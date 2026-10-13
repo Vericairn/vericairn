@@ -24,7 +24,7 @@ public sealed class ResourceType : IRecordType
         new("kind", "repository|service|storage|account", true, "What the resource is."),
         new("name", "string", true, "Display name."),
         new("role", "string", true, "What the estate uses it for."),
-        new("location", "object", true, "github: owner/name, and/or url."),
+        new("location", "object", true, "github: owner/name, url, and/or rootCommit (the first commit of a repository with no remote); never a machine path."),
         new("visibility", "public|private|n/a", true, "Who can see it."),
         new("notes", "string", false, "Free text."),
     ];
@@ -42,10 +42,11 @@ public sealed class ResourceType : IRecordType
         {
             string? github = location.Text("github", false, 200, Patterns.GitHubRepository, "owner/name");
             string? url = location.Text("url", false, 2000);
+            string? rootCommit = location.Text("rootCommit", false, 40, Patterns.Commit, "a 40-character lower-case hex commit id");
             location.NoOtherKeys();
-            if (github is null && url is null)
+            if (github is null && url is null && rootCommit is null)
             {
-                location.Error("body.missing", "github", "A location needs 'github' or 'url'.");
+                location.Error("body.missing", "github", "A location needs 'github', 'url' or 'rootCommit'.");
             }
 
             if (url is not null && !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri?.Scheme != "https")

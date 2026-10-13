@@ -99,7 +99,7 @@ public sealed partial class EstateManifest
             }
 
             string? estate = reader.Ulid("estate", true);
-            long? recordFormat = reader.Number("recordFormat", true, 1, 1);
+            long? recordFormat = reader.Number("recordFormat", true, 1, Model.RecordFormats.Latest);
             string profile = reader.Has("profile") ? reader.Enum("profile", false, Profiles) ?? Profiles[0] : Profiles[0];
             BodyReader? vericairn = reader.Nested("vericairn", true);
             string? mode = null, repository = null, commit = null, version = null;

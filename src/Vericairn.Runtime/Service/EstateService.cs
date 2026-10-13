@@ -444,14 +444,48 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", "The principal applying the upgrade must be a ULID.", []));
             }
 
+            // Migrations stage their files first; nothing is written until every step succeeded.
+            var context = new MigrationContext(session.Root, model);
+            foreach (IRecordFormatMigration step in EstateUpgrade.Steps(plan))
+            {
+                try
+                {
+                    step.Apply(context);
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or IOException or ArgumentException or JsonException)
+                {
+                    return (null, new Problem("refused", $"Migration {step.Name} failed and nothing changed: {exception.Message}", []));
+                }
+            }
+
+            var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
+            var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
             string manifestPath = Path.Combine(session.Root, EstateLayout.ManifestPath);
-            byte[] previous = File.ReadAllBytes(manifestPath);
-            File.WriteAllBytes(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
-            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, [$"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}"]).ToJsonString());
+            previousContents[EstateLayout.ManifestPath] = File.ReadAllBytes(manifestPath);
+            try
+            {
+                foreach ((string relative, byte[] bytes) in context.Staged.OrderBy(s => s.Key, StringComparer.Ordinal))
+                {
+                    string full = Path.Combine(session.Root, relative.Replace('/', Path.DirectorySeparatorChar));
+                    previousContents[relative] = File.Exists(full) ? File.ReadAllBytes(full) : null;
+                    Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                    File.WriteAllBytes(full, bytes);
+                    changes.Add($"{relative} written by the migrations");
+                }
+
+                File.WriteAllBytes(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                RestoreFiles(session.Root, previousContents);
+                return (null, new Problem("refused", $"The upgrade could not write its files and was undone: {exception.Message}", []));
+            }
+
+            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement), model);
             if (!outcome.Ok)
             {
-                File.WriteAllBytes(manifestPath, previous);
+                RestoreFiles(session.Root, previousContents);
                 return (null, outcome.Problem);
             }
 
@@ -610,6 +644,22 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
 
             return ToFindings(findings, $"{verified} objects verified");
+        }
+    }
+
+    private static void RestoreFiles(string root, IReadOnlyDictionary<string, byte[]?> previousContents)
+    {
+        foreach ((string relative, byte[]? bytes) in previousContents)
+        {
+            string full = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+            if (bytes is null)
+            {
+                File.Delete(full);
+            }
+            else
+            {
+                File.WriteAllBytes(full, bytes);
+            }
         }
     }
 

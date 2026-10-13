@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, devices, release, runtime, recover, objects, status, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, devices, release, sources, check, runtime, recover, objects, status, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         var estateOption = new Option<string>("--estate", "-e")
@@ -31,6 +31,8 @@ internal static class CliApp
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
         root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
+        root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(RecoverFamily(estateOption));
         root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
@@ -213,11 +215,155 @@ internal static class CliApp
 
     private static Command ReleaseFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
-        var release = new Command("release", "Releases recorded in the estate.");
+        var release = new Command("release", "Releases: list the records, submit a release through the GitHub Releases provider as intent before effect, observe the run, the draft and the publication.");
         var list = new Command("list", "List current release records: version, status, commit, id, signing.");
         list.SetAction(parseResult => Commands.ReleaseList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         release.Subcommands.Add(list);
+
+        var byOption = new Option<string>("--by") { Description = "Principal id recording the operation (ULID).", Required = true };
+        var versionOption = new Option<string>("--version") { Description = "The version to release, for example 0.2.0.", Required = true };
+        var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the source repository.", Required = true };
+        var productOption = new Option<string>("--product") { Description = "Product record id the release belongs to.", Required = true };
+        var refOption = new Option<string>("--ref") { Description = "Branch or tag to build from.", DefaultValueFactory = _ => "main" };
+        var workflowOption = new Option<string>("--workflow") { Description = "Release workflow file.", DefaultValueFactory = _ => "release.yml" };
+        var reconciliationOption = new Option<string?>("--reconciliation") { Description = "How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry." };
+        var submit = new Command("submit", "Record the intent, then dispatch the release workflow; the run id and outcome are recorded as they are observed. Never publishes.");
+        submit.Options.Add(productOption);
+        submit.Options.Add(versionOption);
+        submit.Options.Add(repositoryOption);
+        submit.Options.Add(byOption);
+        submit.Options.Add(refOption);
+        submit.Options.Add(workflowOption);
+        submit.Options.Add(reconciliationOption);
+        submit.SetAction(parseResult => Commands.ReleaseSubmit(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(productOption)!,
+            parseResult.GetValue(versionOption)!,
+            parseResult.GetValue(repositoryOption)!,
+            parseResult.GetValue(byOption)!,
+            parseResult.GetValue(refOption)!,
+            parseResult.GetValue(workflowOption)!,
+            parseResult.GetValue(reconciliationOption),
+            parseResult.GetValue(jsonOption)));
+        release.Subcommands.Add(submit);
+
+        var qualifiedOption = new Option<string[]>("--qualified") { Description = "Platform whose qualification is recorded for the candidate; repeatable.", AllowMultipleArgumentsPerToken = true };
+        var limitationOption = new Option<string[]>("--limitation") { Description = "A known limitation of the candidate; repeatable.", AllowMultipleArgumentsPerToken = true };
+        var signingOption = new Option<string>("--signing") { Description = "Signing state recorded on the candidate.", DefaultValueFactory = _ => "unsigned developer build" };
+        var cancelOption = new Option<string?>("--cancel") { Description = "Settle an intent that was never dispatched, or an outcome reconciled as having had no effect, with this reason." };
+        var observe = new Command("observe", "Observe the run and the draft; record the outcome, the candidate release, and later the operator's manual publication.");
+        observe.Options.Add(versionOption);
+        observe.Options.Add(repositoryOption);
+        observe.Options.Add(byOption);
+        observe.Options.Add(qualifiedOption);
+        observe.Options.Add(limitationOption);
+        observe.Options.Add(signingOption);
+        observe.Options.Add(cancelOption);
+        observe.SetAction(parseResult => Commands.ReleaseObserve(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(versionOption)!,
+            parseResult.GetValue(repositoryOption)!,
+            parseResult.GetValue(byOption)!,
+            parseResult.GetValue(qualifiedOption) ?? [],
+            parseResult.GetValue(limitationOption) ?? [],
+            parseResult.GetValue(signingOption)!,
+            parseResult.GetValue(cancelOption),
+            parseResult.GetValue(jsonOption)));
+        release.Subcommands.Add(observe);
         return release;
+    }
+
+    private static Command SourcesFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var sources = new Command("sources", "Repositories the estate uses: inspect read-only, adopt as a resource, observe again.");
+        var pathArgument = new Argument<string>("path") { Description = "Path of a git working tree on this machine; never recorded." };
+        var inspect = new Command("inspect", "Observe a repository read-only: commit, branch, remote, working-tree state, tags, recent history.");
+        inspect.Arguments.Add(pathArgument);
+        inspect.SetAction(parseResult => Commands.SourcesInspect(parseResult.GetValue(pathArgument)!, parseResult.GetValue(jsonOption)));
+        sources.Subcommands.Add(inspect);
+
+        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
+        var nameOption = new Option<string>("--name") { Description = "Display name of the resource.", Required = true };
+        var roleOption = new Option<string>("--role") { Description = "What the estate uses the repository for.", Required = true };
+        var visibilityOption = new Option<string>("--visibility") { Description = "public, private or n/a.", DefaultValueFactory = _ => "private" };
+        var notesOption = new Option<string?>("--notes") { Description = "Free text." };
+        var adopt = new Command("adopt", "Adopt a repository as a resource by observation: a resource record and a first observation; nothing in the repository changes.");
+        adopt.Arguments.Add(pathArgument);
+        adopt.Options.Add(byOption);
+        adopt.Options.Add(nameOption);
+        adopt.Options.Add(roleOption);
+        adopt.Options.Add(visibilityOption);
+        adopt.Options.Add(notesOption);
+        adopt.SetAction(parseResult => Commands.SourcesAdopt(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(pathArgument)!,
+            parseResult.GetValue(byOption)!,
+            parseResult.GetValue(nameOption)!,
+            parseResult.GetValue(roleOption)!,
+            parseResult.GetValue(visibilityOption)!,
+            parseResult.GetValue(notesOption),
+            parseResult.GetValue(jsonOption)));
+        sources.Subcommands.Add(adopt);
+
+        var resourceOption = new Option<string>("--resource") { Description = "Resource record id of the adopted repository.", Required = true };
+        var observe = new Command("observe", "Record a fresh observation of an adopted repository.");
+        observe.Arguments.Add(pathArgument);
+        observe.Options.Add(resourceOption);
+        observe.Options.Add(byOption);
+        observe.SetAction(parseResult => Commands.SourcesObserve(parseResult.GetValue(estateOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(resourceOption)!, parseResult.GetValue(byOption)!, parseResult.GetValue(jsonOption)));
+        sources.Subcommands.Add(observe);
+        return sources;
+    }
+
+    private static Command CheckFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var check = new Command("check", "Run a check and record its evidence as a verification of the exact commit, or observe a workflow run.");
+        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
+        var resourceOption = new Option<string>("--resource") { Description = "Resource record id of the repository checked.", Required = true };
+        var inOption = new Option<string>("--in") { Description = "Working tree the command runs in.", DefaultValueFactory = _ => Directory.GetCurrentDirectory() };
+        var roleOption = new Option<string>("--role") { Description = "self, independent-agent, operator or automation.", DefaultValueFactory = _ => "self" };
+        var summaryOption = new Option<string?>("--summary") { Description = "What the check establishes, in your words; the observed exit and duration are recorded regardless." };
+        var timeoutOption = new Option<int>("--timeout") { Description = "Seconds after which the command is stopped and its result recorded as unknown.", DefaultValueFactory = _ => 3600 };
+        var commandArgument = new Argument<string[]>("command") { Description = "The command and its arguments; put -- before it.", Arity = ArgumentArity.OneOrMore };
+        var run = new Command("run", "Run a command in a repository and record a verification: commit, command, environment, exit code, duration and output as evidence.");
+        run.Options.Add(resourceOption);
+        run.Options.Add(byOption);
+        run.Options.Add(inOption);
+        run.Options.Add(roleOption);
+        run.Options.Add(summaryOption);
+        run.Options.Add(timeoutOption);
+        run.Arguments.Add(commandArgument);
+        run.SetAction(parseResult => Commands.CheckRun(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(resourceOption)!,
+            parseResult.GetValue(byOption)!,
+            parseResult.GetValue(inOption)!,
+            parseResult.GetValue(roleOption)!,
+            parseResult.GetValue(summaryOption),
+            parseResult.GetValue(timeoutOption),
+            parseResult.GetValue(commandArgument)!,
+            parseResult.GetValue(jsonOption)));
+        check.Subcommands.Add(run);
+
+        var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name.", Required = true };
+        var runOption = new Option<string>("--run") { Description = "Workflow run id.", Required = true };
+        var workflowOption = new Option<string>("--workflow") { Description = "Workflow file the run belongs to.", DefaultValueFactory = _ => "ci.yml" };
+        var observe = new Command("observe", "Observe a workflow run at its host and record it as automation's verification of the commit it built.");
+        observe.Options.Add(resourceOption);
+        observe.Options.Add(repositoryOption);
+        observe.Options.Add(runOption);
+        observe.Options.Add(workflowOption);
+        observe.Options.Add(byOption);
+        observe.SetAction(parseResult => Commands.CheckObserve(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(resourceOption)!,
+            parseResult.GetValue(repositoryOption)!,
+            parseResult.GetValue(runOption)!,
+            parseResult.GetValue(workflowOption)!,
+            parseResult.GetValue(byOption)!,
+            parseResult.GetValue(jsonOption)));
+        check.Subcommands.Add(observe);
+        return check;
     }
 
     private static Command RecoverFamily(Option<string> estateOption)

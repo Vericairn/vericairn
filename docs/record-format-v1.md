@@ -98,6 +98,34 @@ estate whatever the source profile was, and then shows what the copy holds. An e
 no keys, sessions, credentials or authority, so a restored copy verifies every signature and authors only with a
 device admitted and held where it runs.
 
+## Software: resources, observations, verifications and operations
+
+A repository the estate uses is a `resource` of kind `repository`, identified by its GitHub `owner/name`, its
+https remote, or, when it has no remote, its `rootCommit`; never by a path on a machine. Adoption is
+observation: `vericairn sources adopt` records the resource and a first `observation` and changes nothing
+in the repository, so uncommitted work is preserved and a missing remote account prevents no local inventory.
+
+An `observation` pins an exact subject revision and carries flat facts with an as-of time (for a repository:
+commit, branch, remote, whether the working tree is clean, modified and untracked counts, tags, recent
+history) and its limitations. It is a fact as of that moment, not health.
+
+A `verification` pins an exact subject and names the exact `commit` checked, the `method` (command,
+github-actions, manual), the `command` when one ran, the `environment` (strings only, never a path), the
+`role` of whoever checked (self, independent-agent, operator, automation), the observed `outcome` (passed,
+failed or unknown; a command that did not finish is unknown, never failed), the exit code and duration,
+evidence (the command output is stored as an object and named by hash) and limitations. `vericairn check
+run` records one from a command; `vericairn check observe` records automation's claim from a workflow run
+as the host reports it. Evidence, never permission; historical once the subject changes.
+
+An `operation` is an intended external effect under an original `identity`. It is recorded as `not-started`
+before anything is dispatched, and every change of what is known is a superseding revision: `dispatched`
+(with `dispatchedAt`), `observed-success` or `known-failure` (with what was `observed`), `canceled`, or
+`uncertain` when the provider cannot say whether the effect happened. The validators refuse an operation
+that starts in any state but not-started, a revision that changes the identity or provider, a transition
+the state language does not allow, a second current operation under the same identity, and a retry after
+an uncertain, failed or canceled outcome that does not say how it was reconciled. The transport response
+is not the effect; `vericairn release submit` and `release observe` write these records.
+
 ## Rules that are enforced, not merely documented
 
 - The estate record is authored by its own operator principal, and only that principal may author its own
