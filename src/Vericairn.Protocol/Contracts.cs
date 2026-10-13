@@ -1,0 +1,241 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace Vericairn.Protocol;
+
+/// <summary>The API version every route carries.</summary>
+public static class ApiVersion
+{
+    /// <summary>Route prefix.</summary>
+    public const string Prefix = "/v1";
+
+    /// <summary>The version string reported by the daemon.</summary>
+    public const string Current = "1";
+}
+
+/// <summary>One validation or check finding.</summary>
+/// <param name="Severity">info, warning or error.</param>
+/// <param name="Code">Stable code.</param>
+/// <param name="Location">Repository-relative location.</param>
+/// <param name="Message">Explanation.</param>
+public sealed record FindingDto(string Severity, string Code, string Location, string Message);
+
+/// <summary>Why a request was not carried out: a reason and, for rejected records, the findings.</summary>
+/// <param name="Code">Stable code: refused, rejected, not-found, invalid, conflict.</param>
+/// <param name="Message">Explanation with the permitted next action.</param>
+/// <param name="Findings">Findings behind a rejection; may be empty.</param>
+public sealed record Problem(string Code, string Message, IReadOnlyList<FindingDto> Findings);
+
+/// <summary>A record that was written.</summary>
+/// <param name="Path">Repository-relative path.</param>
+/// <param name="Id">Record id.</param>
+/// <param name="Hash">Content hash.</param>
+public sealed record RecordWritten(string Path, string Id, string Hash);
+
+/// <summary>The outcome of a write: written, or a problem. Never both.</summary>
+/// <param name="Written">The record, when written.</param>
+/// <param name="Problem">The problem, when not.</param>
+public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
+{
+    /// <summary>True when written.</summary>
+    [JsonIgnore]
+    public bool Ok => Written is not null;
+
+    /// <summary>A written outcome.</summary>
+    public static WriteOutcome Success(RecordWritten written) => new(written, null);
+
+    /// <summary>A failed outcome.</summary>
+    public static WriteOutcome Fail(Problem problem) => new(null, problem);
+}
+
+/// <summary>The daemon's identity and what it serves.</summary>
+/// <param name="Api">API version.</param>
+/// <param name="Vericairn">Product version.</param>
+/// <param name="Estate">Estate id.</param>
+/// <param name="Root">Estate root on the daemon's machine.</param>
+/// <param name="Profile">Storage profile.</param>
+/// <param name="RecordFormat">Record format.</param>
+/// <param name="StartedAt">When the daemon started.</param>
+/// <param name="ProcessId">Process id.</param>
+public sealed record HealthResponse(string Api, string Vericairn, string Estate, string Root, string Profile, long RecordFormat, string StartedAt, int ProcessId);
+
+/// <summary>The estate's status: the human text and the canonical JSON that is identical on every machine.</summary>
+/// <param name="Text">Rendered status.</param>
+/// <param name="Json">Canonical status document.</param>
+/// <param name="HasErrors">Whether errors exist.</param>
+public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors);
+
+/// <summary>Findings of a validation or check.</summary>
+/// <param name="Summary">For example '161 records'.</param>
+/// <param name="Errors">Error count.</param>
+/// <param name="Warnings">Warning count.</param>
+/// <param name="Findings">Sorted findings.</param>
+public sealed record FindingsResponse(string Summary, int Errors, int Warnings, IReadOnlyList<FindingDto> Findings);
+
+/// <summary>A record as stored.</summary>
+/// <param name="Path">Repository-relative path.</param>
+/// <param name="Id">Id.</param>
+/// <param name="Type">Type.</param>
+/// <param name="Hash">Content hash.</param>
+/// <param name="Current">Whether no later record supersedes it.</param>
+/// <param name="Envelope">The whole record.</param>
+public sealed record RecordResponse(string Path, string Id, string Type, string Hash, bool Current, JsonElement Envelope);
+
+/// <summary>A request to author a record; the runtime signs it with the author's admitted device on its machine.</summary>
+/// <param name="Type">Record type.</param>
+/// <param name="By">Authoring principal.</param>
+/// <param name="Body">Body object.</param>
+/// <param name="Subject">Subject as type:id or type:id:hash.</param>
+/// <param name="Supersedes">Predecessor id.</param>
+/// <param name="At">Authoring time.</param>
+/// <param name="Id">Explicit id (root operator only).</param>
+public sealed record NewRecordRequest(string Type, string By, JsonElement Body, string? Subject = null, string? Supersedes = null, string? At = null, string? Id = null);
+
+/// <summary>A brief: everything a contributor needs, from the records alone.</summary>
+/// <param name="Markdown">Human form.</param>
+/// <param name="Json">Machine form.</param>
+public sealed record BriefResponse(string Markdown, JsonElement Json);
+
+/// <summary>What an observer sees of a work order.</summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form (the brief document, which carries attempts and results).</param>
+public sealed record ObserveResponse(string Text, JsonElement Json);
+
+/// <summary>Delegate a work order to a contributor.</summary>
+/// <param name="WorkOrder">Key or id.</param>
+/// <param name="Contributor">Contributor principal.</param>
+/// <param name="By">Assigning principal.</param>
+/// <param name="Brief">The brief object.</param>
+/// <param name="Note">Free text.</param>
+public sealed record AssignRequest(string WorkOrder, string Contributor, string By, JsonElement Brief, string? Note = null);
+
+/// <summary>Record the start of an attempt.</summary>
+/// <param name="Assignment">Assignment id.</param>
+/// <param name="By">The contributor.</param>
+/// <param name="Workspace">Where the work happens.</param>
+/// <param name="Note">Intent.</param>
+/// <param name="At">Start time.</param>
+public sealed record AttemptRequest(string Assignment, string By, string Workspace, string Note, string? At = null);
+
+/// <summary>Submit the result of an attempt.</summary>
+/// <param name="Attempt">Attempt id.</param>
+/// <param name="By">The contributor.</param>
+/// <param name="Body">Result body.</param>
+public sealed record ResultRequest(string Attempt, string By, JsonElement Body);
+
+/// <summary>Request an amendment of an assignment.</summary>
+/// <param name="Assignment">Assignment id.</param>
+/// <param name="By">Requesting principal.</param>
+/// <param name="Body">Amendment body.</param>
+public sealed record AmendRequest(string Assignment, string By, JsonElement Body);
+
+/// <summary>One device as the estate and this machine see it.</summary>
+/// <param name="Id">Device id.</param>
+/// <param name="Principal">Principal id.</param>
+/// <param name="PrincipalName">Principal name.</param>
+/// <param name="Name">Device name.</param>
+/// <param name="Platform">Platform.</param>
+/// <param name="Custody">Custody kind.</param>
+/// <param name="Admission">admitted, revoked or not admitted.</param>
+/// <param name="HeldHere">Whether this machine holds its key.</param>
+public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere);
+
+/// <summary>Create a device for a principal on the runtime's machine.</summary>
+/// <param name="Principal">Principal id.</param>
+/// <param name="Name">Device name.</param>
+/// <param name="Custody">Custody: default, file or cng.</param>
+/// <param name="Profiles">Permitted profiles.</param>
+public sealed record DeviceCreateRequest(string Principal, string Name, string? Custody = null, IReadOnlyList<string>? Profiles = null);
+
+/// <summary>Admit a device.</summary>
+/// <param name="Device">Device id.</param>
+/// <param name="By">Admitting principal.</param>
+/// <param name="Note">Why.</param>
+public sealed record AdmitRequest(string Device, string By, string Note);
+
+/// <summary>Revoke a device's admission.</summary>
+/// <param name="Device">Device id.</param>
+/// <param name="By">Revoking principal.</param>
+/// <param name="Reason">Why.</param>
+public sealed record RevokeRequest(string Device, string By, string Reason);
+
+/// <summary>One release record.</summary>
+/// <param name="Version">Version.</param>
+/// <param name="Status">Status.</param>
+/// <param name="Commit">Commit.</param>
+/// <param name="Id">Record id.</param>
+/// <param name="Hash">Record hash.</param>
+/// <param name="Signing">Signing state.</param>
+public sealed record ReleaseRow(string? Version, string? Status, string? Commit, string Id, string Hash, string? Signing);
+
+/// <summary>Plan or apply an upgrade.</summary>
+/// <param name="Version">Target version.</param>
+/// <param name="By">Applying principal (unless check).</param>
+/// <param name="Check">Plan only.</param>
+public sealed record UpgradeRequest(string Version, string? By, bool Check);
+
+/// <summary>An upgrade plan, and whether it was applied.</summary>
+/// <param name="FromPin">Pin before.</param>
+/// <param name="ToPin">Pin after.</param>
+/// <param name="FromFormat">Format before.</param>
+/// <param name="ToFormat">Format after.</param>
+/// <param name="Migrations">Migrations.</param>
+/// <param name="Release">Release record id.</param>
+/// <param name="Artifacts">Artifact hash per platform.</param>
+/// <param name="Applied">Whether applied.</param>
+/// <param name="Migration">The migration record, when applied.</param>
+public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration);
+
+/// <summary>A reconcile task.</summary>
+/// <param name="Code">Code.</param>
+/// <param name="Location">Location.</param>
+/// <param name="Message">Message.</param>
+public sealed record ReconcileTask(string Code, string Location, string Message);
+
+/// <summary>One object held.</summary>
+/// <param name="Hash">Hash.</param>
+public sealed record ObjectRow(string Hash);
+
+/// <summary>The outcome of storing an object.</summary>
+/// <param name="Hash">Hash.</param>
+/// <param name="Bytes">Size.</param>
+/// <param name="Store">Store kind.</param>
+public sealed record ObjectStored(string Hash, long Bytes, string Store);
+
+/// <summary>Write a verified export of the estate to a path on the runtime's machine.</summary>
+/// <param name="Output">Path of the export file to create; never overwritten.</param>
+/// <param name="By">Principal recorded as the exporter.</param>
+public sealed record ExportRequest(string Output, string? By = null);
+
+/// <summary>What an export carried.</summary>
+/// <param name="Id">Export id.</param>
+/// <param name="Estate">Estate id.</param>
+/// <param name="CreatedAt">When.</param>
+/// <param name="Profile">Storage profile.</param>
+/// <param name="Records">Record count.</param>
+/// <param name="Objects">Object count.</param>
+/// <param name="Documents">Document count.</param>
+/// <param name="InventoryHash">Hash of the inventory.</param>
+/// <param name="Output">Where the file was written on the runtime's machine.</param>
+/// <param name="HadErrors">Whether the estate had errors when exported.</param>
+public sealed record ExportResponse(string Id, string Estate, string CreatedAt, string Profile, int Records, int Objects, int Documents, string InventoryHash, string Output, bool HadErrors);
+
+/// <summary>Current decisions: the human list and the machine form.</summary>
+/// <param name="Text">Rendered list.</param>
+/// <param name="Json">Machine form.</param>
+public sealed record DecisionsResponse(string Text, JsonElement Json);
+
+/// <summary>One decision rendered cleanly, with its body.</summary>
+/// <param name="Text">Rendered decision.</param>
+/// <param name="Body">The record body.</param>
+public sealed record DecisionResponse(string Text, JsonElement Body);
+
+/// <summary>JSON conventions shared by the daemon and the SDK.</summary>
+public static class ProtocolJson
+{
+    /// <summary>Camel-case names, no indentation, strings for enums.</summary>
+    public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web) { WriteIndented = false };
+}

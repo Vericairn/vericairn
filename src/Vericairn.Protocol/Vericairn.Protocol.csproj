@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The versioned Vericairn API contract: operations, requests, responses, state language and error codes shared by every client.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Vericairn.Protocol</PackageId>
+  </PropertyGroup>
+
+</Project>
