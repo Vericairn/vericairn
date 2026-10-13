@@ -17,9 +17,15 @@ Early. Release 0.1.0 is being built. What exists today:
 
 Nothing here is a release until a release record in the Vericairn estate says so.
 
-## Build
+## Developing on Windows, Linux or macOS
 
-Requires the .NET SDK pinned in `global.json`.
+Development is supported on all three. Requires the .NET SDK pinned in `global.json` and git on the PATH.
+Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
+every platform, and continuous integration builds and tests on all three operating systems. Building the
+iOS client and signing for Apple platforms will require macOS, which is Apple's constraint, not ours;
+everything else, including the Android client, builds anywhere.
+
+## Build
 
 ```sh
 dotnet build
