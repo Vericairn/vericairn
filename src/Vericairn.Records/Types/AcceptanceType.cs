@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jayson Furr
 
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -12,7 +13,7 @@ public sealed class AcceptanceType : IRecordType
     public string Name => "acceptance";
 
     /// <inheritdoc />
-    public string Summary => "Acceptance of an exact subject revision. Milestones need the operator; ordinary work may be self-accepted only under an explicit authority scope.";
+    public string Summary => "Acceptance of an exact subject revision: a work order, or a result toward one. Milestones and their results need the operator; ordinary work may be self-accepted only under an explicit authority scope.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -27,6 +28,9 @@ public sealed class AcceptanceType : IRecordType
         new("basis", "ulid[]", true, "Review records of the same subject that the acceptance relies on; may be empty for operator acceptance."),
         new("self", "boolean", true, "True when the accepting principal authored the subject; must match the facts."),
     ];
+
+    /// <summary>The subject types an acceptance may have: a work order, or a result toward one.</summary>
+    public static readonly string[] SubjectTypes = ["work-order", "result"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -65,12 +69,13 @@ public sealed class AcceptanceType : IRecordType
         }
 
         bool isOperator = context.HasRole(context.Record.By, Roles.Operator);
-        if (subject.Type == "work-order")
+        RecordEnvelope? order = subject.Type == "work-order" ? subject : subject.Type == "result" ? WorkView.OrderOfResult(context.Model, subject) : null;
+        if (order is not null)
         {
-            string kind = subject.Body.TryGetProperty("kind", out System.Text.Json.JsonElement k) ? k.GetString() ?? "milestone" : "milestone";
+            string kind = order.Body.TryGetProperty("kind", out System.Text.Json.JsonElement k) ? k.GetString() ?? "milestone" : "milestone";
             if (kind == "milestone" && !isOperator)
             {
-                context.Error("acceptance.policy", "A milestone work order is accepted by the operator.");
+                context.Error("acceptance.policy", subject.Type == "result" ? "A result toward a milestone work order is accepted by the operator." : "A milestone work order is accepted by the operator.");
             }
             else if (kind == "ordinary" && !isOperator)
             {

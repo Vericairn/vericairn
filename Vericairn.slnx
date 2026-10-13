@@ -4,6 +4,7 @@
     <Project Path="src/Vericairn.Records/Vericairn.Records.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj" />
     <Project Path="tests/Vericairn.Records.Tests/Vericairn.Records.Tests.csproj" />
   </Folder>
 </Solution>

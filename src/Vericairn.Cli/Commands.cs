@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
@@ -96,15 +97,10 @@ internal static class Commands
                 subjectReference = new RecordReference(parts[0], parts[1], parts.Length == 3 ? "sha256:" + parts[2].Replace("sha256:", string.Empty, StringComparison.Ordinal) : null);
             }
 
-            DateTimeOffset? atTime = null;
-            if (at is not null)
+            DateTimeOffset? atTime = ParseAt(at);
+            if (at is not null && atTime is null)
             {
-                if (!RecordParser.IsTimestamp(at))
-                {
-                    return Fail("--at must look like 2026-10-13T14:00:00Z.");
-                }
-
-                atTime = DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
+                return Fail("--at must look like 2026-10-13T14:00:00Z.");
             }
 
             if (id is not null && !Ulid.IsValid(id))
@@ -112,46 +108,124 @@ internal static class Commands
                 return Fail("--id must be a ULID.");
             }
 
-            byte[] bodyBytes = bodyPath == "-" ? ReadStandardInput() : File.ReadAllBytes(bodyPath);
-            using JsonDocument body = CanonicalJson.Parse(bodyBytes);
-            AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, body.RootElement, subjectReference, supersedes, atTime, id));
-            string written = RecordAuthor.Write(root, record);
-            EstateModel model = EstateLoader.Load(root);
-            FindingList relevant = new();
-            foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
-            {
-                relevant.Add(finding);
-            }
-
-            // Repository checks apply to the new record itself (secrets, absolute paths); problems elsewhere are not this record's fault.
-            foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
-            {
-                relevant.Add(finding);
-            }
-
-            if (relevant.HasErrors)
-            {
-                File.Delete(written);
-                Console.Error.WriteLine($"Not written: the estate would be invalid with this record ({relevant.Errors} errors).");
-                return Report(relevant, json, "rejected");
-            }
-
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { path = record.RelativePath, id = record.Envelope.Id, hash = record.Envelope.ComputedHash }));
-            }
-            else
-            {
-                Console.Out.WriteLine($"{record.RelativePath}  {record.Envelope.Id}  {record.Envelope.ComputedHash}");
-            }
-
-            return Clean;
+            using JsonDocument body = ReadBody(bodyPath);
+            return WriteValidated(root, new RecordDraft(type, by, body.RootElement, subjectReference, supersedes, atTime, id), json);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
         {
             return Fail(exception.Message);
         }
     }
+
+    public static int WorkBrief(string root, string key, bool json)
+    {
+        try
+        {
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? order = WorkView.FindOrder(model, key);
+            if (order is null)
+            {
+                return Fail($"No current work order has key or id {key}.");
+            }
+
+            Console.Out.Write(json ? WorkView.RenderBriefJson(model, order) : WorkView.RenderBrief(model, order));
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int WorkObserve(string root, string key, bool json)
+    {
+        try
+        {
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? order = WorkView.FindOrder(model, key);
+            if (order is null)
+            {
+                return Fail($"No current work order has key or id {key}.");
+            }
+
+            Console.Out.Write(json ? WorkView.RenderBriefJson(model, order) : WorkView.RenderObserve(model, order));
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json)
+    {
+        try
+        {
+            if (!Ulid.IsValid(by) || !Ulid.IsValid(contributor))
+            {
+                return Fail("--by and --contributor must be ULIDs.");
+            }
+
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? order = WorkView.FindOrder(model, key);
+            if (order is null)
+            {
+                return Fail($"No current work order has key or id {key}.");
+            }
+
+            using JsonDocument brief = ReadBody(briefPath);
+            var body = new JsonObject { ["contributor"] = contributor, ["brief"] = JsonNode.Parse(brief.RootElement.GetRawText()) };
+            if (note is not null)
+            {
+                body["note"] = note;
+            }
+
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteValidated(root, new RecordDraft("assignment", by, document.RootElement, order.Reference), json);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json)
+    {
+        try
+        {
+            if (!Ulid.IsValid(by))
+            {
+                return Fail("--by must be a ULID.");
+            }
+
+            DateTimeOffset? atTime = ParseAt(at);
+            if (at is not null && atTime is null)
+            {
+                return Fail("--at must look like 2026-10-13T14:00:00Z.");
+            }
+
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? assignment = Latest(model, assignmentId, "assignment");
+            if (assignment is null)
+            {
+                return Fail($"No assignment has id {assignmentId}.");
+            }
+
+            var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(atTime ?? DateTimeOffset.UtcNow), ["workspace"] = workspace, ["note"] = note };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteValidated(root, new RecordDraft("attempt", by, document.RootElement, assignment.Reference, At: atTime), json);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int WorkResult(string root, string attemptId, string by, string bodyPath, bool json) =>
+        WorkRecordAbout(root, "result", "attempt", attemptId, by, bodyPath, json);
+
+    public static int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
+        WorkRecordAbout(root, "amendment", "assignment", assignmentId, by, bodyPath, json);
 
     public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, bool json)
     {
@@ -297,6 +371,80 @@ internal static class Commands
         Console.Out.WriteLine(VersionText());
         return Clean;
     }
+
+    /// <summary>Creates a record about an existing record (pinned to its exact hash) from a body file.</summary>
+    private static int WorkRecordAbout(string root, string type, string subjectType, string subjectId, string by, string bodyPath, bool json)
+    {
+        try
+        {
+            if (!Ulid.IsValid(by))
+            {
+                return Fail("--by must be a ULID.");
+            }
+
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? subject = Latest(model, subjectId, subjectType);
+            if (subject is null)
+            {
+                return Fail($"No {subjectType} has id {subjectId}.");
+            }
+
+            using JsonDocument body = ReadBody(bodyPath);
+            return WriteValidated(root, new RecordDraft(type, by, body.RootElement, subject.Reference), json);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    /// <summary>Authors a record, writes it, validates the estate with it, and removes it again if the estate would be invalid.</summary>
+    private static int WriteValidated(string root, RecordDraft draft, bool json)
+    {
+        AuthoredRecord record = RecordAuthor.Create(draft);
+        string written = RecordAuthor.Write(root, record);
+        EstateModel model = EstateLoader.Load(root);
+        var relevant = new FindingList();
+        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
+        {
+            relevant.Add(finding);
+        }
+
+        // Repository checks apply to the new record itself (secrets, absolute paths); problems elsewhere are not this record's fault.
+        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        {
+            relevant.Add(finding);
+        }
+
+        if (relevant.HasErrors)
+        {
+            File.Delete(written);
+            Console.Error.WriteLine($"Not written: the estate would be invalid with this record ({relevant.Errors} errors).");
+            return Report(relevant, json, "rejected");
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(new { path = record.RelativePath, id = record.Envelope.Id, hash = record.Envelope.ComputedHash }));
+        }
+        else
+        {
+            Console.Out.WriteLine($"{record.RelativePath}  {record.Envelope.Id}  {record.Envelope.ComputedHash}");
+        }
+
+        return Clean;
+    }
+
+    private static RecordEnvelope? Latest(EstateModel model, string id, string type) =>
+        model.ById.TryGetValue(id, out RecordEnvelope? record) && record.Type == type ? model.Latest(record) : null;
+
+    private static DateTimeOffset? ParseAt(string? at) =>
+        at is not null && RecordParser.IsTimestamp(at)
+            ? DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
+            : null;
+
+    private static JsonDocument ReadBody(string bodyPath) =>
+        CanonicalJson.Parse(bodyPath == "-" ? ReadStandardInput() : File.ReadAllBytes(bodyPath));
 
     private static string VersionText() =>
         Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
