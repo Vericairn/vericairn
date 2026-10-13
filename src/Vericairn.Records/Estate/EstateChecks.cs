@@ -288,6 +288,7 @@ public static partial class EstateChecks
 
     private static void CheckDocuments(EstateModel model, FindingList findings)
     {
+        var retired = new HashSet<string>(model.Current("retirement").Where(r => EstateModel.BodyString(r, "retiredAt") is not null).Select(r => EstateModel.BodyString(r, "path") ?? string.Empty), StringComparer.Ordinal);
         foreach (RecordEnvelope revision in model.Current("document-revision"))
         {
             string? path = EstateModel.BodyString(revision, "path");
@@ -300,6 +301,12 @@ public static partial class EstateChecks
             string full = Path.Combine(model.Root, path);
             if (!File.Exists(full))
             {
+                if (retired.Contains(path))
+                {
+                    findings.Info("document.retired", path, $"Pinned by {revision.Id} and deliberately retired; its last revision remains in history.");
+                    continue;
+                }
+
                 findings.Error("document.missing", path, $"Pinned by {revision.Id} but the file does not exist.");
                 continue;
             }

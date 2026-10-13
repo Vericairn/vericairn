@@ -43,6 +43,22 @@ public class EstateChecksTests
     }
 
     [Fact]
+    public void ARetiredDocumentMayBeRemovedWithoutBeingMissing()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile("docs/temp.md", "temporary\n");
+        string hash = ContentHash.Sha256File(Path.Combine(estate.Root, "docs", "temp.md"));
+        estate.Add("document-revision", estate.BuilderId, $$"""{"path":"docs/temp.md","title":"Temp","hash":"{{hash}}","bytes":10,"mediaType":"text/markdown","revision":1,"summary":"Temporary."}""");
+        RecordEnvelope pending = estate.Add("retirement", estate.BuilderId, """{"path":"docs/temp.md","reason":"Working document.","condition":"When accepted."}""");
+        File.Delete(Path.Combine(estate.Root, "docs", "temp.md"));
+        Assert.Contains(EstateChecks.Run(estate.Load()), f => f.Code == "document.missing");
+        estate.Add("retirement", estate.BuilderId, """{"path":"docs/temp.md","reason":"Working document.","condition":"When accepted.","retiredAt":"2026-10-13T16:00:00Z"}""", supersedes: pending.Id);
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Assert.DoesNotContain(checks, f => f.Code == "document.missing");
+        Assert.Contains(checks, f => f.Code == "document.retired");
+    }
+
+    [Fact]
     public void RetirementsAreEnforced()
     {
         using var estate = new TestEstate();
