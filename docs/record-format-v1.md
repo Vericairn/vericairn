@@ -60,5 +60,6 @@ attempt, result, device, admission, object.
   for display. A decision without a synthesis is reported as a warning. `vericairn decisions` lists them and
   `vericairn decisions <id>` renders one as Markdown.
 - Retirement records register temporary artifacts with a removal condition; once retired, the path must be gone.
+- `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.

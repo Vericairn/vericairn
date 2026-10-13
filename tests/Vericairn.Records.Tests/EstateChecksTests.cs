@@ -56,6 +56,17 @@ public class EstateChecksTests
     }
 
     [Fact]
+    public void WordsRunIntoNumbersAreFlaggedButIdentifiersAreNot()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile("docs/notes.md", "On October13 we saved checkpoint2693.\nThe hash sha256:abc and `code42` and version 0.1.0 and net10.0 and base64 are fine; M0 and 01M4TV are keys.\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        var spacing = checks.Where(f => f.Code == "writing.spacing").ToList();
+        Assert.Equal(2, spacing.Count);
+        Assert.All(spacing, f => Assert.Equal("docs/notes.md:1", f.Location));
+    }
+
+    [Fact]
     public void StatusJsonIsCanonicalAndStable()
     {
         using var estate = new TestEstate();

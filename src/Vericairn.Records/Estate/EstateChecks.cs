@@ -162,6 +162,58 @@ public static partial class EstateChecks
         if (relative.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal) && relative.EndsWith(".json", StringComparison.Ordinal))
         {
             ScanRecordKeys(bytes, relative, findings);
+            ScanRecordProse(bytes, relative, findings);
+        }
+        else if (relative.EndsWith(".md", StringComparison.Ordinal) && (relative.StartsWith(EstateLayout.DocsDirectory + "/", StringComparison.Ordinal) || relative.StartsWith(EstateLayout.DesignDirectory + "/", StringComparison.Ordinal)))
+        {
+            ScanProse(text, relative, findings);
+        }
+    }
+
+    private static readonly HashSet<string> SpacingAllowlist = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "base", "http", "https", "html", "python", "sqlite", "float", "uint", "utf", "unicode", "windows", "macos", "ipv", "mp", "ecdsa", "sha",
+    };
+
+    /// <summary>Flags a word run into a number ("October13", "checkpoint2693") outside code spans, identifiers and paths.</summary>
+    private static void ScanProse(string text, string location, FindingList findings)
+    {
+        int lineNumber = 0;
+        foreach (string rawLine in text.Split('\n'))
+        {
+            lineNumber++;
+            string line = CodeSpan().Replace(rawLine, " ");
+            foreach (Match match in WordRunIntoNumber().Matches(line))
+            {
+                if (!SpacingAllowlist.Contains(match.Groups["word"].Value))
+                {
+                    findings.Warning("writing.spacing", $"{location}:{lineNumber}", $"'{match.Value}': put a space between the word and the number.");
+                }
+            }
+        }
+    }
+
+    private static void ScanRecordProse(byte[] bytes, string relative, FindingList findings)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            if (!document.RootElement.TryGetProperty("body", out JsonElement body) || body.ValueKind != JsonValueKind.Object)
+            {
+                return;
+            }
+
+            foreach (string field in new[] { "title", "summary", "synthesis", "note", "intent", "exitQuestion" })
+            {
+                if (body.TryGetProperty(field, out JsonElement value) && value.ValueKind == JsonValueKind.String)
+                {
+                    ScanProse(value.GetString() ?? string.Empty, $"{relative}#body.{field}", findings);
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // The loader already reported the parse error.
         }
     }
 
@@ -259,6 +311,12 @@ public static partial class EstateChecks
             }
         }
     }
+
+    [GeneratedRegex("`[^`]*`")]
+    private static partial Regex CodeSpan();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_./:\\-])(?<word>[A-Za-z][a-z]{3,})(?<number>[0-9]+)(?![A-Za-z0-9_/:-]|\.[0-9A-Za-z])")]
+    private static partial Regex WordRunIntoNumber();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
     private static partial Regex AbsolutePath();
