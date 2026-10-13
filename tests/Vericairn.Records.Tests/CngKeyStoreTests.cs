@@ -33,7 +33,10 @@ public class CngKeyStoreTests
             byte[] signature = store.Sign(id, digest);
             Assert.Equal(RecordSigning.SignatureBytes, signature.Length);
             Assert.True(RecordSigning.Verify(RecordSigning.EncodePublicKey(publicKey), digest, Base64Url.EncodeToString(signature)));
-            Assert.DoesNotContain(Directory.EnumerateFiles(VericairnHome.Path(), "*", SearchOption.AllDirectories), f => f.Contains(id, StringComparison.Ordinal));
+            if (Directory.Exists(VericairnHome.Path()))
+            {
+                Assert.DoesNotContain(Directory.EnumerateFiles(VericairnHome.Path(), "*", SearchOption.AllDirectories), f => f.Contains(id, StringComparison.Ordinal));
+            }
             Assert.Throws<InvalidOperationException>(() => store.Create(id));
         }
         finally
