@@ -9,7 +9,11 @@ command-line interface, the SDK, and the Workbench and Remote clients as they ar
 
 ## Status
 
-Release 0.1.0 is published and the Vericairn estate runs on it; 0.2.0 is being built. What exists today:
+Release 0.2.0 is published and the Vericairn estate runs on it; 0.3.0 is in development on this branch. Each release
+carries its own documentation set under [docs/releases](docs/releases/README.md): the 0.2.0 set is at
+[docs/releases/0.2.0](docs/releases/0.2.0/README.md) (overview, installation, the operator's guide, the generated
+command-line, API and record references, release notes and known limitations). The documents at `docs/` are the drafts
+for the next release. What exists today:
 
 - `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, signed records, devices and
   admission, estate loading, validation, cleanliness checks, status), documented in
@@ -23,8 +27,10 @@ Release 0.1.0 is published and the Vericairn estate runs on it; 0.2.0 is being b
   GitHub Releases provider with intent recorded before effect and publication left to the operator,
   documented in [docs/software.md](docs/software.md).
 - `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `sources`, `check`, `runtime`,
-  `recover`, `objects`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
-  the estate, the embedded runtime otherwise.
+  `recover`, `objects`, `docs`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
+  the estate, the embedded runtime otherwise. `vericairn docs` generates a release's references from the build and
+  its notes from an estate's records, and refuses an incomplete documentation set; the release workflow runs that
+  check before it builds a draft.
 
 Nothing here is a release until a release record in the Vericairn estate says so.
 
