@@ -81,14 +81,16 @@ public class WorkRecordsTests
     }
 
     [Fact]
-    public void OutputHashesAreVerifiedWhenTheFileIsPresent()
+    public void OutputDriftIsInformationNotAnError()
     {
         using var estate = new TestEstate();
         RecordEnvelope attempt = StartAttempt(estate, OrdinaryBody);
         estate.WriteFile("docs/widget.txt", "widget\n");
         string wrong = "sha256:" + new string('0', 64);
         estate.Add("result", estate.BuilderId, $$"""{"outcome":"completed","summary":"Built.","outputs":[{"name":"widget.txt","hash":"{{wrong}}","location":"docs/widget.txt"}],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""", attempt.Reference);
-        Assert.Contains(estate.Load().Findings, f => f.Code == "result.output-hash");
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.Contains(model.Findings, f => f.Code == "result.output-changed" && f.Severity == Severity.Info);
     }
 
     [Fact]

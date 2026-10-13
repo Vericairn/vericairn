@@ -127,14 +127,11 @@ public sealed class ResultType : IRecordType
             return;
         }
 
-        if (hash is not null && ContentHash.Sha256File(full) != hash)
+        // A result names the exact bytes it produced. The path may legitimately change later (a manifest is re-pinned,
+        // a document is revised), so drift is reported as information; the CLI refuses a mismatch at authoring time.
+        if ((hash is not null && ContentHash.Sha256File(full) != hash) || (bytes is not null && new FileInfo(full).Length != bytes.Value))
         {
-            output.Error("result.output-hash", "hash", $"The file at {location} does not have this hash; the output named is not the file present.");
-        }
-
-        if (bytes is not null && new FileInfo(full).Length != bytes.Value)
-        {
-            output.Error("result.output-bytes", "bytes", $"The file at {location} has a different size.");
+            context.Findings.Info("result.output-changed", output.Location, $"The file at {location} no longer has the hash or size this result recorded; the result names the bytes it produced, not the path's current content.");
         }
     }
 }

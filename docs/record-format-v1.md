@@ -90,7 +90,8 @@ author automatically.
 - Retirement records register temporary artifacts with a removal condition; once retired, the path must be gone.
 - An attempt and its result are authored by the assignment's contributor; one current result exists per
   attempt (a correction supersedes); an output whose file is present in the repository must have the hash
-  and size the result claims; a completed result with a failed check is a warning for the reviewer.
+  and size the result claims when the result is authored, and later drift of that path is reported as
+  information; a completed result with a failed check is a warning for the reviewer.
 - `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.
