@@ -52,6 +52,69 @@ public static class SignatureChecks
         return admission is not null && EstateModel.BodyString(admission, "status") == "admitted";
     }
 
+    /// <summary>Whether a device was admitted at a moment.</summary>
+    public enum AdmissionState
+    {
+        /// <summary>No admission record exists for the device.</summary>
+        Unadmitted,
+
+        /// <summary>The moment precedes the device's first admission.</summary>
+        NotYetAdmitted,
+
+        /// <summary>Admitted at that moment.</summary>
+        Admitted,
+
+        /// <summary>Revoked at or before that moment, with no later admission.</summary>
+        Revoked,
+    }
+
+    /// <summary>
+    /// The admission state of a device at a record time, from every admission record about the device in time order:
+    /// an admitted record starts admission at its authoring time, a revoked record ends it at revokedAt, and a later
+    /// admitted record starts it again.
+    /// </summary>
+    public static AdmissionState AdmissionStateAt(EstateModel model, RecordEnvelope device, string at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(device);
+        var events = new List<(string Time, int Order, bool Admitted)>();
+        foreach (RecordEnvelope admission in model.Chain(device).SelectMany(id => model.About(id, "admission")))
+        {
+            string? status = EstateModel.BodyString(admission, "status");
+            if (status == "admitted")
+            {
+                events.Add((admission.At, 0, true));
+            }
+            else if (status == "revoked" && EstateModel.BodyString(admission, "revokedAt") is string revokedAt)
+            {
+                events.Add((revokedAt, 1, false));
+            }
+        }
+
+        if (events.Count == 0)
+        {
+            return AdmissionState.Unadmitted;
+        }
+
+        bool? state = null;
+        foreach ((string time, int _, bool admitted) in events.OrderBy(e => e.Time, StringComparer.Ordinal).ThenBy(e => e.Order))
+        {
+            if (string.CompareOrdinal(time, at) > 0)
+            {
+                break;
+            }
+
+            state = admitted;
+        }
+
+        return state switch
+        {
+            null => AdmissionState.NotYetAdmitted,
+            true => AdmissionState.Admitted,
+            false => AdmissionState.Revoked,
+        };
+    }
+
     private static void Verify(EstateModel model, RecordEnvelope record, RecordSignature signature, string? rootOperator, FindingList findings)
     {
         string location = record.ExpectedPath + "#signatures";
@@ -86,30 +149,25 @@ public static class SignatureChecks
             return;
         }
 
-        RecordEnvelope? admission = AdmissionOf(model, device);
         bool selfAdmission = record.Type == "admission" && record.Subject?.Id == device.Id && record.By == rootOperator;
-        if (admission is null)
+        if (selfAdmission)
         {
-            if (!selfAdmission)
-            {
+            return;
+        }
+
+        switch (AdmissionStateAt(model, device, record.At))
+        {
+            case AdmissionState.Admitted:
+                return;
+            case AdmissionState.Revoked:
+                findings.Error("signature.revoked", location, $"Device {device.Id} was revoked before this record was authored; records signed by it from the revocation on are invalid.");
+                return;
+            case AdmissionState.NotYetAdmitted:
+                findings.Error("signature.before-admission", location, $"Device {device.Id} signed this record before it was admitted.");
+                return;
+            default:
                 findings.Error("signature.unadmitted", location, $"Device {device.Id} is not admitted to this estate; an administrator records an admission first.");
-            }
-
-            return;
-        }
-
-        string? status = EstateModel.BodyString(admission, "status");
-        string? revokedAt = EstateModel.BodyString(admission, "revokedAt");
-        if (status == "revoked" && revokedAt is not null && string.CompareOrdinal(record.At, revokedAt) >= 0)
-        {
-            findings.Error("signature.revoked", location, $"Device {device.Id} was revoked at {revokedAt}; records signed by it from then on are invalid.");
-            return;
-        }
-
-        RecordEnvelope first = model.ById.TryGetValue(model.Chain(admission)[0], out RecordEnvelope? f) ? f : admission;
-        if (string.CompareOrdinal(record.At, first.At) < 0 && !selfAdmission && record.Id != first.Id)
-        {
-            findings.Error("signature.before-admission", location, $"Device {device.Id} signed this record before it was admitted at {first.At}.");
+                return;
         }
     }
 }
