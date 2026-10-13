@@ -123,6 +123,12 @@ internal static class Commands
                 relevant.Add(finding);
             }
 
+            // Repository checks apply to the new record itself (secrets, absolute paths); problems elsewhere are not this record's fault.
+            foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+            {
+                relevant.Add(finding);
+            }
+
             if (relevant.HasErrors)
             {
                 File.Delete(written);
