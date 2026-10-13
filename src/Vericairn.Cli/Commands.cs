@@ -14,6 +14,8 @@ using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
+using Vericairn.Runtime.Portability;
+using Vericairn.Runtime.Store;
 
 namespace Vericairn.Cli;
 
@@ -28,7 +30,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             return Report(model.Findings, json, $"{model.Records.Count} records");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -41,7 +44,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             FindingList checks = EstateChecks.Run(model);
             var all = new FindingList();
             foreach (Finding finding in model.Findings.Concat(checks))
@@ -61,7 +65,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             FindingList checks = EstateChecks.Run(model);
             Console.Out.Write(json ? EstateStatus.RenderJson(model, checks) : EstateStatus.Render(model, checks));
             return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
@@ -122,7 +127,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? order = WorkView.FindOrder(model, key);
             if (order is null)
             {
@@ -142,7 +148,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? order = WorkView.FindOrder(model, key);
             if (order is null)
             {
@@ -167,7 +174,8 @@ internal static class Commands
                 return Fail("--by and --contributor must be ULIDs.");
             }
 
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? order = WorkView.FindOrder(model, key);
             if (order is null)
             {
@@ -205,7 +213,8 @@ internal static class Commands
                 return Fail("--at must look like 2026-10-13T14:00:00Z.");
             }
 
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? assignment = Latest(model, assignmentId, "assignment");
             if (assignment is null)
             {
@@ -228,11 +237,38 @@ internal static class Commands
     public static int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
         WorkRecordAbout(root, "amendment", "assignment", assignmentId, by, bodyPath, json);
 
-    public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, bool json)
+    public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
     {
         try
         {
-            (RecordEnvelope operatorRecord, RecordEnvelope estateRecord) = EstateInitializer.Initialize(root, new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit));
+            var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
+            RecordEnvelope operatorRecord;
+            RecordEnvelope estateRecord;
+            if (profile == "local-only")
+            {
+                PreparedEstate prepared = EstateInitializer.Prepare(root, initialization);
+                string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
+                Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+                File.WriteAllBytes(manifestPath, prepared.ManifestBytes);
+                using EstateSession session = EstateSession.Open(root);
+                session.Write(prepared.Operator);
+                session.Write(prepared.Estate);
+                EstateModel model = session.Load();
+                if (model.Findings.HasErrors)
+                {
+                    session.Discard(prepared.Estate);
+                    session.Discard(prepared.Operator);
+                    File.Delete(manifestPath);
+                    return Report(model.Findings, json, "rejected");
+                }
+
+                (operatorRecord, estateRecord) = (prepared.Operator.Envelope, prepared.Estate.Envelope);
+            }
+            else
+            {
+                (operatorRecord, estateRecord) = EstateInitializer.Initialize(root, initialization);
+            }
+
             if (json)
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath }));
@@ -334,7 +370,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             if (id is null)
             {
                 Console.Out.Write(json ? DecisionView.RenderJson(model) : DecisionView.RenderList(model));
@@ -384,7 +421,8 @@ internal static class Commands
                 return Fail("--by must be a ULID.");
             }
 
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? subject = Latest(model, subjectId, subjectType);
             if (subject is null)
             {
@@ -400,10 +438,16 @@ internal static class Commands
         }
     }
 
-    /// <summary>Authors a record, writes it, validates the estate with it, and removes it again if the estate would be invalid.</summary>
+    /// <summary>Authors a record, stores it where the profile keeps records, validates the estate with it, and removes it again if the estate would be invalid.</summary>
     private static int WriteValidated(string root, RecordDraft draft, bool json, IRecordSigner? signer = null)
     {
-        EstateModel current = EstateLoader.Load(root);
+        if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+        {
+            return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
+        }
+
+        using EstateSession session = EstateSession.Open(root);
+        EstateModel current = session.Load();
         if (signer is null)
         {
             string? refusal = ResolveSigner(current, draft, out signer);
@@ -420,8 +464,8 @@ internal static class Commands
         }
 
         AuthoredRecord record = RecordAuthor.Create(draft, signer);
-        string written = RecordAuthor.Write(root, record);
-        EstateModel model = EstateLoader.Load(root);
+        session.Write(record);
+        EstateModel model = session.Load();
         var relevant = new FindingList();
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
         {
@@ -442,7 +486,7 @@ internal static class Commands
 
         if (relevant.HasErrors)
         {
-            File.Delete(written);
+            session.Discard(record);
             Console.Error.WriteLine($"Not written: the estate would be invalid with this record ({relevant.Errors} errors).");
             return Report(relevant, json, "rejected");
         }
@@ -457,6 +501,224 @@ internal static class Commands
         }
 
         return Clean;
+    }
+
+    /// <summary>Opens the estate session when a manifest exists; a bare records directory still validates through the file loader.</summary>
+    private static EstateSession? OpenIfEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath)) ? EstateSession.Open(root) : null;
+
+    private static EstateModel LoadWith(EstateSession? session, string root) => session?.Load() ?? EstateLoader.Load(root);
+
+    public static int Export(string root, string output, string? by, bool json)
+    {
+        try
+        {
+            if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+            {
+                return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
+            }
+
+            using EstateSession session = EstateSession.Open(root);
+            EstateModel model = session.Load();
+            if (model.Findings.HasErrors)
+            {
+                Console.Error.WriteLine("The estate has errors; exporting it anyway so that it can be inspected elsewhere.");
+            }
+
+            ExportSummary summary = EstateExport.Write(session, output, by);
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { summary.Id, summary.Estate, summary.CreatedAt, summary.Profile, summary.Records, summary.Objects, summary.Documents, summary.InventoryHash, output }));
+            }
+            else
+            {
+                Console.Out.WriteLine($"export {summary.Id} of estate {summary.Estate}: {summary.Records} records, {summary.Objects} objects, {summary.Documents} documents; inventory {summary.InventoryHash}");
+                Console.Out.WriteLine("Carries records and bytes only: no keys, sessions, credentials or authority travel with it.");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int Restore(string from, string to, bool json)
+    {
+        try
+        {
+            (ExportSummary? verified, FindingList findings) = EstateExport.Verify(from);
+            if (verified is null || findings.HasErrors)
+            {
+                Console.Error.WriteLine("Nothing restored: the export does not verify against its inventory.");
+                return Report(findings, json, "rejected");
+            }
+
+            ExportSummary summary = EstateExport.Restore(from, to);
+            using EstateSession session = EstateSession.Open(to);
+            EstateModel model = session.Load();
+            FindingList checks = EstateChecks.Run(model);
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { summary.Id, summary.Estate, summary.Records, summary.Objects, summary.Documents, restoredTo = Path.GetFullPath(to), errors = model.Findings.Errors + checks.Errors }));
+            }
+            else
+            {
+                Console.Out.WriteLine($"restored export {summary.Id} of estate {summary.Estate} into {Path.GetFullPath(to)}: {summary.Records} records, {summary.Objects} objects, {summary.Documents} documents");
+                Console.Out.WriteLine("Restored records carry no authority: devices stay where their keys are, and a device held here must be admitted before this copy can author.");
+                Console.Out.Write(Recovery.Inspect(model, checks));
+            }
+
+            return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or JsonException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int Reconcile(string root, bool json)
+    {
+        try
+        {
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
+            var all = new FindingList();
+            foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+            {
+                all.Add(finding);
+            }
+
+            IReadOnlyList<Finding> tasks = EstateStatus.ReconcileTasks(all);
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(tasks.Select(t => new { t.Code, t.Location, t.Message })));
+            }
+            else if (tasks.Count == 0)
+            {
+                Console.Out.WriteLine("Nothing to reconcile.");
+            }
+            else
+            {
+                foreach (Finding task in tasks)
+                {
+                    Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
+                }
+
+                Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+            }
+
+            return tasks.Count == 0 ? Clean : HasErrors;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int RecoverInspect(string root)
+    {
+        try
+        {
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
+            Console.Out.Write(Recovery.Inspect(model, EstateChecks.Run(model)));
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int RecoverCompare(string root, string other)
+    {
+        try
+        {
+            using EstateSession? left = OpenIfEstate(root);
+            using EstateSession? right = OpenIfEstate(other);
+            Console.Out.Write(Recovery.Compare(LoadWith(left, root), "this copy", LoadWith(right, other), "the other copy"));
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ObjectsPut(string root, string file, bool json)
+    {
+        try
+        {
+            using EstateSession session = EstateSession.Open(root);
+            byte[] bytes = File.ReadAllBytes(file);
+            if (bytes.LongLength > EstateLayout.MaxObjectBytes)
+            {
+                return Fail($"{file} is {bytes.LongLength:N0} bytes; objects above {EstateLayout.MaxObjectBytes:N0} bytes go to releases and are referenced by hash.");
+            }
+
+            string hash = session.Objects.Put(bytes);
+            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { hash, bytes = bytes.LongLength, store = session.Objects.Kind }) : $"{hash}  {bytes.LongLength} bytes  ({session.Objects.Kind})");
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ObjectsList(string root, bool json)
+    {
+        try
+        {
+            using EstateSession session = EstateSession.Open(root);
+            IReadOnlyList<string> hashes = session.Objects.List();
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(hashes));
+            }
+            else
+            {
+                foreach (string hash in hashes)
+                {
+                    Console.Out.WriteLine(hash);
+                }
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ObjectsVerify(string root, bool json)
+    {
+        try
+        {
+            using EstateSession session = EstateSession.Open(root);
+            var findings = new FindingList();
+            int verified = 0;
+            foreach (string hash in session.Objects.List())
+            {
+                try
+                {
+                    session.Objects.Read(hash);
+                    verified++;
+                }
+                catch (Vericairn.Runtime.Objects.ObjectCorruptedException exception)
+                {
+                    findings.Error("objects.hash", hash, exception.Message);
+                }
+            }
+
+            return Report(findings, json, $"{verified} objects verified");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
     }
 
     public static int DevicesCreate(string root, string principal, string name, string? custody, string[] profiles, bool json)
@@ -508,7 +770,8 @@ internal static class Commands
     {
         try
         {
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
             var rows = model.Current("device").OrderBy(d => d.Id, StringComparer.Ordinal).Select(device =>
             {
@@ -555,7 +818,8 @@ internal static class Commands
                 return Fail("--by must be a ULID.");
             }
 
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? device = Latest(model, deviceId, "device");
             if (device is null)
             {
@@ -581,7 +845,8 @@ internal static class Commands
                 return Fail("--by must be a ULID.");
             }
 
-            EstateModel model = EstateLoader.Load(root);
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
             RecordEnvelope? device = Latest(model, deviceId, "device");
             if (device is null)
             {

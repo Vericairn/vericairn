@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+    <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
   </ItemGroup>
 
 </Project>

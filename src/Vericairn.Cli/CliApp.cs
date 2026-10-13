@@ -30,6 +30,8 @@ internal static class CliApp
         root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(RecoverFamily(estateOption));
+        root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
         status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
@@ -118,7 +120,9 @@ internal static class CliApp
         var githubOption = new Option<string?>("--github") { Description = "GitHub organization login, if any." };
         var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the Vericairn source to pin.", DefaultValueFactory = _ => "Vericairn/vericairn" };
         var commitOption = new Option<string>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits).", Required = true };
+        var profileOption = new Option<string>("--profile") { Description = "Storage profile: repository-synced (records as files in a git repository) or local-only (records in this machine's live store).", DefaultValueFactory = _ => "repository-synced" };
         var init = new Command("init", "Create a new estate: operator principal, charter and manifest, validated together.");
+        init.Options.Add(profileOption);
         init.Options.Add(nameOption);
         init.Options.Add(slugOption);
         init.Options.Add(purposeOption);
@@ -137,13 +141,65 @@ internal static class CliApp
             parseResult.GetValue(githubOption),
             parseResult.GetValue(repositoryOption)!,
             parseResult.GetValue(commitOption)!,
+            parseResult.GetValue(profileOption)!,
             parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(init);
 
         var check = new Command("check", "Validate records and run repository cleanliness and portability checks.");
         check.SetAction(parseResult => Commands.Check(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(check);
+
+        var outOption = new Option<string>("--out") { Description = "Path of the export file to create (never overwritten).", Required = true };
+        var exportByOption = new Option<string?>("--by") { Description = "Principal id recorded as the exporter." };
+        var export = new Command("export", "Write a verified export: records, objects, manifest and documents with an inventory; no keys or authority.");
+        export.Options.Add(outOption);
+        export.Options.Add(exportByOption);
+        export.SetAction(parseResult => Commands.Export(parseResult.GetValue(estateOption)!, parseResult.GetValue(outOption)!, parseResult.GetValue(exportByOption), parseResult.GetValue(jsonOption)));
+        estate.Subcommands.Add(export);
+
+        var fromOption = new Option<string>("--from") { Description = "Export file.", Required = true };
+        var toOption = new Option<string>("--to") { Description = "Empty destination directory.", Required = true };
+        var restore = new Command("restore", "Verify an export against its inventory and restore it into an empty directory as a repository-synced estate; authority is not restored.");
+        restore.Options.Add(fromOption);
+        restore.Options.Add(toOption);
+        restore.SetAction(parseResult => Commands.Restore(parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(jsonOption)));
+        estate.Subcommands.Add(restore);
+
+        var reconcile = new Command("reconcile", "List what two diverged copies left to settle: divergent revisions, duplicate keys, duplicate results.");
+        reconcile.SetAction(parseResult => Commands.Reconcile(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        estate.Subcommands.Add(reconcile);
         return estate;
+    }
+
+    private static Command RecoverFamily(Option<string> estateOption)
+    {
+        var recover = new Command("recover", "After an interruption or a move: inspect what this copy holds and compare it with another.");
+        var inspect = new Command("inspect", "What this copy knows, which devices can author from here, work in progress, unresolved effects and reconcile tasks.");
+        inspect.SetAction(parseResult => Commands.RecoverInspect(parseResult.GetValue(estateOption)!));
+        recover.Subcommands.Add(inspect);
+        var withOption = new Option<string>("--with") { Description = "Root of the other copy.", Required = true };
+        var compare = new Command("compare", "Records only in this copy, only in the other, or (never expected) differing in content.");
+        compare.Options.Add(withOption);
+        compare.SetAction(parseResult => Commands.RecoverCompare(parseResult.GetValue(estateOption)!, parseResult.GetValue(withOption)!));
+        recover.Subcommands.Add(compare);
+        return recover;
+    }
+
+    private static Command ObjectsFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var objects = new Command("objects", "Content-addressed objects: put, list, verify.");
+        var fileArgument = new Argument<string>("file") { Description = "File whose bytes become an object." };
+        var put = new Command("put", "Store a file's bytes as an object named by their hash.");
+        put.Arguments.Add(fileArgument);
+        put.SetAction(parseResult => Commands.ObjectsPut(parseResult.GetValue(estateOption)!, parseResult.GetValue(fileArgument)!, parseResult.GetValue(jsonOption)));
+        objects.Subcommands.Add(put);
+        var list = new Command("list", "List held objects.");
+        list.SetAction(parseResult => Commands.ObjectsList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        objects.Subcommands.Add(list);
+        var verify = new Command("verify", "Read every object and check its bytes against its name.");
+        verify.SetAction(parseResult => Commands.ObjectsVerify(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        objects.Subcommands.Add(verify);
+        return objects;
     }
 
     private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)

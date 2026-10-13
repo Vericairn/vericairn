@@ -20,7 +20,14 @@ namespace Vericairn.Records.Authoring;
 /// <param name="Repository">GitHub owner/name of the Vericairn source to pin.</param>
 /// <param name="Commit">Commit of that source to pin (source mode).</param>
 /// <param name="At">Authoring time; now when omitted.</param>
-public sealed record EstateInitialization(string Name, string Slug, string Purpose, string OperatorName, string OrganizationName, string? GitHubOrganization, string Repository, string Commit, DateTimeOffset? At = null);
+/// <param name="Profile">Storage profile: repository-synced (default) or local-only.</param>
+public sealed record EstateInitialization(string Name, string Slug, string Purpose, string OperatorName, string OrganizationName, string? GitHubOrganization, string Repository, string Commit, DateTimeOffset? At = null, string Profile = "repository-synced");
+
+/// <summary>The records and manifest of a new estate before anything is written.</summary>
+/// <param name="Operator">The root operator principal.</param>
+/// <param name="Estate">The charter.</param>
+/// <param name="ManifestBytes">Canonical manifest bytes.</param>
+public sealed record PreparedEstate(AuthoredRecord Operator, AuthoredRecord Estate, byte[] ManifestBytes);
 
 /// <summary>Creates the root of trust of a new estate: the operator principal, the charter and the manifest, together.</summary>
 public static class EstateInitializer
@@ -31,9 +38,35 @@ public static class EstateInitializer
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(initialization);
         root = Path.GetFullPath(root);
+        PreparedEstate prepared = Prepare(root, initialization);
+        string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
+        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
+        File.WriteAllBytes(manifestPath, prepared.ManifestBytes);
+        RecordAuthor.Write(root, prepared.Operator);
+        RecordAuthor.Write(root, prepared.Estate);
+        EstateModel model = EstateLoader.Load(root);
+        if (model.Findings.HasErrors)
+        {
+            throw new InvalidOperationException("The initialized estate is not valid: " + string.Join("; ", model.Findings.Where(f => f.Severity == Severity.Error).Select(f => f.Message)));
+        }
+
+        return (prepared.Operator.Envelope, prepared.Estate.Envelope);
+    }
+
+    /// <summary>Prepares the root of trust without writing anything; the caller stores the records wherever the profile keeps them.</summary>
+    public static PreparedEstate Prepare(string root, EstateInitialization initialization)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        ArgumentNullException.ThrowIfNull(initialization);
+        root = Path.GetFullPath(root);
         if (Directory.Exists(Path.Combine(root, EstateLayout.RecordsDirectory)) || File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
         {
             throw new InvalidOperationException("This directory already holds an estate; initialization never overwrites records or a manifest.");
+        }
+
+        if (Array.IndexOf(EstateManifest.Profiles, initialization.Profile) < 0)
+        {
+            throw new ArgumentException($"Unknown profile '{initialization.Profile}'. Known: {string.Join(", ", EstateManifest.Profiles)}.", nameof(initialization));
         }
 
         DateTimeOffset at = initialization.At ?? DateTimeOffset.UtcNow;
@@ -58,6 +91,7 @@ public static class EstateInitializer
             ["format"] = EstateManifest.Format1,
             ["estate"] = estateRecord.Envelope.Id,
             ["recordFormat"] = 1,
+            ["profile"] = initialization.Profile,
             ["vericairn"] = new JsonObject { ["mode"] = "source", ["repository"] = initialization.Repository, ["commit"] = initialization.Commit },
         };
         byte[] manifestBytes;
@@ -66,18 +100,7 @@ public static class EstateInitializer
             manifestBytes = CanonicalJson.SerializePrettyUtf8(document.RootElement);
         }
 
-        string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
-        File.WriteAllBytes(manifestPath, manifestBytes);
-        RecordAuthor.Write(root, operatorRecord);
-        RecordAuthor.Write(root, estateRecord);
-        EstateModel model = EstateLoader.Load(root);
-        if (model.Findings.HasErrors)
-        {
-            throw new InvalidOperationException("The initialized estate is not valid: " + string.Join("; ", model.Findings.Where(f => f.Severity == Severity.Error).Select(f => f.Message)));
-        }
-
-        return (operatorRecord.Envelope, estateRecord.Envelope);
+        return new PreparedEstate(operatorRecord, estateRecord, manifestBytes);
     }
 
     private static AuthoredRecord Author(string type, string by, JsonObject body, DateTimeOffset at, string? id)

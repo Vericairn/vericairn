@@ -101,6 +101,16 @@ public static class EstateStatus
             all.Add(finding);
         }
 
+        IReadOnlyList<Finding> reconcile = ReconcileTasks(all);
+        if (reconcile.Count > 0)
+        {
+            text.Append("Reconcile:\n");
+            foreach (Finding task in reconcile)
+            {
+                text.Append("  ").Append(task.Location).Append(": ").Append(task.Message).Append('\n');
+            }
+        }
+
         text.Append("Findings: ").Append(all.Errors.ToString(CultureInfo.InvariantCulture)).Append(" errors, ").Append(all.Warnings.ToString(CultureInfo.InvariantCulture)).Append(" warnings\n");
         foreach (Finding finding in all.Sorted().Where(f => f.Severity != Severity.Info))
         {
@@ -108,6 +118,16 @@ public static class EstateStatus
         }
 
         return text.ToString();
+    }
+
+    /// <summary>Codes that mean two clones diverged and a person or an authorized agent must settle it; never merged silently.</summary>
+    public static readonly string[] ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id"];
+
+    /// <summary>The findings that are reconcile tasks, sorted.</summary>
+    public static IReadOnlyList<Finding> ReconcileTasks(FindingList findings)
+    {
+        ArgumentNullException.ThrowIfNull(findings);
+        return findings.Sorted().Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).ToList();
     }
 
     /// <summary>Machine-readable status in canonical pretty JSON (byte-identical across machines for the same estate).</summary>
@@ -135,6 +155,8 @@ public static class EstateStatus
             }).ToArray()),
             ["findings"] = new JsonArray(model.Findings.Concat(checks).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
+            ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
+                .Select(f => (JsonNode)new JsonObject { ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
         };
         using JsonDocument document = JsonDocument.Parse(status.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);

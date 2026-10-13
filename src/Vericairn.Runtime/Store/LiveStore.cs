@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+using Microsoft.Data.Sqlite;
+using Vericairn.Records.Estate;
+
+namespace Vericairn.Runtime.Store;
+
+/// <summary>
+/// The runtime's live store for one estate on one machine: a SQLite database that holds the record files
+/// (the canonical copy under the local-only profile, a derived copy under the repository-synced profile),
+/// never committed and never opened over a shared filesystem.
+/// </summary>
+public sealed class LiveStore : IDisposable
+{
+    private readonly SqliteConnection connection;
+
+    /// <summary>Opens (creating when needed) the live store database.</summary>
+    public LiveStore(string databasePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
+        Path = System.IO.Path.GetFullPath(databasePath);
+        Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+        connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Path, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+        connection.Open();
+        Execute("PRAGMA journal_mode = WAL;");
+        Execute("CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime INTEGER NOT NULL, bytes BLOB NOT NULL);");
+        Execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
+    }
+
+    /// <summary>Database file path.</summary>
+    public string Path { get; }
+
+    /// <summary>A metadata value, or null.</summary>
+    public string? Meta(string key)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT value FROM meta WHERE key = $key;";
+        command.Parameters.AddWithValue("$key", key);
+        return command.ExecuteScalar() as string;
+    }
+
+    /// <summary>Sets a metadata value.</summary>
+    public void SetMeta(string key, string value)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO meta (key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value;";
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Every record file held, in path order.</summary>
+    public IReadOnlyList<RecordFile> Files()
+    {
+        var files = new List<RecordFile>();
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT path, bytes FROM files ORDER BY path;";
+        using SqliteDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            files.Add(new RecordFile(reader.GetString(0), (byte[])reader[1]));
+        }
+
+        return files;
+    }
+
+    /// <summary>Number of record files held.</summary>
+    public long Count()
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM files;";
+        return (long)(command.ExecuteScalar() ?? 0L);
+    }
+
+    /// <summary>True when a path is held.</summary>
+    public bool Has(string path)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM files WHERE path = $path;";
+        command.Parameters.AddWithValue("$path", path);
+        return command.ExecuteScalar() is not null;
+    }
+
+    /// <summary>Stores or replaces a record file.</summary>
+    public void Put(string path, byte[] bytes, long mtime = 0)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "INSERT INTO files (path, size, mtime, bytes) VALUES ($path, $size, $mtime, $bytes) ON CONFLICT(path) DO UPDATE SET size = excluded.size, mtime = excluded.mtime, bytes = excluded.bytes;";
+        command.Parameters.AddWithValue("$path", path);
+        command.Parameters.AddWithValue("$size", bytes.LongLength);
+        command.Parameters.AddWithValue("$mtime", mtime);
+        command.Parameters.AddWithValue("$bytes", bytes);
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Removes a record file; true when it was held.</summary>
+    public bool Remove(string path)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM files WHERE path = $path;";
+        command.Parameters.AddWithValue("$path", path);
+        return command.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>
+    /// Brings the store in line with the records directory of a repository: new and changed files are read, deleted files
+    /// are dropped, unchanged files (same size and modification time) are kept without reading them again.
+    /// Returns how many files were read from disk.
+    /// </summary>
+    public int SyncFromDirectory(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+        string recordsRoot = System.IO.Path.Combine(root, EstateLayout.RecordsDirectory);
+        var onDisk = new Dictionary<string, (long Size, long Mtime, string Full)>(StringComparer.Ordinal);
+        if (Directory.Exists(recordsRoot))
+        {
+            foreach (string file in Directory.EnumerateFiles(recordsRoot, "*", SearchOption.AllDirectories))
+            {
+                var info = new FileInfo(file);
+                onDisk[EstateLayout.Relative(root, file)] = (info.Length, info.LastWriteTimeUtc.Ticks, file);
+            }
+        }
+
+        var held = new Dictionary<string, (long Size, long Mtime)>(StringComparer.Ordinal);
+        using (SqliteCommand select = connection.CreateCommand())
+        {
+            select.CommandText = "SELECT path, size, mtime FROM files;";
+            using SqliteDataReader reader = select.ExecuteReader();
+            while (reader.Read())
+            {
+                held[reader.GetString(0)] = (reader.GetInt64(1), reader.GetInt64(2));
+            }
+        }
+
+        int read = 0;
+        using SqliteTransaction transaction = connection.BeginTransaction();
+        foreach ((string path, (long size, long mtime, string full)) in onDisk)
+        {
+            if (held.TryGetValue(path, out (long Size, long Mtime) entry) && entry.Size == size && entry.Mtime == mtime)
+            {
+                continue;
+            }
+
+            Put(path, File.ReadAllBytes(full), mtime);
+            read++;
+        }
+
+        foreach (string path in held.Keys.Where(p => !onDisk.ContainsKey(p)))
+        {
+            Remove(path);
+        }
+
+        transaction.Commit();
+        return read;
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => connection.Dispose();
+
+    private void Execute(string sql)
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+}

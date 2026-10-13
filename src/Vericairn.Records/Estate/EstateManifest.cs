@@ -21,6 +21,12 @@ public sealed partial class EstateManifest
     /// <summary>Record format version.</summary>
     public required long RecordFormat { get; init; }
 
+    /// <summary>Storage profile: repository-synced (records in a git repository) or local-only (records in this machine's live store).</summary>
+    public required string Profile { get; init; }
+
+    /// <summary>Profiles this release implements.</summary>
+    public static readonly string[] Profiles = ["repository-synced", "local-only"];
+
     /// <summary>"source" while Vericairn is built from a pinned commit; "release" once a release is pinned.</summary>
     public required string Mode { get; init; }
 
@@ -91,6 +97,7 @@ public sealed partial class EstateManifest
 
             string? estate = reader.Ulid("estate", true);
             long? recordFormat = reader.Number("recordFormat", true, 1, 1);
+            string profile = reader.Has("profile") ? reader.Enum("profile", false, Profiles) ?? Profiles[0] : Profiles[0];
             BodyReader? vericairn = reader.Nested("vericairn", true);
             string? mode = null, repository = null, commit = null, version = null;
             if (vericairn is not null)
@@ -108,7 +115,7 @@ public sealed partial class EstateManifest
                 return null;
             }
 
-            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Mode = mode, Repository = repository, Commit = commit, Version = version };
+            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version };
         }
     }
 
