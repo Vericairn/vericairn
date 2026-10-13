@@ -72,6 +72,8 @@ jobs:
               *) tar -C "out/$rid" -czf "dist/vericairn-$VERSION-$rid.tar.gz" . ;;
             esac
           done
+          # Runtime-specific restores rewrite the lock files in the working tree; the repository's lock files are the truth.
+          git checkout -- $(git ls-files '*packages.lock.json')
       - name: Software bill of materials
         shell: bash
         env:
