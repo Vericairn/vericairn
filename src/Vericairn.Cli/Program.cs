@@ -112,6 +112,12 @@ var status = new Command("status", "Show the estate's current state derived from
 status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
 root.Subcommands.Add(status);
 
+var decisions = new Command("decisions", "List the estate's current decisions, or show one cleanly.");
+var decisionIdArgument = new Argument<string?>("id") { Description = "Decision record id (any revision); omit to list.", Arity = ArgumentArity.ZeroOrOne };
+decisions.Arguments.Add(decisionIdArgument);
+decisions.SetAction(parseResult => Commands.Decisions(parseResult.GetValue(estateOption)!, parseResult.GetValue(decisionIdArgument), parseResult.GetValue(jsonOption)));
+root.Subcommands.Add(decisions);
+
 var doctor = new Command("doctor", "Check this machine's prerequisites.");
 doctor.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(estateOption)!));
 root.Subcommands.Add(doctor);

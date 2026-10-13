@@ -105,6 +105,24 @@ public class EstateLoaderTests
     }
 
     [Fact]
+    public void DecisionsWantASynthesisAndRenderCleanly()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope bare = estate.Add("decision", estate.BuilderId, $$"""{"title":"Bare","statement":"Do it.","summary":"Do it.","effects":["x"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+        Assert.Contains(estate.Load().Findings, f => f.Code == "decision.synthesis" && f.Severity == Severity.Warning);
+        estate.Add("decision", estate.BuilderId, $$"""{"title":"Bare","statement":"Do it.","summary":"Do it.","synthesis":"Context, decision, rationale, consequences, limits.","effects":["x"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""", supersedes: bare.Id);
+        EstateModel model = estate.Load();
+        Assert.DoesNotContain(model.Findings, f => f.Code == "decision.synthesis");
+        RecordEnvelope? current = DecisionView.Find(model, bare.Id);
+        Assert.NotNull(current);
+        string markdown = DecisionView.Render(model, current);
+        Assert.Contains("## Synthesis", markdown, StringComparison.Ordinal);
+        Assert.Contains("> Do it.", markdown, StringComparison.Ordinal);
+        Assert.Contains("(revision 2)", markdown, StringComparison.Ordinal);
+        Assert.Single(DecisionView.Current(model));
+    }
+
+    [Fact]
     public void OnlyTheRootOperatorMayAuthorItself()
     {
         using var estate = new TestEstate();

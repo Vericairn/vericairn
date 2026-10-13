@@ -23,7 +23,8 @@ public sealed class DecisionType : IRecordType
     [
         new("title", "string", true, "Short title."),
         new("statement", "string", true, "The operator's words, verbatim."),
-        new("summary", "string", true, "What was decided, in the recorder's words."),
+        new("summary", "string", true, "What was decided, in one or two sentences, for lists."),
+        new("synthesis", "string", false, "A clean, thorough restatement for display: context, what was decided, why, consequences and limits. Expected on every decision; the recorder writes it and it never alters the verbatim statement."),
         new("effects", "string[]", true, "Concrete effects on the estate."),
         new("affects", "ulid[]", true, "Work orders this decision changes; may be empty."),
         new("decidedBy", "ulid", true, "The operator principal who decided."),
@@ -38,6 +39,11 @@ public sealed class DecisionType : IRecordType
         body.Text("title", true, 200);
         body.Text("statement", true, 20000);
         body.Text("summary", true, 4000);
+        if (body.Text("synthesis", false, 40000) is null && !body.Has("synthesis") && context.Model.IsCurrent(context.Record))
+        {
+            body.Warning("decision.synthesis", "synthesis", "Every decision should carry a synthesis: a clean, thorough restatement for display alongside the verbatim statement.");
+        }
+
         body.StringArray("effects", true, allowEmpty: false, maxItemLength: 2000);
         IReadOnlyList<string>? affects = body.StringArray("affects", true, allowEmpty: true, maxItemLength: Identity.Ulid.Length);
         string? decidedBy = body.Ulid("decidedBy", true);

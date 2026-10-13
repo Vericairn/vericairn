@@ -56,6 +56,9 @@ attempt, result, device, admission, object.
   under `accept-work`. If the subject changes afterwards, the acceptance is reported as unresolved, not invalid.
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
+- Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
+  for display. A decision without a synthesis is reported as a warning. `vericairn decisions` lists them and
+  `vericairn decisions <id>` renders one as Markdown.
 - Retirement records register temporary artifacts with a removal condition; once retired, the path must be gone.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.

@@ -255,6 +255,32 @@ internal static class Commands
         }
     }
 
+    public static int Decisions(string root, string? id, bool json)
+    {
+        try
+        {
+            EstateModel model = EstateLoader.Load(root);
+            if (id is null)
+            {
+                Console.Out.Write(json ? DecisionView.RenderJson(model) : DecisionView.RenderList(model));
+                return Clean;
+            }
+
+            RecordEnvelope? decision = DecisionView.Find(model, id);
+            if (decision is null)
+            {
+                return Fail($"No decision has id {id}.");
+            }
+
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : DecisionView.Render(model, decision));
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
     public static int Doctor(string root)
     {
         Console.Out.WriteLine($"vericairn {VersionText()}");
