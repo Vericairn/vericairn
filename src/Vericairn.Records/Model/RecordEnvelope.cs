@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jayson Furr
 
 using System.Text.Json;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Model;
 
@@ -22,7 +23,7 @@ public sealed class RecordEnvelope
     public const string Format1 = "vericairn.record/1";
 
     /// <summary>Creates an envelope.</summary>
-    public RecordEnvelope(string type, string id, string at, string by, RecordReference? subject, string? supersedes, JsonElement body, string declaredHash, string computedHash, bool hasSignatures)
+    public RecordEnvelope(string type, string id, string at, string by, RecordReference? subject, string? supersedes, JsonElement body, string declaredHash, string computedHash, IReadOnlyList<RecordSignature> signatures)
     {
         Type = type;
         Id = id;
@@ -33,7 +34,7 @@ public sealed class RecordEnvelope
         Body = body;
         DeclaredHash = declaredHash;
         ComputedHash = computedHash;
-        HasSignatures = hasSignatures;
+        Signatures = signatures ?? throw new ArgumentNullException(nameof(signatures));
     }
 
     /// <summary>Record type, kebab-case.</summary>
@@ -66,8 +67,11 @@ public sealed class RecordEnvelope
     /// <summary>Hash computed from the canonical envelope.</summary>
     public string ComputedHash { get; }
 
-    /// <summary>Whether the record carries signatures (not verified in format 1 without keys).</summary>
-    public bool HasSignatures { get; }
+    /// <summary>Signatures over the content hash, verified against device records when the estate is loaded.</summary>
+    public IReadOnlyList<RecordSignature> Signatures { get; }
+
+    /// <summary>Whether the record carries signatures.</summary>
+    public bool HasSignatures => Signatures.Count > 0;
 
     /// <summary>The repository-relative path this record must live at.</summary>
     public string ExpectedPath => $"records/{Type}/{AtTime:yyyy-MM}/{Id}.json";

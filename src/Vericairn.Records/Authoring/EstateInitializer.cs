@@ -52,7 +52,7 @@ public static class EstateInitializer
                 ? new JsonObject { ["name"] = initialization.OrganizationName }
                 : new JsonObject { ["name"] = initialization.OrganizationName, ["github"] = initialization.GitHubOrganization },
         };
-        AuthoredRecord estateRecord = Author("estate", operatorId, estateBody, at.AddSeconds(1), null);
+        AuthoredRecord estateRecord = Author("estate", operatorId, estateBody, at, null);
         var manifest = new JsonObject
         {
             ["format"] = EstateManifest.Format1,

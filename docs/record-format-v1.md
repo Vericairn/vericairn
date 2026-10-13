@@ -19,7 +19,7 @@ Every record is a JSON object with these keys and no others:
 | `supersedes` | optional | ULID of the record of the same type this one replaces |
 | `body` | yes | type-specific object |
 | `hash` | yes | `sha256:` + 64 lower-case hex digits over the canonical envelope without `hash` and `signatures` |
-| `signatures` | optional | reserved; not verified in this release |
+| `signatures` | optional | `[{algorithm, device, signature}]`: signatures over the content hash by admitted devices; verified on load |
 
 ## Canonical form
 
@@ -41,8 +41,8 @@ write the same file; merges are always clean file additions, and conflicts are s
 
 Run `vericairn records describe` for the current list and `vericairn records describe <type>` for fields.
 Format 1 admits: estate, principal, authority, decision, product, resource, document-revision, work-order,
-work-status, review, acceptance, retirement, assignment, attempt, result, amendment. Reserved for later
-releases: release, migration, device, admission, object.
+work-status, review, acceptance, retirement, assignment, attempt, result, amendment, device, admission.
+Reserved for later releases: release, migration, object.
 
 ## Work: brief, assignment, attempt, result
 
@@ -56,6 +56,21 @@ result pins the result's hash and follows the work order's policy: results towar
 operator; results of ordinary work may be self-accepted under `self-accept-ordinary-work`.
 `vericairn work brief <key>` renders everything a contributor needs from the records alone;
 `vericairn work observe <key>` shows what happened.
+
+## Signatures, devices and admission
+
+A **device** record binds a public key to a principal with its platform, custody strength (`windows-cng`,
+`macos-keychain`, `linux-secret-service` or `file-owner-only`) and permitted connectivity profiles; it is
+signed by its own key to prove possession. An **admission** record, authored by the operator or under the
+`administer` scope and pinned to the exact device record, admits the device to author records; a superseding
+admission with status `revoked` and `revokedAt` ends it. A signature is `ecdsa-p256-sha256` over the 32 digest
+bytes of the record's `hash`, encoded as a 64-byte base64url value in IEEE P1363 form. On load, every signature
+is verified against its device's public key; a signature by a device of another principal, by an unadmitted
+device, before its admission, or from its revocation onward is an error. The estate's `policies.signatures`
+is `optional` or `required`; when required, every record authored after the charter revision that set it must
+be signed, so a clone without an admitted device key is read-only. Private keys live in the per-user state
+directory (`VERICAIRN_HOME` overrides it), never in a repository; the CLI picks the signing device for the
+author automatically.
 
 ## Rules that are enforced, not merely documented
 

@@ -12,6 +12,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 
 namespace Vericairn.Cli;
@@ -363,6 +364,7 @@ internal static class Commands
         Console.Out.WriteLine($"dotnet    {Probe("dotnet", "--version") ?? "not found on PATH (needed only to build from source)"}");
         string manifest = Path.Combine(root, EstateLayout.ManifestPath);
         Console.Out.WriteLine(File.Exists(manifest) ? $"estate    {Path.GetFullPath(root)} (manifest present)" : $"estate    {Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath})");
+        Console.Out.WriteLine($"custody   {DeviceKeyStores.Default().Kind} (default on this platform); per-user state at {VericairnHome.Path()}");
         return Clean;
     }
 
@@ -399,9 +401,25 @@ internal static class Commands
     }
 
     /// <summary>Authors a record, writes it, validates the estate with it, and removes it again if the estate would be invalid.</summary>
-    private static int WriteValidated(string root, RecordDraft draft, bool json)
+    private static int WriteValidated(string root, RecordDraft draft, bool json, IRecordSigner? signer = null)
     {
-        AuthoredRecord record = RecordAuthor.Create(draft);
+        EstateModel current = EstateLoader.Load(root);
+        if (signer is null)
+        {
+            string? refusal = ResolveSigner(current, draft, out signer);
+            if (refusal is not null)
+            {
+                return Fail(refusal);
+            }
+        }
+
+        // A successor is never older than the record it supersedes, even when clocks or fast scripts put them in the same second.
+        if (draft.Supersedes is not null && current.ById.TryGetValue(draft.Supersedes, out RecordEnvelope? predecessor) && (draft.At ?? DateTimeOffset.UtcNow) < predecessor.AtTime)
+        {
+            draft = draft with { At = predecessor.AtTime };
+        }
+
+        AuthoredRecord record = RecordAuthor.Create(draft, signer);
         string written = RecordAuthor.Write(root, record);
         EstateModel model = EstateLoader.Load(root);
         var relevant = new FindingList();
@@ -433,6 +451,189 @@ internal static class Commands
         }
 
         return Clean;
+    }
+
+    public static int DevicesCreate(string root, string principal, string name, string? custody, string[] profiles, bool json)
+    {
+        IDeviceKeyStore? store = null;
+        string? id = null;
+        try
+        {
+            if (!Ulid.IsValid(principal))
+            {
+                return Fail("--principal must be a ULID.");
+            }
+
+            store = DeviceKeyStores.Named(custody);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            id = Ulid.NewUlid(now).Value;
+            byte[] publicKey = store.Create(id);
+            var body = new JsonObject
+            {
+                ["principal"] = principal,
+                ["name"] = name,
+                ["platform"] = VericairnHome.Platform(),
+                ["custody"] = store.Kind,
+                ["algorithm"] = RecordSigning.Algorithm,
+                ["publicKey"] = RecordSigning.EncodePublicKey(publicKey),
+                ["profiles"] = new JsonArray((profiles.Length == 0 ? ["embedded"] : profiles).Select(p => (JsonNode)p).ToArray()),
+            };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            int code = WriteValidated(root, new RecordDraft("device", principal, document.RootElement, At: now, Id: id), json, new StoreSigner(store, id));
+            if (code != Clean)
+            {
+                store.Remove(id);
+            }
+
+            return code;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.Security.Cryptography.CryptographicException)
+        {
+            if (store is not null && id is not null)
+            {
+                store.Remove(id);
+            }
+
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int DevicesList(string root, bool json)
+    {
+        try
+        {
+            EstateModel model = EstateLoader.Load(root);
+            IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
+            var rows = model.Current("device").OrderBy(d => d.Id, StringComparer.Ordinal).Select(device =>
+            {
+                RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+                string principal = EstateModel.BodyString(device, "principal") ?? "?";
+                return new
+                {
+                    id = device.Id,
+                    principal,
+                    principalName = model.CurrentPrincipal(principal) is RecordEnvelope p ? EstateModel.BodyString(p, "name") : principal,
+                    name = EstateModel.BodyString(device, "name"),
+                    platform = EstateModel.BodyString(device, "platform"),
+                    custody = EstateModel.BodyString(device, "custody"),
+                    admission = admission is null ? "not admitted" : EstateModel.BodyString(admission, "status"),
+                    heldHere = stores.Any(s => s.Has(device.Id)),
+                };
+            }).ToList();
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(rows));
+            }
+            else
+            {
+                foreach (var row in rows)
+                {
+                    Console.Out.WriteLine($"{row.id}  {row.principalName}  {row.name}  {row.platform}  {row.custody}  {row.admission}{(row.heldHere ? "  key held on this machine" : string.Empty)}");
+                }
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int DevicesAdmit(string root, string deviceId, string by, string note, bool json)
+    {
+        try
+        {
+            if (!Ulid.IsValid(by))
+            {
+                return Fail("--by must be a ULID.");
+            }
+
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? device = Latest(model, deviceId, "device");
+            if (device is null)
+            {
+                return Fail($"No device has id {deviceId}.");
+            }
+
+            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "admitted", ["note"] = note };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteValidated(root, new RecordDraft("admission", by, document.RootElement, device.Reference), json);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int DevicesRevoke(string root, string deviceId, string by, string reason, bool json)
+    {
+        try
+        {
+            if (!Ulid.IsValid(by))
+            {
+                return Fail("--by must be a ULID.");
+            }
+
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope? device = Latest(model, deviceId, "device");
+            if (device is null)
+            {
+                return Fail($"No device has id {deviceId}.");
+            }
+
+            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+            if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
+            {
+                return Fail($"Device {deviceId} has no current admission to revoke.");
+            }
+
+            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = reason, ["revokedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteValidated(root, new RecordDraft("admission", by, document.RootElement, device.Reference, admission.Id), json);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    /// <summary>Chooses the device that signs a record for its author on this machine, or explains why none can.</summary>
+    private static string? ResolveSigner(EstateModel model, RecordDraft draft, out IRecordSigner? signer)
+    {
+        signer = null;
+        IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
+        List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => d.Id, StringComparer.Ordinal).ToList();
+        foreach (RecordEnvelope device in devices.Where(d => SignatureChecks.IsAdmitted(model, d)))
+        {
+            IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(device.Id));
+            if (store is not null)
+            {
+                signer = new StoreSigner(store, device.Id);
+                return null;
+            }
+        }
+
+        RecordEnvelope? estate = model.CurrentEstate;
+        string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
+        if (draft.Type == "admission" && draft.Subject is not null && draft.By == rootOperator)
+        {
+            RecordEnvelope? own = devices.FirstOrDefault(d => d.Id == draft.Subject.Id);
+            IDeviceKeyStore? store = own is null ? null : stores.FirstOrDefault(s => s.Has(own.Id));
+            if (own is not null && store is not null)
+            {
+                signer = new StoreSigner(store, own.Id);
+                return null;
+            }
+        }
+
+        bool required = estate is not null && estate.Body.TryGetProperty("policies", out JsonElement policies) && policies.TryGetProperty("signatures", out JsonElement policy) && policy.GetString() == "required";
+        if (required)
+        {
+            return $"This clone is read-only for principal {draft.By}: no admitted device key is held on this machine. Create a device with 'vericairn devices create' and have an administrator admit it.";
+        }
+
+        return null;
     }
 
     private static RecordEnvelope? Latest(EstateModel model, string id, string type) =>

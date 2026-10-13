@@ -102,10 +102,11 @@ public static class EstateLoader
             type.Validate(new ValidationContext(model, record, findings));
         }
 
+        SignatureChecks.Run(model, findings);
         model.Manifest = EstateManifest.Load(root, findings);
-        if (model.Manifest is not null && model.CurrentEstate is not null && model.Manifest.Estate != model.CurrentEstate.Id)
+        if (model.Manifest is not null && model.CurrentEstate is not null && model.Manifest.Estate != model.Chain(model.CurrentEstate)[0])
         {
-            findings.Error("manifest.estate", EstateLayout.ManifestPath, $"The manifest names estate {model.Manifest.Estate} but the current estate record is {model.CurrentEstate.Id}.");
+            findings.Error("manifest.estate", EstateLayout.ManifestPath, $"The manifest names estate {model.Manifest.Estate} but this estate's charter began as {model.Chain(model.CurrentEstate)[0]}.");
         }
 
         if (records.Count > 0 && model.CurrentEstate is null)

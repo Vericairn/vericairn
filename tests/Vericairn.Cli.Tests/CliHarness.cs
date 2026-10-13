@@ -99,7 +99,7 @@ internal static class CliHarness
 
     public static void Delete(params string[] directories)
     {
-        foreach (string directory in directories)
+        foreach (string directory in directories.Where(d => !string.IsNullOrEmpty(d)))
         {
             try
             {
