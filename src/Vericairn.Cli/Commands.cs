@@ -147,6 +147,30 @@ internal static class Commands
         }
     }
 
+    public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, bool json)
+    {
+        try
+        {
+            (RecordEnvelope operatorRecord, RecordEnvelope estateRecord) = EstateInitializer.Initialize(root, new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit));
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath }));
+            }
+            else
+            {
+                Console.Out.WriteLine($"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}");
+                Console.Out.WriteLine($"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}");
+                Console.Out.WriteLine($"manifest  {EstateLayout.ManifestPath}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
     public static int Describe(string? type)
     {
         if (type is null)

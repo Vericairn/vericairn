@@ -72,8 +72,38 @@ hash.Arguments.Add(hashFileArgument);
 hash.SetAction(parseResult => Commands.Hash(parseResult.GetValue(hashFileArgument)!));
 records.Subcommands.Add(hash);
 
-var estate = new Command("estate", "Estate-level checks.");
+var estate = new Command("estate", "Create and check estates.");
 root.Subcommands.Add(estate);
+
+var nameOption = new Option<string>("--name") { Description = "Estate display name.", Required = true };
+var slugOption = new Option<string>("--slug") { Description = "Estate slug (lower-case kebab-case).", Required = true };
+var purposeOption = new Option<string>("--purpose") { Description = "Why the estate exists.", Required = true };
+var operatorNameOption = new Option<string>("--operator-name") { Description = "Display name of the root operator (a human).", Required = true };
+var organizationOption = new Option<string>("--organization") { Description = "Organization display name.", Required = true };
+var githubOption = new Option<string?>("--github") { Description = "GitHub organization login, if any." };
+var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the Vericairn source to pin.", DefaultValueFactory = _ => "Vericairn/vericairn" };
+var commitOption = new Option<string>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits).", Required = true };
+var init = new Command("init", "Create a new estate: operator principal, charter and manifest, validated together.");
+init.Options.Add(nameOption);
+init.Options.Add(slugOption);
+init.Options.Add(purposeOption);
+init.Options.Add(operatorNameOption);
+init.Options.Add(organizationOption);
+init.Options.Add(githubOption);
+init.Options.Add(repositoryOption);
+init.Options.Add(commitOption);
+init.SetAction(parseResult => Commands.Init(
+    parseResult.GetValue(estateOption)!,
+    parseResult.GetValue(nameOption)!,
+    parseResult.GetValue(slugOption)!,
+    parseResult.GetValue(purposeOption)!,
+    parseResult.GetValue(operatorNameOption)!,
+    parseResult.GetValue(organizationOption)!,
+    parseResult.GetValue(githubOption),
+    parseResult.GetValue(repositoryOption)!,
+    parseResult.GetValue(commitOption)!,
+    parseResult.GetValue(jsonOption)));
+estate.Subcommands.Add(init);
 var check = new Command("check", "Validate records and run repository cleanliness and portability checks.");
 check.SetAction(parseResult => Commands.Check(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
 estate.Subcommands.Add(check);
