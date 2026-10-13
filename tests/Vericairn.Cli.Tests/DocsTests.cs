@@ -1,0 +1,131 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text.Json;
+
+namespace Vericairn.Cli.Tests;
+
+/// <summary>A release's documentation set: generated from the build, checked against it, refused when incomplete with every gap named.</summary>
+[Collection("cli")]
+public class DocsTests
+{
+    private static readonly string[] Authored = ["README.md", "install.md", "operator-guide.md", "record-format.md", "api.md", "software.md", "release-notes.md", "limitations-and-platforms.md"];
+
+    [Fact]
+    public void GenerateWritesTheReferencesAndTheManifestFromThisBuild()
+    {
+        string output = CliHarness.TempDirectory("docs-generate");
+        try
+        {
+            JsonElement summary = CliHarness.Ok("--json", "docs", "generate", "--out", output).Json;
+            Assert.Equal(Docs.ReleaseVersion, summary.GetProperty("version").GetString());
+            foreach (string name in new[] { "cli-reference.md", "api-reference.md", "record-reference.md", "manifest.json" })
+            {
+                Assert.True(File.Exists(Path.Combine(output, name)), name);
+            }
+
+            using JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "manifest.json")));
+            List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
+            Assert.Contains("docs check", commands);
+            Assert.Contains("records new", commands);
+            Assert.Contains("estate upgrade", commands);
+            Assert.Contains("GET /v1/health", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
+
+            string cli = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
+            Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
+            Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
+            Assert.Contains("## `POST /v1/records`", File.ReadAllText(Path.Combine(output, "api-reference.md")), StringComparison.Ordinal);
+            Assert.Contains("## `acceptance`", File.ReadAllText(Path.Combine(output, "record-reference.md")), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CheckAcceptsACompleteSetAndNamesEveryGapOfAnIncompleteOne()
+    {
+        string output = CliHarness.TempDirectory("docs-check");
+        try
+        {
+            CliHarness.Ok("docs", "generate", "--out", output);
+            foreach (string name in Authored)
+            {
+                File.WriteAllText(Path.Combine(output, name), $"# {name} for Vericairn {Docs.ReleaseVersion}\n\nAuthored.\n");
+            }
+
+            CliHarness.Outcome complete = CliHarness.Run("docs", "check", output);
+            Assert.True(complete.Code == 0, complete.Out + complete.Err);
+            Assert.Contains("complete: 0 errors", complete.Out, StringComparison.Ordinal);
+
+            File.Delete(Path.Combine(output, "install.md"));
+            File.WriteAllText(Path.Combine(output, "README.md"), "# A set that forgot its version\n");
+            string cliPath = Path.Combine(output, "cli-reference.md");
+            File.WriteAllLines(cliPath, File.ReadAllLines(cliPath).Where(l => !l.Contains("`vericairn docs check`", StringComparison.Ordinal)));
+            string recordPath = Path.Combine(output, "record-reference.md");
+            File.WriteAllLines(recordPath, File.ReadAllLines(recordPath).Where(l => !l.Contains("## `acceptance`", StringComparison.Ordinal)));
+
+            CliHarness.Outcome incomplete = CliHarness.Run("--json", "docs", "check", output);
+            Assert.Equal(1, incomplete.Code);
+            JsonElement findings = incomplete.Json;
+            Assert.Equal(4, findings.GetProperty("errors").GetInt32());
+            List<string> messages = findings.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("Location").GetString() + ": " + f.GetProperty("Message").GetString()).ToList();
+            Assert.Contains(messages, m => m.StartsWith("install.md: Missing", StringComparison.Ordinal));
+            Assert.Contains(messages, m => m.StartsWith("README.md: Does not name the version", StringComparison.Ordinal));
+            Assert.Contains(messages, m => m.StartsWith("cli-reference.md: No heading for `vericairn docs check`", StringComparison.Ordinal));
+            Assert.Contains(messages, m => m.StartsWith("record-reference.md: No heading for `acceptance`", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CheckRefusesAManifestThatDisagreesWithThisBuild()
+    {
+        string output = CliHarness.TempDirectory("docs-stale");
+        try
+        {
+            CliHarness.Ok("docs", "generate", "--out", output);
+            foreach (string name in Authored)
+            {
+                File.WriteAllText(Path.Combine(output, name), $"# {name} for Vericairn {Docs.ReleaseVersion}\n");
+            }
+
+            string manifestPath = Path.Combine(output, "manifest.json");
+            string manifest = File.ReadAllText(manifestPath).Replace("\"docs check\"", "\"docs retired-verb\"", StringComparison.Ordinal);
+            File.WriteAllText(manifestPath, manifest);
+            File.AppendAllText(Path.Combine(output, "cli-reference.md"), "\n## `vericairn docs retired-verb`\n");
+
+            CliHarness.Outcome stale = CliHarness.Run("docs", "check", output);
+            Assert.Equal(1, stale.Code);
+            Assert.Contains("This build has the command vericairn docs check and the set does not", stale.Out, StringComparison.Ordinal);
+            Assert.Contains("The set documents the command vericairn docs retired-verb, which this build does not have", stale.Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheReleasedSetOfZeroTwoZeroIsComplete()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx")))
+        {
+            root = Path.GetDirectoryName(root);
+        }
+
+        Assert.NotNull(root);
+        string set = Path.Combine(root, "docs", "releases", "0.2.0");
+        CliHarness.Outcome outcome = CliHarness.Run("docs", "check", set);
+        Assert.True(outcome.Code == 0, outcome.Out + outcome.Err);
+        Assert.Contains("complete: 0 errors", outcome.Out, StringComparison.Ordinal);
+    }
+}

@@ -30,9 +30,9 @@ namespace Vericairn.Cli;
 /// </summary>
 internal static class Commands
 {
-    private const int Clean = 0;
-    private const int HasErrors = 1;
-    private const int Failed = 2;
+    internal const int Clean = 0;
+    internal const int HasErrors = 1;
+    internal const int Failed = 2;
 
     public static int Validate(string root, bool json) =>
         IsEstate(root) ? WithApi(root, api => ReportFindings(api.Validate(), json)) : WithFiles(root, model => ReportFindings(ToFindings(model.Findings, $"{model.Records.Count} records"), json));
@@ -1257,7 +1257,7 @@ internal static class Commands
         }
     }
 
-    private static EstateModel LoadCopy(string root)
+    internal static EstateModel LoadCopy(string root)
     {
         if (!IsEstate(root))
         {
@@ -1369,7 +1369,7 @@ internal static class Commands
         return Fail(problem.Message);
     }
 
-    private static int ReportFindings(FindingsResponse findings, bool json)
+    internal static int ReportFindings(FindingsResponse findings, bool json)
     {
         if (json)
         {
@@ -1394,7 +1394,7 @@ internal static class Commands
         return findings.Errors > 0 ? HasErrors : Clean;
     }
 
-    private static int Fail(string message)
+    internal static int Fail(string message)
     {
         Console.Error.WriteLine("error: " + message);
         return Failed;

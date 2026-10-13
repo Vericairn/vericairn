@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, devices, release, sources, check, runtime, recover, objects, status, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, devices, release, sources, check, runtime, recover, objects, docs, status, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         var estateOption = new Option<string>("--estate", "-e")
@@ -36,6 +36,7 @@ internal static class CliApp
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(RecoverFamily(estateOption));
         root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
+        root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
         status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
@@ -55,6 +56,34 @@ internal static class CliApp
         version.SetAction(_ => Commands.Version());
         root.Subcommands.Add(version);
         return root;
+    }
+
+    private static Command DocsFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var docs = new Command("docs", "A release's documentation set: generate the references from this build, the notes from an estate's records, and check a set for completeness.");
+
+        var generate = new Command("generate", "Write the command-line, API and record references and the set's manifest from this build.");
+        var generateOutOption = new Option<string>("--out") { Description = "Directory of the documentation set, for example docs/releases/0.3.0.", Required = true };
+        generate.Options.Add(generateOutOption);
+        generate.SetAction(parseResult => Docs.Generate(parseResult.GetValue(generateOutOption)!, parseResult.GetValue(jsonOption)));
+        docs.Subcommands.Add(generate);
+
+        var notes = new Command("notes", "Write release notes from the estate's records between two published releases.");
+        var fromOption = new Option<string>("--from") { Description = "The earlier published release's version; the notes start after its publication.", Required = true };
+        var toOption = new Option<string>("--to") { Description = "The release's version; its publication ends the notes.", Required = true };
+        var notesOutOption = new Option<string>("--out") { Description = "Directory of the documentation set the notes belong to.", Required = true };
+        notes.Options.Add(fromOption);
+        notes.Options.Add(toOption);
+        notes.Options.Add(notesOutOption);
+        notes.SetAction(parseResult => Docs.Notes(parseResult.GetValue(estateOption)!, parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(notesOutOption)!, parseResult.GetValue(jsonOption)));
+        docs.Subcommands.Add(notes);
+
+        var check = new Command("check", "Refuse a documentation set that lacks a document, a command, an API operation or a record type; every gap is listed at once.");
+        var directoryArgument = new Argument<string>("directory") { Description = "The documentation set to check." };
+        check.Arguments.Add(directoryArgument);
+        check.SetAction(parseResult => Docs.Check(parseResult.GetValue(directoryArgument)!, parseResult.GetValue(jsonOption)));
+        docs.Subcommands.Add(check);
+        return docs;
     }
 
     private static Command RecordsFamily(Option<string> estateOption, Option<bool> jsonOption)

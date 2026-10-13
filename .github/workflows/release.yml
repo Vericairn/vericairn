@@ -54,6 +54,13 @@ jobs:
           fi
       - name: Restore (locked)
         run: dotnet restore --locked-mode
+      - name: Check the documentation set
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        # The release's documentation set must exist and cover every command, API operation and record type of this
+        # build before any draft is created; an incomplete set refuses the release with every gap listed.
+        run: dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "docs/releases/$VERSION"
       - name: Publish self-contained distributables
         shell: bash
         env:
@@ -84,6 +91,13 @@ jobs:
           dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects
           cp sbom/bom.json "dist/vericairn-$VERSION-sbom.cdx.json"
           cp THIRD-PARTY-NOTICES.md "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md"
+      - name: Documentation set
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -eu
+          (cd docs/releases && zip -q -X -r "../../dist/vericairn-$VERSION-docs.zip" "$VERSION")
       - name: Checksums and notes
         shell: bash
         env:
@@ -101,6 +115,8 @@ jobs:
             echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
             echo
             echo "Distributables are self-contained per platform: unpack and run bin/vericairn (bin/vericairn.exe on Windows)."
+            echo
+            echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
           } > dist/NOTES.md
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
@@ -114,4 +130,4 @@ jobs:
         run: |
           set -eu
           gh release create "v$VERSION" --draft --title "Vericairn $VERSION" --notes-file dist/NOTES.md --target "${{ github.sha }}" \
-            dist/vericairn-$VERSION-*.tar.gz dist/vericairn-$VERSION-*.zip dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/SHA256SUMS
+            dist/vericairn-$VERSION-*.tar.gz dist/vericairn-$VERSION-*.zip dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS
