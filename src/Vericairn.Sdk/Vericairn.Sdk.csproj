@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The typed client of the Vericairn API over a local socket, a named pipe or pinned loopback TLS.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Vericairn.Sdk</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

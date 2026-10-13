@@ -43,8 +43,8 @@ public class UpgradeJourneyTests
 
             // The upgrade: one manifest change plus a migration record.
             JsonElement plan = CliHarness.Ok("--estate", root, "--json", "estate", "upgrade", "--to", "0.1.0", "--check").Json;
-            Assert.Equal("release 0.1.0", plan.GetProperty("ToPin").GetString());
-            Assert.Equal(3, plan.GetProperty("Artifacts").EnumerateObject().Count());
+            Assert.Equal("release 0.1.0", plan.GetProperty("toPin").GetString());
+            Assert.Equal(3, plan.GetProperty("artifacts").EnumerateObject().Count());
             Assert.Equal(0, CliHarness.Run("--estate", root, "--json", "estate", "upgrade", "--to", "0.1.0", "--by", builder).Code);
             string manifest = File.ReadAllText(Path.Combine(root, "estate", "manifest.json"));
             Assert.Contains("\"mode\": \"release\"", manifest, StringComparison.Ordinal);

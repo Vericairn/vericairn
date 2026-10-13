@@ -2,241 +2,99 @@
 // Copyright (c) 2026 Jayson Furr
 
 using System.Diagnostics;
-using System.Globalization;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Text.Json.Nodes;
+using Vericairn.Daemon;
+using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
-using Vericairn.Records.Hashing;
-using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Portability;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Store;
-using Vericairn.Runtime.Upgrade;
+using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
 
-/// <summary>Command implementations. Exit codes: 0 clean, 1 findings with errors, 2 usage or failure.</summary>
+/// <summary>
+/// Command implementations. Every operation on an open estate goes through the API: the daemon's when one serves the estate on
+/// this machine, the embedded runtime otherwise, so that one owner holds the live state and one implementation evaluates
+/// authority. Exit codes: 0 clean, 1 findings with errors, 2 usage or failure.
+/// </summary>
 internal static class Commands
 {
     private const int Clean = 0;
     private const int HasErrors = 1;
     private const int Failed = 2;
 
-    public static int Validate(string root, bool json)
-    {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            return Report(model.Findings, json, $"{model.Records.Count} records");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    public static int Validate(string root, bool json) =>
+        IsEstate(root) ? WithApi(root, api => ReportFindings(api.Validate(), json)) : WithFiles(root, model => ReportFindings(ToFindings(model.Findings, $"{model.Records.Count} records"), json));
 
-    public static int Check(string root, bool json)
-    {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            FindingList checks = EstateChecks.Run(model);
-            var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(checks))
-            {
-                all.Add(finding);
-            }
-
-            return Report(all, json, $"{model.Records.Count} records");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    public static int Check(string root, bool json) =>
+        IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
 
     public static int Status(string root, bool json)
     {
-        try
+        if (!IsEstate(root))
         {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            FindingList checks = EstateChecks.Run(model);
-            Console.Out.Write(json ? EstateStatus.RenderJson(model, checks) : EstateStatus.Render(model, checks));
-            return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
+            return WithFiles(root, model =>
+            {
+                FindingList checks = EstateChecks.Run(model);
+                Console.Out.Write(json ? EstateStatus.RenderJson(model, checks) : EstateStatus.Render(model, checks));
+                return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
+            });
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+
+        return WithApi(root, api =>
         {
-            return Fail(exception.Message);
-        }
+            StatusResponse status = api.Status();
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(status.Json) : status.Text);
+            return status.HasErrors ? HasErrors : Clean;
+        });
     }
 
-    public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json)
+    public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
+        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
+
+    public static int WorkBrief(string root, string key, bool json) => WithApi(root, api =>
     {
-        try
+        BriefResponse? brief = api.Brief(key);
+        if (brief is null)
         {
-            if (RecordTypeRegistry.Find(type) is null)
-            {
-                return Fail($"Unknown record type '{type}'. Run 'vericairn records describe'.");
-            }
-
-            if (!Ulid.IsValid(by))
-            {
-                return Fail("--by must be a ULID.");
-            }
-
-            RecordReference? subjectReference = null;
-            if (subject is not null)
-            {
-                string[] parts = subject.Split(':', 3);
-                if (parts.Length < 2 || !Ulid.IsValid(parts[1]) || (parts.Length == 3 && !ContentHash.IsValid("sha256:" + parts[2].Replace("sha256:", string.Empty, StringComparison.Ordinal))))
-                {
-                    return Fail("--subject must be type:id or type:id:hash.");
-                }
-
-                subjectReference = new RecordReference(parts[0], parts[1], parts.Length == 3 ? "sha256:" + parts[2].Replace("sha256:", string.Empty, StringComparison.Ordinal) : null);
-            }
-
-            DateTimeOffset? atTime = ParseAt(at);
-            if (at is not null && atTime is null)
-            {
-                return Fail("--at must look like 2026-10-13T14:00:00Z.");
-            }
-
-            if (id is not null && !Ulid.IsValid(id))
-            {
-                return Fail("--id must be a ULID.");
-            }
-
-            using JsonDocument body = ReadBody(bodyPath);
-            return WriteValidated(root, new RecordDraft(type, by, body.RootElement, subjectReference, supersedes, atTime, id), json);
+            return Fail($"No current work order has key or id {key}.");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
 
-    public static int WorkBrief(string root, string key, bool json)
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(brief.Json) : brief.Markdown);
+        return Clean;
+    });
+
+    public static int WorkObserve(string root, string key, bool json) => WithApi(root, api =>
     {
-        try
+        ObserveResponse? observe = api.Observe(key);
+        if (observe is null)
         {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? order = WorkView.FindOrder(model, key);
-            if (order is null)
-            {
-                return Fail($"No current work order has key or id {key}.");
-            }
-
-            Console.Out.Write(json ? WorkView.RenderBriefJson(model, order) : WorkView.RenderBrief(model, order));
-            return Clean;
+            return Fail($"No current work order has key or id {key}.");
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return Fail(exception.Message);
-        }
-    }
 
-    public static int WorkObserve(string root, string key, bool json)
-    {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? order = WorkView.FindOrder(model, key);
-            if (order is null)
-            {
-                return Fail($"No current work order has key or id {key}.");
-            }
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : observe.Text);
+        return Clean;
+    });
 
-            Console.Out.Write(json ? WorkView.RenderBriefJson(model, order) : WorkView.RenderObserve(model, order));
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    public static int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json) =>
+        WithBody(briefPath, brief => WithApi(root, api => ReportOutcome(api.Assign(new AssignRequest(key, contributor, by, brief, note)), json)));
 
-    public static int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json)
-    {
-        try
-        {
-            if (!Ulid.IsValid(by) || !Ulid.IsValid(contributor))
-            {
-                return Fail("--by and --contributor must be ULIDs.");
-            }
-
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? order = WorkView.FindOrder(model, key);
-            if (order is null)
-            {
-                return Fail($"No current work order has key or id {key}.");
-            }
-
-            using JsonDocument brief = ReadBody(briefPath);
-            var body = new JsonObject { ["contributor"] = contributor, ["brief"] = JsonNode.Parse(brief.RootElement.GetRawText()) };
-            if (note is not null)
-            {
-                body["note"] = note;
-            }
-
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteValidated(root, new RecordDraft("assignment", by, document.RootElement, order.Reference), json);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json)
-    {
-        try
-        {
-            if (!Ulid.IsValid(by))
-            {
-                return Fail("--by must be a ULID.");
-            }
-
-            DateTimeOffset? atTime = ParseAt(at);
-            if (at is not null && atTime is null)
-            {
-                return Fail("--at must look like 2026-10-13T14:00:00Z.");
-            }
-
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? assignment = Latest(model, assignmentId, "assignment");
-            if (assignment is null)
-            {
-                return Fail($"No assignment has id {assignmentId}.");
-            }
-
-            var body = new JsonObject { ["startedAt"] = RecordParser.FormatTimestamp(atTime ?? DateTimeOffset.UtcNow), ["workspace"] = workspace, ["note"] = note };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteValidated(root, new RecordDraft("attempt", by, document.RootElement, assignment.Reference, At: atTime), json);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    public static int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json) =>
+        WithApi(root, api => ReportOutcome(api.Attempt(new AttemptRequest(assignmentId, by, workspace, note, at)), json));
 
     public static int WorkResult(string root, string attemptId, string by, string bodyPath, bool json) =>
-        WorkRecordAbout(root, "result", "attempt", attemptId, by, bodyPath, json);
+        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.Result(new ResultRequest(attemptId, by, body)), json)));
 
     public static int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
-        WorkRecordAbout(root, "amendment", "assignment", assignmentId, by, bodyPath, json);
+        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.Amend(new AmendRequest(assignmentId, by, body)), json)));
 
     public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
     {
@@ -260,7 +118,7 @@ internal static class Commands
                     session.Discard(prepared.Estate);
                     session.Discard(prepared.Operator);
                     File.Delete(manifestPath);
-                    return Report(model.Findings, json, "rejected");
+                    return ReportFindings(ToFindings(model.Findings, "rejected"), json);
                 }
 
                 (operatorRecord, estateRecord) = (prepared.Operator.Envelope, prepared.Estate.Envelope);
@@ -355,7 +213,7 @@ internal static class Commands
             RecordEnvelope? record = RecordParser.Parse(File.ReadAllBytes(file), file, findings, checkFormatting: false);
             if (record is null)
             {
-                return Report(findings, false, file);
+                return ReportFindings(ToFindings(findings, file), false);
             }
 
             Console.Out.WriteLine(record.ComputedHash);
@@ -367,42 +225,41 @@ internal static class Commands
         }
     }
 
-    public static int Decisions(string root, string? id, bool json)
+    public static int Decisions(string root, string? id, bool json) => WithApi(root, api =>
     {
-        try
+        if (id is null)
         {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            if (id is null)
-            {
-                Console.Out.Write(json ? DecisionView.RenderJson(model) : DecisionView.RenderList(model));
-                return Clean;
-            }
-
-            RecordEnvelope? decision = DecisionView.Find(model, id);
-            if (decision is null)
-            {
-                return Fail($"No decision has id {id}.");
-            }
-
-            Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : DecisionView.Render(model, decision));
+            DecisionsResponse decisions = api.Decisions();
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(decisions.Json) : decisions.Text);
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+
+        DecisionResponse? decision = api.Decision(id);
+        if (decision is null)
         {
-            return Fail(exception.Message);
+            return Fail($"No decision has id {id}.");
         }
-    }
+
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : decision.Text);
+        return Clean;
+    });
 
     public static int Doctor(string root)
     {
         Console.Out.WriteLine($"vericairn {VersionText()}");
-        Console.Out.WriteLine($"runtime   .NET {Environment.Version} on {System.Runtime.InteropServices.RuntimeInformation.OSDescription} ({System.Runtime.InteropServices.RuntimeInformation.OSArchitecture})");
+        Console.Out.WriteLine($"runtime   .NET {Environment.Version} on {RuntimeInformation.OSDescription} ({RuntimeInformation.OSArchitecture})");
         Console.Out.WriteLine($"git       {Probe("git", "--version") ?? "not found on PATH"}");
         Console.Out.WriteLine($"dotnet    {Probe("dotnet", "--version") ?? "not found on PATH (needed only to build from source)"}");
-        string manifest = Path.Combine(root, EstateLayout.ManifestPath);
-        Console.Out.WriteLine(File.Exists(manifest) ? $"estate    {Path.GetFullPath(root)} (manifest present)" : $"estate    {Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath})");
+        Console.Out.WriteLine(IsEstate(root) ? $"estate    {Path.GetFullPath(root)} (manifest present)" : $"estate    {Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath})");
         Console.Out.WriteLine($"custody   {DeviceKeyStores.Default().Kind} (default on this platform); per-user state at {VericairnHome.Path()}");
+        if (IsEstate(root))
+        {
+            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+            Console.Out.WriteLine(endpoint is not null && VericairnClient.IsAlive(endpoint)
+                ? $"daemon    process {endpoint.ProcessId} serves this estate since {endpoint.StartedAt} ({endpoint.Kind}{(endpoint.Loopback is null ? string.Empty : ", loopback " + endpoint.Loopback.Port)})"
+                : "daemon    none; commands run the embedded runtime");
+        }
+
         return Clean;
     }
 
@@ -412,231 +269,318 @@ internal static class Commands
         return Clean;
     }
 
-    /// <summary>Creates a record about an existing record (pinned to its exact hash) from a body file.</summary>
-    private static int WorkRecordAbout(string root, string type, string subjectType, string subjectId, string by, string bodyPath, bool json)
+    public static int RuntimeServe(string root, bool loopback)
     {
         try
         {
-            if (!Ulid.IsValid(by))
+            if (!IsEstate(root))
             {
-                return Fail("--by must be a ULID.");
+                return Fail(NotAnEstate(root));
             }
 
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? subject = Latest(model, subjectId, subjectType);
-            if (subject is null)
+            DaemonEndpoint? existing = DaemonHost.Discover(root);
+            if (existing is not null && VericairnClient.IsAlive(existing))
             {
-                return Fail($"No {subjectType} has id {subjectId}.");
+                return Fail($"Daemon {existing.ProcessId} already serves this estate; one process owns an estate's live state.");
             }
 
-            using JsonDocument body = ReadBody(bodyPath);
-            return WriteValidated(root, new RecordDraft(type, by, body.RootElement, subject.Reference), json);
+            using var stop = new CancellationTokenSource();
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                stop.Cancel();
+            };
+            using PosixSignalRegistration? hangup = IgnoreHangup();
+            DaemonHost host = DaemonHost.StartAsync(root, loopback: loopback).GetAwaiter().GetResult();
+            Console.Out.WriteLine($"vericairnd {VersionText()} serving {host.Service.Root}");
+            Console.Out.WriteLine($"  {host.Endpoint.Kind}  {host.Endpoint.Address}");
+            if (host.Endpoint.Loopback is LoopbackEndpoint published)
+            {
+                Console.Out.WriteLine($"  loopback  https://{published.Host}:{published.Port} pinned to {published.Certificate}");
+            }
+
+            Console.Out.WriteLine($"  process {host.Endpoint.ProcessId}; stop with Ctrl+C or 'vericairn runtime stop'");
+            host.WaitForShutdownAsync(stop.Token).GetAwaiter().GetResult();
+            host.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            Console.Out.WriteLine("vericairnd stopped");
+            return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or System.Security.Cryptography.CryptographicException)
         {
             return Fail(exception.Message);
         }
     }
 
-    /// <summary>Authors a record, stores it where the profile keeps records, validates the estate with it, and removes it again if the estate would be invalid.</summary>
-    private static int WriteValidated(string root, RecordDraft draft, bool json, IRecordSigner? signer = null)
+    public static int RuntimeStart(string root, bool json)
     {
-        if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+        try
         {
-            return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
-        }
-
-        using EstateSession session = EstateSession.Open(root);
-        EstateModel current = session.Load();
-        if (signer is null)
-        {
-            string? refusal = ResolveSigner(current, draft, out signer);
-            if (refusal is not null)
+            if (!IsEstate(root))
             {
-                return Fail(refusal);
+                return Fail(NotAnEstate(root));
             }
-        }
 
-        // A successor is never older than the record it supersedes, even when clocks or fast scripts put them in the same second.
-        if (draft.Supersedes is not null && current.ById.TryGetValue(draft.Supersedes, out RecordEnvelope? predecessor) && (draft.At ?? DateTimeOffset.UtcNow) < predecessor.AtTime)
+            DaemonEndpoint? existing = DaemonHost.Discover(root);
+            if (existing is not null && VericairnClient.IsAlive(existing))
+            {
+                return RuntimeStatus(root, json);
+            }
+
+            IReadOnlyList<string> launcher = ServiceInstaller.CurrentLauncher();
+            var info = new ProcessStartInfo(launcher[0]) { UseShellExecute = false, CreateNoWindow = true };
+            foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve"]))
+            {
+                info.ArgumentList.Add(argument);
+            }
+
+            using Process? process = Process.Start(info);
+            if (process is null)
+            {
+                return Fail("The daemon process did not start.");
+            }
+
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+                if (endpoint is not null && endpoint.ProcessId == process.Id && VericairnClient.IsAlive(endpoint))
+                {
+                    return RuntimeStatus(root, json);
+                }
+
+                if (process.HasExited)
+                {
+                    return Fail($"The daemon exited with code {process.ExitCode} before serving.");
+                }
+
+                Thread.Sleep(200);
+            }
+
+            return Fail("The daemon did not start serving within 30 seconds.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            draft = draft with { At = predecessor.AtTime };
+            return Fail(exception.Message);
         }
+    }
 
-        AuthoredRecord record = RecordAuthor.Create(draft, signer);
-        session.Write(record);
-        EstateModel model = session.Load();
-        var relevant = new FindingList();
-        foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
+    public static int RuntimeStop(string root, bool json)
+    {
+        if (!IsEstate(root))
         {
-            relevant.Add(finding);
+            return Fail(NotAnEstate(root));
         }
 
-        // Repository checks apply to the new record itself (secrets, absolute paths); problems elsewhere are not this record's fault.
-        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+        if (endpoint is null || !VericairnClient.IsAlive(endpoint))
         {
-            relevant.Add(finding);
+            Console.Out.WriteLine(json ? "{\"stopped\":null}" : "no daemon is serving this estate");
+            return Clean;
         }
 
-        // A new result must name the bytes actually present: later drift is information, a wrong claim now is a refusal.
-        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        try
         {
-            relevant.Add(new Finding(Severity.Error, "result.output-hash", finding.Location, "The file present does not have the hash or size this result claims; name the bytes actually produced."));
-        }
+            using (var client = new VericairnClient(endpoint))
+            {
+                client.Shutdown();
+            }
 
-        if (relevant.HasErrors)
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+            while (DateTimeOffset.UtcNow < deadline && VericairnClient.IsAlive(endpoint))
+            {
+                Thread.Sleep(200);
+            }
+
+            bool stopped = !VericairnClient.IsAlive(endpoint);
+            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { stopped = stopped ? endpoint.ProcessId : (int?)null, process = endpoint.ProcessId }) : $"asked daemon {endpoint.ProcessId} to stop; {(stopped ? "stopped" : "still answering")}");
+            return stopped ? Clean : HasErrors;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidOperationException)
         {
-            session.Discard(record);
-            Console.Error.WriteLine($"Not written: the estate would be invalid with this record ({relevant.Errors} errors).");
-            return Report(relevant, json, "rejected");
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int RuntimeStatus(string root, bool json)
+    {
+        if (!IsEstate(root))
+        {
+            return Fail(NotAnEstate(root));
         }
 
+        DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+        bool alive = endpoint is not null && VericairnClient.IsAlive(endpoint);
         if (json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(new { path = record.RelativePath, id = record.Envelope.Id, hash = record.Envelope.ComputedHash }));
+            Console.Out.WriteLine(JsonSerializer.Serialize(new { mode = alive ? "daemon" : "embedded", daemon = alive ? endpoint : null }, ProtocolJson.Options));
+        }
+        else if (alive)
+        {
+            Console.Out.WriteLine($"daemon {endpoint!.ProcessId} serves {endpoint.Root} since {endpoint.StartedAt}");
+            Console.Out.WriteLine($"  {endpoint.Kind}  {endpoint.Address}");
+            if (endpoint.Loopback is LoopbackEndpoint published)
+            {
+                Console.Out.WriteLine($"  loopback  https://{published.Host}:{published.Port} pinned to {published.Certificate}");
+            }
         }
         else
         {
-            Console.Out.WriteLine($"{record.RelativePath}  {record.Envelope.Id}  {record.Envelope.ComputedHash}");
+            Console.Out.WriteLine("no daemon is serving this estate; commands run the embedded runtime");
         }
 
         return Clean;
     }
 
-    /// <summary>Opens the estate session when a manifest exists; a bare records directory still validates through the file loader.</summary>
-    private static EstateSession? OpenIfEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath)) ? EstateSession.Open(root) : null;
-
-    private static EstateModel LoadWith(EstateSession? session, string root) => session?.Load() ?? EstateLoader.Load(root);
-
-    public static int Upgrade(string root, string version, string? by, bool check, bool json)
+    public static int RuntimeInstall(string root, bool planOnly, bool json)
     {
         try
         {
-            if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+            if (!IsEstate(root))
             {
-                return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
+                return Fail(NotAnEstate(root));
             }
 
-            UpgradePlan plan;
-            EstateManifest manifest;
-            using (EstateSession session = EstateSession.Open(root))
+            ServicePlan plan = ServiceInstaller.PlanHere(root);
+            if (planOnly)
             {
-                EstateModel model = session.Load();
-                if (model.Findings.HasErrors)
-                {
-                    Console.Error.WriteLine("The estate has errors; resolve them before upgrading.");
-                    return Report(model.Findings, json, "not upgraded");
-                }
-
-                manifest = session.Manifest;
-                plan = EstateUpgrade.Plan(model, version);
-            }
-
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, release = plan.Release.Id, plan.Artifacts, applied = !check }));
-            }
-            else
-            {
-                Console.Out.WriteLine($"{(check ? "would upgrade" : "upgrading")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release.Id}");
-                foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
-                {
-                    Console.Out.WriteLine($"  {platform}  {hash}");
-                }
-            }
-
-            if (check)
-            {
+                PrintPlan(plan, json);
                 return Clean;
             }
 
-            if (by is null || !Ulid.IsValid(by))
-            {
-                return Fail("--by must be the ULID of the principal applying the upgrade.");
-            }
-
-            string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
-            byte[] previous = File.ReadAllBytes(manifestPath);
-            File.WriteAllBytes(manifestPath, EstateUpgrade.ManifestAfter(manifest, plan));
-            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, [$"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}"]).ToJsonString());
-            int code = WriteValidated(root, new RecordDraft("migration", by, body.RootElement), json);
-            if (code != Clean)
-            {
-                File.WriteAllBytes(manifestPath, previous);
-                Console.Error.WriteLine("The manifest was restored; nothing changed.");
-            }
-
-            return code;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int ReleaseList(string root, bool json)
-    {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            var rows = model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
-                .Select(r => new { version = EstateModel.BodyString(r, "version"), status = EstateModel.BodyString(r, "status"), commit = EstateModel.BodyString(r, "commit"), id = r.Id, hash = r.ComputedHash, signing = EstateModel.BodyString(r, "signing") }).ToList();
+            IReadOnlyList<string> log = ServiceInstaller.Install(plan);
             if (json)
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(rows));
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { installed = plan.Label, unit = plan.UnitPath, log }));
             }
             else
             {
-                foreach (var row in rows)
+                foreach (string line in log)
                 {
-                    Console.Out.WriteLine($"{row.version}  {row.status}  {row.commit}  {row.id}  {row.signing}");
+                    Console.Out.WriteLine(line);
                 }
+
+                Console.Out.WriteLine($"installed {plan.Label}: the runtime starts at login and restarts after failure; remove it with 'vericairn runtime uninstall'.");
             }
 
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.ComponentModel.Win32Exception)
         {
             return Fail(exception.Message);
         }
     }
 
-    public static int Export(string root, string output, string? by, bool json)
+    public static int RuntimeUninstall(string root, bool json)
     {
         try
         {
-            if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+            if (!IsEstate(root))
             {
-                return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
+                return Fail(NotAnEstate(root));
             }
 
-            using EstateSession session = EstateSession.Open(root);
-            EstateModel model = session.Load();
-            if (model.Findings.HasErrors)
-            {
-                Console.Error.WriteLine("The estate has errors; exporting it anyway so that it can be inspected elsewhere.");
-            }
-
-            ExportSummary summary = EstateExport.Write(session, output, by);
+            ServicePlan plan = ServiceInstaller.PlanHere(root);
+            IReadOnlyList<string> log = ServiceInstaller.Uninstall(plan);
             if (json)
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { summary.Id, summary.Estate, summary.CreatedAt, summary.Profile, summary.Records, summary.Objects, summary.Documents, summary.InventoryHash, output }));
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { uninstalled = plan.Label, log }));
             }
             else
             {
-                Console.Out.WriteLine($"export {summary.Id} of estate {summary.Estate}: {summary.Records} records, {summary.Objects} objects, {summary.Documents} documents; inventory {summary.InventoryHash}");
-                Console.Out.WriteLine("Carries records and bytes only: no keys, sessions, credentials or authority travel with it.");
+                foreach (string line in log)
+                {
+                    Console.Out.WriteLine(line);
+                }
+
+                Console.Out.WriteLine($"uninstalled {plan.Label}");
             }
 
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.ComponentModel.Win32Exception)
         {
             return Fail(exception.Message);
         }
     }
+
+    public static int Upgrade(string root, string version, string? by, bool check, bool json) => WithApi(root, api =>
+    {
+        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check));
+        if (plan is null)
+        {
+            if (problem is not null && problem.Findings.Count > 0)
+            {
+                Console.Error.WriteLine(problem.Message);
+                return ReportFindings(new FindingsResponse("not upgraded", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
+            }
+
+            return Fail(problem?.Message ?? "refused");
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(plan, ProtocolJson.Options));
+        }
+        else
+        {
+            Console.Out.WriteLine($"{(plan.Applied ? "upgraded" : "would upgrade")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release}");
+            foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
+            {
+                Console.Out.WriteLine($"  {platform}  {hash}");
+            }
+
+            if (plan.Migration is not null)
+            {
+                Console.Out.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");
+            }
+        }
+
+        return Clean;
+    });
+
+    public static int ReleaseList(string root, bool json) => WithApi(root, api =>
+    {
+        IReadOnlyList<ReleaseRow> rows = api.Releases();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+        }
+        else
+        {
+            foreach (ReleaseRow row in rows)
+            {
+                Console.Out.WriteLine($"{row.Version}  {row.Status}  {row.Commit}  {row.Id}  {row.Signing}");
+            }
+        }
+
+        return Clean;
+    });
+
+    public static int Export(string root, string output, string? by, bool json) => WithApi(root, api =>
+    {
+        (ExportResponse? export, Problem? problem) = api.Export(new ExportRequest(Path.GetFullPath(output), by));
+        if (export is null)
+        {
+            return Fail(problem?.Message ?? "refused");
+        }
+
+        if (export.HadErrors)
+        {
+            Console.Error.WriteLine("The estate has errors; exported anyway so that it can be inspected elsewhere.");
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(new { export.Id, export.Estate, export.CreatedAt, export.Profile, export.Records, export.Objects, export.Documents, export.InventoryHash, output = export.Output }));
+        }
+        else
+        {
+            Console.Out.WriteLine($"export {export.Id} of estate {export.Estate}: {export.Records} records, {export.Objects} objects, {export.Documents} documents; inventory {export.InventoryHash}");
+            Console.Out.WriteLine("Carries records and bytes only: no keys, sessions, credentials or authority travel with it.");
+        }
+
+        return Clean;
+    });
 
     public static int Restore(string from, string to, bool json)
     {
@@ -646,7 +590,7 @@ internal static class Commands
             if (verified is null || findings.HasErrors)
             {
                 Console.Error.WriteLine("Nothing restored: the export does not verify against its inventory.");
-                return Report(findings, json, "rejected");
+                return ReportFindings(ToFindings(findings, "rejected"), json);
             }
 
             ExportSummary summary = EstateExport.Restore(from, to);
@@ -672,67 +616,41 @@ internal static class Commands
         }
     }
 
-    public static int Reconcile(string root, bool json)
+    public static int Reconcile(string root, bool json) => WithApi(root, api =>
     {
-        try
+        IReadOnlyList<ReconcileTask> tasks = api.Reconcile();
+        if (json)
         {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
-            {
-                all.Add(finding);
-            }
-
-            IReadOnlyList<Finding> tasks = EstateStatus.ReconcileTasks(all);
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(tasks.Select(t => new { t.Code, t.Location, t.Message })));
-            }
-            else if (tasks.Count == 0)
-            {
-                Console.Out.WriteLine("Nothing to reconcile.");
-            }
-            else
-            {
-                foreach (Finding task in tasks)
-                {
-                    Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
-                }
-
-                Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
-            }
-
-            return tasks.Count == 0 ? Clean : HasErrors;
+            Console.Out.WriteLine(JsonSerializer.Serialize(tasks.Select(t => new { t.Code, t.Location, t.Message })));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        else if (tasks.Count == 0)
         {
-            return Fail(exception.Message);
+            Console.Out.WriteLine("Nothing to reconcile.");
         }
-    }
+        else
+        {
+            foreach (ReconcileTask task in tasks)
+            {
+                Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
+            }
 
-    public static int RecoverInspect(string root)
+            Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+        }
+
+        return tasks.Count == 0 ? Clean : HasErrors;
+    });
+
+    public static int RecoverInspect(string root) => WithApi(root, api =>
     {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            Console.Out.Write(Recovery.Inspect(model, EstateChecks.Run(model)));
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+        Console.Out.Write(api.RecoverInspect());
+        return Clean;
+    });
 
     public static int RecoverCompare(string root, string other)
     {
         try
         {
-            using EstateSession? left = OpenIfEstate(root);
-            using EstateSession? right = OpenIfEstate(other);
-            Console.Out.Write(Recovery.Compare(LoadWith(left, root), "this copy", LoadWith(right, other), "the other copy"));
+            Console.Out.Write(Recovery.Compare(LoadCopy(root), "this copy", LoadCopy(other), "the other copy"));
             return Clean;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
@@ -743,275 +661,187 @@ internal static class Commands
 
     public static int ObjectsPut(string root, string file, bool json)
     {
+        byte[] bytes;
         try
         {
-            using EstateSession session = EstateSession.Open(root);
-            byte[] bytes = File.ReadAllBytes(file);
-            if (bytes.LongLength > EstateLayout.MaxObjectBytes)
-            {
-                return Fail($"{file} is {bytes.LongLength:N0} bytes; objects above {EstateLayout.MaxObjectBytes:N0} bytes go to releases and are referenced by hash.");
-            }
-
-            string hash = session.Objects.Put(bytes);
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { hash, bytes = bytes.LongLength, store = session.Objects.Kind }) : $"{hash}  {bytes.LongLength} bytes  ({session.Objects.Kind})");
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int ObjectsList(string root, bool json)
-    {
-        try
-        {
-            using EstateSession session = EstateSession.Open(root);
-            IReadOnlyList<string> hashes = session.Objects.List();
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(hashes));
-            }
-            else
-            {
-                foreach (string hash in hashes)
-                {
-                    Console.Out.WriteLine(hash);
-                }
-            }
-
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int ObjectsVerify(string root, bool json)
-    {
-        try
-        {
-            using EstateSession session = EstateSession.Open(root);
-            var findings = new FindingList();
-            int verified = 0;
-            foreach (string hash in session.Objects.List())
-            {
-                try
-                {
-                    session.Objects.Read(hash);
-                    verified++;
-                }
-                catch (Vericairn.Runtime.Objects.ObjectCorruptedException exception)
-                {
-                    findings.Error("objects.hash", hash, exception.Message);
-                }
-            }
-
-            return Report(findings, json, $"{verified} objects verified");
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int DevicesCreate(string root, string principal, string name, string? custody, string[] profiles, bool json)
-    {
-        IDeviceKeyStore? store = null;
-        string? id = null;
-        try
-        {
-            if (!Ulid.IsValid(principal))
-            {
-                return Fail("--principal must be a ULID.");
-            }
-
-            store = DeviceKeyStores.Named(custody);
-            DateTimeOffset now = DateTimeOffset.UtcNow;
-            id = Ulid.NewUlid(now).Value;
-            byte[] publicKey = store.Create(id);
-            var body = new JsonObject
-            {
-                ["principal"] = principal,
-                ["name"] = name,
-                ["platform"] = VericairnHome.Platform(),
-                ["custody"] = store.Kind,
-                ["algorithm"] = RecordSigning.Algorithm,
-                ["publicKey"] = RecordSigning.EncodePublicKey(publicKey),
-                ["profiles"] = new JsonArray((profiles.Length == 0 ? ["embedded"] : profiles).Select(p => (JsonNode)p).ToArray()),
-            };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            int code = WriteValidated(root, new RecordDraft("device", principal, document.RootElement, At: now, Id: id), json, new StoreSigner(store, id));
-            if (code != Clean)
-            {
-                store.Remove(id);
-            }
-
-            return code;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or PlatformNotSupportedException or System.Security.Cryptography.CryptographicException)
-        {
-            if (store is not null && id is not null)
-            {
-                store.Remove(id);
-            }
-
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int DevicesList(string root, bool json)
-    {
-        try
-        {
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-            var rows = model.Current("device").OrderBy(d => d.Id, StringComparer.Ordinal).Select(device =>
-            {
-                RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
-                string principal = EstateModel.BodyString(device, "principal") ?? "?";
-                return new
-                {
-                    id = device.Id,
-                    principal,
-                    principalName = model.CurrentPrincipal(principal) is RecordEnvelope p ? EstateModel.BodyString(p, "name") : principal,
-                    name = EstateModel.BodyString(device, "name"),
-                    platform = EstateModel.BodyString(device, "platform"),
-                    custody = EstateModel.BodyString(device, "custody"),
-                    admission = admission is null ? "not admitted" : EstateModel.BodyString(admission, "status"),
-                    heldHere = stores.Any(s => s.Has(device.Id)),
-                };
-            }).ToList();
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(rows));
-            }
-            else
-            {
-                foreach (var row in rows)
-                {
-                    Console.Out.WriteLine($"{row.id}  {row.principalName}  {row.name}  {row.platform}  {row.custody}  {row.admission}{(row.heldHere ? "  key held on this machine" : string.Empty)}");
-                }
-            }
-
-            return Clean;
+            bytes = File.ReadAllBytes(file);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return Fail(exception.Message);
         }
+
+        return WithApi(root, api =>
+        {
+            (ObjectStored? stored, Problem? problem) = api.ObjectPut(bytes);
+            if (stored is null)
+            {
+                return Fail(problem?.Message ?? "refused");
+            }
+
+            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { hash = stored.Hash, bytes = stored.Bytes, store = stored.Store }) : $"{stored.Hash}  {stored.Bytes} bytes  ({stored.Store})");
+            return Clean;
+        });
     }
 
-    public static int DevicesAdmit(string root, string deviceId, string by, string note, bool json)
+    public static int ObjectsList(string root, bool json) => WithApi(root, api =>
+    {
+        IReadOnlyList<ObjectRow> rows = api.Objects();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => r.Hash)));
+        }
+        else
+        {
+            foreach (ObjectRow row in rows)
+            {
+                Console.Out.WriteLine(row.Hash);
+            }
+        }
+
+        return Clean;
+    });
+
+    public static int ObjectsVerify(string root, bool json) => WithApi(root, api => ReportFindings(api.ObjectsVerify(), json));
+
+    public static int DevicesCreate(string root, string principal, string name, string? custody, string[] profiles, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceCreate(new DeviceCreateRequest(principal, name, custody, profiles.Length == 0 ? null : profiles)), json));
+
+    public static int DevicesList(string root, bool json) => WithApi(root, api =>
+    {
+        IReadOnlyList<DeviceRow> rows = api.Devices();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => new { id = r.Id, principal = r.Principal, principalName = r.PrincipalName, name = r.Name, platform = r.Platform, custody = r.Custody, admission = r.Admission, heldHere = r.HeldHere })));
+        }
+        else
+        {
+            foreach (DeviceRow row in rows)
+            {
+                Console.Out.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}");
+            }
+        }
+
+        return Clean;
+    });
+
+    public static int DevicesAdmit(string root, string deviceId, string by, string note, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceAdmit(new AdmitRequest(deviceId, by, note)), json));
+
+    public static int DevicesRevoke(string root, string deviceId, string by, string reason, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason)), json));
+
+    /// <summary>Runs an operation against the estate's API: the daemon's when one answers for this estate, the embedded runtime otherwise.</summary>
+    private static int WithApi(string root, Func<IEstateApi, int> operation)
     {
         try
         {
-            if (!Ulid.IsValid(by))
+            if (!IsEstate(root))
             {
-                return Fail("--by must be a ULID.");
+                return Fail(NotAnEstate(root));
             }
 
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? device = Latest(model, deviceId, "device");
-            if (device is null)
+            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
             {
-                return Fail($"No device has id {deviceId}.");
+                using var client = new VericairnClient(endpoint);
+                return operation(client);
             }
 
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "admitted", ["note"] = note };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteValidated(root, new RecordDraft("admission", by, document.RootElement, device.Reference), json);
+            using EstateService service = EstateService.Open(root);
+            return operation(service);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
         {
             return Fail(exception.Message);
         }
     }
 
-    public static int DevicesRevoke(string root, string deviceId, string by, string reason, bool json)
+    /// <summary>A bare records directory without a manifest is still validated from its files; no live state is involved.</summary>
+    private static int WithFiles(string root, Func<EstateModel, int> operation)
     {
         try
         {
-            if (!Ulid.IsValid(by))
-            {
-                return Fail("--by must be a ULID.");
-            }
-
-            using EstateSession? session = OpenIfEstate(root);
-            EstateModel model = LoadWith(session, root);
-            RecordEnvelope? device = Latest(model, deviceId, "device");
-            if (device is null)
-            {
-                return Fail($"No device has id {deviceId}.");
-            }
-
-            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
-            if (admission is null || EstateModel.BodyString(admission, "status") != "admitted")
-            {
-                return Fail($"Device {deviceId} has no current admission to revoke.");
-            }
-
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = reason, ["revokedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
-            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteValidated(root, new RecordDraft("admission", by, document.RootElement, device.Reference, admission.Id), json);
+            return operation(EstateLoader.Load(root));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return Fail(exception.Message);
         }
     }
 
-    /// <summary>Chooses the device that signs a record for its author on this machine, or explains why none can.</summary>
-    private static string? ResolveSigner(EstateModel model, RecordDraft draft, out IRecordSigner? signer)
+    private static int WithBody(string bodyPath, Func<JsonElement, int> operation)
     {
-        signer = null;
-        IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-        List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => d.Id, StringComparer.Ordinal).ToList();
-        foreach (RecordEnvelope device in devices.Where(d => SignatureChecks.IsAdmitted(model, d)))
+        try
         {
-            IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(device.Id));
-            if (store is not null)
-            {
-                signer = new StoreSigner(store, device.Id);
-                return null;
-            }
+            using JsonDocument body = CanonicalJson.Parse(bodyPath == "-" ? ReadStandardInput() : File.ReadAllBytes(bodyPath));
+            return operation(body.RootElement.Clone());
         }
-
-        RecordEnvelope? estate = model.CurrentEstate;
-        string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
-        if (draft.Type == "admission" && draft.Subject is not null && draft.By == rootOperator)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException)
         {
-            RecordEnvelope? own = devices.FirstOrDefault(d => d.Id == draft.Subject.Id);
-            IDeviceKeyStore? store = own is null ? null : stores.FirstOrDefault(s => s.Has(own.Id));
-            if (own is not null && store is not null)
-            {
-                signer = new StoreSigner(store, own.Id);
-                return null;
-            }
+            return Fail(exception.Message);
         }
-
-        bool required = estate is not null && estate.Body.TryGetProperty("policies", out JsonElement policies) && policies.TryGetProperty("signatures", out JsonElement policy) && policy.GetString() == "required";
-        if (required)
-        {
-            return $"This clone is read-only for principal {draft.By}: no admitted device key is held on this machine. Create a device with 'vericairn devices create' and have an administrator admit it.";
-        }
-
-        return null;
     }
 
-    private static RecordEnvelope? Latest(EstateModel model, string id, string type) =>
-        model.ById.TryGetValue(id, out RecordEnvelope? record) && record.Type == type ? model.Latest(record) : null;
+    private static EstateModel LoadCopy(string root)
+    {
+        if (!IsEstate(root))
+        {
+            return EstateLoader.Load(root);
+        }
 
-    private static DateTimeOffset? ParseAt(string? at) =>
-        at is not null && RecordParser.IsTimestamp(at)
-            ? DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
-            : null;
+        using EstateSession session = EstateSession.Open(root);
+        return session.Load();
+    }
 
-    private static JsonDocument ReadBody(string bodyPath) =>
-        CanonicalJson.Parse(bodyPath == "-" ? ReadStandardInput() : File.ReadAllBytes(bodyPath));
+    private static bool IsEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath));
+
+    private static string NotAnEstate(string root) => $"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).";
+
+    private static PosixSignalRegistration? IgnoreHangup()
+    {
+        try
+        {
+            return PosixSignalRegistration.Create(PosixSignal.SIGHUP, context => context.Cancel = true);
+        }
+        catch (PlatformNotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    private static void PrintPlan(ServicePlan plan, bool json)
+    {
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(plan, ProtocolJson.Options));
+            return;
+        }
+
+        Console.Out.WriteLine($"{plan.Platform}: {plan.Label}");
+        Console.Out.WriteLine($"unit {plan.UnitPath}:");
+        Console.Out.Write(plan.UnitContent);
+        foreach (IReadOnlyList<string> command in plan.Install)
+        {
+            Console.Out.WriteLine("install: " + string.Join(' ', command));
+        }
+
+        foreach (IReadOnlyList<string> command in plan.Uninstall.Concat(plan.AfterUninstall))
+        {
+            Console.Out.WriteLine("uninstall: " + string.Join(' ', command));
+        }
+    }
+
+    private static FindingList Combined(EstateModel model)
+    {
+        var all = new FindingList();
+        foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+        {
+            all.Add(finding);
+        }
+
+        return all;
+    }
 
     private static string VersionText() =>
         Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
@@ -1044,29 +874,50 @@ internal static class Commands
         return buffer.ToArray();
     }
 
-    private static int Report(FindingList findings, bool json, string summary)
+    private static FindingsResponse ToFindings(FindingList findings, string summary) =>
+        new(summary, findings.Errors, findings.Warnings, findings.Sorted().Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message)).ToList());
+
+    private static int ReportOutcome(WriteOutcome outcome, bool json)
+    {
+        if (outcome.Written is RecordWritten written)
+        {
+            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
+            return Clean;
+        }
+
+        Problem problem = outcome.Problem ?? new Problem("refused", "refused", []);
+        if (problem.Code == "rejected")
+        {
+            Console.Error.WriteLine(problem.Message);
+            return ReportFindings(new FindingsResponse("rejected", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
+        }
+
+        return Fail(problem.Message);
+    }
+
+    private static int ReportFindings(FindingsResponse findings, bool json)
     {
         if (json)
         {
             Console.Out.WriteLine(JsonSerializer.Serialize(new
             {
-                summary,
+                summary = findings.Summary,
                 errors = findings.Errors,
                 warnings = findings.Warnings,
-                findings = findings.Sorted().Select(f => new { severity = f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message }),
+                findings = findings.Findings.Select(f => new { severity = f.Severity, f.Code, f.Location, f.Message }),
             }));
         }
         else
         {
-            foreach (Finding finding in findings.Sorted())
+            foreach (FindingDto finding in findings.Findings)
             {
-                Console.Out.WriteLine(finding.ToString());
+                Console.Out.WriteLine($"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
             }
 
-            Console.Out.WriteLine($"{summary}: {findings.Errors} errors, {findings.Warnings} warnings");
+            Console.Out.WriteLine($"{findings.Summary}: {findings.Errors} errors, {findings.Warnings} warnings");
         }
 
-        return findings.HasErrors ? HasErrors : Clean;
+        return findings.Errors > 0 ? HasErrors : Clean;
     }
 
     private static int Fail(string message)

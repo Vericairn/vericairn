@@ -48,6 +48,9 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
+      "vericairn.protocol": {
+        "type": "Project"
+      },
       "vericairn.records": {
         "type": "Project"
       }

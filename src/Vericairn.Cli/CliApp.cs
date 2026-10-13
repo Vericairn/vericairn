@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, status, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, devices, release, runtime, recover, objects, status, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         var estateOption = new Option<string>("--estate", "-e")
@@ -31,6 +31,7 @@ internal static class CliApp
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
         root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
+        root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(RecoverFamily(estateOption));
         root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
 
@@ -180,6 +181,34 @@ internal static class CliApp
         reconcile.SetAction(parseResult => Commands.Reconcile(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(reconcile);
         return estate;
+    }
+
+    private static Command RuntimeFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall.");
+        var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Serve the local socket only, without the pinned loopback TLS endpoint." };
+        var serve = new Command("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.");
+        serve.Options.Add(noLoopbackOption);
+        serve.SetAction(parseResult => Commands.RuntimeServe(parseResult.GetValue(estateOption)!, !parseResult.GetValue(noLoopbackOption)));
+        runtime.Subcommands.Add(serve);
+        var start = new Command("start", "Start a daemon for the estate in the background and wait until it answers.");
+        start.SetAction(parseResult => Commands.RuntimeStart(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(start);
+        var stop = new Command("stop", "Ask the daemon serving the estate to stop; closing a client never stops it.");
+        stop.SetAction(parseResult => Commands.RuntimeStop(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(stop);
+        var status = new Command("status", "Whether a daemon serves the estate and where, or whether commands run the embedded runtime.");
+        status.SetAction(parseResult => Commands.RuntimeStatus(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(status);
+        var planOption = new Option<bool>("--plan") { Description = "Show the unit and the commands without installing anything." };
+        var install = new Command("install", "Install the daemon as a per-user service that starts at login (launchd agent, systemd user unit or a logon task).");
+        install.Options.Add(planOption);
+        install.SetAction(parseResult => Commands.RuntimeInstall(parseResult.GetValue(estateOption)!, parseResult.GetValue(planOption), parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(install);
+        var uninstall = new Command("uninstall", "Remove the per-user service installed by 'runtime install'.");
+        uninstall.SetAction(parseResult => Commands.RuntimeUninstall(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(uninstall);
+        return runtime;
     }
 
     private static Command ReleaseFamily(Option<string> estateOption, Option<bool> jsonOption)

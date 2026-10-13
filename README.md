@@ -9,11 +9,19 @@ command-line interface, the SDK, and the Workbench and Remote clients as they ar
 
 ## Status
 
-Early. Release 0.1.0 is being built. What exists today:
+Release 0.1.0 is published and the Vericairn estate runs on it; 0.2.0 is being built. What exists today:
 
-- `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, twelve record types, estate
-  loading, validation, cleanliness checks, status), documented in [docs/record-format-v1.md](docs/record-format-v1.md).
-- `vericairn` CLI: `records validate|new|describe|format|hash`, `estate check`, `status`, `doctor`, `version`.
+- `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, signed records, devices and
+  admission, estate loading, validation, cleanliness checks, status), documented in
+  [docs/record-format-v1.md](docs/record-format-v1.md).
+- `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
+  the one implementation of the estate operations.
+- `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
+  an estate's live state and serves it over a local socket and pinned loopback TLS, and the typed client,
+  documented in [docs/api-v1.md](docs/api-v1.md).
+- `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `runtime`, `recover`, `objects`,
+  `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves the estate, the
+  embedded runtime otherwise.
 
 Nothing here is a release until a release record in the Vericairn estate says so.
 
