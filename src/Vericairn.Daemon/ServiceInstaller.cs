@@ -197,8 +197,10 @@ public static class ServiceInstaller
         string executable = Environment.ProcessPath ?? throw new InvalidOperationException("The running executable cannot be located.");
         if (Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
         {
-            string? entry = Assembly.GetEntryAssembly()?.Location;
-            if (!string.IsNullOrEmpty(entry))
+            // Running from source through the dotnet host: the entry assembly sits beside the application base.
+            string? name = Assembly.GetEntryAssembly()?.GetName().Name;
+            string entry = name is null ? string.Empty : Path.Combine(AppContext.BaseDirectory, name + ".dll");
+            if (name is not null && File.Exists(entry))
             {
                 return [executable, entry];
             }
