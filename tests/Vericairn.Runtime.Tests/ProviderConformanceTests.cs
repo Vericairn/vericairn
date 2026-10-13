@@ -117,9 +117,14 @@ public sealed class GitCommandAdapterTests : SourceAdapterConformance, IDisposab
     {
         try
         {
+            foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+            {
+                File.SetAttributes(file, FileAttributes.Normal);
+            }
+
             Directory.Delete(root, recursive: true);
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             // Best effort.
         }

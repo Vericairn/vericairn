@@ -107,15 +107,21 @@ internal static class CliHarness
         return added;
     }
 
+    /// <summary>Deletes test directories, clearing read-only attributes first so git object files delete on Windows too.</summary>
     public static void Delete(params string[] directories)
     {
-        foreach (string directory in directories.Where(d => !string.IsNullOrEmpty(d)))
+        foreach (string directory in directories.Where(d => !string.IsNullOrEmpty(d) && Directory.Exists(d)))
         {
             try
             {
+                foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                }
+
                 Directory.Delete(directory, recursive: true);
             }
-            catch (IOException)
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 // Best effort.
             }
