@@ -434,6 +434,12 @@ internal static class Commands
             relevant.Add(finding);
         }
 
+        // A new result must name the bytes actually present: later drift is information, a wrong claim now is a refusal.
+        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        {
+            relevant.Add(new Finding(Severity.Error, "result.output-hash", finding.Location, "The file present does not have the hash or size this result claims; name the bytes actually produced."));
+        }
+
         if (relevant.HasErrors)
         {
             File.Delete(written);
