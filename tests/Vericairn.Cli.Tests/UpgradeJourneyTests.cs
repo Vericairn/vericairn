@@ -35,7 +35,9 @@ public class UpgradeJourneyTests
             Assert.Contains("not published", refused.Err, StringComparison.Ordinal);
 
             // The builder cannot publish without the operator's acceptance of the exact candidate.
-            string publishedBody = candidateBody.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-10-13T21:00:00Z\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal);
+            // The publication is observed after the candidate was recorded, whatever the clock says when the test runs.
+            string publishedAt = Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddMinutes(5));
+            string publishedBody = candidateBody.Replace("\"status\":\"candidate\"", $"\"status\":\"published\",\"publishedAt\":\"{publishedAt}\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal);
             string publishedPath = CliHarness.WriteJson(scratch, "published.json", publishedBody);
             Assert.NotEqual(0, CliHarness.Run("--estate", root, "--json", "records", "new", "release", "--by", builder, "--subject", $"product:{product}", "--supersedes", candidate.Id, "--body", publishedPath).Code);
             CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.Id}:{candidate.Hash}", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted release 0.1.0 from the recorded evidence.","basis":[],"self":false}"""));
