@@ -15,6 +15,37 @@ public sealed class ReleaseType : IRecordType
     /// <summary>Runtime identifiers an artifact may target.</summary>
     public static readonly string[] Platforms = ["any", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 
+    /// <summary>Keys a published revision may change relative to the candidate it supersedes; everything else must be identical.</summary>
+    private static readonly string[] PublicationKeys = ["status", "publishedAt", "url"];
+
+    /// <summary>
+    /// True when <paramref name="latest"/> is the publication of the release candidate <paramref name="candidate"/>: it supersedes it
+    /// directly and differs only in status, publishedAt and url. An acceptance of the candidate then applies to it by design.
+    /// </summary>
+    public static bool IsPublicationOf(RecordEnvelope candidate, RecordEnvelope latest)
+    {
+        ArgumentNullException.ThrowIfNull(candidate);
+        ArgumentNullException.ThrowIfNull(latest);
+        if (candidate.Type != "release" || latest.Type != "release" || latest.Supersedes != candidate.Id || EstateModel.BodyString(latest, "status") != "published")
+        {
+            return false;
+        }
+
+        var left = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        var right = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (System.Text.Json.JsonProperty property in candidate.Body.EnumerateObject().Where(p => Array.IndexOf(PublicationKeys, p.Name) < 0))
+        {
+            left[property.Name] = property.Value.GetRawText();
+        }
+
+        foreach (System.Text.Json.JsonProperty property in latest.Body.EnumerateObject().Where(p => Array.IndexOf(PublicationKeys, p.Name) < 0))
+        {
+            right[property.Name] = property.Value.GetRawText();
+        }
+
+        return left.Count == right.Count && left.All(pair => right.TryGetValue(pair.Key, out string? value) && value == pair.Value);
+    }
+
     /// <inheritdoc />
     public string Name => "release";
 

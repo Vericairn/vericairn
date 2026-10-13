@@ -91,7 +91,8 @@ public sealed class AcceptanceType : IRecordType
             context.Error("acceptance.policy", $"Acceptance of a {subject.Type} record is reserved to the operator in record format 1.");
         }
 
-        if (context.Model.Latest(subject).Id != subject.Id)
+        RecordEnvelope latest = context.Model.Latest(subject);
+        if (latest.Id != subject.Id && !ReleaseType.IsPublicationOf(subject, latest))
         {
             context.Warning("acceptance.unresolved", "The subject was superseded after this acceptance; it accepts an earlier revision and needs reconsideration.");
         }
