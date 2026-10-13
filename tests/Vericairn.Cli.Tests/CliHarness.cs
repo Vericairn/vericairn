@@ -4,12 +4,22 @@
 using System.Text.Json;
 using Vericairn.Cli;
 using Vericairn.Records.Identity;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Cli.Tests;
 
 /// <summary>Runs the command tree in-process with captured output, exactly as the binary would run it.</summary>
 internal static class CliHarness
 {
+    static CliHarness()
+    {
+        // Live stores and keys of test estates never touch the developer's real per-user state.
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, TempDirectory("cli-tests-home"));
+        }
+    }
+
     public sealed record Outcome(int Code, string Out, string Err)
     {
         public JsonElement Json => JsonDocument.Parse(Out).RootElement.Clone();

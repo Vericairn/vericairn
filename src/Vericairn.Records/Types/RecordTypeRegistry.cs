@@ -26,6 +26,7 @@ public static class RecordTypeRegistry
         new AmendmentType(),
         new DeviceType(),
         new AdmissionType(),
+        new ReconciliationType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>

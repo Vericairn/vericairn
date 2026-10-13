@@ -101,7 +101,7 @@ public class EstateLoaderTests
         estate.Add("work-order", estate.BuilderId, OrdinaryBody.Replace("Small task", "Revised twice", StringComparison.Ordinal), supersedes: ordinary.Id);
         EstateModel model = estate.Load();
         Assert.Contains(model.Findings, f => f.Code == "work.duplicate-key");
-        Assert.Contains(model.Findings, f => f.Code == "record.supersedes");
+        Assert.Contains(model.Findings, f => f.Code == "reconcile.successors");
     }
 
     [Fact]

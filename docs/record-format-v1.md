@@ -41,8 +41,8 @@ write the same file; merges are always clean file additions, and conflicts are s
 
 Run `vericairn records describe` for the current list and `vericairn records describe <type>` for fields.
 Format 1 admits: estate, principal, authority, decision, product, resource, document-revision, work-order,
-work-status, review, acceptance, retirement, assignment, attempt, result, amendment, device, admission.
-Reserved for later releases: release, migration, object.
+work-status, review, acceptance, retirement, assignment, attempt, result, amendment, device, admission,
+reconciliation. Reserved for later releases: release, migration, object.
 
 ## Work: brief, assignment, attempt, result
 
@@ -71,6 +71,32 @@ is `optional` or `required`; when required, every record authored after the char
 be signed, so a clone without an admitted device key is read-only. Private keys live in the per-user state
 directory (`VERICAIRN_HOME` overrides it), never in a repository; the CLI picks the signing device for the
 author automatically.
+
+## Where records are kept: profiles, the live store, objects
+
+The manifest's `profile` is `repository-synced` (the default: record files in the git repository are canonical and
+each machine's runtime keeps a derived live store, a SQLite database under the per-user state directory keyed by
+estate and clone, refreshed on every open and never committed) or `local-only` (the live store is canonical and no
+record file exists; the directory holds only the manifest). Objects are content-addressed by SHA-256 behind one
+provider interface: the repository's `objects/` directory, or a SQLite store beside the live store under
+local-only; every read verifies the bytes against the name and a mismatch is reported, never served.
+
+## Divergence and reconciliation
+
+Two clones that each add records merge as pure file additions. When both revised the same record, two successors
+supersede one predecessor: the loader reports `reconcile.successors`, `status` lists it under Reconcile, and
+`vericairn estate reconcile` shows every such task (divergent revisions, duplicate work-order keys, duplicate
+results). A **reconciliation** record about the predecessor keeps one successor and withdraws the others, which
+then count as superseded by the kept one; nothing is merged silently and nothing is deleted.
+
+## Export and restore
+
+`vericairn estate export` writes a zip holding the records, objects, manifest and documents with an inventory of
+every entry's size and hash and a summary whose hash covers the inventory. `vericairn estate restore` verifies
+every byte against the inventory before writing anything, restores into an empty directory as a repository-synced
+estate whatever the source profile was, and then shows what the copy holds. An export carries records and bytes:
+no keys, sessions, credentials or authority, so a restored copy verifies every signature and authors only with a
+device admitted and held where it runs.
 
 ## Rules that are enforced, not merely documented
 

@@ -45,9 +45,14 @@ public static class CanonicalJson
         MaxDepth = 64,
     };
 
-    /// <summary>Parses UTF-8 JSON strictly (no comments, no trailing commas).</summary>
+    /// <summary>Parses UTF-8 JSON strictly (no comments, no trailing commas, no invalid UTF-8 anywhere).</summary>
     public static JsonDocument Parse(ReadOnlyMemory<byte> utf8)
     {
+        if (!System.Text.Unicode.Utf8.IsValid(utf8.Span))
+        {
+            throw new CanonicalJsonException("The document is not valid UTF-8.");
+        }
+
         try
         {
             return JsonDocument.Parse(utf8, ParseOptions);
