@@ -75,6 +75,16 @@ public static class EstateStatus
             text.Append("  ").Append(item.Key.PadRight(keyWidth)).Append(item.Status.PadRight(statusWidth)).Append(item.Kind.PadRight(11)).Append(item.Title).Append('\n');
         }
 
+        List<RecordEnvelope> releases = model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToList();
+        if (releases.Count > 0)
+        {
+            text.Append("Releases:\n");
+            foreach (RecordEnvelope release in releases)
+            {
+                text.Append("  ").Append(EstateModel.BodyString(release, "version")).Append("  ").Append(EstateModel.BodyString(release, "status")).Append("  ").Append(EstateModel.BodyString(release, "commit")?[..12]).Append("  ").Append(release.Id).Append('\n');
+            }
+        }
+
         IReadOnlyList<WorkView.AssignmentItem> assignments = WorkView.AssignmentItems(model);
         if (assignments.Count > 0)
         {
@@ -142,6 +152,8 @@ public static class EstateStatus
             ["records"] = model.Records.Count,
             ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version },
             ["workOrders"] = new JsonArray(WorkItems(model).Select(i => (JsonNode)new JsonObject { ["key"] = i.Key, ["kind"] = i.Kind, ["title"] = i.Title, ["status"] = i.Status, ["id"] = i.Id }).ToArray()),
+            ["releases"] = new JsonArray(model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+                .Select(r => (JsonNode)new JsonObject { ["version"] = EstateModel.BodyString(r, "version"), ["status"] = EstateModel.BodyString(r, "status"), ["commit"] = EstateModel.BodyString(r, "commit"), ["id"] = r.Id }).ToArray()),
             ["assignments"] = new JsonArray(WorkView.AssignmentItems(model).Select(a => (JsonNode)new JsonObject
             {
                 ["key"] = a.Key,

@@ -16,6 +16,7 @@ using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Store;
+using Vericairn.Runtime.Upgrade;
 
 namespace Vericairn.Cli;
 
@@ -507,6 +508,100 @@ internal static class Commands
     private static EstateSession? OpenIfEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath)) ? EstateSession.Open(root) : null;
 
     private static EstateModel LoadWith(EstateSession? session, string root) => session?.Load() ?? EstateLoader.Load(root);
+
+    public static int Upgrade(string root, string version, string? by, bool check, bool json)
+    {
+        try
+        {
+            if (!File.Exists(Path.Combine(root, EstateLayout.ManifestPath)))
+            {
+                return Fail($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
+            }
+
+            UpgradePlan plan;
+            EstateManifest manifest;
+            using (EstateSession session = EstateSession.Open(root))
+            {
+                EstateModel model = session.Load();
+                if (model.Findings.HasErrors)
+                {
+                    Console.Error.WriteLine("The estate has errors; resolve them before upgrading.");
+                    return Report(model.Findings, json, "not upgraded");
+                }
+
+                manifest = session.Manifest;
+                plan = EstateUpgrade.Plan(model, version);
+            }
+
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, release = plan.Release.Id, plan.Artifacts, applied = !check }));
+            }
+            else
+            {
+                Console.Out.WriteLine($"{(check ? "would upgrade" : "upgrading")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release.Id}");
+                foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
+                {
+                    Console.Out.WriteLine($"  {platform}  {hash}");
+                }
+            }
+
+            if (check)
+            {
+                return Clean;
+            }
+
+            if (by is null || !Ulid.IsValid(by))
+            {
+                return Fail("--by must be the ULID of the principal applying the upgrade.");
+            }
+
+            string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
+            byte[] previous = File.ReadAllBytes(manifestPath);
+            File.WriteAllBytes(manifestPath, EstateUpgrade.ManifestAfter(manifest, plan));
+            using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, [$"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}"]).ToJsonString());
+            int code = WriteValidated(root, new RecordDraft("migration", by, body.RootElement), json);
+            if (code != Clean)
+            {
+                File.WriteAllBytes(manifestPath, previous);
+                Console.Error.WriteLine("The manifest was restored; nothing changed.");
+            }
+
+            return code;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ReleaseList(string root, bool json)
+    {
+        try
+        {
+            using EstateSession? session = OpenIfEstate(root);
+            EstateModel model = LoadWith(session, root);
+            var rows = model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+                .Select(r => new { version = EstateModel.BodyString(r, "version"), status = EstateModel.BodyString(r, "status"), commit = EstateModel.BodyString(r, "commit"), id = r.Id, hash = r.ComputedHash, signing = EstateModel.BodyString(r, "signing") }).ToList();
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(rows));
+            }
+            else
+            {
+                foreach (var row in rows)
+                {
+                    Console.Out.WriteLine($"{row.version}  {row.status}  {row.commit}  {row.id}  {row.signing}");
+                }
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
 
     public static int Export(string root, string output, string? by, bool json)
     {
