@@ -56,7 +56,7 @@ public static class EstateStatus
         var text = new StringBuilder();
         RecordEnvelope? estate = model.CurrentEstate;
         text.Append("Estate: ").Append(estate is null ? "(no charter)" : $"{EstateModel.BodyString(estate, "name")} ({EstateModel.BodyString(estate, "slug")})")
-            .Append(" · record format 1 · ").Append(model.Records.Count.ToString(CultureInfo.InvariantCulture)).Append(" records\n");
+            .Append(" · record format ").Append((model.Manifest?.RecordFormat ?? RecordFormats.Current).ToString(CultureInfo.InvariantCulture)).Append(" · ").Append(model.Records.Count.ToString(CultureInfo.InvariantCulture)).Append(" records\n");
         text.Append("Vericairn: ").Append(model.Manifest?.Describe() ?? "(no manifest)").Append('\n');
         text.Append("Principals:\n");
         foreach (RecordEnvelope principal in model.OfType("principal").Where(p => !model.SupersededBy.ContainsKey(p.Id) || true).Where(p => model.Records.All(r => r.Supersedes != p.Id)).OrderBy(p => p.Id, StringComparer.Ordinal))
@@ -97,9 +97,21 @@ public static class EstateStatus
             }
         }
 
+        IReadOnlyList<OperationItem> operations = OperationItems(model);
+        if (operations.Count > 0)
+        {
+            text.Append("Operations:\n");
+            int identityWidth = operations.Max(o => o.Identity.Length) + 2;
+            foreach (OperationItem operation in operations)
+            {
+                text.Append("  ").Append(operation.Identity.PadRight(identityWidth)).Append(operation.Status).Append("  ").Append(operation.Provider).Append('/').Append(operation.Action).Append("  ").Append(operation.Id).Append('\n');
+            }
+        }
+
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
-            .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture)).Append('\n');
+            .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
+            .Append(" · Verifications: ").Append(model.Current("verification").Count().ToString(CultureInfo.InvariantCulture)).Append('\n');
         var all = new FindingList();
         foreach (Finding finding in model.Findings)
         {
@@ -128,6 +140,23 @@ public static class EstateStatus
         }
 
         return text.ToString();
+    }
+
+    /// <summary>One current external operation.</summary>
+    /// <param name="Identity">Original identity.</param>
+    /// <param name="Provider">Provider id.</param>
+    /// <param name="Action">Action.</param>
+    /// <param name="Status">Current status.</param>
+    /// <param name="Id">Record id of the current revision.</param>
+    public sealed record OperationItem(string Identity, string Provider, string Action, string Status, string Id);
+
+    /// <summary>Every current external operation, ordered by identity; a status other than observed-success or canceled needs attention.</summary>
+    public static IReadOnlyList<OperationItem> OperationItems(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return model.Current("operation")
+            .Select(o => new OperationItem(EstateModel.BodyString(o, "identity") ?? "?", EstateModel.BodyString(o, "provider") ?? "?", EstateModel.BodyString(o, "action") ?? "?", EstateModel.BodyString(o, "status") ?? "?", o.Id))
+            .OrderBy(o => o.Identity, StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>Codes that mean two clones diverged and a person or an authorized agent must settle it; never merged silently.</summary>
@@ -165,6 +194,7 @@ public static class EstateStatus
                 ["outcome"] = a.Outcome,
                 ["state"] = a.State,
             }).ToArray()),
+            ["operations"] = new JsonArray(OperationItems(model).Select(o => (JsonNode)new JsonObject { ["identity"] = o.Identity, ["provider"] = o.Provider, ["action"] = o.Action, ["status"] = o.Status, ["id"] = o.Id }).ToArray()),
             ["findings"] = new JsonArray(model.Findings.Concat(checks).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
             ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)

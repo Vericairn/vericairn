@@ -19,9 +19,12 @@ Release 0.1.0 is published and the Vericairn estate runs on it; 0.2.0 is being b
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
   an estate's live state and serves it over a local socket and pinned loopback TLS, and the typed client,
   documented in [docs/api-v1.md](docs/api-v1.md).
-- `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `runtime`, `recover`, `objects`,
-  `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves the estate, the
-  embedded runtime otherwise.
+- The software journey: the git adapter, verification records from commands and workflow runs, and the
+  GitHub Releases provider with intent recorded before effect and publication left to the operator,
+  documented in [docs/software.md](docs/software.md).
+- `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `sources`, `check`, `runtime`,
+  `recover`, `objects`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
+  the estate, the embedded runtime otherwise.
 
 Nothing here is a release until a release record in the Vericairn estate says so.
 

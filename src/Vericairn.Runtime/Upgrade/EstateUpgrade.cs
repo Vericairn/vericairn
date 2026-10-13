@@ -9,7 +9,42 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Runtime.Upgrade;
 
-/// <summary>A record-format migration: forward-only, idempotent, named.</summary>
+/// <summary>What a migration may do: stage repository-relative files; the upgrade writes them only once every step succeeded, so a failed migration leaves the repository untouched.</summary>
+public sealed class MigrationContext
+{
+    private readonly Dictionary<string, byte[]> staged = new(StringComparer.Ordinal);
+
+    /// <summary>Creates a context over an estate.</summary>
+    public MigrationContext(string root, EstateModel model)
+    {
+        Root = root ?? throw new ArgumentNullException(nameof(root));
+        Model = model ?? throw new ArgumentNullException(nameof(model));
+    }
+
+    /// <summary>Repository root.</summary>
+    public string Root { get; }
+
+    /// <summary>The estate as loaded before the migration.</summary>
+    public EstateModel Model { get; }
+
+    /// <summary>Files staged so far, by repository-relative path.</summary>
+    public IReadOnlyDictionary<string, byte[]> Staged => staged;
+
+    /// <summary>Stages a file to be written when the whole upgrade succeeds; records are never rewritten, so record paths are refused.</summary>
+    public void Stage(string relativePath, byte[] bytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (Path.IsPathRooted(relativePath) || relativePath.Contains("..", StringComparison.Ordinal) || relativePath.StartsWith("records/", StringComparison.Ordinal) || relativePath == EstateLayout.ManifestPath)
+        {
+            throw new ArgumentException("A migration stages repository-relative files outside records/ and never the manifest.", nameof(relativePath));
+        }
+
+        staged[relativePath] = bytes;
+    }
+}
+
+/// <summary>A record-format migration: forward-only, idempotent, named, and applied through a context so that a failure changes nothing.</summary>
 public interface IRecordFormatMigration
 {
     /// <summary>Stable name recorded in the migration record.</summary>
@@ -20,6 +55,9 @@ public interface IRecordFormatMigration
 
     /// <summary>Format it writes.</summary>
     long ToFormat { get; }
+
+    /// <summary>Applies the migration by staging files; throws to abort the upgrade with nothing changed.</summary>
+    void Apply(MigrationContext context);
 }
 
 /// <summary>What an upgrade would do, computed before anything changes.</summary>
@@ -35,8 +73,25 @@ public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
 public static class EstateUpgrade
 {
+    private static IReadOnlyList<IRecordFormatMigration> migrations = [];
+
     /// <summary>Record-format migrations this release knows. Format 1 is the only format so far.</summary>
-    public static IReadOnlyList<IRecordFormatMigration> Migrations { get; } = [];
+    public static IReadOnlyList<IRecordFormatMigration> Migrations => migrations;
+
+    /// <summary>Substitutes the known migrations for a synthetic set, for tests of the upgrade path; restored on dispose.</summary>
+    internal static IDisposable UseMigrations(IReadOnlyList<IRecordFormatMigration> synthetic)
+    {
+        IReadOnlyList<IRecordFormatMigration> previous = migrations;
+        migrations = synthetic;
+        return new Restore(() => migrations = previous);
+    }
+
+    /// <summary>The migration steps of a plan, in order.</summary>
+    public static IReadOnlyList<IRecordFormatMigration> Steps(UpgradePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        return plan.Migrations.Select(name => Migrations.First(m => m.Name == name)).ToList();
+    }
 
     /// <summary>Plans an upgrade to a version; throws with the reason when no published release of that version is recorded.</summary>
     public static UpgradePlan Plan(EstateModel model, string version)
@@ -86,6 +141,18 @@ public static class EstateUpgrade
 
         string repository = EstateModel.BodyString(release, "repository") ?? manifest.Repository ?? "?";
         return new UpgradePlan(manifest.Describe(), $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts);
+    }
+
+    private sealed class Restore : IDisposable
+    {
+        private readonly Action action;
+
+        public Restore(Action action)
+        {
+            this.action = action;
+        }
+
+        public void Dispose() => action();
     }
 
     /// <summary>The distributable name for a platform: a tar.gz on Linux and macOS, a zip on Windows.</summary>

@@ -7,6 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 

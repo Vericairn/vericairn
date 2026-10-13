@@ -29,6 +29,9 @@ public static class RecordTypeRegistry
         new ReconciliationType(),
         new ReleaseType(),
         new MigrationType(),
+        new VerificationType(),
+        new ObservationType(),
+        new OperationType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>
