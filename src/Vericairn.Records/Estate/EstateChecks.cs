@@ -203,7 +203,7 @@ public static partial class EstateChecks
                 return;
             }
 
-            foreach (string field in new[] { "title", "summary", "synthesis", "note", "intent", "exitQuestion" })
+            foreach (string field in new[] { "title", "summary", "synthesis", "note", "intent", "exitQuestion", "rationale", "nextStep" })
             {
                 if (body.TryGetProperty(field, out JsonElement value) && value.ValueKind == JsonValueKind.String)
                 {

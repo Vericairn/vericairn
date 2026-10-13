@@ -75,6 +75,18 @@ public static class EstateStatus
             text.Append("  ").Append(item.Key.PadRight(keyWidth)).Append(item.Status.PadRight(statusWidth)).Append(item.Kind.PadRight(11)).Append(item.Title).Append('\n');
         }
 
+        IReadOnlyList<WorkView.AssignmentItem> assignments = WorkView.AssignmentItems(model);
+        if (assignments.Count > 0)
+        {
+            text.Append("Assignments:\n");
+            int assignmentKeyWidth = assignments.Max(a => a.Key.Length) + 2;
+            foreach (WorkView.AssignmentItem assignment in assignments)
+            {
+                text.Append("  ").Append(assignment.Key.PadRight(assignmentKeyWidth)).Append(assignment.AssignmentId).Append("  ").Append(assignment.ContributorName)
+                    .Append("  attempts ").Append(assignment.Attempts.ToString(CultureInfo.InvariantCulture)).Append("  ").Append(assignment.Outcome).Append(", ").Append(assignment.State).Append('\n');
+            }
+        }
+
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture)).Append('\n');
@@ -110,6 +122,17 @@ public static class EstateStatus
             ["records"] = model.Records.Count,
             ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version },
             ["workOrders"] = new JsonArray(WorkItems(model).Select(i => (JsonNode)new JsonObject { ["key"] = i.Key, ["kind"] = i.Kind, ["title"] = i.Title, ["status"] = i.Status, ["id"] = i.Id }).ToArray()),
+            ["assignments"] = new JsonArray(WorkView.AssignmentItems(model).Select(a => (JsonNode)new JsonObject
+            {
+                ["key"] = a.Key,
+                ["id"] = a.AssignmentId,
+                ["contributor"] = a.ContributorId,
+                ["contributorName"] = a.ContributorName,
+                ["attempts"] = a.Attempts,
+                ["latestResult"] = a.LatestResultId,
+                ["outcome"] = a.Outcome,
+                ["state"] = a.State,
+            }).ToArray()),
             ["findings"] = new JsonArray(model.Findings.Concat(checks).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
         };

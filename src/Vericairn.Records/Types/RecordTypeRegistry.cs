@@ -20,10 +20,14 @@ public static class RecordTypeRegistry
         new ReviewType(),
         new AcceptanceType(),
         new RetirementType(),
+        new AssignmentType(),
+        new AttemptType(),
+        new ResultType(),
+        new AmendmentType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>
-    public static readonly string[] Reserved = ["release", "migration", "assignment", "attempt", "result", "device", "admission", "object"];
+    public static readonly string[] Reserved = ["release", "migration", "device", "admission", "object"];
 
     /// <summary>All admitted types, ordered by name.</summary>
     public static IReadOnlyList<IRecordType> All => Types.Values.OrderBy(t => t.Name, StringComparer.Ordinal).ToList();

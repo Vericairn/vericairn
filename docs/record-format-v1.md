@@ -41,8 +41,21 @@ write the same file; merges are always clean file additions, and conflicts are s
 
 Run `vericairn records describe` for the current list and `vericairn records describe <type>` for fields.
 Format 1 admits: estate, principal, authority, decision, product, resource, document-revision, work-order,
-work-status, review, acceptance, retirement. Reserved for later releases: release, migration, assignment,
-attempt, result, device, admission, object.
+work-status, review, acceptance, retirement, assignment, attempt, result, amendment. Reserved for later
+releases: release, migration, device, admission, object.
+
+## Work: brief, assignment, attempt, result
+
+A work order is the unit of work. An **assignment** delegates it to a contributor under a brief (outcome,
+sources, permitted changes, prohibited effects, workspace, limits, expected outputs, review criteria,
+recovery) and pins the exact work-order revision. An **attempt** is one contribution, authored by the
+contributor and pinned to the exact assignment. A **result** is what an attempt submits (outcome, summary,
+outputs by hash, evidence, checks, limitations, unresolved effects, next step), pinned to the exact attempt;
+it is a claim to inspect. An **amendment** asks to change the brief and authorizes nothing. Acceptance of a
+result pins the result's hash and follows the work order's policy: results toward milestones need the
+operator; results of ordinary work may be self-accepted under `self-accept-ordinary-work`.
+`vericairn work brief <key>` renders everything a contributor needs from the records alone;
+`vericairn work observe <key>` shows what happened.
 
 ## Rules that are enforced, not merely documented
 
@@ -60,6 +73,9 @@ attempt, result, device, admission, object.
   for display. A decision without a synthesis is reported as a warning. `vericairn decisions` lists them and
   `vericairn decisions <id>` renders one as Markdown.
 - Retirement records register temporary artifacts with a removal condition; once retired, the path must be gone.
+- An attempt and its result are authored by the assignment's contributor; one current result exists per
+  attempt (a correction supersedes); an output whose file is present in the repository must have the hash
+  and size the result claims; a completed result with a failed check is a warning for the reviewer.
 - `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.
