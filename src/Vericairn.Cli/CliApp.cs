@@ -29,6 +29,7 @@ internal static class CliApp
         root.Subcommands.Add(RecordsFamily(estateOption, jsonOption));
         root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
+        root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
         status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
@@ -143,6 +144,52 @@ internal static class CliApp
         check.SetAction(parseResult => Commands.Check(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(check);
         return estate;
+    }
+
+    private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit and revoke.");
+        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
+
+        var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
+        var nameOption = new Option<string>("--name") { Description = "Descriptive device name, never a machine path.", Required = true };
+        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default (CNG on Windows, owner-only file elsewhere), file, or cng." };
+        var profilesOption = new Option<string[]>("--profile") { Description = "Permitted connectivity profile; repeatable (default: embedded).", AllowMultipleArgumentsPerToken = true };
+        var create = new Command("create", "Generate a key on this machine and record the device, signed by its own key.");
+        create.Options.Add(principalOption);
+        create.Options.Add(nameOption);
+        create.Options.Add(custodyOption);
+        create.Options.Add(profilesOption);
+        create.SetAction(parseResult => Commands.DevicesCreate(
+            parseResult.GetValue(estateOption)!,
+            parseResult.GetValue(principalOption)!,
+            parseResult.GetValue(nameOption)!,
+            parseResult.GetValue(custodyOption),
+            parseResult.GetValue(profilesOption) ?? [],
+            parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(create);
+
+        var list = new Command("list", "List device records with their admission state and whether their key is held here.");
+        list.SetAction(parseResult => Commands.DevicesList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(list);
+
+        var deviceArgument = new Argument<string>("device") { Description = "Device record id." };
+        var noteOption = new Option<string>("--note") { Description = "Why the device is admitted.", Required = true };
+        var admit = new Command("admit", "Admit a device to author records in this estate (operator or 'administer' scope).");
+        admit.Arguments.Add(deviceArgument);
+        admit.Options.Add(byOption);
+        admit.Options.Add(noteOption);
+        admit.SetAction(parseResult => Commands.DevicesAdmit(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(noteOption)!, parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(admit);
+
+        var reasonOption = new Option<string>("--reason") { Description = "Why the admission ends.", Required = true };
+        var revoke = new Command("revoke", "Revoke a device's admission from now on; its earlier records stay attributable.");
+        revoke.Arguments.Add(deviceArgument);
+        revoke.Options.Add(byOption);
+        revoke.Options.Add(reasonOption);
+        revoke.SetAction(parseResult => Commands.DevicesRevoke(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(revoke);
+        return devices;
     }
 
     private static Command WorkFamily(Option<string> estateOption, Option<bool> jsonOption)

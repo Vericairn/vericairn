@@ -7,6 +7,7 @@ using System.Text.RegularExpressions;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Model;
 
@@ -150,7 +151,7 @@ public static partial class RecordParser
                 findings.Error("record.hash", location, "'hash' must look like sha256:<64 lower-case hex digits>.");
             }
 
-            bool hasSignatures = false;
+            var parsedSignatures = new List<RecordSignature>();
             if (root.TryGetProperty("signatures", out JsonElement signatures))
             {
                 if (signatures.ValueKind != JsonValueKind.Array)
@@ -159,10 +160,14 @@ public static partial class RecordParser
                 }
                 else
                 {
-                    hasSignatures = signatures.GetArrayLength() > 0;
-                    if (hasSignatures)
+                    int index = 0;
+                    foreach (JsonElement item in signatures.EnumerateArray())
                     {
-                        findings.Info("record.signatures", location, "Signatures are present but record format 1 does not verify them yet.");
+                        RecordSignature? parsedSignature = ParseSignature(item, $"{location}#signatures[{index++}]", findings);
+                        if (parsedSignature is not null)
+                        {
+                            parsedSignatures.Add(parsedSignature);
+                        }
                     }
                 }
             }
@@ -195,7 +200,7 @@ public static partial class RecordParser
                 findings.Error("record.formatting", location, "The file is not in canonical pretty form (sorted keys, two-space indent, LF, trailing newline). Run 'vericairn records format'.");
             }
 
-            return new RecordEnvelope(type!, id!, at!, by!, subject, supersedes, root.GetProperty("body").Clone(), declaredHash!, computedHash, hasSignatures);
+            return new RecordEnvelope(type!, id!, at!, by!, subject, supersedes, root.GetProperty("body").Clone(), declaredHash!, computedHash, parsedSignatures);
         }
     }
 
@@ -249,6 +254,58 @@ public static partial class RecordParser
         }
 
         return ok ? new RecordReference(type!, id!, hash) : null;
+    }
+
+    /// <summary>Parses one {algorithm, device, signature} entry.</summary>
+    public static RecordSignature? ParseSignature(JsonElement element, string location, FindingList findings)
+    {
+        ArgumentNullException.ThrowIfNull(findings);
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            findings.Error("record.signatures", location, "A signature is an object with 'algorithm', 'device' and 'signature'.");
+            return null;
+        }
+
+        string? algorithm = null, device = null, signature = null;
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            switch (property.Name)
+            {
+                case "algorithm":
+                    algorithm = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                    break;
+                case "device":
+                    device = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                    break;
+                case "signature":
+                    signature = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+                    break;
+                default:
+                    findings.Error("record.signatures", location, $"Unknown signature key '{property.Name}'.");
+                    break;
+            }
+        }
+
+        bool ok = true;
+        if (string.IsNullOrEmpty(algorithm) || algorithm.Length > 100)
+        {
+            findings.Error("record.signatures", location, "Signature 'algorithm' must be a short name.");
+            ok = false;
+        }
+
+        if (!Ulid.IsValid(device))
+        {
+            findings.Error("record.signatures", location, "Signature 'device' must be the ULID of a device record.");
+            ok = false;
+        }
+
+        if (!RecordSigning.IsSignature(signature))
+        {
+            findings.Error("record.signatures", location, "Signature 'signature' must be a base64url 64-byte value.");
+            ok = false;
+        }
+
+        return ok ? new RecordSignature(algorithm!, device!, signature!) : null;
     }
 
     private static string? StringOrNull(JsonElement root, string name) =>

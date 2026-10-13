@@ -8,6 +8,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Authoring;
 
@@ -30,8 +31,8 @@ public sealed record AuthoredRecord(string RelativePath, byte[] Bytes, RecordEnv
 /// <summary>Creates records in canonical form with their hash.</summary>
 public static class RecordAuthor
 {
-    /// <summary>Builds the canonical bytes of a new record.</summary>
-    public static AuthoredRecord Create(RecordDraft draft)
+    /// <summary>Builds the canonical bytes of a new record, signed by the device when a signer is given.</summary>
+    public static AuthoredRecord Create(RecordDraft draft, IRecordSigner? signer = null)
     {
         ArgumentNullException.ThrowIfNull(draft);
         if (draft.Body.ValueKind != JsonValueKind.Object)
@@ -74,6 +75,12 @@ public static class RecordAuthor
         }
 
         envelope["hash"] = hash;
+        if (signer is not null)
+        {
+            RecordSignature signature = signer.Sign(RecordSigning.Digest(hash));
+            envelope["signatures"] = new JsonArray(new JsonObject { ["algorithm"] = signature.Algorithm, ["device"] = signature.Device, ["signature"] = signature.Signature });
+        }
+
         byte[] bytes;
         using (JsonDocument hashed = JsonDocument.Parse(envelope.ToJsonString()))
         {

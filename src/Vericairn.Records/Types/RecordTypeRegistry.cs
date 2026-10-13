@@ -24,10 +24,12 @@ public static class RecordTypeRegistry
         new AttemptType(),
         new ResultType(),
         new AmendmentType(),
+        new DeviceType(),
+        new AdmissionType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>
-    public static readonly string[] Reserved = ["release", "migration", "device", "admission", "object"];
+    public static readonly string[] Reserved = ["release", "migration", "object"];
 
     /// <summary>All admitted types, ordered by name.</summary>
     public static IReadOnlyList<IRecordType> All => Types.Values.OrderBy(t => t.Name, StringComparer.Ordinal).ToList();

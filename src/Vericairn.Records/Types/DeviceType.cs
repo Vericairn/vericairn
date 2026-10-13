@@ -1,0 +1,92 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
+
+namespace Vericairn.Records.Types;
+
+/// <summary>A device that holds a signing key for a principal; signed by that key to prove possession.</summary>
+public sealed class DeviceType : IRecordType
+{
+    /// <summary>Connectivity profiles a device may be permitted.</summary>
+    public static readonly string[] Profiles = ["embedded", "local-socket", "loopback", "local-network", "relay"];
+
+    /// <summary>Platforms.</summary>
+    public static readonly string[] Platforms = ["windows", "linux", "macos", "ios", "android", "other"];
+
+    /// <inheritdoc />
+    public string Name => "device";
+
+    /// <inheritdoc />
+    public string Summary => "A device holding a signing key for a principal: platform, custody strength, public key and permitted connectivity profiles. Signed by its own key to prove possession; admitted separately.";
+
+    /// <inheritdoc />
+    public string? SubjectType => null;
+
+    /// <inheritdoc />
+    public bool SubjectHashRequired => false;
+
+    /// <inheritdoc />
+    public IReadOnlyList<FieldDescription> Fields { get; } =
+    [
+        new("principal", "ulid", true, "The principal the device acts for."),
+        new("name", "string", true, "Descriptive name, never a machine path."),
+        new("platform", string.Join('|', Platforms), true, "Operating system family."),
+        new("custody", string.Join('|', DeviceKeyStores.Kinds), true, "How the private key is held; recorded strength, never assumed."),
+        new("algorithm", RecordSigning.Algorithm, true, "Signature algorithm."),
+        new("publicKey", "string", true, "Base64url SubjectPublicKeyInfo of the P-256 public key."),
+        new("profiles", "string[]", true, "Permitted connectivity profiles: embedded, local-socket, loopback, local-network, relay."),
+    ];
+
+    /// <inheritdoc />
+    public void Validate(ValidationContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        BodyReader body = context.Body;
+        string? principal = body.Ulid("principal", true);
+        body.Text("name", true, 200);
+        body.Enum("platform", true, Platforms);
+        body.Enum("custody", true, DeviceKeyStores.Kinds);
+        body.Enum("algorithm", true, RecordSigning.Algorithm);
+        string? publicKey = body.Text("publicKey", true, 400);
+        IReadOnlyList<string>? profiles = body.StringArray("profiles", true, allowEmpty: false, maxItemLength: 50);
+        body.NoOtherKeys();
+        if (publicKey is not null && !RecordSigning.IsPublicKey(publicKey))
+        {
+            body.Error("device.public-key", "publicKey", "Not a base64url P-256 SubjectPublicKeyInfo.");
+        }
+
+        foreach (string profile in (profiles ?? []).Where(p => Array.IndexOf(Profiles, p) < 0))
+        {
+            body.Error("body.enum", "profiles", $"Unknown profile '{profile}'. Known: {string.Join(", ", Profiles)}.");
+        }
+
+        if (principal is null)
+        {
+            return;
+        }
+
+        if (context.Principal(principal) is null)
+        {
+            context.Error("device.principal", $"Principal {principal} has no principal record.");
+        }
+
+        if (context.Record.By != principal && !context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.Administer))
+        {
+            context.Error("device.author", "A device record is authored by its principal, by the operator, or under the 'administer' scope.");
+        }
+
+        if (!context.Record.Signatures.Any(s => s.Device == context.Record.Id))
+        {
+            context.Error("device.unsigned", "A device record is signed by its own key to prove possession.");
+        }
+
+        RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
+        if (previous is not null && previous.Type == Name && EstateModel.BodyString(previous, "publicKey") != publicKey)
+        {
+            context.Error("device.key-change", "A device revision keeps its public key; a new key is a new device.");
+        }
+    }
+}
