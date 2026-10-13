@@ -67,9 +67,12 @@ public static class EstateStatus
         }
 
         text.Append("Work orders:\n");
-        foreach (WorkItem item in WorkItems(model))
+        IReadOnlyList<WorkItem> items = WorkItems(model);
+        int keyWidth = items.Count == 0 ? 0 : items.Max(i => i.Key.Length) + 2;
+        int statusWidth = items.Count == 0 ? 0 : items.Max(i => i.Status.Length) + 2;
+        foreach (WorkItem item in items)
         {
-            text.Append("  ").Append(item.Key.PadRight(12)).Append(item.Status.PadRight(26)).Append(item.Kind.PadRight(10)).Append(item.Title).Append('\n');
+            text.Append("  ").Append(item.Key.PadRight(keyWidth)).Append(item.Status.PadRight(statusWidth)).Append(item.Kind.PadRight(11)).Append(item.Title).Append('\n');
         }
 
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
