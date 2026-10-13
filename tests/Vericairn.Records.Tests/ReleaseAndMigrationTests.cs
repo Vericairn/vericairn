@@ -38,6 +38,7 @@ public class ReleaseAndMigrationTests
         model = accepted.Load();
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
         Assert.Contains("\"releases\"", EstateStatus.RenderJson(model, EstateChecks.Run(model)), StringComparison.Ordinal);
+        Assert.DoesNotContain(model.Findings, f => f.Code is "acceptance.unresolved" or "record.subject-stale");
     }
 
     [Fact]

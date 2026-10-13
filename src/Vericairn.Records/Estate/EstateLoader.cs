@@ -226,7 +226,7 @@ public static class EstateLoader
         }
 
         RecordEnvelope latest = model.Latest(target);
-        if (record.Subject.Hash is not null && latest.Id != target.Id)
+        if (record.Subject.Hash is not null && latest.Id != target.Id && !ReleaseType.IsPublicationOf(target, latest))
         {
             findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
         }
