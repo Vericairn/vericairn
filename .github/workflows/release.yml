@@ -63,7 +63,7 @@ jobs:
           mkdir -p dist
           for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
             dotnet publish src/Vericairn.Cli/Vericairn.Cli.csproj --configuration Release --runtime "$rid" --self-contained \
-              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true -p:RestoreLockedMode=false \
               --output "out/$rid/bin" --nologo --verbosity quiet
             rm -f "out/$rid/bin/"*.pdb "out/$rid/bin/"*.xml
             cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out/$rid/"
