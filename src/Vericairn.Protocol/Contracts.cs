@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Copyright (c) 2026 Jayson Furr
+// Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
 using System.Text.Json.Serialization;

@@ -16,10 +16,10 @@
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Authors>Jayson Furr</Authors>
+    <Authors>Jason Furr</Authors>
     <Company>Vericairn</Company>
     <Product>Vericairn</Product>
-    <Copyright>Copyright (c) 2026 Jayson Furr</Copyright>
+    <Copyright>Copyright (c) 2026 Jason Furr</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Vericairn/vericairn</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
