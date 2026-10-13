@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+using System.Text.RegularExpressions;
+
+namespace Vericairn.Records.Types;
+
+/// <summary>Shared field patterns.</summary>
+public static partial class Patterns
+{
+    /// <summary>Lower-case kebab-case slug.</summary>
+    public static Regex Slug => SlugRegex();
+
+    /// <summary>Upper-case work-order key such as M0 or DESIGN-01.</summary>
+    public static Regex WorkKey => WorkKeyRegex();
+
+    /// <summary>Repository-relative path under design/ or docs/ with forward slashes.</summary>
+    public static Regex DocumentPath => DocumentPathRegex();
+
+    /// <summary>GitHub owner/name.</summary>
+    public static Regex GitHubRepository => GitHubRepositoryRegex();
+
+    /// <summary>Semantic version.</summary>
+    public static Regex SemanticVersion => SemanticVersionRegex();
+
+    [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
+    private static partial Regex SlugRegex();
+
+    [GeneratedRegex("^[A-Z][A-Z0-9]*(-[A-Z0-9]+)*$")]
+    private static partial Regex WorkKeyRegex();
+
+    [GeneratedRegex(@"^(design|docs)/([A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+\.[A-Za-z0-9]+$")]
+    private static partial Regex DocumentPathRegex();
+
+    [GeneratedRegex(@"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?/[A-Za-z0-9._-]+$")]
+    private static partial Regex GitHubRepositoryRegex();
+
+    [GeneratedRegex(@"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$")]
+    private static partial Regex SemanticVersionRegex();
+}

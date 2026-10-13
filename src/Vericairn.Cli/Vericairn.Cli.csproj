@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>vericairn</AssemblyName>
+    <RootNamespace>Vericairn.Cli</RootNamespace>
+    <Description>The vericairn command-line interface.</Description>
+    <IsPackable>false</IsPackable>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

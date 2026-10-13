@@ -1,0 +1,27 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{json,yml,yaml,xml,props,targets,csproj,slnx,md,sh}]
+indent_size = 2
+
+[*.cs]
+file_header_template = SPDX-License-Identifier: Apache-2.0\nCopyright (c) 2026 Jayson Furr
+dotnet_diagnostic.IDE0073.severity = error
+csharp_style_namespace_declarations = file_scoped:error
+dotnet_sort_system_directives_first = true
+csharp_prefer_braces = true:suggestion
+dotnet_style_prefer_collection_expression = true:suggestion
+# CA1303: literal strings in console output are intentional for a CLI
+dotnet_diagnostic.CA1303.severity = none
+# CA1848 / CA2254: no logging framework in this layer
+dotnet_diagnostic.CA1848.severity = none
+dotnet_diagnostic.CA2254.severity = none
+# CA1031: the CLI boundary deliberately catches all exceptions to turn them into exit codes
+dotnet_diagnostic.CA1031.severity = none

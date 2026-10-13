@@ -1,0 +1,15 @@
+# Build output (UseArtifactsOutput puts everything here)
+artifacts/
+bin/
+obj/
+TestResults/
+
+# Per-clone working state and local tooling; never estate content
+.vericairn/
+
+# IDE and OS residue
+.vs/
+.idea/
+*.user
+*.suo
+.DS_Store

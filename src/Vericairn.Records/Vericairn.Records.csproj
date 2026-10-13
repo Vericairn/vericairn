@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Vericairn record format: canonical JSON, identifiers, hashing, validation and estate layout.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Vericairn.Records</PackageId>
+  </PropertyGroup>
+
+</Project>

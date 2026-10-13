@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+namespace Vericairn.Records.Types;
+
+/// <summary>Role names a principal can hold.</summary>
+public static class Roles
+{
+    /// <summary>The accountable human who owns the estate and accepts releases.</summary>
+    public const string Operator = "operator";
+
+    /// <summary>A principal that produces work (code, documents, records).</summary>
+    public const string Builder = "builder";
+
+    /// <summary>A principal that reviews other principals' work.</summary>
+    public const string Reviewer = "reviewer";
+
+    /// <summary>A principal admitted to contribute bounded work.</summary>
+    public const string Contributor = "contributor";
+
+    /// <summary>An automated service principal.</summary>
+    public const string Service = "service";
+
+    /// <summary>All role names.</summary>
+    public static readonly string[] All = [Operator, Builder, Reviewer, Contributor, Service];
+}
+
+/// <summary>Authority scope names with a defined meaning in format 1.</summary>
+public static class Scopes
+{
+    /// <summary>Engineering inside the estate's repositories: code, tests, documents, records.</summary>
+    public const string LocalEngineering = "local-engineering";
+
+    /// <summary>Commit and push to the estate's repositories on non-protected branches, open pull requests.</summary>
+    public const string RepositoryWrite = "repository-write";
+
+    /// <summary>Record self-reviews and self-acceptances for ordinary (non-release, non-milestone) work orders.</summary>
+    public const string SelfAcceptOrdinaryWork = "self-accept-ordinary-work";
+
+    /// <summary>Accept other principals' work orders.</summary>
+    public const string AcceptWork = "accept-work";
+
+    /// <summary>Record principals, authority and admissions.</summary>
+    public const string Administer = "administer";
+
+    /// <summary>All scope names with defined meaning.</summary>
+    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer];
+}
