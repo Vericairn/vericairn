@@ -27,10 +27,12 @@ public static class RecordTypeRegistry
         new DeviceType(),
         new AdmissionType(),
         new ReconciliationType(),
+        new ReleaseType(),
+        new MigrationType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
     /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>
-    public static readonly string[] Reserved = ["release", "migration", "object"];
+    public static readonly string[] Reserved = ["object"];
 
     /// <summary>All admitted types, ordered by name.</summary>
     public static IReadOnlyList<IRecordType> All => Types.Values.OrderBy(t => t.Name, StringComparer.Ordinal).ToList();

@@ -30,6 +30,7 @@ internal static class CliApp
         root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
         root.Subcommands.Add(RecoverFamily(estateOption));
         root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
 
@@ -165,10 +166,29 @@ internal static class CliApp
         restore.SetAction(parseResult => Commands.Restore(parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(restore);
 
+        var toVersionOption = new Option<string>("--to") { Description = "Version of a published release recorded in this estate.", Required = true };
+        var upgradeByOption = new Option<string?>("--by") { Description = "Principal id applying the upgrade (required unless --check)." };
+        var checkOnlyOption = new Option<bool>("--check") { Description = "Show the plan without changing anything." };
+        var upgrade = new Command("upgrade", "Pin the estate to a published release and apply record-format migrations as one reviewable change with a migration record.");
+        upgrade.Options.Add(toVersionOption);
+        upgrade.Options.Add(upgradeByOption);
+        upgrade.Options.Add(checkOnlyOption);
+        upgrade.SetAction(parseResult => Commands.Upgrade(parseResult.GetValue(estateOption)!, parseResult.GetValue(toVersionOption)!, parseResult.GetValue(upgradeByOption), parseResult.GetValue(checkOnlyOption), parseResult.GetValue(jsonOption)));
+        estate.Subcommands.Add(upgrade);
+
         var reconcile = new Command("reconcile", "List what two diverged copies left to settle: divergent revisions, duplicate keys, duplicate results.");
         reconcile.SetAction(parseResult => Commands.Reconcile(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(reconcile);
         return estate;
+    }
+
+    private static Command ReleaseFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var release = new Command("release", "Releases recorded in the estate.");
+        var list = new Command("list", "List current release records: version, status, commit, id, signing.");
+        list.SetAction(parseResult => Commands.ReleaseList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        release.Subcommands.Add(list);
+        return release;
     }
 
     private static Command RecoverFamily(Option<string> estateOption)

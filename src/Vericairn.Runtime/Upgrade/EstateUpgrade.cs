@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jayson Furr
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
+
+namespace Vericairn.Runtime.Upgrade;
+
+/// <summary>A record-format migration: forward-only, idempotent, named.</summary>
+public interface IRecordFormatMigration
+{
+    /// <summary>Stable name recorded in the migration record.</summary>
+    string Name { get; }
+
+    /// <summary>Format it reads.</summary>
+    long FromFormat { get; }
+
+    /// <summary>Format it writes.</summary>
+    long ToFormat { get; }
+}
+
+/// <summary>What an upgrade would do, computed before anything changes.</summary>
+/// <param name="FromPin">Current pin description.</param>
+/// <param name="ToPin">Target pin description.</param>
+/// <param name="FromFormat">Current record format.</param>
+/// <param name="ToFormat">Target record format.</param>
+/// <param name="Migrations">Migrations that would run, in order.</param>
+/// <param name="Release">The published release record upgraded to.</param>
+/// <param name="Artifacts">Distributable hash per platform, carried into the manifest.</param>
+public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts);
+
+/// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
+public static class EstateUpgrade
+{
+    /// <summary>Record-format migrations this release knows. Format 1 is the only format so far.</summary>
+    public static IReadOnlyList<IRecordFormatMigration> Migrations { get; } = [];
+
+    /// <summary>Plans an upgrade to a version; throws with the reason when no published release of that version is recorded.</summary>
+    public static UpgradePlan Plan(EstateModel model, string version)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        EstateManifest manifest = model.Manifest ?? throw new InvalidOperationException("The estate has no usable manifest.");
+        List<RecordEnvelope> candidates = model.Current("release").Where(r => EstateModel.BodyString(r, "version") == version).ToList();
+        RecordEnvelope release = candidates.FirstOrDefault(r => EstateModel.BodyString(r, "status") == "published")
+            ?? throw new InvalidOperationException(candidates.Count == 0
+                ? $"No release record has version {version}; a release is recorded in the estate before the estate is upgraded to it."
+                : $"Release {version} is recorded as {EstateModel.BodyString(candidates[0], "status")}, not published; the operator's acceptance and the observed publication come first.");
+        long toFormat = release.Body.TryGetProperty("recordFormat", out JsonElement format) && format.TryGetProperty("writes", out JsonElement writes) && writes.TryGetInt64(out long w) ? w : manifest.RecordFormat;
+        if (toFormat < manifest.RecordFormat)
+        {
+            throw new InvalidOperationException($"Release {version} writes record format {toFormat}, older than this estate's format {manifest.RecordFormat}; upgrades are forward-only.");
+        }
+
+        var steps = new List<string>();
+        long current = manifest.RecordFormat;
+        while (current < toFormat)
+        {
+            IRecordFormatMigration step = Migrations.FirstOrDefault(m => m.FromFormat == current) ?? throw new InvalidOperationException($"No migration from record format {current} is known to this Vericairn.");
+            steps.Add(step.Name);
+            current = step.ToFormat;
+        }
+
+        var artifacts = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (release.Body.TryGetProperty("artifacts", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement artifact in list.EnumerateArray())
+            {
+                string? platform = artifact.TryGetProperty("platform", out JsonElement p) ? p.GetString() : null;
+                string? name = artifact.TryGetProperty("name", out JsonElement n) ? n.GetString() : null;
+                string? hash = artifact.TryGetProperty("hash", out JsonElement h) ? h.GetString() : null;
+                if (platform is not null && platform != "any" && hash is not null && name is not null && IsDistributable(name, version, platform))
+                {
+                    artifacts[platform] = hash;
+                }
+            }
+        }
+
+        if (artifacts.Count == 0)
+        {
+            throw new InvalidOperationException($"Release {version} names no distributable of the form vericairn-{version}-<platform>.tar.gz or .zip; the bootstrap could not verify what it fetches.");
+        }
+
+        string repository = EstateModel.BodyString(release, "repository") ?? manifest.Repository ?? "?";
+        return new UpgradePlan(manifest.Describe(), $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts);
+    }
+
+    /// <summary>The distributable name for a platform: a tar.gz on Linux and macOS, a zip on Windows.</summary>
+    public static string DistributableName(string version, string platform) =>
+        $"vericairn-{version}-{platform}" + (platform.StartsWith("win-", StringComparison.Ordinal) ? ".zip" : ".tar.gz");
+
+    /// <summary>True when an artifact name is the distributable of a platform for a version (either archive form).</summary>
+    public static bool IsDistributable(string name, string version, string platform) =>
+        name == $"vericairn-{version}-{platform}.zip" || name == $"vericairn-{version}-{platform}.tar.gz";
+
+    /// <summary>The manifest bytes after the upgrade: release mode, the version, and the artifact hashes.</summary>
+    public static byte[] ManifestAfter(EstateManifest current, UpgradePlan plan)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(plan);
+        var artifacts = new JsonObject();
+        foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
+        {
+            artifacts[platform] = hash;
+        }
+
+        var manifest = new JsonObject
+        {
+            ["format"] = EstateManifest.Format1,
+            ["estate"] = current.Estate,
+            ["recordFormat"] = plan.ToFormat,
+            ["profile"] = current.Profile,
+            ["vericairn"] = new JsonObject
+            {
+                ["mode"] = "release",
+                ["repository"] = EstateModel.BodyString(plan.Release, "repository") ?? current.Repository,
+                ["version"] = EstateModel.BodyString(plan.Release, "version"),
+                ["artifacts"] = artifacts,
+            },
+        };
+        using JsonDocument document = JsonDocument.Parse(manifest.ToJsonString());
+        return CanonicalJson.SerializePrettyUtf8(document.RootElement);
+    }
+
+    /// <summary>The body of the migration record that describes an applied plan.</summary>
+    public static JsonObject MigrationBody(UpgradePlan plan, IReadOnlyList<string> changes)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(changes);
+        return new JsonObject
+        {
+            ["fromPin"] = plan.FromPin,
+            ["toPin"] = plan.ToPin,
+            ["fromFormat"] = plan.FromFormat,
+            ["toFormat"] = plan.ToFormat,
+            ["migrations"] = new JsonArray(plan.Migrations.Select(m => (JsonNode)m).ToArray()),
+            ["changes"] = new JsonArray(changes.Select(c => (JsonNode)c).ToArray()),
+            ["release"] = plan.Release.Id,
+        };
+    }
+}

@@ -39,6 +39,9 @@ public sealed partial class EstateManifest
     /// <summary>Pinned version (release mode).</summary>
     public string? Version { get; init; }
 
+    /// <summary>Release mode: the hash of the distributable per platform, so the bootstrap verifies what it fetches against the estate, never against a tag name.</summary>
+    public IReadOnlyDictionary<string, string>? Artifacts { get; init; }
+
     /// <summary>One-line description of the pin for status output.</summary>
     public string Describe() => Mode == "release" ? $"release {Version}" : $"source {Repository}@{(Commit is { Length: >= 12 } ? Commit[..12] : Commit)}";
 
@@ -100,12 +103,34 @@ public sealed partial class EstateManifest
             string profile = reader.Has("profile") ? reader.Enum("profile", false, Profiles) ?? Profiles[0] : Profiles[0];
             BodyReader? vericairn = reader.Nested("vericairn", true);
             string? mode = null, repository = null, commit = null, version = null;
+            Dictionary<string, string>? artifacts = null;
             if (vericairn is not null)
             {
                 mode = vericairn.Enum("mode", true, "source", "release");
                 repository = vericairn.Text("repository", true, 200, Patterns.GitHubRepository, "owner/name");
                 commit = vericairn.Text("commit", mode == "source", 40, CommitPattern(), "a 40-character lower-case hex commit id");
                 version = vericairn.Text("version", mode == "release", 100, Patterns.SemanticVersion, "a semantic version");
+                BodyReader? artifactsReader = vericairn.Nested("artifacts", mode == "release");
+                if (artifactsReader is not null)
+                {
+                    var map = new Dictionary<string, string>(StringComparer.Ordinal);
+                    foreach (JsonProperty property in artifactsReader.Element.EnumerateObject())
+                    {
+                        string? hash = artifactsReader.Hash(property.Name, true);
+                        if (Array.IndexOf(Types.ReleaseType.Platforms, property.Name) < 0 || property.Name == "any")
+                        {
+                            artifactsReader.Error("body.enum", property.Name, "Artifact platforms are runtime identifiers such as linux-x64, osx-arm64 or win-x64.");
+                        }
+                        else if (hash is not null)
+                        {
+                            map[property.Name] = hash;
+                        }
+                    }
+
+                    artifactsReader.NoOtherKeys();
+                    artifacts = map;
+                }
+
                 vericairn.NoOtherKeys();
             }
 
@@ -115,7 +140,7 @@ public sealed partial class EstateManifest
                 return null;
             }
 
-            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version };
+            return new EstateManifest { Estate = estate, RecordFormat = recordFormat.Value, Profile = profile, Mode = mode, Repository = repository, Commit = commit, Version = version, Artifacts = artifacts };
         }
     }
 

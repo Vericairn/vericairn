@@ -23,6 +23,9 @@ public static partial class Patterns
     /// <summary>Semantic version.</summary>
     public static Regex SemanticVersion => SemanticVersionRegex();
 
+    /// <summary>A 40-character lower-case hex git commit id.</summary>
+    public static Regex Commit => CommitRegex();
+
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex SlugRegex();
 
@@ -37,4 +40,7 @@ public static partial class Patterns
 
     [GeneratedRegex(@"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$")]
     private static partial Regex SemanticVersionRegex();
+
+    [GeneratedRegex("^[0-9a-f]{40}$")]
+    private static partial Regex CommitRegex();
 }
