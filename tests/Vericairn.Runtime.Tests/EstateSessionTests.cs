@@ -13,23 +13,15 @@ using Vericairn.Runtime.Store;
 namespace Vericairn.Runtime.Tests;
 
 [Collection("home")]
-public class EstateSessionTests : IDisposable
+public class EstateSessionTests
 {
-    private readonly string home = Path.Combine(Path.GetTempPath(), "vericairn-home-" + Ulid.NewUlid().Value);
-    private readonly string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
-
-    public EstateSessionTests()
-    {
-        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
-    }
-
     [Fact]
     public void RepositorySyncedSessionMirrorsTheRecordFilesAndNeverWritesIntoTheRepository()
     {
         using var estate = new TestEstate();
         using EstateSession session = EstateSession.Open(estate.Root);
         Assert.Equal("repository-synced", session.Profile);
-        Assert.StartsWith(home, session.Live.Path, StringComparison.Ordinal);
+        Assert.StartsWith(VericairnHome.Path(), session.Live.Path, StringComparison.Ordinal);
         Assert.DoesNotContain(estate.Root, session.Live.Path, StringComparison.Ordinal);
         EstateModel first = session.Load();
         Assert.False(first.Findings.HasErrors, string.Join("\n", first.Findings));
@@ -84,20 +76,6 @@ public class EstateSessionTests : IDisposable
         finally
         {
             Directory.Delete(root, recursive: true);
-        }
-    }
-
-    public void Dispose()
-    {
-        GC.SuppressFinalize(this);
-        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
-        try
-        {
-            Directory.Delete(home, recursive: true);
-        }
-        catch (IOException)
-        {
-            // Best effort.
         }
     }
 }
