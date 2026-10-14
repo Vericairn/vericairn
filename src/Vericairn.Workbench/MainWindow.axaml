@@ -1,0 +1,121 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:Vericairn.Workbench"
+        xmlns:pres="using:Vericairn.Presentation"
+        x:Class="Vericairn.Workbench.MainWindow"
+        x:DataType="local:ShellViewModel"
+        Title="Vericairn Workbench" Width="1200" Height="800" MinWidth="720" MinHeight="480">
+  <DockPanel>
+    <Menu DockPanel.Dock="Top" Name="MainMenu" AutomationProperties.Name="Main menu">
+      <MenuItem Header="_Estate">
+        <MenuItem Header="_Open or connect" InputGesture="Ctrl+O" Click="OnFocusOpen" />
+        <MenuItem Header="_Refresh" InputGesture="F5" Click="OnRefresh" />
+      </MenuItem>
+      <MenuItem Header="_Runtime" Name="RuntimeMenu">
+        <MenuItem Header="_Start the daemon" Click="OnStartRuntime" />
+        <MenuItem Header="S_top the daemon" Click="OnStopRuntime" />
+        <MenuItem Header="Show the _install plan" Click="OnInstallPlan" />
+      </MenuItem>
+      <MenuItem Header="_View">
+        <MenuItem Header="Toggle _navigation" InputGesture="Ctrl+Shift+L" Click="OnToggleLeft" />
+        <MenuItem Header="Toggle _inspector" InputGesture="Ctrl+Shift+R" Click="OnToggleRight" />
+        <MenuItem Header="Toggle _activity" InputGesture="Ctrl+Shift+B" Click="OnToggleBottom" />
+        <MenuItem Header="Reset _layout" InputGesture="Ctrl+Shift+0" Click="OnResetLayout" />
+        <Separator />
+        <MenuItem Header="Focus navigation" InputGesture="Ctrl+1" Click="OnFocusNavigation" />
+        <MenuItem Header="Focus documents" InputGesture="Ctrl+2" Click="OnFocusDocuments" />
+        <MenuItem Header="Focus inspector" InputGesture="Ctrl+3" Click="OnFocusInspector" />
+        <MenuItem Header="Focus activity" InputGesture="Ctrl+4" Click="OnFocusActivity" />
+      </MenuItem>
+    </Menu>
+
+    <Border DockPanel.Dock="Top" Name="TargetBar" Padding="12,6" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1" AutomationProperties.Name="Target context">
+      <StackPanel Orientation="Horizontal" Spacing="18">
+        <TextBlock Name="EstateNameText" Text="{Binding EstateName}" FontWeight="Bold" VerticalAlignment="Center" />
+        <TextBlock Text="{Binding Pin}" VerticalAlignment="Center" />
+        <TextBlock Name="RuntimeText" Text="{Binding RuntimeLabel}" VerticalAlignment="Center" />
+        <TextBlock Name="ActingText" Text="{Binding ActingPrincipal}" VerticalAlignment="Center" />
+        <TextBlock Name="FreshnessText" Text="{Binding Freshness}" VerticalAlignment="Center" />
+        <TextBox Name="RecordIdBox" PlaceholderText="Record id, then Enter" Width="300" MinHeight="28" AutomationProperties.Name="Open a record by id" />
+      </StackPanel>
+    </Border>
+
+    <TextBlock DockPanel.Dock="Bottom" Name="StatusBar" Text="{Binding Status}" Padding="12,6" AutomationProperties.Name="Status" />
+
+    <Grid Name="Body" ColumnDefinitions="240,4,*,4,320" RowDefinitions="*,4,160">
+      <Border Name="LeftPanel" Grid.Column="0" Grid.Row="0" Grid.RowSpan="3" IsVisible="{Binding LeftVisible}" AutomationProperties.Name="Navigation">
+        <ListBox Name="Navigation" Focusable="True" ItemsSource="{Binding Regions}" SelectedItem="{Binding SelectedRegion}" AutomationProperties.Name="Primary navigation">
+          <ListBox.ItemTemplate>
+            <DataTemplate x:DataType="local:Region">
+              <StackPanel MinHeight="32">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                <TextBlock Text="{Binding Question}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+      </Border>
+      <GridSplitter Name="LeftSplitter" Grid.Column="1" Grid.Row="0" Grid.RowSpan="3" Width="4" IsVisible="{Binding LeftVisible}" />
+
+      <Grid Grid.Column="2" Grid.Row="0" RowDefinitions="Auto,*">
+        <StackPanel Name="FirstRun" Grid.Row="0" Margin="16" Spacing="8" IsVisible="{Binding !HasEstate}" AutomationProperties.Name="Open an estate">
+          <TextBlock Text="Open an estate" FontSize="20" FontWeight="SemiBold" />
+          <TextBlock TextWrapping="Wrap" Text="Create locally, adopt existing work, or connect to an authorized estate. In this release Workbench opens an existing estate's root; creation and adoption follow with the work screens. Records stay in that directory and nothing leaves this machine unless a provider you connect sends it." />
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBox Name="EstatePathBox" Width="520" MinHeight="32" PlaceholderText="Path of the estate root (the directory with estate/manifest.json)" Text="{Binding EstatePath}" AutomationProperties.Name="Estate root" />
+            <Button Name="OpenButton" Content="Open" MinHeight="32" MinWidth="80" Click="OnOpenEstate" />
+          </StackPanel>
+          <TextBlock Text="Recent" FontWeight="SemiBold" Margin="0,8,0,0" />
+          <ListBox Name="RecentList" Focusable="True" ItemsSource="{Binding Recent}" MaxHeight="200" AutomationProperties.Name="Recent estates" DoubleTapped="OnRecentOpen" />
+        </StackPanel>
+
+        <Grid Grid.Row="1" RowDefinitions="Auto,*" IsVisible="{Binding HasEstate}">
+          <Border Grid.Row="0" IsVisible="{Binding HomeSelected}" Padding="8" AutomationProperties.Name="Home">
+            <StackPanel Spacing="4">
+              <TextBlock Text="Attention" FontWeight="SemiBold" />
+              <ListBox Name="AttentionList" Focusable="True" ItemsSource="{Binding Attention}" MaxHeight="360" AutomationProperties.Name="Attention items" DoubleTapped="OnAttentionOpen" SelectionChanged="OnAttentionSelected">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:AttentionItem">
+                    <Grid ColumnDefinitions="150,*" MinHeight="32">
+                      <TextBlock Grid.Column="0" Text="{Binding KindLabel}" FontWeight="SemiBold" />
+                      <StackPanel Grid.Column="1">
+                        <TextBlock Text="{Binding Subject}" />
+                        <TextBlock Text="{Binding Why}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </Border>
+          <TabControl Grid.Row="1" Name="DocumentTabs" Focusable="True" ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDocument}" AutomationProperties.Name="Documents">
+            <TabControl.ItemTemplate>
+              <DataTemplate x:DataType="local:Document">
+                <TextBlock Text="{Binding Title}" MinHeight="24" />
+              </DataTemplate>
+            </TabControl.ItemTemplate>
+            <TabControl.ContentTemplate>
+              <DataTemplate x:DataType="local:Document">
+                <ScrollViewer>
+                  <SelectableTextBlock Text="{Binding Text}" FontFamily="Menlo,Consolas,monospace" FontSize="12" Margin="8" TextWrapping="Wrap" />
+                </ScrollViewer>
+              </DataTemplate>
+            </TabControl.ContentTemplate>
+          </TabControl>
+        </Grid>
+      </Grid>
+
+      <GridSplitter Name="RightSplitter" Grid.Column="3" Grid.Row="0" Grid.RowSpan="3" Width="4" IsVisible="{Binding RightVisible}" />
+      <Border Name="RightPanel" Grid.Column="4" Grid.Row="0" Grid.RowSpan="3" IsVisible="{Binding RightVisible}" Padding="8" AutomationProperties.Name="Inspector">
+        <ScrollViewer>
+          <SelectableTextBlock Name="InspectorText" Text="{Binding Inspector}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Inspector text" />
+        </ScrollViewer>
+      </Border>
+
+      <GridSplitter Name="BottomSplitter" Grid.Column="2" Grid.Row="1" Height="4" IsVisible="{Binding BottomVisible}" />
+      <Border Name="BottomPanel" Grid.Column="2" Grid.Row="2" IsVisible="{Binding BottomVisible}" AutomationProperties.Name="Activity">
+        <ListBox Name="ActivityList" Focusable="True" ItemsSource="{Binding Activity}" FontFamily="Menlo,Consolas,monospace" FontSize="11" AutomationProperties.Name="Activity log" />
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

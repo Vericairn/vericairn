@@ -1,0 +1,92 @@
+{
+  "format": "vericairn.state-language/1",
+  "note": "The state language of the cohesion contract as the runtime renders it and the clients present it. One vocabulary per subject; the strings are exact; presentation may reword a label but never merge two states. Checked against Vericairn.Presentation.StateLanguage and against the runtime's own strings by tests.",
+  "vocabularies": {
+    "work-order": [
+      "planned",
+      "active",
+      "paused",
+      "submitted",
+      "retired",
+      "accepted",
+      "accepted (earlier revision)"
+    ],
+    "work-order-kind": [
+      "ordinary",
+      "milestone"
+    ],
+    "assignment": [
+      "no attempt",
+      "in progress",
+      "awaiting review",
+      "accepted",
+      "accepted (earlier revision)"
+    ],
+    "result-outcome": [
+      "none",
+      "completed",
+      "partial",
+      "blocked",
+      "abandoned"
+    ],
+    "operation": [
+      "not-started",
+      "dispatched",
+      "observed-success",
+      "known-failure",
+      "canceled",
+      "uncertain"
+    ],
+    "release": [
+      "candidate",
+      "published",
+      "withdrawn"
+    ],
+    "review-independence": [
+      "self",
+      "independent-agent",
+      "operator"
+    ],
+    "review-outcome": [
+      "pass",
+      "findings",
+      "fail"
+    ],
+    "verification": [
+      "passed",
+      "failed",
+      "unknown"
+    ],
+    "finding-severity": [
+      "error",
+      "warning",
+      "info"
+    ],
+    "device-admission": [
+      "not admitted",
+      "admitted",
+      "revoked"
+    ],
+    "runtime": [
+      "daemon",
+      "embedded",
+      "unavailable"
+    ],
+    "connection": [
+      "connecting",
+      "current",
+      "cached",
+      "partial",
+      "denied",
+      "unavailable"
+    ],
+    "attention": [
+      "decision needed",
+      "blocked",
+      "uncertain effect",
+      "failed check",
+      "incident",
+      "information"
+    ]
+  }
+}
