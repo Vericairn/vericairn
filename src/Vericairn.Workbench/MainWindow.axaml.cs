@@ -2,10 +2,12 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.ComponentModel;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using Vericairn.Presentation;
 
 namespace Vericairn.Workbench;
@@ -31,6 +33,8 @@ public partial class MainWindow : Window
         EstatePathBox.AddHandler(KeyDownEvent, OnEstatePathKeyDown, RoutingStrategies.Tunnel);
         RecentList.AddHandler(KeyDownEvent, OnRecentKeyDown, RoutingStrategies.Tunnel);
         AttentionList.AddHandler(KeyDownEvent, OnAttentionKeyDown, RoutingStrategies.Tunnel);
+        // Lists inside documents are templated, so Enter for them is caught at the window before any list sees it.
+        AddHandler(KeyDownEvent, OnWindowTunnelKeyDown, RoutingStrategies.Tunnel);
         shell.PropertyChanged += OnShellChanged;
         ApplyLayout();
         Closing += OnClosing;
@@ -90,6 +94,11 @@ public partial class MainWindow : Window
         {
             FocusRegion(RecordIdBox);
         }
+        else if (command && e.Key == Key.I)
+        {
+            shell.OpenInbox();
+            FocusRegion(DocumentTabs);
+        }
         else if (e.Key == Key.Escape)
         {
             FocusRegion(Navigation);
@@ -111,8 +120,51 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnWindowTunnelKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None && EnterOnDocumentList())
+        {
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Enter on a list inside a document: the inbox opens the review workspace; an assignment opens its latest result's review.</summary>
+    private bool EnterOnDocumentList()
+    {
+        if (FocusManager?.GetFocusedElement() is not Visual focused)
+        {
+            return false;
+        }
+
+        ListBox? list = focused as ListBox ?? focused.FindAncestorOfType<ListBox>();
+        if (list?.DataContext is ResultInboxDocument && list.SelectedItem is InboxRow row)
+        {
+            shell.OpenReview(row.ResultId);
+            return true;
+        }
+
+        if (list?.DataContext is WorkOrderDocument && list.SelectedItem is AssignmentView assignment)
+        {
+            shell.OpenAssignment(assignment.Id);
+            return true;
+        }
+
+        if (list?.DataContext is AssignmentDocument && list.SelectedItem is AttemptView attempt && attempt.ResultId is not null)
+        {
+            shell.OpenReview(attempt.ResultId);
+            return true;
+        }
+
+        return false;
+    }
+
     private bool EnterOnFocusedRegion()
     {
+        if (EnterOnDocumentList())
+        {
+            return true;
+        }
+
         if (AttentionList.IsKeyboardFocusWithin && AttentionList.SelectedItem is AttentionItem item)
         {
             shell.OpenAttention(item);
@@ -257,6 +309,145 @@ public partial class MainWindow : Window
             shell.Inspect(item);
         }
     }
+
+    private void OnOpenInbox(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenInbox();
+        FocusRegion(DocumentTabs);
+    }
+
+    private void OnOpenProducts(object? sender, RoutedEventArgs e) => shell.OpenProducts();
+
+    private void OnOpenComposer(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
+        {
+            shell.OpenComposer(order.Key);
+        }
+        else
+        {
+            shell.Status = "Open a work order first; the composer assigns the open work order.";
+        }
+    }
+
+    private void OnCompareOpen(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
+        {
+            shell.OpenComparison(order.Id);
+        }
+        else if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace)
+        {
+            shell.OpenComparison(workspace.SubjectId);
+        }
+        else if (!string.IsNullOrWhiteSpace(RecordIdBox.Text))
+        {
+            shell.OpenComparison(RecordIdBox.Text.Trim());
+        }
+        else
+        {
+            shell.Status = "Open a work order or a review, or type a record id, to compare it with the revision it supersedes.";
+        }
+    }
+
+    private void OnOpenSelectedAssignment(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
+        {
+            if (order.SelectedAssignment is AssignmentView assignment)
+            {
+                shell.OpenAssignment(assignment.Id);
+            }
+            else
+            {
+                shell.Status = "Select an assignment first.";
+            }
+        }
+    }
+
+    private void OnReviewLatestResult(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<AssignmentDocument>(sender) is AssignmentDocument page)
+        {
+            if (page.SelectedAttempt?.ResultId is string selected)
+            {
+                shell.OpenReview(selected);
+            }
+            else if (page.LatestResultId is string latest)
+            {
+                shell.OpenReview(latest);
+            }
+            else
+            {
+                shell.Status = "This assignment has no result yet.";
+            }
+        }
+    }
+
+    private void OnReviewSelectedAssignment(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
+        {
+            if (order.SelectedAssignment?.LatestResultId is string result)
+            {
+                shell.OpenReview(result);
+            }
+            else
+            {
+                shell.Status = "Select an assignment with a result first.";
+            }
+        }
+    }
+
+    private void OnSubmitAssignment(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is AssignmentComposer composer && shell.Api is not null)
+        {
+            composer.Submit(shell.Api, shell.ActingPrincipalId);
+            shell.Status = composer.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
+    private void OnInboxOpen(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<ResultInboxDocument>(sender) is ResultInboxDocument inbox && inbox.Selected is InboxRow row)
+        {
+            shell.OpenReview(row.ResultId);
+        }
+    }
+
+    private void OnSubmitReview(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        {
+            workspace.SubmitReview(shell.Api);
+            shell.Status = workspace.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
+    private void OnSubmitAcceptance(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        {
+            workspace.SubmitAcceptance(shell.Api);
+            shell.Status = workspace.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
+    private void OnCheckPrepared(object? sender, RoutedEventArgs e)
+    {
+        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        {
+            workspace.CheckPrepared(shell.Api);
+            shell.Status = workspace.PreparedState;
+        }
+    }
+
+    /// <summary>The document a handler acts on: the sender's data context when it is inside that document, else the selected document.</summary>
+    private T? DocumentOf<T>(object? sender) where T : Document => (sender as Control)?.DataContext as T ?? shell.SelectedDocument as T;
 
     private void OnFocusOpen(object? sender, RoutedEventArgs e) => FocusRegion(EstatePathBox);
 

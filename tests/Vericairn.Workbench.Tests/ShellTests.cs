@@ -107,7 +107,7 @@ public class ShellTests(HeadlessFixture fixture)
             });
             Assert.True(shell.Documents.Any(d => d.Kind == "work-order"), $"documents: {string.Join(", ", shell.Documents.Select(d => d.Title + "/" + d.Kind))} | focused: {await fixture.Ui(() => window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing")} | activity: {string.Join(" / ", shell.Activity)}");
             Assert.Contains("decision needed", shell.Inspector, StringComparison.Ordinal);
-            Assert.Contains("M9", shell.SelectedDocument!.Text, StringComparison.Ordinal);
+            Assert.Contains("M9", ((WorkOrderDocument)shell.SelectedDocument!).Heading, StringComparison.Ordinal);
         }
         finally
         {
@@ -153,7 +153,7 @@ public class ShellTests(HeadlessFixture fixture)
         Assert.Equal(["start"], runtime.Calls);
         Assert.Equal("daemon", shell.RuntimeMode);
         await fixture.UiAsync(shell.ShowInstallPlanAsync);
-        Assert.Contains(shell.Documents, d => d.Title == "Runtime install plan" && d.Text.Contains("unit: example", StringComparison.Ordinal));
+        Assert.Contains(shell.Documents, d => d.Title == "Runtime install plan" && d is TextDocument text && text.Text.Contains("unit: example", StringComparison.Ordinal));
         await fixture.UiAsync(shell.StopRuntimeAsync);
         Assert.Equal(["start", "plan", "stop"], runtime.Calls);
         unavailable.Dispose();

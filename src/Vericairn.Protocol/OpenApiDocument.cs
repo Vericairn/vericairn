@@ -17,6 +17,7 @@ public static class OpenApiDocument
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
+        ("GET", "/v1/records"),
         ("POST", "/v1/records"),
         ("GET", "/v1/decisions"),
         ("GET", "/v1/decisions/{id}"),
@@ -65,6 +66,11 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
+            if (method == "GET" && path == "/v1/records")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
+            }
+
             if (path.Contains('{', StringComparison.Ordinal))
             {
                 var parameters = new JsonArray();
@@ -213,6 +219,7 @@ public static class OpenApiDocument
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",
         ("GET", "/v1/records/{id}") => "A record by id.",
+        ("GET", "/v1/records") => "The current records of one type, oldest first.",
         ("POST", "/v1/records") => "Author a record; signed with the author's admitted device on the runtime's machine; rejected with findings when the estate would be invalid.",
         ("GET", "/v1/decisions") => "Current decisions.",
         ("GET", "/v1/decisions/{id}") => "One decision by the id of any of its revisions.",

@@ -55,6 +55,7 @@ so a copied request grants nothing and a copied key file is useless where platfo
 | `GET /v1/status` | Status text and the canonical status JSON that is identical on every machine |
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
+| `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
 | `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device, validated with the estate, removed again when the estate would be invalid |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |

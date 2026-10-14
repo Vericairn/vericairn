@@ -125,6 +125,25 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<RecordResponse> Records(string type)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(type);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            Dictionary<string, RecordFile> files = session.Files().ToDictionary(f => f.Path, f => f, StringComparer.Ordinal);
+            var rows = new List<RecordResponse>();
+            foreach (RecordEnvelope record in model.Current(type).OrderBy(r => r.Id, StringComparer.Ordinal))
+            {
+                using JsonDocument document = JsonDocument.Parse(files.TryGetValue(record.ExpectedPath, out RecordFile? file) ? file.Bytes : []);
+                rows.Add(new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, true, document.RootElement.Clone()));
+            }
+
+            return rows;
+        }
+    }
+
+    /// <inheritdoc />
     public WriteOutcome NewRecord(NewRecordRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

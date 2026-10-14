@@ -1,0 +1,564 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Net.Http;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Vericairn.Presentation;
+using Vericairn.Protocol;
+
+namespace Vericairn.Workbench;
+
+/// <summary>A document open in the center workspace; the kind picks the view.</summary>
+public abstract class Document(string title, string kind) : Observable
+{
+    /// <summary>Tab title.</summary>
+    public string Title { get; } = title;
+
+    /// <summary>The kind of document, for tests and the shell.</summary>
+    public string Kind { get; } = kind;
+}
+
+/// <summary>Plain text: observations, plans, records.</summary>
+public sealed class TextDocument(string title, string text, string kind) : Document(title, kind)
+{
+    /// <summary>The text.</summary>
+    public string Text { get; } = text;
+}
+
+/// <summary>A product as its record states it.</summary>
+public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces);
+
+/// <summary>The products of the estate from their records; projects are not a record type of format 1 and the page says so.</summary>
+public sealed class ProductsDocument(IReadOnlyList<ProductRow> products) : Document("Products", "products")
+{
+    /// <summary>The products.</summary>
+    public IReadOnlyList<ProductRow> Products { get; } = products;
+
+    /// <summary>What the page cannot show yet.</summary>
+    public string Note => Products.Count == 0 ? "No product record yet." : "Projects are added to the record format by the milestone that needs them; until then a product's work is its work orders.";
+}
+
+/// <summary>An assignment as the work order page lists it.</summary>
+public sealed record AssignmentView(string Id, string Hash, string Contributor, string Attempts, string? LatestResultId, string? LatestResultState, string Summary);
+
+/// <summary>A work order page: the brief, the assignments with their attempts and results, and the actions that start the loop.</summary>
+public sealed class WorkOrderDocument : Document
+{
+    /// <summary>Builds the page from the work order's brief document.</summary>
+    public WorkOrderDocument(string key, JsonElement brief, string observation) : base(key, "work-order")
+    {
+        Key = key;
+        Observation = observation;
+        JsonElement order = brief.TryGetProperty("workOrder", out JsonElement o) ? o : default;
+        Id = Str(order, "id") ?? string.Empty;
+        Hash = Str(order, "hash") ?? string.Empty;
+        JsonElement body = order.ValueKind == JsonValueKind.Object && order.TryGetProperty("body", out JsonElement b) ? b : default;
+        Heading = $"{key}: {Str(body, "title")}";
+        Kind2 = Str(body, "kind") ?? string.Empty;
+        Intent = Str(body, "intent") ?? string.Empty;
+        ExitQuestion = Str(body, "exitQuestion") ?? string.Empty;
+        var assignments = new List<AssignmentView>();
+        if (brief.TryGetProperty("assignments", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement a in list.EnumerateArray())
+            {
+                string? latestId = null, latestState = null;
+                int attempts = 0;
+                if (a.TryGetProperty("attempts", out JsonElement at) && at.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement attempt in at.EnumerateArray())
+                    {
+                        attempts++;
+                        if (attempt.TryGetProperty("result", out JsonElement r) && r.ValueKind == JsonValueKind.Object)
+                        {
+                            latestId = Str(r, "id");
+                            latestState = Str(r, "state");
+                        }
+                    }
+                }
+
+                string outcome = Str(a.TryGetProperty("brief", out JsonElement bb) ? bb : default, "outcome") ?? string.Empty;
+                assignments.Add(new AssignmentView(Str(a, "id") ?? string.Empty, Str(a, "hash") ?? string.Empty, Str(a, "contributor") ?? "?", attempts.ToString(CultureInfo.InvariantCulture), latestId, latestState is null ? null : StateLanguage.Label("assignment", latestState), outcome));
+            }
+        }
+
+        Assignments = assignments;
+    }
+
+    /// <summary>Work-order key.</summary>
+    public string Key { get; }
+
+    /// <summary>Current revision id.</summary>
+    public string Id { get; }
+
+    /// <summary>Current revision hash.</summary>
+    public string Hash { get; }
+
+    /// <summary>Key and title.</summary>
+    public string Heading { get; }
+
+    /// <summary>ordinary or milestone.</summary>
+    public string Kind2 { get; }
+
+    /// <summary>Intent.</summary>
+    public string Intent { get; }
+
+    /// <summary>Exit question.</summary>
+    public string ExitQuestion { get; }
+
+    /// <summary>The observation text.</summary>
+    public string Observation { get; }
+
+    /// <summary>Assignments.</summary>
+    public IReadOnlyList<AssignmentView> Assignments { get; }
+
+    /// <summary>The selected assignment.</summary>
+    public AssignmentView? SelectedAssignment { get; set; }
+
+    private static string? Str(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+}
+
+/// <summary>An attempt of an assignment with its result, if any.</summary>
+public sealed record AttemptView(string Id, string By, string StartedAt, string Workspace, string Note, string? ResultId, string? ResultState, string? ResultOutcome, string? ResultSummary)
+{
+    /// <summary>First line.</summary>
+    public string Heading => $"{StartedAt}  {Workspace}";
+
+    /// <summary>Second line.</summary>
+    public string Detail => ResultId is null ? $"{Note} (no result yet)" : $"result {ResultId[..Math.Min(12, ResultId.Length)]}: {ResultOutcome}; {ResultState}. {ResultSummary}";
+}
+
+/// <summary>An assignment page: the brief as delegated, the attempts and their results.</summary>
+public sealed class AssignmentDocument : Document
+{
+    /// <summary>Builds the page from the assignment node of the work order's brief document.</summary>
+    public AssignmentDocument(string key, JsonElement assignment, string contributorName) : base($"Assignment {Str(assignment, "id")?[..12]}", "assignment")
+    {
+        Key = key;
+        Id = Str(assignment, "id") ?? string.Empty;
+        Hash = Str(assignment, "hash") ?? string.Empty;
+        Contributor = contributorName;
+        Heading = $"{key}: assignment {Id[..Math.Min(12, Id.Length)]} to {contributorName}";
+        JsonElement brief = assignment.TryGetProperty("brief", out JsonElement b) ? b : default;
+        var lines = new List<string> { "Outcome: " + (Str(brief, "outcome") ?? string.Empty) };
+        foreach ((string name, string title) in new[] { ("permittedChanges", "Permitted changes"), ("prohibitedEffects", "Prohibited effects"), ("workspace", "Workspace"), ("limits", "Limits"), ("expectedOutputs", "Expected outputs"), ("reviewCriteria", "Review criteria") })
+        {
+            if (brief.ValueKind == JsonValueKind.Object && brief.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+            {
+                lines.Add(title + ":");
+                lines.AddRange(list.EnumerateArray().Select(e => "- " + (e.ValueKind == JsonValueKind.String ? e.GetString() : e.GetRawText())));
+            }
+        }
+
+        lines.Add("Recovery: " + (Str(brief, "recovery") ?? string.Empty));
+        BriefText = string.Join("\n", lines);
+        Note = Str(assignment, "note") ?? string.Empty;
+        var attempts = new List<AttemptView>();
+        if (assignment.TryGetProperty("attempts", out JsonElement at) && at.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement attempt in at.EnumerateArray())
+            {
+                JsonElement result = attempt.TryGetProperty("result", out JsonElement r) && r.ValueKind == JsonValueKind.Object ? r : default;
+                JsonElement body = result.ValueKind == JsonValueKind.Object && result.TryGetProperty("body", out JsonElement rb) ? rb : default;
+                attempts.Add(new AttemptView(Str(attempt, "id") ?? string.Empty, Str(attempt, "by") ?? string.Empty, Str(attempt, "startedAt") ?? string.Empty, Str(attempt, "workspace") ?? string.Empty, Str(attempt, "note") ?? string.Empty, Str(result, "id"), result.ValueKind == JsonValueKind.Object ? StateLanguage.Label("assignment", Str(result, "state")) : null, Str(body, "outcome"), Str(body, "summary")));
+            }
+        }
+
+        Attempts = attempts;
+        LatestResultId = attempts.LastOrDefault(a => a.ResultId is not null)?.ResultId;
+    }
+
+    /// <summary>Work-order key.</summary>
+    public string Key { get; }
+
+    /// <summary>Assignment id.</summary>
+    public string Id { get; }
+
+    /// <summary>Assignment hash.</summary>
+    public string Hash { get; }
+
+    /// <summary>The contributor's name.</summary>
+    public string Contributor { get; }
+
+    /// <summary>Heading.</summary>
+    public string Heading { get; }
+
+    /// <summary>The brief as delegated.</summary>
+    public string BriefText { get; }
+
+    /// <summary>The assigning note.</summary>
+    public string Note { get; }
+
+    /// <summary>Attempts, oldest first.</summary>
+    public IReadOnlyList<AttemptView> Attempts { get; }
+
+    /// <summary>The selected attempt.</summary>
+    public AttemptView? SelectedAttempt { get; set; }
+
+    /// <summary>The latest result, if any.</summary>
+    public string? LatestResultId { get; }
+
+    private static string? Str(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+}
+
+/// <summary>A principal a work order can be delegated to.</summary>
+public sealed record ContributorRow(string Id, string Name, string Kind)
+{
+    /// <summary>Display.</summary>
+    public string Display => $"{Name} ({Kind})";
+}
+
+/// <summary>Composes an assignment: the brief's fields, one per line where a list is expected; nothing is sent until Submit.</summary>
+public sealed class AssignmentComposer(string workOrderKey, IReadOnlyList<ContributorRow> contributors) : Document($"Assign {workOrderKey}", "composer")
+{
+    private string outcome = string.Empty, permittedChanges = string.Empty, prohibitedEffects = string.Empty, workspace = string.Empty, limits = string.Empty, expectedOutputs = string.Empty, reviewCriteria = string.Empty, recovery = string.Empty, note = string.Empty, status = "Not sent.";
+    private ContributorRow? contributor = contributors.Count > 0 ? contributors[0] : null;
+
+    /// <summary>The work order.</summary>
+    public string WorkOrderKey { get; } = workOrderKey;
+
+    /// <summary>Principals that can be assigned.</summary>
+    public IReadOnlyList<ContributorRow> Contributors { get; } = contributors;
+
+    /// <summary>The chosen contributor.</summary>
+    public ContributorRow? Contributor { get => contributor; set => Set(ref contributor, value); }
+
+    /// <summary>Outcome.</summary>
+    public string Outcome { get => outcome; set => Set(ref outcome, value); }
+
+    /// <summary>Permitted changes, one per line.</summary>
+    public string PermittedChanges { get => permittedChanges; set => Set(ref permittedChanges, value); }
+
+    /// <summary>Prohibited effects, one per line.</summary>
+    public string ProhibitedEffects { get => prohibitedEffects; set => Set(ref prohibitedEffects, value); }
+
+    /// <summary>Workspace, one entry per line, never a machine path.</summary>
+    public string Workspace { get => workspace; set => Set(ref workspace, value); }
+
+    /// <summary>Limits, one per line.</summary>
+    public string Limits { get => limits; set => Set(ref limits, value); }
+
+    /// <summary>Expected outputs, one per line.</summary>
+    public string ExpectedOutputs { get => expectedOutputs; set => Set(ref expectedOutputs, value); }
+
+    /// <summary>Review criteria, one per line.</summary>
+    public string ReviewCriteria { get => reviewCriteria; set => Set(ref reviewCriteria, value); }
+
+    /// <summary>Recovery.</summary>
+    public string Recovery { get => recovery; set => Set(ref recovery, value); }
+
+    /// <summary>Note.</summary>
+    public string Note { get => note; set => Set(ref note, value); }
+
+    /// <summary>What the runtime answered.</summary>
+    public string Status { get => status; private set => Set(ref status, value); }
+
+    /// <summary>The assignment id once written.</summary>
+    public string? WrittenId { get; private set; }
+
+    /// <summary>The brief as the runtime wants it.</summary>
+    public JsonElement Brief()
+    {
+        var brief = new JsonObject
+        {
+            ["outcome"] = Outcome.Trim(),
+            ["sources"] = new JsonArray(),
+            ["permittedChanges"] = Lines(PermittedChanges),
+            ["prohibitedEffects"] = Lines(ProhibitedEffects),
+            ["workspace"] = Lines(Workspace),
+            ["limits"] = Lines(Limits),
+            ["expectedOutputs"] = Lines(ExpectedOutputs),
+            ["reviewCriteria"] = Lines(ReviewCriteria),
+            ["recovery"] = Recovery.Trim(),
+        };
+        using JsonDocument document = JsonDocument.Parse(brief.ToJsonString());
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>Sends the assignment; the runtime validates and signs.</summary>
+    public void Submit(IEstateApi api, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (string.IsNullOrWhiteSpace(by))
+        {
+            Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
+            return;
+        }
+
+        if (Contributor is null)
+        {
+            Status = "Choose a contributor.";
+            return;
+        }
+
+        WriteOutcome outcome = api.Assign(new AssignRequest(WorkOrderKey, Contributor.Id, by, Brief(), string.IsNullOrWhiteSpace(Note) ? null : Note.Trim()));
+        if (outcome.Ok)
+        {
+            WrittenId = outcome.Written!.Id;
+            Status = $"Written: assignment {outcome.Written.Id} ({outcome.Written.Hash[..19]}...).";
+        }
+        else
+        {
+            Status = Refusal(outcome.Problem);
+        }
+    }
+
+    internal static string Refusal(Problem? problem)
+    {
+        if (problem is null)
+        {
+            return "Refused.";
+        }
+
+        var lines = new List<string> { $"{problem.Code}: {problem.Message}" };
+        lines.AddRange(problem.Findings.Select(f => $"{f.Severity.ToUpperInvariant()} {f.Code} {f.Location}: {f.Message}"));
+        return string.Join("\n", lines);
+    }
+
+    private static JsonArray Lines(string text) => new(text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).Select(l => (JsonNode)l).ToArray());
+}
+
+/// <summary>A result awaiting a person.</summary>
+public sealed record InboxRow(string Key, string AssignmentId, string ResultId, string Contributor, string Outcome, string State)
+{
+    /// <summary>First line.</summary>
+    public string Heading => $"{Key}: result {ResultId[..Math.Min(12, ResultId.Length)]} from {Contributor}";
+
+    /// <summary>Second line.</summary>
+    public string Detail => $"{Outcome}; {State}";
+}
+
+/// <summary>Results across the estate that await review, from the status document.</summary>
+public sealed class ResultInboxDocument(IReadOnlyList<InboxRow> rows) : Document("Result inbox", "inbox")
+{
+    /// <summary>The rows.</summary>
+    public IReadOnlyList<InboxRow> Rows { get; } = rows;
+
+    /// <summary>The selected row.</summary>
+    public InboxRow? Selected { get; set; }
+
+    /// <summary>What the inbox holds.</summary>
+    public string Note => Rows.Count == 0 ? "No result awaits review." : $"{Rows.Count} result(s) await review; each is a claim to inspect. Enter opens the review workspace.";
+}
+
+/// <summary>An existing review of the subject, selectable as the basis of an acceptance.</summary>
+public sealed class ReviewRow(string id, string by, string independence, string outcome, string summary) : Observable
+{
+    private bool selected;
+
+    /// <summary>Record id.</summary>
+    public string Id { get; } = id;
+
+    /// <summary>Reviewer.</summary>
+    public string By { get; } = by;
+
+    /// <summary>Display.</summary>
+    public string Display => $"{Id[..Math.Min(12, Id.Length)]} {independence} {outcome}: {summary}";
+
+    /// <summary>Whether the acceptance cites it.</summary>
+    public bool Selected { get => selected; set => Set(ref selected, value); }
+}
+
+/// <summary>
+/// The review and decision workspace for one exact result: what was claimed, the evidence and limitations, the reviews on
+/// record, and the drafts of a review and an acceptance pinned to the result's hash. The client shows what it will send and
+/// what the runtime answered; it decides neither independence nor authority.
+/// </summary>
+public sealed class ReviewWorkspace : Document
+{
+    private readonly string subjectType;
+    private PreparedAction prepared;
+    private string reviewOutcome = "pass", reviewSummary = string.Empty, reviewFindings = string.Empty, acceptanceStatement = string.Empty, status = "Nothing sent.", preparedState = string.Empty;
+
+    /// <summary>A workspace over a record (a result or a work order), pinned to its hash and to the facts about it now.</summary>
+    public ReviewWorkspace(RecordResponse subject, string facts, string heading, string summaryText, IReadOnlyList<ReviewRow> reviews, string actingPrincipal, string actingRole) : base(heading, "review")
+    {
+        subjectType = subject.Type;
+        SubjectId = subject.Id;
+        prepared = new PreparedAction("review-and-acceptance", subject.Type, subject.Id, subject.Hash, facts);
+        Heading = heading;
+        SummaryText = summaryText;
+        Reviews = new ObservableCollection<ReviewRow>(reviews);
+        string author = subject.Envelope.TryGetProperty("by", out JsonElement by) ? by.GetString() ?? string.Empty : string.Empty;
+        Independence = author == actingPrincipal ? "self" : actingRole == "operator" ? "operator" : "independent-agent";
+        SelfAcceptance = author == actingPrincipal;
+        ActingPrincipal = actingPrincipal;
+    }
+
+    /// <summary>The outcomes a review can state.</summary>
+    public static IReadOnlyList<string> Outcomes { get; } = ["pass", "findings", "fail"];
+
+    /// <summary>The record under review.</summary>
+    public string SubjectId { get; }
+
+    /// <summary>What the client will declare to the runtime; the runtime verifies both against the records.</summary>
+    public string Declaration => ActingPrincipal.Length == 0
+        ? "No acting principal: this machine holds no admitted device, so nothing can be sent from here."
+        : $"Acting as {ActingPrincipal}. The review will state independence '{Independence}' and the acceptance self = {(SelfAcceptance ? "true" : "false")}, both derived from who authored the subject; the runtime checks them.";
+
+    /// <summary>The pinned subject and facts; re-pinned after a write of this workspace's own, which the person has just seen.</summary>
+    public PreparedAction Prepared { get => prepared; private set => Set(ref prepared, value); }
+
+    /// <summary>Heading.</summary>
+    public string Heading { get; }
+
+    /// <summary>The claim and its evidence, rendered.</summary>
+    public string SummaryText { get; }
+
+    /// <summary>Reviews of the subject on record.</summary>
+    public ObservableCollection<ReviewRow> Reviews { get; }
+
+    /// <summary>The independence the client will declare, derived from who acts and who authored; the runtime verifies it.</summary>
+    public string Independence { get; }
+
+    /// <summary>Whether the acceptance would be a self-acceptance, derived the same way.</summary>
+    public bool SelfAcceptance { get; }
+
+    /// <summary>The acting principal.</summary>
+    public string ActingPrincipal { get; }
+
+    /// <summary>pass, findings or fail.</summary>
+    public string ReviewOutcome { get => reviewOutcome; set => Set(ref reviewOutcome, value); }
+
+    /// <summary>What was reviewed and how.</summary>
+    public string ReviewSummary { get => reviewSummary; set => Set(ref reviewSummary, value); }
+
+    /// <summary>Findings, one per line, optionally prefixed with error:, warning: or info:.</summary>
+    public string ReviewFindings { get => reviewFindings; set => Set(ref reviewFindings, value); }
+
+    /// <summary>The acceptance statement.</summary>
+    public string AcceptanceStatement { get => acceptanceStatement; set => Set(ref acceptanceStatement, value); }
+
+    /// <summary>What the runtime answered last.</summary>
+    public string Status { get => status; private set => Set(ref status, value); }
+
+    /// <summary>The prepared action's state on the last check.</summary>
+    public string PreparedState { get => preparedState; private set => Set(ref preparedState, value); }
+
+    /// <summary>Last written record id.</summary>
+    public string? WrittenId { get; private set; }
+
+    /// <summary>Checks the pinned subject against the runtime; false when the draft must not be sent.</summary>
+    public bool CheckPrepared(IEstateApi api)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        PreparedState state = PreparedAction.Check(Prepared, api.Record(SubjectId), SubjectFacts.About(api, SubjectId));
+        PreparedState = PreparedAction.Label(state);
+        return state == Presentation.PreparedState.Reusable;
+    }
+
+    /// <summary>Sends the review.</summary>
+    public void SubmitReview(IEstateApi api)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (!CheckPrepared(api))
+        {
+            Status = PreparedState;
+            return;
+        }
+
+        var findings = new JsonArray();
+        foreach (string line in ReviewFindings.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0))
+        {
+            string severity = "info";
+            string text = line;
+            foreach (string s in new[] { "error", "warning", "info" })
+            {
+                if (line.StartsWith(s + ":", StringComparison.OrdinalIgnoreCase))
+                {
+                    severity = s;
+                    text = line[(s.Length + 1)..].Trim();
+                }
+            }
+
+            findings.Add(new JsonObject { ["severity"] = severity, ["summary"] = text });
+        }
+
+        var body = new JsonObject { ["independence"] = Independence, ["outcome"] = ReviewOutcome, ["summary"] = ReviewSummary.Trim(), ["findings"] = findings };
+        Send(api, "review", body);
+    }
+
+    /// <summary>Sends the acceptance with the selected reviews as its basis.</summary>
+    public void SubmitAcceptance(IEstateApi api)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (!CheckPrepared(api))
+        {
+            Status = PreparedState;
+            return;
+        }
+
+        var body = new JsonObject
+        {
+            ["statement"] = AcceptanceStatement.Trim(),
+            ["basis"] = new JsonArray(Reviews.Where(r => r.Selected).Select(r => (JsonNode)r.Id).ToArray()),
+            ["self"] = SelfAcceptance,
+        };
+        Send(api, "acceptance", body);
+    }
+
+    private void Send(IEstateApi api, string type, JsonObject body)
+    {
+        if (ActingPrincipal.Length == 0)
+        {
+            Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
+            return;
+        }
+
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            WriteOutcome outcome = api.NewRecord(new NewRecordRequest(type, ActingPrincipal, document.RootElement.Clone(), Prepared.Subject));
+            if (outcome.Ok)
+            {
+                WrittenId = outcome.Written!.Id;
+                Status = $"Written: {type} {outcome.Written.Id}, signed by the runtime with the acting principal's device.";
+                Prepared = Prepared with { Facts = SubjectFacts.About(api, SubjectId) };
+                PreparedState = PreparedAction.Label(Presentation.PreparedState.Reusable);
+                if (type == "review")
+                {
+                    Reviews.Add(new ReviewRow(outcome.Written.Id, ActingPrincipal, Independence, ReviewOutcome, ReviewSummary.Trim()));
+                }
+            }
+            else
+            {
+                Status = AssignmentComposer.Refusal(outcome.Problem);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Status = "The runtime did not answer: " + exception.Message;
+        }
+    }
+}
+
+/// <summary>Two records side by side with their difference; the raw sides are the alternative inspection path.</summary>
+public sealed class ComparisonDocument(string title, string leftTitle, string leftText, string rightTitle, string rightText) : Document(title, "comparison")
+{
+    /// <summary>Left heading.</summary>
+    public string LeftTitle { get; } = leftTitle;
+
+    /// <summary>Left raw text.</summary>
+    public string LeftText { get; } = leftText;
+
+    /// <summary>Right heading.</summary>
+    public string RightTitle { get; } = rightTitle;
+
+    /// <summary>Right raw text.</summary>
+    public string RightText { get; } = rightText;
+
+    /// <summary>The difference, one mark per line.</summary>
+    public string DiffText { get; } = Diff.Render(Diff.Lines(leftText, rightText));
+
+    /// <summary>Counts.</summary>
+    public string Summary { get; } = Count(leftText, rightText);
+
+    private static string Count(string left, string right)
+    {
+        IReadOnlyList<DiffLine> lines = Diff.Lines(left, right);
+        return $"{lines.Count(l => l.Mark == '-')} removed, {lines.Count(l => l.Mark == '+')} added, {lines.Count(l => l.Mark == ' ')} unchanged";
+    }
+}

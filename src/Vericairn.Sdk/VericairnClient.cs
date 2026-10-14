@@ -116,6 +116,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public RecordResponse? Record(string id) => Get<RecordResponse>("/v1/records/" + Uri.EscapeDataString(id), allowNotFound: true);
 
     /// <inheritdoc />
+    public IReadOnlyList<RecordResponse> Records(string type) => Get<List<RecordResponse>>("/v1/records?type=" + Uri.EscapeDataString(type))!;
+
+    /// <inheritdoc />
     public WriteOutcome NewRecord(NewRecordRequest request) => Post<NewRecordRequest, WriteOutcome>("/v1/records", request)!;
 
     /// <inheritdoc />

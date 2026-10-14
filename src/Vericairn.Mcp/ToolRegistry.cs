@@ -104,6 +104,8 @@ public sealed class ToolRegistry
                 (api, a) => { ObserveResponse? o = api.Observe(Arg(a, "workOrder")); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
             Read("record_get", "One record by id: its envelope with type, author, subject, hash, signatures and body, and whether it is current.", Arguments(("id", "Record id (ULID).")), "id",
                 (api, a) => { RecordResponse? r = api.Record(Arg(a, "id")); return r is null ? NotFound("record", Arg(a, "id")) : Json(r); }),
+            Read("records_list", "The current records of one type, oldest first, as compact rows: id, type, hash and path; record_get fetches one in full.", Arguments(("type", "Record type, for example work-order, decision or release.")), "type",
+                (api, a) => Json(api.Records(Arg(a, "type")).Select(r => new { r.Id, r.Type, r.Hash, r.Path }).ToList())),
             Read("decisions_list", "The estate's current decisions, rendered as a list.", NoArguments(),
                 (api, _) => new ToolCallResult(api.Decisions().Text, false)),
             Read("decision_get", "One decision by the id of any of its revisions: the operator's statement, the summary, the synthesis and the effects.", Arguments(("id", "Decision record id.")), "id",

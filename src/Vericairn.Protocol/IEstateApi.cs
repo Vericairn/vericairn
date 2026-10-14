@@ -24,6 +24,9 @@ public interface IEstateApi
     /// <summary>A record by id, or null.</summary>
     RecordResponse? Record(string id);
 
+    /// <summary>The current records of one type, oldest first; empty for a type with none.</summary>
+    IReadOnlyList<RecordResponse> Records(string type);
+
     /// <summary>Author a record; signed with the author's admitted device on the runtime's machine.</summary>
     WriteOutcome NewRecord(NewRecordRequest request);
 

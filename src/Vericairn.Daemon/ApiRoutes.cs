@@ -23,6 +23,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/validate", () => Results.Json(service.Validate(), ProtocolJson.Options));
         app.MapGet($"{v}/check", () => Results.Json(service.Check(), ProtocolJson.Options));
         app.MapGet($"{v}/records/{{id}}", (string id) => service.Record(id) is RecordResponse record ? Results.Json(record, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/records", (string type) => Results.Json(service.Records(type), ProtocolJson.Options));
         app.MapPost($"{v}/records", (NewRecordRequest request) => Outcome(service.NewRecord(request)));
         app.MapGet($"{v}/decisions", () => Results.Json(service.Decisions(), ProtocolJson.Options));
         app.MapGet($"{v}/decisions/{{id}}", (string id) => service.Decision(id) is DecisionResponse decision ? Results.Json(decision, ProtocolJson.Options) : Results.NotFound());
