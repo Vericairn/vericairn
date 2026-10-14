@@ -149,7 +149,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+        # Every asset is named once (a pattern that also matched the documentation archive once uploaded it twice and the
+        # upload was refused). A draft of the same version left by an earlier failed run of this workflow is replaced, so
+        # the observed draft is always the one this run built; a published release is never touched, and a corrective
+        # release is a new version.
         run: |
           set -eu
+          earlier=$(gh release view "v$VERSION" --json isDraft -q 'select(.isDraft) | "draft"' 2>/dev/null || true)
+          if [ "$earlier" = "draft" ]; then
+            echo "replacing the draft v$VERSION left by an earlier run of this workflow"
+            gh release delete "v$VERSION" --yes
+          fi
           gh release create "v$VERSION" --draft --title "Vericairn $VERSION" --notes-file dist/NOTES.md --target "${{ github.sha }}" \
-            dist/vericairn-$VERSION-*.tar.gz dist/vericairn-$VERSION-*.zip dist/vericairn-workbench-$VERSION-*.tar.gz dist/vericairn-workbench-$VERSION-*.zip dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS
+            dist/vericairn-$VERSION-linux-x64.tar.gz dist/vericairn-$VERSION-linux-arm64.tar.gz dist/vericairn-$VERSION-osx-x64.tar.gz dist/vericairn-$VERSION-osx-arm64.tar.gz \
+            dist/vericairn-$VERSION-win-x64.zip dist/vericairn-$VERSION-win-arm64.zip \
+            dist/vericairn-workbench-$VERSION-linux-x64.tar.gz dist/vericairn-workbench-$VERSION-linux-arm64.tar.gz dist/vericairn-workbench-$VERSION-osx-x64.tar.gz dist/vericairn-workbench-$VERSION-osx-arm64.tar.gz \
+            dist/vericairn-workbench-$VERSION-win-x64.zip dist/vericairn-workbench-$VERSION-win-arm64.zip \
+            dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS
