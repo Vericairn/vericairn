@@ -1,0 +1,9 @@
+SQLitePCLRaw (SQLitePCLRaw.core, SQLitePCLRaw.provider.e_sqlite3, SQLitePCLRaw.lib.e_sqlite3, SQLitePCLRaw.bundle_e_sqlite3)
+Copyright 2014-2024 SourceGear, LLC
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use these files except in compliance with the
+License. A copy of the License is in Apache-2.0.txt beside this file and at http://www.apache.org/licenses/LICENSE-2.0.
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+The e_sqlite3 native library these packages carry is built from SQLite; see SQLite.txt.
