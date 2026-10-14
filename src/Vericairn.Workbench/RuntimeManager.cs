@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text;
 
 namespace Vericairn.Workbench;
 
@@ -77,14 +78,45 @@ public sealed class CliRuntimeManager : IRuntimeManager
                 return new RuntimeOutcome(false, "The command line could not be started.");
             }
 
-            string output = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(true);
-            string error = await process.StandardError.ReadToEndAsync().ConfigureAwait(true);
+            // The command's exit is what is awaited, never the end of its output: a service it starts may hold that output
+            // open for as long as it runs. What the command wrote is collected while it runs and for a moment after it exits.
+            var collected = new StringBuilder();
+            var gate = new object();
+            Task readOutput = Collect(process.StandardOutput, collected, gate);
+            Task readError = Collect(process.StandardError, collected, gate);
             await process.WaitForExitAsync().ConfigureAwait(true);
-            return new RuntimeOutcome(process.ExitCode == 0, (output + error).Trim());
+            await Task.WhenAny(Task.WhenAll(readOutput, readError), Task.Delay(OutputGrace)).ConfigureAwait(true);
+            lock (gate)
+            {
+                return new RuntimeOutcome(process.ExitCode == 0, collected.ToString().Trim());
+            }
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return new RuntimeOutcome(false, exception.Message);
+        }
+    }
+
+    /// <summary>How long output is still collected after the command exits.</summary>
+    private static readonly TimeSpan OutputGrace = TimeSpan.FromSeconds(2);
+
+    private static async Task Collect(StreamReader reader, StringBuilder sink, object gate)
+    {
+        var buffer = new char[4096];
+        try
+        {
+            int read;
+            while ((read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
+            {
+                lock (gate)
+                {
+                    sink.Append(buffer, 0, read);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
+        {
+            // The process was disposed while a service still held the stream open; what was read is kept.
         }
     }
 }
