@@ -71,6 +71,55 @@ public class McpTests
     }
 
     [Fact]
+    public void WritesAppearForAnAdmittedDeviceAndAreSigned()
+    {
+        string root = CliHarness.TempDirectory("mcp-write");
+        string scratch = CliHarness.TempDirectory("mcp-write-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "MCP writes.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Through MCP.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}"""));
+            string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["example repository"],"limits":[],"expectedOutputs":["widget.txt"],"reviewCriteria":["tests pass"],"recovery":"Record a result before stopping."}""")).Id;
+
+            using EstateService api = EstateService.Open(root);
+            Assert.DoesNotContain("work_attempt", ToolNames(Drive(api, builder, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""")[0]));
+
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", builder, "--name", "Builder device").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Test.");
+
+            List<JsonObject> replies = Drive(api, builder,
+                """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""",
+                """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"work_attempt","arguments":{"assignment":"@ASSIGNMENT@","workspace":"example repository, main","note":"Start."}}}""".Replace("@ASSIGNMENT@", assignment, StringComparison.Ordinal));
+            Assert.Contains("work_attempt", ToolNames(replies[0]));
+            Assert.Contains("work_result", ToolNames(replies[0]));
+            JsonObject attempt = replies[1];
+            Assert.False(attempt["result"]!["isError"]!.GetValue<bool>(), attempt.ToJsonString());
+            using JsonDocument outcome = JsonDocument.Parse(attempt["result"]!["content"]![0]!["text"]!.GetValue<string>());
+            string attemptId = outcome.RootElement.GetProperty("written").GetProperty("id").GetString()!;
+
+            JsonObject record = Drive(api, null, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"record_get","arguments":{"id":"@ATTEMPT@"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            using JsonDocument envelope = JsonDocument.Parse(record["result"]!["content"]![0]!["text"]!.GetValue<string>());
+            JsonElement signatures = envelope.RootElement.GetProperty("envelope").GetProperty("signatures");
+            Assert.Equal(1, signatures.GetArrayLength());
+            Assert.Equal(device, signatures[0].GetProperty("device").GetString());
+
+            JsonObject resultReply = Drive(api, builder, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"work_result","arguments":{"attempt":"@ATTEMPT@","body":{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            Assert.False(resultReply["result"]!["isError"]!.GetValue<bool>(), resultReply.ToJsonString());
+            Assert.Contains("next step: none", CliHarness.Ok("--estate", root, "work", "brief", "W-1").Out, StringComparison.Ordinal);
+
+            // A refused write is an error result with the runtime's findings, never an exception or a silent success.
+            JsonObject refused = Drive(api, builder, """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"work_result","arguments":{"attempt":"@ATTEMPT@","body":{"outcome":"completed"}}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            Assert.True(refused["result"]!["isError"]!.GetValue<bool>());
+        }
+        finally
+        {
+            CliHarness.Delete(root);
+            CliHarness.Delete(scratch);
+        }
+    }
+
+    [Fact]
     public void OrientationFilesComeFromTheRecordsAndStateNonClaims()
     {
         string root = CliHarness.TempDirectory("mcp-orientation");

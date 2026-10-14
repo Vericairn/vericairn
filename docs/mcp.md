@@ -10,7 +10,7 @@
 
 Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `decisions_list`, `decision_get`, `releases_list`, `devices_list`.
 
-This is the read-only pilot: no tool writes. The second step of work order MCP-01 adds `work_attempt`, `work_result` and `work_amend`, visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with; a refused write will come back as an error result carrying the runtime's findings. There will be no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type.
+Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_result`, `work_amend`. A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type.
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
@@ -24,10 +24,10 @@ Claude Code: `claude mcp add vericairn -- vericairn --estate <estate root> mcp s
 
 ## Qualification
 
-The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) is qualified by two observations recorded in the estate: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing on three operating systems, and a genuinely different peer, a script in another language driving the built binary end to end. Every agent harness is a non-claim in the orientation file's matrix until a session with it is observed and recorded.
+The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authentication by the operating-system identity of the process plus the acting principal's admitted device for writes) is qualified by two observations recorded in the estate: the in-process conformance test in `tests/Vericairn.Cli.Tests/McpTests.cs`, which drives initialize, tools/list and tools/call over the stream framing on three operating systems, and a genuinely different peer, `tests/mcp-peer/mcp_peer.py`, a Python script driving the built binary end to end over the real stream framing (`python3 -I tests/mcp-peer/mcp_peer.py artifacts/bin/Vericairn.Cli/release/vericairn.dll <estate root>`). Every agent harness is a non-claim in the orientation file's matrix until a session with it is observed and recorded.
 
 ## Limitations
 
-- Read-only pilot: the write tools follow in the second step of work order MCP-01 and are limited to attempts, results and amendments.
+- Read-only pilot first: the write tools shipped in the second step of work order MCP-01 and are limited to attempts, results and amendments.
 - The server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one.
 - Long outputs (a large status document, a long brief) are returned whole; no paging.
