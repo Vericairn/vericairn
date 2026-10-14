@@ -12,6 +12,9 @@ internal static class Seed
 {
     public const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
+    // Console.Out is process-wide; test classes run in parallel, so every redirection takes this gate.
+    private static readonly object ConsoleGate = new();
+
     public static string Init(string root, string name = "Example Estate")
     {
         string line = Cli("--estate", root, "--json", "estate", "init", "--name", name, "--slug", "example", "--purpose", "Workbench test.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
@@ -27,33 +30,39 @@ internal static class Seed
 
     public static string Cli(params string[] args)
     {
-        var output = new StringWriter { NewLine = "\n" };
-        TextWriter previous = Console.Out;
-        Console.SetOut(output);
-        try
+        lock (ConsoleGate)
         {
-            int code = CliApp.Build().Parse(args).Invoke();
-            Assert.True(code == 0, $"vericairn {string.Join(' ', args)} exited {code}: {output}");
-        }
-        finally
-        {
-            Console.SetOut(previous);
-        }
+            var output = new StringWriter { NewLine = "\n" };
+            TextWriter previous = Console.Out;
+            Console.SetOut(output);
+            try
+            {
+                int code = CliApp.Build().Parse(args).Invoke();
+                Assert.True(code == 0, $"vericairn {string.Join(' ', args)} exited {code}: {output}");
+            }
+            finally
+            {
+                Console.SetOut(previous);
+            }
 
-        return output.ToString().Trim().Split('\n').Last();
+            return output.ToString().Trim().Split('\n').Last();
+        }
     }
 
     public static int Run(params string[] args)
     {
-        TextWriter previous = Console.Out;
-        Console.SetOut(new StringWriter());
-        try
+        lock (ConsoleGate)
         {
-            return CliApp.Build().Parse(args).Invoke();
-        }
-        finally
-        {
-            Console.SetOut(previous);
+            TextWriter previous = Console.Out;
+            Console.SetOut(new StringWriter());
+            try
+            {
+                return CliApp.Build().Parse(args).Invoke();
+            }
+            finally
+            {
+                Console.SetOut(previous);
+            }
         }
     }
 

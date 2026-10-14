@@ -14,6 +14,7 @@ using Vericairn.Runtime.Service;
 namespace Vericairn.Workbench.Tests;
 
 /// <summary>The work screens: the loop from a composed assignment through the inbox to a review and an acceptance, prepared actions pinned to their subject, products and comparisons.</summary>
+[Collection("workbench")]
 public class WorkTests(HeadlessFixture fixture)
 {
     private const string Order = """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Exercise the loop.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}""";

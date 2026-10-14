@@ -61,6 +61,7 @@ internal sealed class FakeRuntimeManager : IRuntimeManager
 }
 
 /// <summary>The shell over a test estate: target context, home attention, keyboard alternatives, runtime management, layout.</summary>
+[Collection("workbench")]
 public class ShellTests(HeadlessFixture fixture)
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
@@ -207,23 +208,7 @@ public class ShellTests(HeadlessFixture fixture)
         public void Dispose() => inner?.Dispose();
     }
 
-    private static string Cli(params string[] args)
-    {
-        var output = new StringWriter { NewLine = "\n" };
-        TextWriter previous = Console.Out;
-        Console.SetOut(output);
-        try
-        {
-            int code = CliApp.Build().Parse(args).Invoke();
-            Assert.True(code == 0, $"vericairn {string.Join(' ', args)} exited {code}: {output}");
-        }
-        finally
-        {
-            Console.SetOut(previous);
-        }
-
-        return output.ToString().Trim().Split('\n').Last();
-    }
+    private static string Cli(params string[] args) => Seed.Cli(args);
 
     private static string LastId(string root, string type)
     {
