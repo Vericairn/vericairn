@@ -1,5 +1,6 @@
-<!-- The brand's token contract (design/brand.md): the shell binds these roles, never values. The values are neutral placeholders
-     until the operator's direction becomes revision 2; light and dark variants are both bound so the shell follows the platform. -->
+<!-- The brand's token contract (design/brand.md revision 2): the shell binds these roles, never values. The first values were
+     adopted by the operator's decision of October 14, 2026; light and dark variants are both bound so the shell follows the
+     platform, and the probe measures the contrast of every pair the roles form. -->
 <ResourceDictionary xmlns="https://github.com/avaloniaui"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
   <ResourceDictionary.ThemeDictionaries>
@@ -11,7 +12,7 @@
       <SolidColorBrush x:Key="BrandAccent" Color="#2F5F8F" />
       <SolidColorBrush x:Key="BrandAccentText" Color="#FFFFFF" />
       <SolidColorBrush x:Key="BrandAttention" Color="#8A4B00" />
-      <SolidColorBrush x:Key="BrandOutline" Color="#C9C9C9" />
+      <SolidColorBrush x:Key="BrandOutline" Color="#767676" />
     </ResourceDictionary>
     <ResourceDictionary x:Key="Dark">
       <SolidColorBrush x:Key="BrandSurface" Color="#1E1E1E" />
@@ -21,15 +22,16 @@
       <SolidColorBrush x:Key="BrandAccent" Color="#7FB2E5" />
       <SolidColorBrush x:Key="BrandAccentText" Color="#101010" />
       <SolidColorBrush x:Key="BrandAttention" Color="#F0B46A" />
-      <SolidColorBrush x:Key="BrandOutline" Color="#4A4A4A" />
+      <SolidColorBrush x:Key="BrandOutline" Color="#8F8F8F" />
     </ResourceDictionary>
   </ResourceDictionary.ThemeDictionaries>
 
-  <!-- Type roles: title, heading, body, mono. Identifiers, hashes and commands are never shown in a proportional face. -->
-  <FontFamily x:Key="BrandTitleFont">Inter,Segoe UI,Helvetica Neue,sans-serif</FontFamily>
-  <FontFamily x:Key="BrandHeadingFont">Inter,Segoe UI,Helvetica Neue,sans-serif</FontFamily>
-  <FontFamily x:Key="BrandBodyFont">Inter,Segoe UI,Helvetica Neue,sans-serif</FontFamily>
-  <FontFamily x:Key="BrandMonoFont">Menlo,Consolas,DejaVu Sans Mono,monospace</FontFamily>
+  <!-- Type roles: title, heading, body, mono. Inter and JetBrains Mono travel with Workbench under the SIL Open Font License
+       (Assets/Fonts); identifiers, hashes and commands are never shown in a proportional face. -->
+  <FontFamily x:Key="BrandTitleFont">avares://vericairn-workbench/Assets/Fonts#Inter</FontFamily>
+  <FontFamily x:Key="BrandHeadingFont">avares://vericairn-workbench/Assets/Fonts#Inter</FontFamily>
+  <FontFamily x:Key="BrandBodyFont">avares://vericairn-workbench/Assets/Fonts#Inter</FontFamily>
+  <FontFamily x:Key="BrandMonoFont">avares://vericairn-workbench/Assets/Fonts#JetBrains Mono</FontFamily>
 
   <!-- Scale roles: compact is the density the accessibility measurement is taken at. -->
   <x:Double x:Key="BrandScaleCompact">12</x:Double>

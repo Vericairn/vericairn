@@ -19,6 +19,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <AvaloniaResource Include="Assets/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
   </ItemGroup>
 

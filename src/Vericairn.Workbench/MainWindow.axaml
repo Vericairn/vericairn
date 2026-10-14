@@ -82,7 +82,17 @@
 
       <Grid Grid.Column="2" Grid.Row="0" RowDefinitions="Auto,*">
         <StackPanel Name="FirstRun" Grid.Row="0" Margin="16" Spacing="8" IsVisible="{Binding !HasEstate}" AutomationProperties.Name="Open an estate">
-          <TextBlock Text="Open an estate" FontSize="20" FontWeight="SemiBold" />
+          <!-- The identity: the cairn mark drawn as geometry (brand/cairn-mark.svg at half scale) and the wordmark in the title face. -->
+          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,0,0,8">
+            <Canvas Width="32" Height="32" AutomationProperties.Name="Vericairn mark">
+              <Border Canvas.Left="4.5" Canvas.Top="23" Width="23" Height="5" CornerRadius="1.75" Background="{DynamicResource BrandAccent}" />
+              <Border Canvas.Left="8.5" Canvas.Top="16.5" Width="17" Height="5" CornerRadius="1.75" Background="{DynamicResource BrandAccent}" />
+              <Border Canvas.Left="6.5" Canvas.Top="10" Width="15" Height="5" CornerRadius="1.75" Background="{DynamicResource BrandAccent}" />
+              <Border Canvas.Left="12" Canvas.Top="4" Width="9" Height="4.5" CornerRadius="1.75" Background="{DynamicResource BrandAccent}" />
+            </Canvas>
+            <TextBlock Text="Vericairn" FontFamily="{DynamicResource BrandTitleFont}" FontWeight="SemiBold" FontSize="26" VerticalAlignment="Center" />
+          </StackPanel>
+          <TextBlock Text="Open an estate" FontSize="20" FontWeight="SemiBold" FontFamily="{DynamicResource BrandHeadingFont}" />
           <TextBlock TextWrapping="Wrap" Text="Create locally, adopt existing work, or connect to an authorized estate. In this release Workbench opens an existing estate's root; creation and adoption follow with the work screens. Records stay in that directory and nothing leaves this machine unless a provider you connect sends it." />
           <StackPanel Orientation="Horizontal" Spacing="8">
             <TextBox Name="EstatePathBox" Width="520" MinHeight="32" PlaceholderText="Path of the estate root (the directory with estate/manifest.json)" Text="{Binding EstatePath}" AutomationProperties.Name="Estate root" />

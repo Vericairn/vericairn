@@ -199,6 +199,13 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             {
                 Assert.True(app.TryGetResource(key, ThemeVariant.Default, out object? value) && value is not null, key);
             }
+
+            // The first values: the bundled faces resolve by family name, and every pair the roles form meets its minimum in both variants.
+            Assert.True(app.TryGetResource("BrandMonoFont", ThemeVariant.Default, out object? mono) && mono is Avalonia.Media.FontFamily monoFamily && monoFamily.Name == "JetBrains Mono", "mono face");
+            Assert.True(app.TryGetResource("BrandBodyFont", ThemeVariant.Default, out object? body) && body is Avalonia.Media.FontFamily bodyFamily && bodyFamily.Name == "Inter", "body face");
+            IReadOnlyList<ContrastPair> contrast = Probe.Contrast(app);
+            Assert.Equal(16, contrast.Count);
+            Assert.All(contrast, c => Assert.True(c.Meets, $"{c.Variant}: {c.Foreground} on {c.Background} is {c.Ratio}, minimum {c.Minimum}"));
         });
     }
 }
