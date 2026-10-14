@@ -308,8 +308,9 @@ public sealed class FakeReleaseProvider : IReleaseProvider
         int n = 1;
         foreach (string platform in new[] { "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64" })
         {
-            string name = $"vericairn-{version}-{platform}" + (platform.StartsWith("win-", StringComparison.Ordinal) ? ".zip" : ".tar.gz");
-            assets.Add(new ReleaseAsset(name, 1000 + n, "sha256:" + new string((char)('0' + n), 64)));
+            string suffix = platform.StartsWith("win-", StringComparison.Ordinal) ? ".zip" : ".tar.gz";
+            assets.Add(new ReleaseAsset($"vericairn-{version}-{platform}{suffix}", 1000 + n, "sha256:" + new string((char)('0' + n), 64)));
+            assets.Add(new ReleaseAsset($"vericairn-workbench-{version}-{platform}{suffix}", 2000 + n, "sha256:" + new string('f', 60) + n.ToString("D4", CultureInfo.InvariantCulture)));
             n++;
         }
 

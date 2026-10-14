@@ -141,7 +141,7 @@ public static class ReleaseFlow
                 continue;
             }
 
-            string platform = Platforms.FirstOrDefault(p => EstateUpgrade.IsDistributable(asset.Name, version, p)) ?? "any";
+            string platform = Platforms.FirstOrDefault(p => EstateUpgrade.IsDistributable(asset.Name, version, p) || IsWorkbenchDistributable(asset.Name, version, p)) ?? "any";
             artifacts.Add(new JsonObject { ["name"] = asset.Name, ["hash"] = asset.Hash, ["bytes"] = asset.Bytes, ["platform"] = platform });
             if (asset.Name == $"vericairn-{version}-sbom.cdx.json")
             {
@@ -185,6 +185,10 @@ public static class ReleaseFlow
 
         return body;
     }
+
+    /// <summary>Whether an asset is the desktop's distributable for a platform (vericairn-workbench-version-platform, as the release workflow names it).</summary>
+    public static bool IsWorkbenchDistributable(string name, string version, string platform) =>
+        name == $"vericairn-workbench-{version}-{platform}.zip" || name == $"vericairn-workbench-{version}-{platform}.tar.gz";
 
     /// <summary>The published revision of a candidate: the same release with the observed publication.</summary>
     public static JsonObject PublishedBody(JsonElement candidate, ReleaseObservation release)
