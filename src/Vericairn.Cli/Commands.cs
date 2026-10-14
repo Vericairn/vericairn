@@ -766,7 +766,8 @@ internal static class Commands
     internal static ISourceAdapter SourceAdapter { get; set; } = new GitCommandAdapter();
 
     /// <summary>The release provider behind release submit and observe; tests substitute the in-memory one.</summary>
-    internal static IReleaseProvider ReleaseProvider { get; set; } = new GhReleaseProvider();
+    /// <summary>The GitHub Releases provider: the runtime service's default, so the command line and a daemon dispatch and observe the same way; tests replace it.</summary>
+    internal static IReleaseProvider ReleaseProvider { get => EstateService.DefaultReleaseProvider; set => EstateService.DefaultReleaseProvider = value; }
 
     public static int SourcesInspect(string path, bool json)
     {
@@ -959,259 +960,38 @@ internal static class Commands
         });
     }
 
-    public static int ReleaseSubmit(string root, string product, string version, string repository, string by, string reference, string workflow, string? reconciliation, bool json)
+    public static int ReleaseSubmit(string root, string product, string version, string repository, string by, string reference, string workflow, string? reconciliation, bool json) =>
+        WithApi(root, api => ReportRelease(api.ReleaseSubmit(new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation)), json));
+
+    public static int ReleaseObserve(string root, string version, string repository, string by, string[] qualified, string[] limitations, string signing, string? cancel, bool json) =>
+        WithApi(root, api => ReportRelease(api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel)), json));
+
+    /// <summary>Prints a release operation's outcome exactly as the runtime reported it: a problem fails, a rejected record lists its findings, and the exit code says whether the request advanced.</summary>
+    private static int ReportRelease(ReleaseResponse response, bool json)
     {
-        string identity = ReleaseFlow.Identity(repository, version);
-        return WithApi(root, api =>
+        if (response.Problem is not null)
         {
-            RecordResponse? current = CurrentOperation(api, identity);
-            string? status = current is null ? null : current.Envelope.GetProperty("body").GetProperty("status").GetString();
-            switch (status)
-            {
-                case "observed-success":
-                    return Fail($"Release {version} was already observed as built under {identity}; a corrective release is a new version.");
-                case "dispatched" or "uncertain":
-                    return Fail($"An operation under {identity} is {status}; observe and reconcile it with 'vericairn release observe' before any retry.");
-                case "known-failure" or "canceled" when string.IsNullOrWhiteSpace(reconciliation):
-                    return Fail($"The earlier attempt under {identity} is {status}; retry with --reconciliation stating how it was settled under that identity.");
-            }
+            return response.Problem.Findings.Count > 0 ? ReportOutcome(WriteOutcome.Fail(response.Problem), json) : Fail(response.Message);
+        }
 
-            string previousId;
-            JsonElement previousBody;
-            if (current is null)
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+        }
+        else
+        {
+            foreach (RecordWritten? written in new[] { response.Operation, response.Candidate, response.Release })
             {
-                WriteOutcome intent = api.NewRecord(new NewRecordRequest("operation", by, Element(ReleaseFlow.IntentBody(repository, workflow, reference, version, product)), $"product:{product}"));
-                if (!intent.Ok)
+                if (written is not null)
                 {
-                    return ReportOutcome(intent, json);
-                }
-
-                previousId = intent.Written!.Id;
-                previousBody = api.Record(previousId)!.Envelope.GetProperty("body");
-            }
-            else
-            {
-                previousId = current.Id;
-                previousBody = current.Envelope.GetProperty("body");
-            }
-
-            Json.JsonObject body;
-            int code = Clean;
-            try
-            {
-                DispatchReceipt receipt = ReleaseProvider.Dispatch(new DispatchRequest(repository, workflow, reference, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = version }));
-                body = status is "known-failure" or "canceled" ? ReleaseFlow.Retry(previousBody, receipt, reconciliation!) : ReleaseFlow.AfterDispatch(previousBody, receipt);
-                if (receipt.RunId is null)
-                {
-                    code = HasErrors;
+                    Console.Out.WriteLine($"{written.Path}  {written.Id}  {written.Hash}");
                 }
             }
-            catch (ProviderRefusedException exception)
-            {
-                body = ReleaseFlow.AfterRefusal(previousBody, exception.Message);
-                code = HasErrors;
-            }
-            catch (ProviderUncertainException exception)
-            {
-                body = ReleaseFlow.AfterUncertainty(previousBody, exception.Message);
-                code = HasErrors;
-            }
 
-            WriteOutcome revision = api.NewRecord(new NewRecordRequest("operation", by, Element(body), $"product:{product}", previousId));
-            if (!revision.Ok)
-            {
-                return ReportOutcome(revision, json);
-            }
-
-            string newStatus = body["status"]!.GetValue<string>();
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { operation = revision.Written, identity, status = newStatus, run = body["target"]!.AsObject().TryGetPropertyValue("run", out Json.JsonNode? run) ? run?.GetValue<string>() : null }, ProtocolJson.Options));
-            }
-            else
-            {
-                Console.Out.WriteLine($"{revision.Written!.Path}  {revision.Written.Id}  {revision.Written.Hash}");
-                Console.Out.WriteLine($"{identity}: {newStatus}");
-                Console.Out.WriteLine(newStatus switch
-                {
-                    "dispatched" => "The intent was recorded before the dispatch. Observe the run and the draft with 'vericairn release observe'; publication stays the operator's manual step.",
-                    "uncertain" => "The dispatch may or may not have started a run. Observe with 'vericairn release observe' and reconcile under this identity before any retry.",
-                    _ => "Nothing was dispatched. Fix the cause, then retry with --reconciliation.",
-                });
-            }
-
-            return code;
-        });
-    }
-
-    public static int ReleaseObserve(string root, string version, string repository, string by, string[] qualified, string[] limitations, string signing, string? cancel, bool json)
-    {
-        string identity = ReleaseFlow.Identity(repository, version);
-        string tag = ReleaseFlow.Tag(version);
-        return WithApi(root, api =>
-        {
-            RecordResponse? current = CurrentOperation(api, identity);
-            if (current is null)
-            {
-                return Fail($"No operation is recorded under {identity}; 'vericairn release submit' records the intent and dispatches the workflow.");
-            }
-
-            JsonElement body = current.Envelope.GetProperty("body");
-            string status = body.GetProperty("status").GetString() ?? "?";
-            string product = body.GetProperty("target").GetProperty("product").GetString() ?? "?";
-            string? runId = body.GetProperty("target").TryGetProperty("run", out JsonElement runElement) ? runElement.GetString() : null;
-            if (cancel is not null)
-            {
-                if (status is not ("not-started" or "uncertain" or "known-failure"))
-                {
-                    return Fail($"An operation that is {status} is not canceled; cancellation settles an intent that was never dispatched or an outcome reconciled as having had no effect.");
-                }
-
-                return ReportOutcome(api.NewRecord(new NewRecordRequest("operation", by, Element(ReleaseFlow.Canceled(body, cancel)), $"product:{product}", current.Id)), json);
-            }
-
-            ReleaseObservation? release;
-            RunObservation? run;
-            try
-            {
-                run = runId is null ? null : ReleaseProvider.ObserveRun(repository, runId);
-                release = ReleaseProvider.ObserveRelease(repository, tag);
-            }
-            catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
-            {
-                return Fail(exception.Message);
-            }
-
-            ReleaseRow? recorded = api.Releases().FirstOrDefault(r => r.Version == version);
-            switch (status)
-            {
-                case "observed-success":
-                    return ObservePublication(api, by, product, version, recorded, release, json);
-                case "dispatched" or "uncertain":
-                {
-                    Json.JsonObject revisionBody;
-                    try
-                    {
-                        revisionBody = ReleaseFlow.AfterObservation(body, run, release, version);
-                    }
-                    catch (InvalidOperationException)
-                    {
-                        string pending = run is null
-                            ? (release is null ? "no run is identified and no release is observed yet" : $"draft {tag} lacks checksums for {string.Join(", ", ReleaseFlow.MissingDistributables(release, version))}")
-                            : $"run {run.RunId} is {run.Status.Replace('_', ' ')}";
-                        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { identity, status, pending }, ProtocolJson.Options) : $"{identity}: {status}, pending ({pending}). Nothing recorded; observe again later{(status == "uncertain" ? ", or cancel with --cancel once reconciliation shows no effect" : string.Empty)}.");
-                        return Clean;
-                    }
-
-                    WriteOutcome revision = api.NewRecord(new NewRecordRequest("operation", by, Element(revisionBody), $"product:{product}", current.Id));
-                    if (!revision.Ok)
-                    {
-                        return ReportOutcome(revision, json);
-                    }
-
-                    string newStatus = revisionBody["status"]!.GetValue<string>();
-                    if (newStatus != "observed-success")
-                    {
-                        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { operation = revision.Written, identity, status = newStatus }, ProtocolJson.Options) : $"{revision.Written!.Path}  {revision.Written.Id}\n{identity}: {newStatus}. Retry with 'vericairn release submit --reconciliation' once the cause is settled.");
-                        return HasErrors;
-                    }
-
-                    string? commit = run?.HeadSha ?? release?.TargetCommit;
-                    if (commit is null || commit.Length != 40)
-                    {
-                        return Fail("The release was observed but its exact commit is unknown; the candidate record needs the commit the run built.");
-                    }
-
-                    if (recorded is not null)
-                    {
-                        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { operation = revision.Written, identity, status = newStatus, release = recorded.Id }, ProtocolJson.Options) : $"{identity}: {newStatus}; release {version} is already recorded as {recorded.Status} ({recorded.Id}).");
-                        return Clean;
-                    }
-
-                    var evidence = new List<string> { $"Draft release {tag} observed at {release!.Url} with {release.Assets.Count} assets and checksums for every distributable." };
-                    if (run is not null)
-                    {
-                        evidence.Insert(0, $"Release workflow run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");
-                    }
-
-                    WriteOutcome candidate = api.NewRecord(new NewRecordRequest("release", by, Element(ReleaseFlow.CandidateBody(version, repository, commit, release, evidence, qualified, signing, limitations)), $"product:{product}"));
-                    if (!candidate.Ok)
-                    {
-                        return ReportOutcome(candidate, json);
-                    }
-
-                    if (json)
-                    {
-                        Console.Out.WriteLine(JsonSerializer.Serialize(new { operation = revision.Written, identity, status = newStatus, candidate = candidate.Written, publish = ReleaseProvider.ManualPublicationCommand(repository, tag) }, ProtocolJson.Options));
-                    }
-                    else
-                    {
-                        Console.Out.WriteLine($"{revision.Written!.Path}  {revision.Written.Id}  {revision.Written.Hash}");
-                        Console.Out.WriteLine($"{candidate.Written!.Path}  {candidate.Written.Id}  {candidate.Written.Hash}");
-                        Console.Out.WriteLine($"{identity}: observed-success; release {version} recorded as a candidate at commit {commit[..12]}.");
-                        Console.Out.WriteLine($"Publication is the operator's: after accepting candidate {candidate.Written.Id} at its exact hash, publish with");
-                        Console.Out.WriteLine("  " + ReleaseProvider.ManualPublicationCommand(repository, tag));
-                        Console.Out.WriteLine("then run 'vericairn release observe' again to record the observed publication.");
-                    }
-
-                    return Clean;
-                }
-
-                default:
-                    Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { identity, status }, ProtocolJson.Options) : $"{identity}: {status}. {(status == "not-started" ? "The intent is recorded and nothing was dispatched; 'vericairn release submit' dispatches it, or --cancel settles it." : "Retry with 'vericairn release submit --reconciliation' once the cause is settled.")}");
-                    return HasErrors;
-            }
-        });
-    }
-
-    private static int ObservePublication(IEstateApi api, string by, string product, string version, ReleaseRow? recorded, ReleaseObservation? release, bool json)
-    {
-        string repository = release?.Url is null ? "the repository" : release.Url;
-        if (recorded is null)
-        {
-            return Fail($"Release {version} was observed as built but no release record exists; observe it again after the operation is recorded, or record the candidate.");
+            Console.Out.WriteLine(response.Message);
         }
 
-        if (recorded.Status == "published")
-        {
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { release = recorded.Id, status = "published" }, ProtocolJson.Options) : $"release {version} is published ({recorded.Id}); nothing to observe.");
-            return Clean;
-        }
-
-        if (release is null || release.Draft || release.PublishedAt is null)
-        {
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { release = recorded.Id, status = recorded.Status, observed = release is null ? "absent" : "draft" }, ProtocolJson.Options) : $"release {version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {repository}; publication is the operator's manual step after accepting the candidate.");
-            return Clean;
-        }
-
-        RecordResponse candidate = api.Record(recorded.Id)!;
-        WriteOutcome published = api.NewRecord(new NewRecordRequest("release", by, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id));
-        if (!published.Ok)
-        {
-            return ReportOutcome(published, json);
-        }
-
-        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { release = published.Written, status = "published", release.PublishedAt, release.Url }, ProtocolJson.Options) : $"{published.Written!.Path}  {published.Written.Id}  {published.Written.Hash}\nrelease {version} observed published at {release.PublishedAt}: {release.Url}");
-        return Clean;
-    }
-
-    private static RecordResponse? CurrentOperation(IEstateApi api, string identity)
-    {
-        StatusResponse status = api.Status();
-        if (!status.Json.TryGetProperty("operations", out JsonElement operations))
-        {
-            return null;
-        }
-
-        foreach (JsonElement operation in operations.EnumerateArray())
-        {
-            if (operation.GetProperty("identity").GetString() == identity)
-            {
-                return api.Record(operation.GetProperty("id").GetString()!);
-            }
-        }
-
-        return null;
+        return response.Ok ? Clean : HasErrors;
     }
 
     private static void PrintObservation(RepositoryObservation observation)

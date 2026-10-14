@@ -244,6 +244,15 @@ public sealed class ShellViewModel : Observable
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
+            foreach (ReleaseWorkspace page in Documents.OfType<ReleaseWorkspace>().ToList())
+            {
+                FillRelease(page);
+            }
+
+            foreach (RuntimeDocument page in Documents.OfType<RuntimeDocument>().ToList())
+            {
+                FillRuntime(page);
+            }
             IReadOnlyList<DeviceRow> devices = connection.Api.Devices();
             List<DeviceRow> held = devices.Where(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase)).ToList();
             Replace(ActingCandidates, held);
@@ -325,7 +334,7 @@ public sealed class ShellViewModel : Observable
         Refresh();
     }
 
-    /// <summary>Shows the install plan without installing.</summary>
+    /// <summary>Shows the install plan without installing; the runtime workspace, when open, records that the plan was shown.</summary>
     public async Task ShowInstallPlanAsync()
     {
         if (connection is null)
@@ -334,7 +343,147 @@ public sealed class ShellViewModel : Observable
         }
 
         RuntimeOutcome outcome = await runtime.InstallPlanAsync(connection.Root).ConfigureAwait(true);
-        Open(new TextDocument("Runtime install plan", outcome.Output, "plan"));
+        if (Documents.OfType<RuntimeDocument>().FirstOrDefault() is RuntimeDocument page)
+        {
+            page.Plan = outcome.Output;
+            page.PlanShown = outcome.Ok;
+            page.Output = outcome.Ok ? "The plan is shown; install and uninstall follow it." : outcome.Output;
+            SelectedDocument = page;
+        }
+        else
+        {
+            Open(new TextDocument("Runtime install plan", outcome.Output, "plan"));
+        }
+    }
+
+    /// <summary>Installs the per-user service, after the plan was shown in the runtime workspace.</summary>
+    public async Task InstallRuntimeAsync()
+    {
+        RuntimeDocument page = OpenRuntime();
+        if (connection is null)
+        {
+            return;
+        }
+
+        if (!page.PlanShown)
+        {
+            page.Output = "Show the install plan first; installing changes this machine's login items.";
+            Status = page.Output;
+            return;
+        }
+
+        RuntimeOutcome outcome = await runtime.InstallAsync(connection.Root).ConfigureAwait(true);
+        page.Output = outcome.Output;
+        Log($"runtime install: {(outcome.Ok ? "done" : "failed")}: {outcome.Output}");
+        Refresh();
+    }
+
+    /// <summary>Removes the per-user service, after the plan was shown in the runtime workspace.</summary>
+    public async Task UninstallRuntimeAsync()
+    {
+        RuntimeDocument page = OpenRuntime();
+        if (connection is null)
+        {
+            return;
+        }
+
+        if (!page.PlanShown)
+        {
+            page.Output = "Show the install plan first; it names the service that uninstall removes.";
+            Status = page.Output;
+            return;
+        }
+
+        RuntimeOutcome outcome = await runtime.UninstallAsync(connection.Root).ConfigureAwait(true);
+        page.Output = outcome.Output;
+        Log($"runtime uninstall: {(outcome.Ok ? "done" : "failed")}: {outcome.Output}");
+        Refresh();
+    }
+
+    /// <summary>Opens or refreshes the runtime workspace.</summary>
+    public RuntimeDocument OpenRuntime()
+    {
+        RuntimeDocument page = Documents.OfType<RuntimeDocument>().FirstOrDefault() ?? new RuntimeDocument();
+        FillRuntime(page);
+        Open(page);
+        return page;
+    }
+
+    private void FillRuntime(RuntimeDocument page)
+    {
+        page.Label = RuntimeLabel;
+        page.Where = RuntimeWhere;
+        page.Acting = ActingPrincipal;
+        HealthResponse? health = connection?.Api is null ? null : Try(() => connection.Api.Health());
+        page.Health = health is null ? "No daemon answers." : $"API {health.Api}; Vericairn {health.Vericairn}; estate {health.Estate}; profile {health.Profile}; record format {health.RecordFormat}; started {health.StartedAt}; process {health.ProcessId}.";
+    }
+
+    /// <summary>Opens or refreshes the release workspace.</summary>
+    public ReleaseWorkspace OpenRelease()
+    {
+        ReleaseWorkspace page = Documents.OfType<ReleaseWorkspace>().FirstOrDefault() ?? new ReleaseWorkspace(ProductRows());
+        FillRelease(page);
+        Open(page);
+        return page;
+    }
+
+    private void FillRelease(ReleaseWorkspace page)
+    {
+        var rows = new List<DestinationRow>();
+        foreach (RecordResponse operation in Try(() => connection?.Api?.Records("operation") ?? []) ?? [])
+        {
+            JsonElement body = operation.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
+            if (Str(body, "provider") != "github-releases")
+            {
+                continue;
+            }
+
+            JsonElement target = body.TryGetProperty("target", out JsonElement tg) ? tg : default;
+            string status = Str(body, "status") ?? "?";
+            string version = Str(target, "version") ?? "?";
+            string? run = Str(target, "run");
+            ReleaseRowView? release = Releases.FirstOrDefault(r => r.Version == version);
+            string submission = status switch
+            {
+                "not-started" => "not dispatched",
+                "canceled" => "canceled",
+                "uncertain" => "uncertain: no run identified",
+                _ => run is null ? "dispatched" : $"run {run} dispatched",
+            };
+            string review = status switch
+            {
+                "observed-success" => "run succeeded and the draft was observed",
+                "known-failure" => "known failure",
+                "dispatched" => "run outcome not yet observed",
+                "uncertain" => "unknown until reconciled",
+                _ => "none",
+            };
+            string availability = release?.Status switch
+            {
+                null => "no candidate recorded",
+                "candidate" => "draft observed; candidate recorded, not published",
+                "published" => "published, observed",
+                _ => StateLanguage.Label("release", release.Status),
+            };
+            rows.Add(new DestinationRow(Str(body, "identity") ?? operation.Id, version, Str(target, "repository") ?? "?", operation.Id, status, run, release?.Id, release?.Status, "intent recorded", submission, review, availability));
+        }
+
+        string? selectedIdentity = page.Selected?.Identity;
+        Replace(page.Destinations, rows);
+        Replace(page.Releases, Releases.ToList());
+        page.Selected = rows.FirstOrDefault(r => r.Identity == selectedIdentity) ?? rows.LastOrDefault();
+    }
+
+    private List<ProductRow> ProductRows()
+    {
+        var rows = new List<ProductRow>();
+        foreach (RecordResponse product in Try(() => connection?.Api?.Records("product") ?? []) ?? [])
+        {
+            JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
+            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces")));
+        }
+
+        return rows;
     }
 
     /// <summary>Shows an attention item in the inspector without opening anything.</summary>
@@ -495,14 +644,7 @@ public sealed class ShellViewModel : Observable
             return;
         }
 
-        var rows = new List<ProductRow>();
-        foreach (RecordResponse product in Try(() => connection.Api.Records("product")) ?? [])
-        {
-            JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
-            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces")));
-        }
-
-        Open(new ProductsDocument(rows));
+        Open(new ProductsDocument(ProductRows()));
     }
 
     /// <summary>Opens a comparison of a record with the record it supersedes, or of two records.</summary>
@@ -648,10 +790,10 @@ public sealed class ShellViewModel : Observable
                 OpenProducts();
                 break;
             case "Releases":
-                Open(new TextDocument("Releases", Releases.Count == 0 ? "No releases." : string.Join("\n", Releases.Select(r => $"{r.Version,-8} {r.StatusLabel,-44} {r.Commit?[..Math.Min(12, r.Commit.Length)]}  {r.Id}")), "releases"));
+                OpenRelease();
                 break;
             case "Runtime":
-                Open(new TextDocument("Runtime", $"{RuntimeLabel}\n{RuntimeWhere}\n\nActing principal: {ActingPrincipal}\n\nStart, stop and the install plan are in the Runtime menu.", "runtime"));
+                OpenRuntime();
                 break;
             case "Records":
                 Open(new TextDocument("Records", "Open a record or a work order by id or key with Ctrl+G (Cmd+G on macOS), or select an attention item.", "records"));

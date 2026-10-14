@@ -81,6 +81,27 @@ jobs:
           done
           # Runtime-specific restores rewrite the lock files in the working tree; the repository's lock files are the truth.
           git checkout -- $(git ls-files '*packages.lock.json')
+      - name: Publish Workbench distributables
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        # The desktop ships per platform as an unsigned developer build beside the command line it drives (Workbench finds
+        # vericairn next to its own executable); no bundle, installer or signature yet, as the platform obligations record.
+        run: |
+          set -eu
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            dotnet publish src/Vericairn.Workbench/Vericairn.Workbench.csproj --configuration Release --runtime "$rid" --self-contained \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true -p:RestoreLockedMode=false \
+              --output "out-workbench/$rid/bin" --nologo --verbosity quiet
+            rm -f "out-workbench/$rid/bin/"*.pdb "out-workbench/$rid/bin/"*.xml
+            cp "out/$rid/bin/"vericairn* "out-workbench/$rid/bin/"
+            cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out-workbench/$rid/"
+            case "$rid" in
+              win-*) (cd "out-workbench/$rid" && zip -q -X -r "../../dist/vericairn-workbench-$VERSION-$rid.zip" .) ;;
+              *) tar -C "out-workbench/$rid" -czf "dist/vericairn-workbench-$VERSION-$rid.tar.gz" . ;;
+            esac
+          done
+          git checkout -- $(git ls-files '*packages.lock.json')
       - name: Software bill of materials
         shell: bash
         env:
@@ -115,6 +136,7 @@ jobs:
             echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
             echo
             echo "Distributables are self-contained per platform: unpack and run bin/vericairn (bin/vericairn.exe on Windows)."
+            echo "Workbench, the desktop, is vericairn-workbench-$VERSION-<platform>: unpack and run bin/vericairn-workbench beside the bin/vericairn it drives; an unsigned developer build with no bundle or installer, qualified only where the platform obligations say."
             echo
             echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
           } > dist/NOTES.md
@@ -130,4 +152,4 @@ jobs:
         run: |
           set -eu
           gh release create "v$VERSION" --draft --title "Vericairn $VERSION" --notes-file dist/NOTES.md --target "${{ github.sha }}" \
-            dist/vericairn-$VERSION-*.tar.gz dist/vericairn-$VERSION-*.zip dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS
+            dist/vericairn-$VERSION-*.tar.gz dist/vericairn-$VERSION-*.zip dist/vericairn-workbench-$VERSION-*.tar.gz dist/vericairn-workbench-$VERSION-*.zip dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS

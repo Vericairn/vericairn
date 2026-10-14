@@ -8,7 +8,7 @@ using Avalonia.Threading;
 
 namespace Vericairn.Workbench;
 
-/// <summary>The application: one main window, a client of the daemon. Arguments: --estate root, --as principal, --probe file [--cell name] [--virtual].</summary>
+/// <summary>The application: one main window, a client of the daemon. Arguments: --estate root, --as principal, --open products, inbox, release, runtime or a work-order key, --probe file [--cell name] [--virtual].</summary>
 public partial class App : Application
 {
     /// <summary>The command-line arguments, set by Program before the lifetime starts.</summary>
@@ -27,9 +27,34 @@ public partial class App : Application
             string? estate = Value("--estate");
             string? probe = Value("--probe");
             window.Shell.ActingOverride = Value("--as");
+            string? open = Value("--open");
             if (estate is not null)
             {
-                window.Opened += async (_, _) => await window.Shell.OpenEstateAsync(estate).ConfigureAwait(true);
+                window.Opened += async (_, _) =>
+                {
+                    await window.Shell.OpenEstateAsync(estate).ConfigureAwait(true);
+                    // --open names a workspace to show after the estate opens, so a measurement can cover it.
+                    switch (open)
+                    {
+                        case "products":
+                            window.Shell.OpenProducts();
+                            break;
+                        case "inbox":
+                            window.Shell.OpenInbox();
+                            break;
+                        case "release":
+                            window.Shell.OpenRelease();
+                            break;
+                        case "runtime":
+                            window.Shell.OpenRuntime();
+                            break;
+                        case null:
+                            break;
+                        default:
+                            window.Shell.OpenWorkOrder(open);
+                            break;
+                    }
+                };
             }
 
             if (probe is not null)

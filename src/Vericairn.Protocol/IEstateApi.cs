@@ -63,6 +63,12 @@ public interface IEstateApi
     /// <summary>Current release records.</summary>
     IReadOnlyList<ReleaseRow> Releases();
 
+    /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
+    ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
+
+    /// <summary>Observe a release's run, draft and publication, recording what settled; or cancel an intent that had no effect.</summary>
+    ReleaseResponse ReleaseObserve(ReleaseObserveRequest request);
+
     /// <summary>Plan or apply an upgrade; a problem when the plan cannot be made.</summary>
     (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request);
 

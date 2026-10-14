@@ -99,6 +99,21 @@ public partial class MainWindow : Window
             shell.OpenInbox();
             FocusRegion(DocumentTabs);
         }
+        else if (command && shift && e.Key == Key.E)
+        {
+            shell.OpenRelease();
+            FocusDocument();
+        }
+        else if (command && shift && e.Key == Key.U)
+        {
+            shell.OpenRuntime();
+            FocusDocument();
+        }
+        else if (command && shift && e.Key == Key.A)
+        {
+            OnOpenComposer(null, new RoutedEventArgs());
+            FocusDocument();
+        }
         else if (e.Key == Key.Escape)
         {
             FocusRegion(Navigation);
@@ -122,9 +137,46 @@ public partial class MainWindow : Window
 
     private void OnWindowTunnelKeyDown(object? sender, KeyEventArgs e)
     {
+        bool command = e.KeyModifiers.HasFlag(KeyModifiers.Control) || e.KeyModifiers.HasFlag(KeyModifiers.Meta);
         if (e.Key == Key.Enter && e.KeyModifiers == KeyModifiers.None && EnterOnDocumentList())
         {
             e.Handled = true;
+        }
+        else if (e.Key == Key.Enter && command)
+        {
+            // Ctrl+Enter sends the open document's request, Ctrl+Shift+Enter its second one, before any text box can take the key.
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift))
+            {
+                OnSecondarySend(null, new RoutedEventArgs());
+            }
+            else
+            {
+                OnPrimarySend(null, new RoutedEventArgs());
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>Focuses the first focusable control inside the open document, so a keyboard user lands in the form rather than on the tab strip.</summary>
+    private void FocusDocument(bool retry = true)
+    {
+        DocumentTabs.UpdateLayout();
+        Document? selected = shell.SelectedDocument;
+        InputElement? first = selected is null ? null : DocumentTabs.GetVisualDescendants().OfType<InputElement>()
+            .FirstOrDefault(i => i is not TabItem && i is not ScrollViewer && i.Focusable && i.IsEffectivelyEnabled && ReferenceEquals(i.DataContext, selected) && i.FindAncestorOfType<TabItem>() is null);
+        if (first is not null)
+        {
+            first.Focus();
+        }
+        else if (retry)
+        {
+            // The tab's content is realized by the next layout pass; try once more after it.
+            Avalonia.Threading.Dispatcher.UIThread.Post(() => FocusDocument(false), Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+        else
+        {
+            FocusRegion(DocumentTabs);
         }
     }
 
@@ -152,6 +204,26 @@ public partial class MainWindow : Window
         if (list?.DataContext is AssignmentDocument && list.SelectedItem is AttemptView attempt && attempt.ResultId is not null)
         {
             shell.OpenReview(attempt.ResultId);
+            return true;
+        }
+
+        if (list?.DataContext is ReleaseWorkspace && list.SelectedItem is DestinationRow destination)
+        {
+            if (destination.ReleaseId is not null)
+            {
+                shell.OpenReview(destination.ReleaseId);
+            }
+            else
+            {
+                shell.Status = "No candidate is recorded for this destination yet; observe the run and the draft first.";
+            }
+
+            return true;
+        }
+
+        if (list?.DataContext is ReleaseWorkspace && list.SelectedItem is ReleaseRowView release)
+        {
+            shell.OpenReview(release.Id);
             return true;
         }
 
@@ -401,7 +473,7 @@ public partial class MainWindow : Window
 
     private void OnSubmitAssignment(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is AssignmentComposer composer && shell.Api is not null)
+        if (DocumentOf<AssignmentComposer>(sender) is AssignmentComposer composer && shell.Api is not null)
         {
             composer.Submit(shell.Api, shell.ActingPrincipalId);
             shell.Status = composer.Status.Split('\n')[0];
@@ -419,7 +491,7 @@ public partial class MainWindow : Window
 
     private void OnSubmitReview(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
         {
             workspace.SubmitReview(shell.Api);
             shell.Status = workspace.Status.Split('\n')[0];
@@ -429,7 +501,7 @@ public partial class MainWindow : Window
 
     private void OnSubmitAcceptance(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
         {
             workspace.SubmitAcceptance(shell.Api);
             shell.Status = workspace.Status.Split('\n')[0];
@@ -439,10 +511,98 @@ public partial class MainWindow : Window
 
     private void OnCheckPrepared(object? sender, RoutedEventArgs e)
     {
-        if ((sender as Control)?.DataContext is ReviewWorkspace workspace && shell.Api is not null)
+        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
         {
             workspace.CheckPrepared(shell.Api);
             shell.Status = workspace.PreparedState;
+        }
+    }
+
+    private void OnOpenRelease(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenRelease();
+        FocusDocument();
+    }
+
+    private void OnOpenRuntime(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenRuntime();
+        FocusDocument();
+    }
+
+    private async void OnInstallRuntime(object? sender, RoutedEventArgs e) => await shell.InstallRuntimeAsync().ConfigureAwait(true);
+
+    private async void OnUninstallRuntime(object? sender, RoutedEventArgs e) => await shell.UninstallRuntimeAsync().ConfigureAwait(true);
+
+    private void OnSubmitRelease(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<ReleaseWorkspace>(sender) is ReleaseWorkspace workspace && shell.Api is not null)
+        {
+            workspace.Submit(shell.Api, shell.ActingPrincipalId);
+            shell.Status = workspace.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
+    private void OnObserveRelease(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<ReleaseWorkspace>(sender) is ReleaseWorkspace workspace && shell.Api is not null)
+        {
+            workspace.Observe(shell.Api, shell.ActingPrincipalId);
+            shell.Status = workspace.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
+    private void OnAcceptCandidate(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<ReleaseWorkspace>(sender) is ReleaseWorkspace workspace)
+        {
+            if (workspace.Selected?.ReleaseId is string release)
+            {
+                shell.OpenReview(release);
+            }
+            else
+            {
+                shell.Status = "Select a destination with a recorded candidate first.";
+            }
+        }
+    }
+
+    /// <summary>The open document's request: the composer sends the assignment, the review workspace the review, the release workspace the submission.</summary>
+    private void OnPrimarySend(object? sender, RoutedEventArgs e)
+    {
+        switch (shell.SelectedDocument)
+        {
+            case AssignmentComposer:
+                OnSubmitAssignment(null, e);
+                break;
+            case ReviewWorkspace:
+                OnSubmitReview(null, e);
+                break;
+            case ReleaseWorkspace:
+                OnSubmitRelease(null, e);
+                break;
+            default:
+                shell.Status = "The open document has nothing to send.";
+                break;
+        }
+    }
+
+    /// <summary>The open document's second request: the review workspace sends the acceptance, the release workspace observes.</summary>
+    private void OnSecondarySend(object? sender, RoutedEventArgs e)
+    {
+        switch (shell.SelectedDocument)
+        {
+            case ReviewWorkspace:
+                OnSubmitAcceptance(null, e);
+                break;
+            case ReleaseWorkspace:
+                OnObserveRelease(null, e);
+                break;
+            default:
+                shell.Status = "The open document has no second request.";
+                break;
         }
     }
 

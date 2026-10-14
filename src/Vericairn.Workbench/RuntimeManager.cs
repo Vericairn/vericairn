@@ -19,6 +19,12 @@ public interface IRuntimeManager
 
     /// <summary>The per-user service unit and commands, without installing anything.</summary>
     Task<RuntimeOutcome> InstallPlanAsync(string root);
+
+    /// <summary>Installs the daemon as a per-user service that starts at login; the plan says what this does.</summary>
+    Task<RuntimeOutcome> InstallAsync(string root);
+
+    /// <summary>Removes the per-user service installed before.</summary>
+    Task<RuntimeOutcome> UninstallAsync(string root);
 }
 
 /// <summary>Drives the vericairn command line found beside this executable, named by VERICAIRN_CLI, or on the path.</summary>
@@ -46,6 +52,12 @@ public sealed class CliRuntimeManager : IRuntimeManager
 
     /// <inheritdoc />
     public Task<RuntimeOutcome> InstallPlanAsync(string root) => RunAsync(root, "runtime", "install", "--plan");
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> InstallAsync(string root) => RunAsync(root, "runtime", "install");
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> UninstallAsync(string root) => RunAsync(root, "runtime", "uninstall");
 
     private static async Task<RuntimeOutcome> RunAsync(string root, params string[] arguments)
     {

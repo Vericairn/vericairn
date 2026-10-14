@@ -32,6 +32,8 @@ public static class OpenApiDocument
         ("POST", "/v1/devices/admit"),
         ("POST", "/v1/devices/revoke"),
         ("GET", "/v1/releases"),
+        ("POST", "/v1/releases/submit"),
+        ("POST", "/v1/releases/observe"),
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/estate/export"),
         ("GET", "/v1/reconcile"),
@@ -137,7 +139,11 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
+        if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
+        }
+        else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
         {
             responses["404"] = new JsonObject { ["description"] = "The subject named does not exist (WriteOutcome with a not-found problem)." };
             responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with a problem; a rejection carries findings)." };
@@ -185,6 +191,9 @@ public static class OpenApiDocument
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array")),
             ["AdmitRequest"] = Object(("device", "string"), ("by", "string"), ("note", "string")),
             ["RevokeRequest"] = Object(("device", "string"), ("by", "string"), ("reason", "string")),
+            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string")),
+            ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string")),
+            ["ReleaseResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object")),
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
@@ -203,6 +212,8 @@ public static class OpenApiDocument
         "/v1/devices" => "DeviceCreateRequest",
         "/v1/devices/admit" => "AdmitRequest",
         "/v1/devices/revoke" => "RevokeRequest",
+        "/v1/releases/submit" => "ReleaseSubmitRequest",
+        "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
@@ -234,6 +245,8 @@ public static class OpenApiDocument
         ("POST", "/v1/devices/admit") => "Admit a device.",
         ("POST", "/v1/devices/revoke") => "Revoke a device's admission from now on.",
         ("GET", "/v1/releases") => "Current release records.",
+        ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the release workflow is dispatched through the GitHub Releases provider; nothing is published.",
+        ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",
         ("POST", "/v1/estate/upgrade") => "Plan or apply an upgrade to a published release.",
         ("POST", "/v1/estate/export") => "Write a verified export to a path on the runtime's machine; no keys or authority travel with it.",
         ("GET", "/v1/reconcile") => "Reconcile tasks left by diverged copies.",

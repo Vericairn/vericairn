@@ -161,6 +161,12 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public IReadOnlyList<ReleaseRow> Releases() => Get<List<ReleaseRow>>("/v1/releases")!;
 
     /// <inheritdoc />
+    public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
+
+    /// <inheritdoc />
+    public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request) => Post<ReleaseObserveRequest, ReleaseResponse>("/v1/releases/observe", request)!;
+
+    /// <inheritdoc />
     public (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request) => PostOrProblem<UpgradeRequest, UpgradeResponse>("/v1/estate/upgrade", request);
 
     /// <inheritdoc />
