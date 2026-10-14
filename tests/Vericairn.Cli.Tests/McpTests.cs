@@ -131,8 +131,13 @@ public class McpTests
             CliHarness.Ok("--estate", root, "--json", "mcp", "orientation", "--out", output);
             string agents = File.ReadAllText(Path.Combine(output, "AGENTS.md"));
             Assert.Contains("# Working in the Example Estate estate", agents, StringComparison.Ordinal);
-            Assert.Contains("| W-9 |", agents, StringComparison.Ordinal);
             Assert.Contains("`estate_status`", agents, StringComparison.Ordinal);
+
+            // Nothing that changes with the next record or release: no work orders, no pinned release, no generation date.
+            Assert.DoesNotContain("W-9", agents, StringComparison.Ordinal);
+            Assert.DoesNotContain("## Current work", agents, StringComparison.Ordinal);
+            Assert.DoesNotContain("pinned as", agents, StringComparison.Ordinal);
+            Assert.Contains("`vericairn status` and the `estate_status` tool show the work orders", agents, StringComparison.Ordinal);
             Assert.Contains("| Claude Code | non-claim: not observed |", agents, StringComparison.Ordinal);
             Assert.DoesNotContain(root, agents, StringComparison.Ordinal);
             Assert.Contains("Read `AGENTS.md`", File.ReadAllText(Path.Combine(output, "CLAUDE.md")), StringComparison.Ordinal);
@@ -143,6 +148,68 @@ public class McpTests
             CliHarness.Delete(root);
             CliHarness.Delete(output);
         }
+    }
+
+    [Fact]
+    public void OrientationCheckNamesEveryMissingOrChangedFileAndWritesNothing()
+    {
+        string root = CliHarness.TempDirectory("mcp-orientation-check");
+        string output = CliHarness.TempDirectory("mcp-orientation-check-out");
+        string bodies = CliHarness.TempDirectory("mcp-orientation-check-bodies");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example Estate", "--slug", "example", "--purpose", "Orientation.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
+            Assert.Contains(": current", CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output, "--check").Out, StringComparison.Ordinal);
+
+            // A new record changes nothing the files say.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(bodies, "order.json", """{"key":"W-9","kind":"ordinary","title":"Orient the agents","intent":"Orientation.","scope":["files"],"exitQuestion":"Generated?","inputs":[],"deliverables":["AGENTS.md"]}"""));
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output, "--check");
+
+            File.AppendAllText(Path.Combine(output, "AGENTS.md"), "An edit by hand.\n");
+            File.Delete(Path.Combine(output, "GEMINI.md"));
+            CliHarness.Outcome stale = CliHarness.Run("--estate", root, "--json", "mcp", "orientation", "--out", output, "--check");
+            Assert.Equal(1, stale.Code);
+            List<string> found = stale.Json.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("Code").GetString() + " " + f.GetProperty("Location").GetString()).ToList();
+            Assert.Equal(["orientation.stale AGENTS.md", "orientation.missing GEMINI.md"], found);
+            Assert.False(File.Exists(Path.Combine(output, "GEMINI.md")));
+        }
+        finally
+        {
+            CliHarness.Delete(root);
+            CliHarness.Delete(output);
+            CliHarness.Delete(bodies);
+        }
+    }
+
+    [Fact]
+    public void TheRepositorysOrientationFilesAreCurrent()
+    {
+        // The committed files describe the Vericairn estate. Everything in them but the estate's name comes from this build, so an
+        // estate of that name reproduces them exactly; a new tool or a change to the generator's text without regenerating fails here.
+        string root = CliHarness.TempDirectory("mcp-orientation-repository");
+        try
+        {
+            CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Vericairn", "--slug", "vericairn", "--purpose", "Orientation.", "--operator-name", "Operator", "--organization", "Vericairn", "--commit", Commit);
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "mcp", "orientation", "--out", RepositoryRoot(), "--check");
+            Assert.True(check.Code == 0, "Regenerate AGENTS.md, CLAUDE.md and GEMINI.md with `vericairn --estate <the Vericairn estate> mcp orientation --out <this repository>`:\n" + check.Out);
+        }
+        finally
+        {
+            CliHarness.Delete(root);
+        }
+    }
+
+    private static string RepositoryRoot()
+    {
+        string? root = AppContext.BaseDirectory;
+        while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx")))
+        {
+            root = Path.GetDirectoryName(root);
+        }
+
+        Assert.NotNull(root);
+        return root;
     }
 
     private static List<string> ToolNames(JsonObject listReply) => listReply["result"]!["tools"]!.AsArray().Select(t => t!["name"]!.GetValue<string>()).ToList();
