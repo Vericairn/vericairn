@@ -20,7 +20,7 @@ Every tool description describes and never directs: nothing a tool returns, and 
 vericairn --estate <estate root> mcp serve --as <principal id>
 ```
 
-Claude Code: `claude mcp add vericairn -- vericairn --estate <estate root> mcp serve --as <principal id>`. Other harnesses take the same command and arguments in their server configuration. Diagnostics go to standard error; the output stream carries only protocol messages. `vericairn mcp orientation --out <directory>` writes `AGENTS.md` (generated from the estate's records: what the estate is, the rules it enforces, how to connect, the tools, the current work and an honest agent matrix) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing.
+Claude Code: `claude mcp add vericairn -- vericairn --estate <estate root> mcp serve --as <principal id>`. Other harnesses take the same command and arguments in their server configuration. Diagnostics go to standard error; the output stream carries only protocol messages. `vericairn mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `vericairn status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
 
 ## Qualification
 

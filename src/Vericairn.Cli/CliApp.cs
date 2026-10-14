@@ -70,12 +70,14 @@ internal static class CliApp
         serve.SetAction(parseResult => Commands.McpServe(parseResult.GetValue(estateOption)!, parseResult.GetValue(asOption)));
         mcp.Subcommands.Add(serve);
 
-        var orientation = new Command("orientation", "Write AGENTS.md and the pointer files for the common agent harnesses from the estate's records and the tool registry.");
+        var orientation = new Command("orientation", "Write AGENTS.md and the pointer files for the common agent harnesses from the estate's identity and the tool registry, or check existing copies against a fresh generation.");
         var outOption = new Option<string>("--out") { Description = "Directory to write the files into, for example a repository root.", Required = true };
         var orientationAsOption = new Option<string>("--as") { Description = "Principal id the files describe as the acting principal, if any." };
+        var checkOption = new Option<bool>("--check") { Description = "Write nothing; compare the files in --out with a fresh generation and name every one that is missing or differs." };
         orientation.Options.Add(outOption);
         orientation.Options.Add(orientationAsOption);
-        orientation.SetAction(parseResult => Commands.McpOrientation(parseResult.GetValue(estateOption)!, parseResult.GetValue(outOption)!, parseResult.GetValue(orientationAsOption), parseResult.GetValue(jsonOption)));
+        orientation.Options.Add(checkOption);
+        orientation.SetAction(parseResult => Commands.McpOrientation(parseResult.GetValue(estateOption)!, parseResult.GetValue(outOption)!, parseResult.GetValue(orientationAsOption), parseResult.GetValue(checkOption), parseResult.GetValue(jsonOption)));
         mcp.Subcommands.Add(orientation);
         return mcp;
     }

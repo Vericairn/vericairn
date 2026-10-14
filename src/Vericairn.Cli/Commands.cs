@@ -816,12 +816,35 @@ internal static class Commands
         return Clean;
     });
 
-    /// <summary>Writes the agent orientation files from the estate's records.</summary>
-    public static int McpOrientation(string root, string output, string? actingAs, bool json) => WithApi(root, api =>
+    /// <summary>
+    /// Writes the agent orientation files from the estate's identity and the tool registry; with <paramref name="check"/>,
+    /// compares the copies in the directory with a fresh generation instead and names every file that is missing or differs.
+    /// </summary>
+    public static int McpOrientation(string root, string output, string? actingAs, bool check, bool json) => WithApi(root, api =>
     {
+        IReadOnlyList<(string Name, string Content)> files = Orientation.Generate(api, new ToolRegistry(api, actingAs));
+        if (check)
+        {
+            var findings = new List<FindingDto>();
+            foreach ((string name, string content) in files)
+            {
+                string path = Path.Combine(output, name);
+                if (!File.Exists(path))
+                {
+                    findings.Add(new FindingDto("error", "orientation.missing", name, "Missing; write it with `vericairn mcp orientation --out <directory>`."));
+                }
+                else if (File.ReadAllText(path) != content)
+                {
+                    findings.Add(new FindingDto("error", "orientation.stale", name, "Differs from a fresh generation; regenerate it with `vericairn mcp orientation --out <directory>` instead of editing it."));
+                }
+            }
+
+            return ReportFindings(new FindingsResponse(findings.Count == 0 ? $"{output}: current" : $"{output}: out of date", findings.Count, 0, findings), json);
+        }
+
         Directory.CreateDirectory(output);
         var written = new List<string>();
-        foreach ((string name, string content) in Orientation.Generate(api, new ToolRegistry(api, actingAs), VersionText()))
+        foreach ((string name, string content) in files)
         {
             File.WriteAllText(Path.Combine(output, name), content);
             written.Add(name);
