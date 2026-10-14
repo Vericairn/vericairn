@@ -7,6 +7,7 @@ using System.Runtime.InteropServices;
 using System.Text.Json;
 using Json = System.Text.Json.Nodes;
 using Vericairn.Daemon;
+using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Canonical;
@@ -735,6 +736,33 @@ internal static class Commands
         WithApi(root, api => ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason)), json));
 
     /// <summary>The git adapter behind sources and check; tests substitute a recorded one.</summary>
+    /// <summary>Serves the estate over the Model Context Protocol on standard input and output; diagnostics go to standard error.</summary>
+    public static int McpServe(string root, string? actingAs) => WithApi(root, api =>
+    {
+        var utf8 = new System.Text.UTF8Encoding(false);
+        Console.InputEncoding = utf8;
+        Console.OutputEncoding = utf8;
+        var server = new McpServer(new ToolRegistry(api, actingAs), VersionText());
+        Console.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
+        server.Run(Console.In, Console.Out, Console.Error);
+        return Clean;
+    });
+
+    /// <summary>Writes the agent orientation files from the estate's records.</summary>
+    public static int McpOrientation(string root, string output, string? actingAs, bool json) => WithApi(root, api =>
+    {
+        Directory.CreateDirectory(output);
+        var written = new List<string>();
+        foreach ((string name, string content) in Orientation.Generate(api, new ToolRegistry(api, actingAs), VersionText()))
+        {
+            File.WriteAllText(Path.Combine(output, name), content);
+            written.Add(name);
+        }
+
+        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { output, files = written }) : $"{output}: {string.Join(", ", written)}");
+        return Clean;
+    });
+
     internal static ISourceAdapter SourceAdapter { get; set; } = new GitCommandAdapter();
 
     /// <summary>The release provider behind release submit and observe; tests substitute the in-memory one.</summary>
