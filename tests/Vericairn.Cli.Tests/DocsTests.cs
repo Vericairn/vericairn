@@ -46,6 +46,12 @@ public class DocsTests
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
+
+            // A command's own --version, the version to release, is documented; the built-in help and version options are not.
+            string submit = cli[cli.IndexOf("### `vericairn release submit`", StringComparison.Ordinal)..];
+            submit = submit[..submit.IndexOf("\n### ", 5, StringComparison.Ordinal)];
+            Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
+            Assert.DoesNotContain("`-?, -h, --help`", cli, StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
             Assert.Contains("## `POST /v1/records`", File.ReadAllText(Path.Combine(output, "api-reference.md")), StringComparison.Ordinal);
             Assert.Contains("## `acceptance`", File.ReadAllText(Path.Combine(output, "record-reference.md")), StringComparison.Ordinal);
@@ -136,6 +142,7 @@ public class DocsTests
     [InlineData("0.2.0")]
     [InlineData("0.3.0")]
     [InlineData("0.3.1")]
+    [InlineData("0.4.0")]
     public void TheReleasedSetsAreComplete(string version)
     {
         string? root = AppContext.BaseDirectory;
