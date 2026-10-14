@@ -27,10 +27,12 @@ for the next release. What exists today:
   GitHub Releases provider with intent recorded before effect and publication left to the operator,
   documented in [docs/software.md](docs/software.md).
 - `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `sources`, `check`, `runtime`,
-  `recover`, `objects`, `docs`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
+  `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
   the estate, the embedded runtime otherwise. `vericairn docs` generates a release's references from the build and
   its notes from an estate's records, and refuses an incomplete documentation set; the release workflow runs that
-  check before it builds a draft.
+  check before it builds a draft. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a
+  client adapter over the API that lists only the tools the connected device may use, documented in
+  [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
 
 Nothing here is a release until a release record in the Vericairn estate says so.
 

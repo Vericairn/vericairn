@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>A Model Context Protocol server over the Vericairn API: a client adapter that exposes an estate to coding agents as tools, never a second owner.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Vericairn.Mcp</PackageId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

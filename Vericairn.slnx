@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Vericairn.Cli/Vericairn.Cli.csproj" />
     <Project Path="src/Vericairn.Daemon/Vericairn.Daemon.csproj" />
+    <Project Path="src/Vericairn.Mcp/Vericairn.Mcp.csproj" />
     <Project Path="src/Vericairn.Protocol/Vericairn.Protocol.csproj" />
     <Project Path="src/Vericairn.Records/Vericairn.Records.csproj" />
     <Project Path="src/Vericairn.Runtime/Vericairn.Runtime.csproj" />

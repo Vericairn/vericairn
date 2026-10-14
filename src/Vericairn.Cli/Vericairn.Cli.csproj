@@ -27,6 +27,7 @@
     <ProjectReference Include="../Vericairn.Daemon/Vericairn.Daemon.csproj" />
     <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
     <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
+    <ProjectReference Include="../Vericairn.Mcp/Vericairn.Mcp.csproj" />
   </ItemGroup>
 
 </Project>
