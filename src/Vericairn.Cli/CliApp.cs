@@ -237,8 +237,10 @@ internal static class CliApp
         var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall.");
         var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Serve the local socket only, without the pinned loopback TLS endpoint." };
         var serve = new Command("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.");
+        var detachedOption = new Option<bool>("--detached") { Description = "Write the daemon's output to its log beside the estate's live store instead of the standard streams; 'runtime start' serves this way." };
         serve.Options.Add(noLoopbackOption);
-        serve.SetAction(parseResult => Commands.RuntimeServe(parseResult.GetValue(estateOption)!, !parseResult.GetValue(noLoopbackOption)));
+        serve.Options.Add(detachedOption);
+        serve.SetAction(parseResult => Commands.RuntimeServe(parseResult.GetValue(estateOption)!, !parseResult.GetValue(noLoopbackOption), parseResult.GetValue(detachedOption)));
         runtime.Subcommands.Add(serve);
         var start = new Command("start", "Start a daemon for the estate in the background and wait until it answers.");
         start.SetAction(parseResult => Commands.RuntimeStart(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
