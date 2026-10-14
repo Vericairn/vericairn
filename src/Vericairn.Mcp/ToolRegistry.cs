@@ -112,6 +112,15 @@ public sealed class ToolRegistry
                 (api, _) => Json(api.Releases())),
             Read("devices_list", "The devices known to the estate: principal, name, platform, custody, admission state and whether this machine holds their key.", NoArguments(),
                 (api, _) => Json(api.Devices())),
+            Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
+                Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
+                (api, a) => Outcome(api.Attempt(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note"))))),
+            Write("work_result", "Submits the result of an attempt: outcome (completed, partial, blocked, abandoned), summary, outputs by hash, evidence, checks, limitations, unresolved effects and the next step. A claim to inspect; acceptance is a separate record by someone with that authority.",
+                Arguments(("attempt", "Attempt record id."), ("body", "The result body as an object: outcome, summary, outputs, evidence, checks, limitations, unresolvedEffects, nextStep.")), ["attempt", "body"],
+                (api, a) => Outcome(api.Result(new ResultRequest(Arg(a, "attempt"), by, Body(a, "body")))), ["body"]),
+            Write("work_amend", "Requests a change to an assignment's outcome, scope, target, budget or permitted effects. The request authorizes nothing; a decision admits or declines it.",
+                Arguments(("assignment", "Assignment record id."), ("body", "The amendment body as an object.")), ["assignment", "body"],
+                (api, a) => Outcome(api.Amend(new AmendRequest(Arg(a, "assignment"), by, Body(a, "body")))), ["body"]),
         ];
     }
 
