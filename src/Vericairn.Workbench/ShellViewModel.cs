@@ -10,9 +10,6 @@ using Vericairn.Protocol;
 
 namespace Vericairn.Workbench;
 
-/// <summary>A document open in the center workspace.</summary>
-public sealed record Document(string Title, string Text, string Kind);
-
 /// <summary>A region of the shell's primary navigation.</summary>
 public sealed record Region(string Name, string Question);
 
@@ -33,6 +30,8 @@ public sealed class ShellViewModel : Observable
     private string inspector = "Select something to inspect it.";
     private string status = "No estate open.";
     private string actingPrincipal = "read-only: no admitted device on this machine";
+    private DeviceRow? selectedActing;
+    private string actingRole = string.Empty;
     private string freshness = "no view yet";
     private ShellLayout layout;
     private string estatePath = string.Empty;
@@ -81,6 +80,28 @@ public sealed class ShellViewModel : Observable
     /// <summary>Recently opened estates.</summary>
     public ObservableCollection<string> Recent { get; }
 
+    /// <summary>Admitted devices held on this machine; the acting principal is chosen among their principals.</summary>
+    public ObservableCollection<DeviceRow> ActingCandidates { get; } = [];
+
+    /// <summary>An explicit acting principal id (the --as argument), used when set instead of a held device.</summary>
+    public string? ActingOverride { get; set; }
+
+    /// <summary>The chosen device, and so the acting principal.</summary>
+    public DeviceRow? SelectedActing
+    {
+        get => selectedActing;
+        set
+        {
+            if (Set(ref selectedActing, value))
+            {
+                DescribeActing();
+            }
+        }
+    }
+
+    /// <summary>The principal id writes are authored by, or null.</summary>
+    public string? ActingPrincipalId => ActingOverride ?? selectedActing?.Principal;
+
     /// <summary>The selected region.</summary>
     public Region SelectedRegion
     {
@@ -105,7 +126,7 @@ public sealed class ShellViewModel : Observable
     public string Inspector { get => inspector; private set => Set(ref inspector, value); }
 
     /// <summary>The status line.</summary>
-    public string Status { get => status; private set => Set(ref status, value); }
+    public string Status { get => status; internal set => Set(ref status, value); }
 
     /// <summary>The path typed on the first screen.</summary>
     public string EstatePath { get => estatePath; set => Set(ref estatePath, value); }
@@ -224,8 +245,15 @@ public sealed class ShellViewModel : Observable
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
             IReadOnlyList<DeviceRow> devices = connection.Api.Devices();
-            DeviceRow? held = devices.FirstOrDefault(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase));
-            ActingPrincipal = held is null ? "read-only: no admitted device on this machine" : $"{held.PrincipalName ?? held.Principal} (device {held.Name ?? held.Id})";
+            List<DeviceRow> held = devices.Where(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase)).ToList();
+            Replace(ActingCandidates, held);
+            if (selectedActing is null || held.All(d => d.Id != selectedActing.Id))
+            {
+                selectedActing = held.FirstOrDefault();
+                Raise(nameof(SelectedActing));
+            }
+
+            DescribeActing();
             Status = $"{estate.Name}: {estate.Records} records, {estate.Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
@@ -236,6 +264,39 @@ public sealed class ShellViewModel : Observable
             Status = "The runtime did not answer: " + exception.Message;
             Freshness = "cached";
         }
+    }
+
+    private void DescribeActing()
+    {
+        string? id = ActingPrincipalId;
+        if (id is null)
+        {
+            ActingPrincipal = "read-only: no admitted device on this machine";
+            actingRole = string.Empty;
+            return;
+        }
+
+        string name = selectedActing?.PrincipalName ?? id;
+        actingRole = string.Empty;
+        try
+        {
+            RecordResponse? principal = connection?.Api?.Record(id);
+            if (principal is not null && principal.Envelope.TryGetProperty("body", out JsonElement body))
+            {
+                name = body.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? name : name;
+                if (body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array)
+                {
+                    actingRole = roles.EnumerateArray().Any(r => r.GetString() == "operator") ? "operator" : roles.EnumerateArray().Select(r => r.GetString()).FirstOrDefault() ?? string.Empty;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Log("principal lookup failed: " + exception.Message);
+        }
+
+        ActingPrincipal = selectedActing is null ? $"{name} (explicit)" : $"{name} (device {selectedActing.Name ?? selectedActing.Id})";
+        Raise(nameof(ActingPrincipalId));
     }
 
     /// <summary>Starts the daemon through the runtime manager and reconnects.</summary>
@@ -273,7 +334,7 @@ public sealed class ShellViewModel : Observable
         }
 
         RuntimeOutcome outcome = await runtime.InstallPlanAsync(connection.Root).ConfigureAwait(true);
-        Open(new Document("Runtime install plan", outcome.Output, "plan"));
+        Open(new TextDocument("Runtime install plan", outcome.Output, "plan"));
     }
 
     /// <summary>Shows an attention item in the inspector without opening anything.</summary>
@@ -291,13 +352,17 @@ public sealed class ShellViewModel : Observable
         {
             OpenWorkOrder(item.SubjectId);
         }
+        else if (item.SubjectType == "result" && item.SubjectId is not null)
+        {
+            OpenReview(item.SubjectId);
+        }
         else if (item.SubjectId is not null)
         {
             OpenRecord(item.SubjectId);
         }
     }
 
-    /// <summary>Opens a work order's observation as a document.</summary>
+    /// <summary>Opens a work order's page: brief, assignments, attempts and results.</summary>
     public void OpenWorkOrder(string keyOrId)
     {
         Log($"open work order {keyOrId}");
@@ -310,7 +375,14 @@ public sealed class ShellViewModel : Observable
         {
             ObserveResponse? observed = connection.Api.Observe(keyOrId);
             BriefResponse? brief = connection.Api.Brief(keyOrId);
-            Open(observed is null ? new Document(keyOrId, $"No work order '{keyOrId}'.", "missing") : new Document(keyOrId, observed.Text + (brief is null ? string.Empty : "\n\n" + brief.Markdown), "work-order"));
+            if (observed is null || brief is null)
+            {
+                Open(new TextDocument(keyOrId, $"No work order '{keyOrId}'.", "missing"));
+                return;
+            }
+
+            string key = brief.Json.TryGetProperty("workOrder", out JsonElement o) && o.TryGetProperty("body", out JsonElement b) && b.TryGetProperty("key", out JsonElement k) ? k.GetString() ?? keyOrId : keyOrId;
+            Open(new WorkOrderDocument(key, brief.Json, observed.Text));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
         {
@@ -318,7 +390,201 @@ public sealed class ShellViewModel : Observable
         }
     }
 
-    /// <summary>Opens a record's envelope as a document.</summary>
+    /// <summary>Opens an assignment's page: the brief as delegated, the attempts and their results.</summary>
+    public AssignmentDocument? OpenAssignment(string assignmentId)
+    {
+        if (connection?.Api is null)
+        {
+            return null;
+        }
+
+        AssignmentRow? row = Assignments.FirstOrDefault(a => a.Id == assignmentId);
+        BriefResponse? brief = row is null ? null : Try(() => connection.Api.Brief(row.Key) ?? new BriefResponse(string.Empty, default));
+        JsonElement node = default;
+        if (brief is not null && brief.Json.TryGetProperty("assignments", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+        {
+            node = list.EnumerateArray().FirstOrDefault(a => Str(a, "id") == assignmentId);
+        }
+
+        if (row is null || node.ValueKind != JsonValueKind.Object)
+        {
+            Open(new TextDocument(assignmentId, $"No current assignment '{assignmentId}'.", "missing"));
+            return null;
+        }
+
+        var page = new AssignmentDocument(row.Key, node, row.ContributorName ?? row.Contributor);
+        Open(page);
+        return page;
+    }
+
+    /// <summary>Opens the assignment composer for a work order.</summary>
+    public AssignmentComposer? OpenComposer(string workOrderKey)
+    {
+        if (connection?.Api is null)
+        {
+            return null;
+        }
+
+        var contributors = new List<ContributorRow>();
+        foreach (RecordResponse principal in Try(() => connection.Api.Records("principal")) ?? [])
+        {
+            JsonElement body = principal.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
+            contributors.Add(new ContributorRow(principal.Id, Str(body, "name") ?? principal.Id, Str(body, "kind") ?? "?"));
+        }
+
+        var composer = new AssignmentComposer(workOrderKey, contributors);
+        Open(composer);
+        return composer;
+    }
+
+    /// <summary>Opens the result inbox: results awaiting review across the estate.</summary>
+    public ResultInboxDocument OpenInbox()
+    {
+        var inbox = new ResultInboxDocument(Assignments.Where(a => a.State == "awaiting review" && a.LatestResult is not null).Select(a => new InboxRow(a.Key, a.Id, a.LatestResult!, a.ContributorName ?? a.Contributor, a.Outcome, a.StateLabel)).ToList());
+        Open(inbox);
+        return inbox;
+    }
+
+    /// <summary>Opens the review and decision workspace for a result or a work order revision.</summary>
+    public ReviewWorkspace? OpenReview(string recordId)
+    {
+        if (connection?.Api is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            RecordResponse? record = connection.Api.Record(recordId);
+            if (record is null)
+            {
+                Open(new TextDocument(recordId, $"No record '{recordId}'.", "missing"));
+                return null;
+            }
+
+            JsonElement body = record.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
+            string heading = record.Type == "result" ? $"Review result {record.Id[..12]}" : $"Review {record.Type} {record.Id[..12]}";
+            string summary = record.Type == "result" ? RenderResult(record, body) : JsonSerializer.Serialize(body, Pretty);
+            var reviews = new List<ReviewRow>();
+            foreach (RecordResponse review in Try(() => connection.Api.Records("review")) ?? [])
+            {
+                JsonElement rb = review.Envelope.TryGetProperty("body", out JsonElement x) ? x : default;
+                string? subjectId = review.Envelope.TryGetProperty("subject", out JsonElement s) && s.ValueKind == JsonValueKind.Object ? Str(s, "id") : null;
+                if (subjectId == record.Id)
+                {
+                    reviews.Add(new ReviewRow(review.Id, Str(review.Envelope, "by") ?? "?", Str(rb, "independence") ?? "?", Str(rb, "outcome") ?? "?", Str(rb, "summary") ?? string.Empty));
+                }
+            }
+
+            var workspace = new ReviewWorkspace(record, SubjectFacts.About(connection.Api, record.Id), heading, summary, reviews, ActingPrincipalId ?? string.Empty, actingRole);
+            Open(workspace);
+            return workspace;
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Log("review failed: " + exception.Message);
+            return null;
+        }
+    }
+
+    /// <summary>Opens the products page from the product records.</summary>
+    public void OpenProducts()
+    {
+        if (connection?.Api is null)
+        {
+            return;
+        }
+
+        var rows = new List<ProductRow>();
+        foreach (RecordResponse product in Try(() => connection.Api.Records("product")) ?? [])
+        {
+            JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
+            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces")));
+        }
+
+        Open(new ProductsDocument(rows));
+    }
+
+    /// <summary>Opens a comparison of a record with the record it supersedes, or of two records.</summary>
+    public void OpenComparison(string rightId, string? leftId = null)
+    {
+        if (connection?.Api is null)
+        {
+            return;
+        }
+
+        try
+        {
+            RecordResponse? right = connection.Api.Record(rightId);
+            if (right is null)
+            {
+                Open(new TextDocument(rightId, $"No record '{rightId}'.", "missing"));
+                return;
+            }
+
+            leftId ??= right.Envelope.TryGetProperty("supersedes", out JsonElement s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
+            RecordResponse? left = leftId is null ? null : connection.Api.Record(leftId);
+            string leftText = left is null ? "(no earlier revision)" : JsonSerializer.Serialize(left.Envelope, Pretty);
+            Open(new ComparisonDocument($"Compare {right.Type} {right.Id[..12]}", left?.Id ?? "none", leftText, right.Id, JsonSerializer.Serialize(right.Envelope, Pretty)));
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Log("comparison failed: " + exception.Message);
+        }
+    }
+
+    /// <summary>The API for documents that send requests, or null while unavailable.</summary>
+    public IEstateApi? Api => connection?.Api;
+
+    private static string RenderResult(RecordResponse record, JsonElement body)
+    {
+        var lines = new List<string>
+        {
+            $"Result {record.Id} ({record.Hash})",
+            $"By {Str(record.Envelope, "by")} at {Str(record.Envelope, "at")}",
+            $"Outcome: {StateLanguage.Label("result-outcome", Str(body, "outcome"))}",
+            string.Empty,
+            Str(body, "summary") ?? string.Empty,
+            string.Empty,
+        };
+        foreach ((string name, string title) in new[] { ("outputs", "Outputs"), ("evidence", "Evidence"), ("checks", "Checks"), ("limitations", "Limitations"), ("unresolvedEffects", "Unresolved effects") })
+        {
+            if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array)
+            {
+                lines.Add(title + ":");
+                foreach (JsonElement item in list.EnumerateArray())
+                {
+                    lines.Add("- " + (item.ValueKind == JsonValueKind.String ? item.GetString() : Str(item, "name") is string n ? $"{n}: {Str(item, "outcome") ?? Str(item, "hash") ?? string.Empty} {Str(item, "summary") ?? string.Empty}".Trim() : Str(item, "summary") ?? item.GetRawText()));
+                }
+
+                lines.Add(string.Empty);
+            }
+        }
+
+        lines.Add("Next step: " + (Str(body, "nextStep") ?? string.Empty));
+        return string.Join("\n", lines);
+    }
+
+    private T? Try<T>(Func<T> read) where T : class
+    {
+        try
+        {
+            return read();
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Log("read failed: " + exception.Message);
+            return null;
+        }
+    }
+
+    private static string Names(JsonElement body, string name) =>
+        body.ValueKind == JsonValueKind.Object && body.TryGetProperty(name, out JsonElement list) && list.ValueKind == JsonValueKind.Array
+            ? string.Join(", ", list.EnumerateArray().Select(e => Str(e, "name") ?? string.Empty).Where(s => s.Length > 0)) : string.Empty;
+
+    private static string? Str(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    /// <summary>Opens a record's envelope as a document; a work order (by key or id) opens as its page.</summary>
     public void OpenRecord(string id)
     {
         if (connection?.Api is null)
@@ -328,8 +594,14 @@ public sealed class ShellViewModel : Observable
 
         try
         {
+            if (WorkOrders.Any(w => w.Key == id || w.Id == id))
+            {
+                OpenWorkOrder(id);
+                return;
+            }
+
             RecordResponse? record = connection.Api.Record(id);
-            Open(record is null ? new Document(id, $"No record '{id}'.", "missing") : new Document($"{record.Type} {id[..Math.Min(12, id.Length)]}", JsonSerializer.Serialize(record.Envelope, Pretty), "record"));
+            Open(record is null ? new TextDocument(id, $"No record '{id}'.", "missing") : new TextDocument($"{record.Type} {id[..Math.Min(12, id.Length)]}", JsonSerializer.Serialize(record.Envelope, Pretty), "record"));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
         {
@@ -370,27 +642,29 @@ public sealed class ShellViewModel : Observable
                 Inspector = Attention.Count == 0 ? "Nothing needs a person right now." : $"{Attention.Count} items need attention. Select one to see why and what to do next.";
                 break;
             case "Work":
-                Open(new Document("Work", WorkOrders.Count == 0 ? "No work orders." : string.Join("\n", WorkOrders.Select(w => $"{w.Key,-14} {w.StatusLabel,-48} {w.Kind,-10} {w.Title}")) + "\n\nAssignments:\n" + string.Join("\n", Assignments.Select(a => $"{a.Key,-14} {a.ContributorName ?? a.Contributor,-20} attempts {a.Attempts}  {a.Outcome}, {a.StateLabel}")), "work"));
+                Open(new TextDocument("Work", WorkOrders.Count == 0 ? "No work orders." : string.Join("\n", WorkOrders.Select(w => $"{w.Key,-14} {w.StatusLabel,-48} {w.Kind,-10} {w.Title}")) + "\n\nAssignments:\n" + string.Join("\n", Assignments.Select(a => $"{a.Key,-14} {a.ContributorName ?? a.Contributor,-20} attempts {a.Attempts}  {a.Outcome}, {a.StateLabel}")) + "\n\nOpen a work order by its key with Ctrl+G; the result inbox is Ctrl+I.", "work"));
                 break;
             case "Products":
-                Open(new Document("Products", "Product and project pages arrive in WB-02; the product record is on record (open it from Records).", "planned"));
+                OpenProducts();
                 break;
             case "Releases":
-                Open(new Document("Releases", Releases.Count == 0 ? "No releases." : string.Join("\n", Releases.Select(r => $"{r.Version,-8} {r.StatusLabel,-44} {r.Commit?[..Math.Min(12, r.Commit.Length)]}  {r.Id}")), "releases"));
+                Open(new TextDocument("Releases", Releases.Count == 0 ? "No releases." : string.Join("\n", Releases.Select(r => $"{r.Version,-8} {r.StatusLabel,-44} {r.Commit?[..Math.Min(12, r.Commit.Length)]}  {r.Id}")), "releases"));
                 break;
             case "Runtime":
-                Open(new Document("Runtime", $"{RuntimeLabel}\n{RuntimeWhere}\n\nActing principal: {ActingPrincipal}\n\nStart, stop and the install plan are in the Runtime menu (keyboard: Alt+R).", "runtime"));
+                Open(new TextDocument("Runtime", $"{RuntimeLabel}\n{RuntimeWhere}\n\nActing principal: {ActingPrincipal}\n\nStart, stop and the install plan are in the Runtime menu.", "runtime"));
                 break;
             case "Records":
-                Open(new Document("Records", "Open a record by id with Ctrl+G (Cmd+G on macOS), or select an attention item.", "records"));
+                Open(new TextDocument("Records", "Open a record or a work order by id or key with Ctrl+G (Cmd+G on macOS), or select an attention item.", "records"));
                 break;
             default:
                 break;
         }
     }
 
-    private void Open(Document document)
+    /// <summary>Opens a document, replacing one with the same title.</summary>
+    public void Open(Document document)
     {
+        ArgumentNullException.ThrowIfNull(document);
         Document? existing = Documents.FirstOrDefault(d => d.Title == document.Title);
         if (existing is not null)
         {

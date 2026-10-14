@@ -8,7 +8,7 @@
 
 ## Tools
 
-Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `decisions_list`, `decision_get`, `releases_list`, `devices_list`.
+Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`.
 
 Writes are visible only when the server was started with `--as <principal id>` and that principal has an admitted device whose key this machine holds, because that is what the runtime signs with: `work_attempt`, `work_result`, `work_amend`. A write the runtime refuses comes back as an error result carrying the runtime's findings, every objection at once. There is no tool that publishes, spends, creates or admits a device, runs an arbitrary command or authors an arbitrary record type.
 

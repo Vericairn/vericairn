@@ -2,6 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="using:Vericairn.Workbench"
         xmlns:pres="using:Vericairn.Presentation"
+        xmlns:proto="using:Vericairn.Protocol"
         x:Class="Vericairn.Workbench.MainWindow"
         x:DataType="local:ShellViewModel"
         Title="Vericairn Workbench" Width="1200" Height="800" MinWidth="720" MinHeight="480">
@@ -15,6 +16,12 @@
         <MenuItem Header="_Start the daemon" Click="OnStartRuntime" />
         <MenuItem Header="S_top the daemon" Click="OnStopRuntime" />
         <MenuItem Header="Show the _install plan" Click="OnInstallPlan" />
+      </MenuItem>
+      <MenuItem Header="_Work">
+        <MenuItem Header="Result _inbox" InputGesture="Ctrl+I" Click="OnOpenInbox" />
+        <MenuItem Header="_Products" Click="OnOpenProducts" />
+        <MenuItem Header="_Assign the open work order" Click="OnOpenComposer" />
+        <MenuItem Header="_Compare the open record with its earlier revision" Click="OnCompareOpen" />
       </MenuItem>
       <MenuItem Header="_View">
         <MenuItem Header="Toggle _navigation" InputGesture="Ctrl+Shift+L" Click="OnToggleLeft" />
@@ -35,6 +42,13 @@
         <TextBlock Text="{Binding Pin}" VerticalAlignment="Center" />
         <TextBlock Name="RuntimeText" Text="{Binding RuntimeLabel}" VerticalAlignment="Center" />
         <TextBlock Name="ActingText" Text="{Binding ActingPrincipal}" VerticalAlignment="Center" />
+        <ComboBox Name="ActingBox" ItemsSource="{Binding ActingCandidates}" SelectedItem="{Binding SelectedActing}" MinHeight="28" MinWidth="160" IsVisible="{Binding HasEstate}" AutomationProperties.Name="Acting principal (admitted devices held here)">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="proto:DeviceRow">
+              <TextBlock Text="{Binding PrincipalName}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
         <TextBlock Name="FreshnessText" Text="{Binding Freshness}" VerticalAlignment="Center" />
         <TextBox Name="RecordIdBox" PlaceholderText="Record id, then Enter" Width="300" MinHeight="28" AutomationProperties.Name="Open a record by id" />
       </StackPanel>
@@ -94,13 +108,184 @@
                 <TextBlock Text="{Binding Title}" MinHeight="24" />
               </DataTemplate>
             </TabControl.ItemTemplate>
-            <TabControl.ContentTemplate>
-              <DataTemplate x:DataType="local:Document">
+            <TabControl.DataTemplates>
+              <DataTemplate x:DataType="local:ProductsDocument">
                 <ScrollViewer>
-                  <SelectableTextBlock Text="{Binding Text}" FontFamily="Menlo,Consolas,monospace" FontSize="12" Margin="8" TextWrapping="Wrap" />
+                  <StackPanel Margin="8" Spacing="8">
+                    <TextBlock Text="Products" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Opacity="0.8" />
+                    <ListBox ItemsSource="{Binding Products}" Focusable="True" AutomationProperties.Name="Products">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:ProductRow">
+                          <StackPanel MinHeight="32">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding Editions}" FontSize="11" Opacity="0.8" />
+                            <TextBlock Text="{Binding Surfaces}" FontSize="11" Opacity="0.8" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </StackPanel>
                 </ScrollViewer>
               </DataTemplate>
-            </TabControl.ContentTemplate>
+              <DataTemplate x:DataType="local:WorkOrderDocument">
+                <ScrollViewer>
+                  <StackPanel Margin="8" Spacing="8">
+                    <TextBlock Text="{Binding Heading}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Kind2}" Opacity="0.8" />
+                    <TextBlock Text="{Binding Intent}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ExitQuestion}" TextWrapping="Wrap" FontStyle="Italic" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Content="Assign…" MinHeight="28" Click="OnOpenComposer" />
+                      <Button Content="Open the selected assignment" MinHeight="28" Click="OnOpenSelectedAssignment" />
+                      <Button Content="Review the selected result" MinHeight="28" Click="OnReviewSelectedAssignment" />
+                      <Button Content="Compare with the earlier revision" MinHeight="28" Click="OnCompareOpen" />
+                    </StackPanel>
+                    <TextBlock Text="Assignments (Enter opens the assignment)" FontWeight="SemiBold" />
+                    <ListBox ItemsSource="{Binding Assignments}" SelectedItem="{Binding SelectedAssignment}" Focusable="True" MaxHeight="240" AutomationProperties.Name="Assignments" DoubleTapped="OnOpenSelectedAssignment">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:AssignmentView">
+                          <StackPanel MinHeight="32">
+                            <TextBlock Text="{Binding Contributor}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Summary}" TextWrapping="Wrap" FontSize="11" />
+                            <TextBlock Text="{Binding LatestResultState}" FontSize="11" Opacity="0.8" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="Observation" FontWeight="SemiBold" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Observation}" FontFamily="Menlo,Consolas,monospace" FontSize="12" TextWrapping="Wrap" />
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:AssignmentDocument">
+                <ScrollViewer>
+                  <StackPanel Margin="8" Spacing="8">
+                    <TextBlock Text="{Binding Heading}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Opacity="0.8" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding BriefText}" FontFamily="Menlo,Consolas,monospace" FontSize="12" TextWrapping="Wrap" />
+                    <Button Content="Review the latest result" MinHeight="28" Click="OnReviewLatestResult" />
+                    <TextBlock Text="Attempts (Enter opens the attempt's result for review)" FontWeight="SemiBold" />
+                    <ListBox ItemsSource="{Binding Attempts}" SelectedItem="{Binding SelectedAttempt}" Focusable="True" MaxHeight="320" AutomationProperties.Name="Attempts" DoubleTapped="OnReviewLatestResult">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:AttemptView">
+                          <StackPanel MinHeight="32">
+                            <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:AssignmentComposer">
+                <ScrollViewer>
+                  <StackPanel Margin="8" Spacing="6" MaxWidth="900" HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="Nothing is sent until you choose Send; the runtime validates and signs. Lists take one entry per line. Workspaces are described, never as machine paths." TextWrapping="Wrap" Opacity="0.8" />
+                    <TextBlock Text="Contributor" />
+                    <ComboBox ItemsSource="{Binding Contributors}" SelectedItem="{Binding Contributor}" MinHeight="28" MinWidth="240" AutomationProperties.Name="Contributor">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:ContributorRow">
+                          <TextBlock Text="{Binding Display}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <TextBlock Text="Outcome" />
+                    <TextBox Text="{Binding Outcome}" MinHeight="28" AutomationProperties.Name="Outcome" />
+                    <TextBlock Text="Permitted changes" />
+                    <TextBox Text="{Binding PermittedChanges}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Permitted changes" />
+                    <TextBlock Text="Prohibited effects" />
+                    <TextBox Text="{Binding ProhibitedEffects}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Prohibited effects" />
+                    <TextBlock Text="Workspace" />
+                    <TextBox Text="{Binding Workspace}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Workspace" />
+                    <TextBlock Text="Limits" />
+                    <TextBox Text="{Binding Limits}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Limits" />
+                    <TextBlock Text="Expected outputs" />
+                    <TextBox Text="{Binding ExpectedOutputs}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Expected outputs" />
+                    <TextBlock Text="Review criteria" />
+                    <TextBox Text="{Binding ReviewCriteria}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Review criteria" />
+                    <TextBlock Text="Recovery" />
+                    <TextBox Text="{Binding Recovery}" MinHeight="28" AutomationProperties.Name="Recovery" />
+                    <TextBlock Text="Note" />
+                    <TextBox Text="{Binding Note}" MinHeight="28" AutomationProperties.Name="Note" />
+                    <Button Content="Send the assignment" MinHeight="32" Click="OnSubmitAssignment" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="Menlo,Consolas,monospace" FontSize="12" />
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:ResultInboxDocument">
+                <StackPanel Margin="8" Spacing="8">
+                  <TextBlock Text="Result inbox" FontSize="18" FontWeight="SemiBold" />
+                  <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Opacity="0.8" />
+                  <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Focusable="True" MaxHeight="480" AutomationProperties.Name="Results awaiting review" DoubleTapped="OnInboxOpen">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="local:InboxRow">
+                        <StackPanel MinHeight="32">
+                          <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Button Content="Open the review workspace" MinHeight="28" Click="OnInboxOpen" />
+                </StackPanel>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:ReviewWorkspace">
+                <ScrollViewer>
+                  <StackPanel Margin="8" Spacing="6" MaxWidth="900" HorizontalAlignment="Left">
+                    <TextBlock Text="{Binding Heading}" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Prepared.Subject}" FontFamily="Menlo,Consolas,monospace" FontSize="11" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding Declaration}" TextWrapping="Wrap" Opacity="0.8" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding SummaryText}" FontFamily="Menlo,Consolas,monospace" FontSize="12" TextWrapping="Wrap" />
+                    <TextBlock Text="Reviews on record (checked ones become the acceptance's basis)" FontWeight="SemiBold" />
+                    <ItemsControl ItemsSource="{Binding Reviews}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:ReviewRow">
+                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Display}" MinHeight="28" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="Review" FontWeight="SemiBold" />
+                    <ComboBox ItemsSource="{x:Static local:ReviewWorkspace.Outcomes}" SelectedItem="{Binding ReviewOutcome}" MinHeight="28" MinWidth="160" AutomationProperties.Name="Review outcome" />
+                    <TextBox Text="{Binding ReviewSummary}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Review summary" />
+                    <TextBox Text="{Binding ReviewFindings}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Findings, one per line, prefixed error:, warning: or info:" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Content="Send the review" MinHeight="32" Click="OnSubmitReview" />
+                      <Button Content="Check the subject" MinHeight="32" Click="OnCheckPrepared" />
+                    </StackPanel>
+                    <TextBlock Text="Acceptance" FontWeight="SemiBold" />
+                    <TextBox Text="{Binding AcceptanceStatement}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Acceptance statement" />
+                    <Button Content="Send the acceptance" MinHeight="32" Click="OnSubmitAcceptance" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="Menlo,Consolas,monospace" FontSize="12" />
+                    <TextBlock Text="{Binding PreparedState}" TextWrapping="Wrap" Opacity="0.8" />
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:ComparisonDocument">
+                <Grid RowDefinitions="Auto,*" ColumnDefinitions="*,*,*" Margin="8">
+                  <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding LeftTitle}" FontWeight="SemiBold" />
+                  <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding Summary}" FontWeight="SemiBold" />
+                  <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding RightTitle}" FontWeight="SemiBold" />
+                  <ScrollViewer Grid.Row="1" Grid.Column="0">
+                    <SelectableTextBlock MinHeight="24" Text="{Binding LeftText}" FontFamily="Menlo,Consolas,monospace" FontSize="11" />
+                  </ScrollViewer>
+                  <ScrollViewer Grid.Row="1" Grid.Column="1">
+                    <SelectableTextBlock MinHeight="24" Text="{Binding DiffText}" FontFamily="Menlo,Consolas,monospace" FontSize="11" />
+                  </ScrollViewer>
+                  <ScrollViewer Grid.Row="1" Grid.Column="2">
+                    <SelectableTextBlock MinHeight="24" Text="{Binding RightText}" FontFamily="Menlo,Consolas,monospace" FontSize="11" />
+                  </ScrollViewer>
+                </Grid>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:TextDocument">
+                <ScrollViewer>
+                  <SelectableTextBlock MinHeight="24" Text="{Binding Text}" FontFamily="Menlo,Consolas,monospace" FontSize="12" Margin="8" TextWrapping="Wrap" />
+                </ScrollViewer>
+              </DataTemplate>
+            </TabControl.DataTemplates>
           </TabControl>
         </Grid>
       </Grid>
@@ -108,7 +293,7 @@
       <GridSplitter Name="RightSplitter" Grid.Column="3" Grid.Row="0" Grid.RowSpan="3" Width="4" IsVisible="{Binding RightVisible}" />
       <Border Name="RightPanel" Grid.Column="4" Grid.Row="0" Grid.RowSpan="3" IsVisible="{Binding RightVisible}" Padding="8" AutomationProperties.Name="Inspector">
         <ScrollViewer>
-          <SelectableTextBlock Name="InspectorText" Text="{Binding Inspector}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Inspector text" />
+          <SelectableTextBlock MinHeight="24" Name="InspectorText" Text="{Binding Inspector}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Inspector text" />
         </ScrollViewer>
       </Border>
 

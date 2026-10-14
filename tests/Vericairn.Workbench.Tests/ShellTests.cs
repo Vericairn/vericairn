@@ -61,6 +61,7 @@ internal sealed class FakeRuntimeManager : IRuntimeManager
 }
 
 /// <summary>The shell over a test estate: target context, home attention, keyboard alternatives, runtime management, layout.</summary>
+[Collection("workbench")]
 public class ShellTests(HeadlessFixture fixture)
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
@@ -107,7 +108,7 @@ public class ShellTests(HeadlessFixture fixture)
             });
             Assert.True(shell.Documents.Any(d => d.Kind == "work-order"), $"documents: {string.Join(", ", shell.Documents.Select(d => d.Title + "/" + d.Kind))} | focused: {await fixture.Ui(() => window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing")} | activity: {string.Join(" / ", shell.Activity)}");
             Assert.Contains("decision needed", shell.Inspector, StringComparison.Ordinal);
-            Assert.Contains("M9", shell.SelectedDocument!.Text, StringComparison.Ordinal);
+            Assert.Contains("M9", ((WorkOrderDocument)shell.SelectedDocument!).Heading, StringComparison.Ordinal);
         }
         finally
         {
@@ -153,7 +154,7 @@ public class ShellTests(HeadlessFixture fixture)
         Assert.Equal(["start"], runtime.Calls);
         Assert.Equal("daemon", shell.RuntimeMode);
         await fixture.UiAsync(shell.ShowInstallPlanAsync);
-        Assert.Contains(shell.Documents, d => d.Title == "Runtime install plan" && d.Text.Contains("unit: example", StringComparison.Ordinal));
+        Assert.Contains(shell.Documents, d => d.Title == "Runtime install plan" && d is TextDocument text && text.Text.Contains("unit: example", StringComparison.Ordinal));
         await fixture.UiAsync(shell.StopRuntimeAsync);
         Assert.Equal(["start", "plan", "stop"], runtime.Calls);
         unavailable.Dispose();
@@ -207,23 +208,7 @@ public class ShellTests(HeadlessFixture fixture)
         public void Dispose() => inner?.Dispose();
     }
 
-    private static string Cli(params string[] args)
-    {
-        var output = new StringWriter { NewLine = "\n" };
-        TextWriter previous = Console.Out;
-        Console.SetOut(output);
-        try
-        {
-            int code = CliApp.Build().Parse(args).Invoke();
-            Assert.True(code == 0, $"vericairn {string.Join(' ', args)} exited {code}: {output}");
-        }
-        finally
-        {
-            Console.SetOut(previous);
-        }
-
-        return output.ToString().Trim().Split('\n').Last();
-    }
+    private static string Cli(params string[] args) => Seed.Cli(args);
 
     private static string LastId(string root, string type)
     {
