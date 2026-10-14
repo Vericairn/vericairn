@@ -7,9 +7,10 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Packs.Software;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Service;
-using Vericairn.Runtime.Software;
 using Vericairn.Runtime.Upgrade;
 
 namespace Vericairn.Runtime.Tests;
@@ -48,54 +49,108 @@ public class SoftwareFlowTests
         Assert.Equal("git@github.com:Example/widget.git", SourceAdoption.ObservationBody(hosted)["facts"]!["remote"]!.GetValue<string>());
     }
 
+    private static readonly Dictionary<string, string> GitHub = new(StringComparer.Ordinal) { ["repository"] = "Example/widget", ["workflow"] = "release.yml", ["ref"] = "main", ["checksums"] = "SHA256SUMS" };
+
     [Fact]
     public void TheReleaseFlowIsIntentThenObservedEffect()
     {
         var provider = new FakeReleaseProvider();
-        JsonObject intent = ReleaseFlow.IntentBody("Example/widget", "release.yml", "main", "0.2.0", "01PRODUCT");
+        JsonObject intent = ReleaseFlow.IntentBody("github-releases", "Example/widget", GitHub, "0.2.0", "01PRODUCT");
         Assert.Equal("not-started", intent["status"]!.GetValue<string>());
         Assert.Equal("github-releases:Example/widget:v0.2.0", intent["identity"]!.GetValue<string>());
+        Assert.Equal("Example/widget", intent["target"]!["repository"]!.GetValue<string>());
+        Assert.Equal("release.yml", intent["target"]!["workflow"]!.GetValue<string>());
+        Assert.Equal("01PRODUCT", intent["target"]!["product"]!.GetValue<string>());
 
-        DispatchReceipt receipt = provider.Dispatch(new DispatchRequest("Example/widget", "release.yml", "main", new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.2.0" }));
+        DispatchReceipt receipt = provider.Dispatch(new DispatchRequest("Example/widget", GitHub, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.2.0" }));
         JsonObject dispatched = ReleaseFlow.AfterDispatch(Element(intent), receipt);
         Assert.Equal("dispatched", dispatched["status"]!.GetValue<string>());
         Assert.Equal(receipt.RunId, dispatched["target"]!["run"]!.GetValue<string>());
 
         RunObservation running = provider.ObserveRun("Example/widget", receipt.RunId!)!;
-        Assert.Throws<InvalidOperationException>(() => ReleaseFlow.AfterObservation(Element(dispatched), running, null, "0.2.0"));
+        Assert.Throws<InvalidOperationException>(() => ReleaseFlow.AfterObservation(Element(dispatched), running, null, "0.2.0", ReleaseProfile.None, "SHA256SUMS"));
 
         provider.CompleteRun("Example/widget", receipt.RunId!, true, "0.2.0");
         RunObservation done = provider.ObserveRun("Example/widget", receipt.RunId!)!;
-        ReleaseObservation draft = provider.ObserveRelease("Example/widget", "v0.2.0")!;
-        Assert.Empty(ReleaseFlow.MissingDistributables(draft, "0.2.0"));
-        JsonObject observed = ReleaseFlow.AfterObservation(Element(dispatched), done, draft, "0.2.0");
+        ReleaseObservation draft = provider.ObserveRelease("Example/widget", "v0.2.0", GitHub)!;
+        Assert.Empty(ReleaseProfile.None.Missing(draft, "0.2.0", "SHA256SUMS"));
+        JsonObject observed = ReleaseFlow.AfterObservation(Element(dispatched), done, draft, "0.2.0", ReleaseProfile.None, "SHA256SUMS");
         Assert.Equal("observed-success", observed["status"]!.GetValue<string>());
         Assert.Equal(receipt.RunId, observed["observed"]!["reference"]!.GetValue<string>());
 
-        JsonObject candidate = ReleaseFlow.CandidateBody("0.2.0", "Example/widget", done.HeadSha, draft, ["run passed"], ["linux-x64"], "unsigned developer build", ["none signed"]);
+        // With nothing declared, the generic rule classifies Vericairn's own assets exactly as a declaration would.
+        JsonObject candidate = ReleaseFlow.CandidateBody("0.2.0", "Example/widget", done.HeadSha, draft, ["run passed"], ["linux-x64"], "unsigned developer build", ["none signed"], ReleaseProfile.None, "SHA256SUMS");
         Assert.Equal("candidate", candidate["status"]!.GetValue<string>());
         Assert.Equal(14, candidate["artifacts"]!.AsArray().Count);
         Assert.Equal(12, candidate["artifacts"]!.AsArray().Count(a => a!["platform"]!.GetValue<string>() != "any"));
         Assert.Equal("osx-arm64", candidate["artifacts"]!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "vericairn-workbench-0.2.0-osx-arm64.tar.gz")!["platform"]!.GetValue<string>());
+        Assert.Equal("win-arm64", candidate["artifacts"]!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "vericairn-0.2.0-win-arm64.zip")!["platform"]!.GetValue<string>());
         Assert.NotNull(candidate["sbom"]);
         Assert.NotNull(candidate["notices"]);
         Assert.Equal(RecordFormats.Current, candidate["recordFormat"]!["writes"]!.GetValue<long>());
         Assert.Throws<InvalidOperationException>(() => ReleaseFlow.PublishedBody(Element(candidate), draft));
         provider.Publish("Example/widget", "v0.2.0");
-        JsonObject published = ReleaseFlow.PublishedBody(Element(candidate), provider.ObserveRelease("Example/widget", "v0.2.0")!);
+        JsonObject published = ReleaseFlow.PublishedBody(Element(candidate), provider.ObserveRelease("Example/widget", "v0.2.0", GitHub)!);
         Assert.Equal("published", published["status"]!.GetValue<string>());
         Assert.NotNull(published["publishedAt"]);
 
         // A failed run is a known failure with the run as reference; a refusal before dispatch is a known failure too.
-        DispatchReceipt second = provider.Dispatch(new DispatchRequest("Example/widget", "release.yml", "main", new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.3.0" }));
+        DispatchReceipt second = provider.Dispatch(new DispatchRequest("Example/widget", GitHub, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.3.0" }));
         provider.CompleteRun("Example/widget", second.RunId!, false, "0.3.0");
-        JsonObject failed = ReleaseFlow.AfterObservation(Element(ReleaseFlow.AfterDispatch(Element(ReleaseFlow.IntentBody("Example/widget", "release.yml", "main", "0.3.0", "01PRODUCT")), second)), provider.ObserveRun("Example/widget", second.RunId!), null, "0.3.0");
+        JsonObject failed = ReleaseFlow.AfterObservation(Element(ReleaseFlow.AfterDispatch(Element(ReleaseFlow.IntentBody("github-releases", "Example/widget", GitHub, "0.3.0", "01PRODUCT")), second)), provider.ObserveRun("Example/widget", second.RunId!), null, "0.3.0", ReleaseProfile.None, "SHA256SUMS");
         Assert.Equal("known-failure", failed["status"]!.GetValue<string>());
         Assert.Equal("known-failure", ReleaseFlow.AfterRefusal(Element(intent), "not logged in")["status"]!.GetValue<string>());
         Assert.Equal("uncertain", ReleaseFlow.AfterUncertainty(Element(intent), "timed out")["status"]!.GetValue<string>());
         JsonObject retry = ReleaseFlow.Retry(Element(failed), second, "The failed run produced nothing.");
         Assert.Equal("dispatched", retry["status"]!.GetValue<string>());
         Assert.Null(retry["observed"]);
+    }
+
+    [Fact]
+    public void ADeclaredProfileClassifiesAnotherProductsArtifactsAndSaysWhatIsMissing()
+    {
+        using JsonDocument product = JsonDocument.Parse("""
+            {"name":"Gadget","release":{"destination":{"provider":"github-releases","settings":{"repository":"Example/gadget"}},"checksums":"CHECKSUMS.txt",
+             "artifacts":[{"name":"gadget-{version}-{platform}.zip","role":"distributable","platforms":["linux-x64","win-x64"]},{"name":"gadget-{version}.spdx.json","role":"sbom"},{"name":"LICENSES-{version}.txt","role":"notices"}]}}
+            """);
+        ReleaseProfile profile = ReleaseProfile.FromProductBody(product.RootElement);
+        Assert.True(profile.DeclaresArtifacts);
+        Assert.Equal("github-releases", profile.Destination!.Provider);
+        Assert.Equal("Example/gadget", profile.Destination.Settings["repository"]);
+        Assert.Equal(["gadget-1.0.0-linux-x64.zip", "gadget-1.0.0-win-x64.zip", "gadget-1.0.0.spdx.json", "LICENSES-1.0.0.txt"], profile.Expected("1.0.0").Select(e => e.Name));
+        Assert.Equal(new ExpectedArtifact("gadget-1.0.0-win-x64.zip", "distributable", "win-x64"), profile.Classify("gadget-1.0.0-win-x64.zip", "1.0.0"));
+        Assert.Equal("notices", profile.Classify("LICENSES-1.0.0.txt", "1.0.0").Role);
+        Assert.Equal(new ExpectedArtifact("extra-linux-arm64.tar.gz", "distributable", "linux-arm64"), profile.Classify("extra-linux-arm64.tar.gz", "1.0.0"));
+
+        ReleaseObservation partial = new("v1.0.0", true, null, Commit, null, [new ReleaseAsset("gadget-1.0.0-linux-x64.zip", 10, "sha256:" + new string('1', 64)), new ReleaseAsset("gadget-1.0.0-win-x64.zip", 10, null), new ReleaseAsset("CHECKSUMS.txt", 1, null)], "2026-10-14T00:00:00Z");
+        Assert.Equal(["gadget-1.0.0-win-x64.zip", "gadget-1.0.0.spdx.json", "LICENSES-1.0.0.txt"], profile.Missing(partial, "1.0.0", "CHECKSUMS.txt"));
+
+        // The declared checksum file and the product's settings come before the provider's defaults; the request's own come last.
+        var descriptor = new FakeReleaseProvider().Descriptor;
+        IReadOnlyDictionary<string, string> settings = profile.Settings(descriptor, "github-releases", new Dictionary<string, string>(StringComparer.Ordinal) { ["ref"] = "release" });
+        Assert.Equal("Example/gadget", settings["repository"]);
+        Assert.Equal("CHECKSUMS.txt", settings["checksums"]);
+        Assert.Equal("release.yml", settings["workflow"]);
+        Assert.Equal("release", settings["ref"]);
+        Assert.DoesNotContain("repository", ReleaseProfile.None.Settings(descriptor, "github-releases", null).Keys);
+    }
+
+    [Theory]
+    [InlineData("tool-1.0.0-linux-x64.tar.gz", "linux-x64", "distributable")]
+    [InlineData("tool_1.0.0_osx-arm64.zip", "osx-arm64", "distributable")]
+    [InlineData("tool-1.0.0-win-arm64", "win-arm64", "distributable")]
+    [InlineData("tool-1.0.0-sbom.cdx.json", "any", "sbom")]
+    [InlineData("tool.spdx.json", "any", "sbom")]
+    [InlineData("THIRD-PARTY-NOTICES.md", "any", "notices")]
+    [InlineData("tool-1.0.0-docs.zip", "any", "documentation")]
+    [InlineData("readme.txt", "any", "other")]
+    [InlineData("tool-linux-x64-extras.tar.gz", "linux-x64", "distributable")]
+    [InlineData("tool-xlinux-x64.zip", "any", "other")]
+    public void TheGenericRuleNeedsNoDeclaration(string name, string platform, string role)
+    {
+        ExpectedArtifact artifact = ReleaseProfile.Generic(name);
+        Assert.Equal(platform, artifact.Platform);
+        Assert.Equal(role, artifact.Role);
     }
 
     [Fact]

@@ -5,43 +5,55 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
-using Vericairn.Runtime.Upgrade;
 
-namespace Vericairn.Runtime.Software;
+namespace Vericairn.Runtime.Release;
 
 /// <summary>
-/// The release as intent, then observed effect: an operation record is written before the release workflow is dispatched,
-/// every change of what is known is a superseding revision, the observed draft becomes a candidate release record, and
-/// publication stays the operator's manual step that is observed afterwards.
+/// The release as intent, then observed effect: an operation record is written before the build is dispatched through the
+/// provider the product or the request names, every change of what is known is a superseding revision, the observed draft becomes
+/// a candidate release record classified by the product's declared profile (or the generic rule), and publication stays the
+/// operator's manual step that is observed afterwards. Nothing here knows a particular product or provider.
 /// </summary>
 public static class ReleaseFlow
 {
-    /// <summary>The provider id recorded on operations.</summary>
-    public const string ProviderId = "github-releases";
-
-    /// <summary>The action recorded on operations.</summary>
+    /// <summary>The action recorded on release operations.</summary>
     public const string DispatchAction = "dispatch-release-workflow";
 
-    /// <summary>The distributable platforms a release of Vericairn names.</summary>
+    /// <summary>The platform identifiers a release's artifacts can name.</summary>
     public static readonly string[] Platforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 
-    /// <summary>The original identity of releasing a version from a repository; every retry reconciles under it.</summary>
-    public static string Identity(string repository, string version) => $"{ProviderId}:{repository}:v{version}";
+    /// <summary>The original identity of releasing a version to a destination through a provider; every retry reconciles under it.</summary>
+    public static string Identity(string provider, string destination, string version) => $"{provider}:{destination}:v{version}";
 
     /// <summary>The tag a version is released under.</summary>
     public static string Tag(string version) => "v" + version;
 
-    /// <summary>The intent, recorded before any dispatch.</summary>
-    public static JsonObject IntentBody(string repository, string workflow, string reference, string version, string product) => new()
+    /// <summary>The intent, recorded before any dispatch: the provider, the destination, every setting it runs with, the version and the product.</summary>
+    public static JsonObject IntentBody(string provider, string destination, IReadOnlyDictionary<string, string> settings, string version, string product)
     {
-        ["provider"] = ProviderId,
-        ["action"] = DispatchAction,
-        ["identity"] = Identity(repository, version),
-        ["intent"] = $"Build release {version} of {repository} from {reference} through {workflow} into a draft GitHub release; publication stays the operator's manual step.",
-        ["target"] = new JsonObject { ["repository"] = repository, ["workflow"] = workflow, ["ref"] = reference, ["version"] = version, ["product"] = product },
-        ["status"] = "not-started",
-        ["evidence"] = new JsonArray(),
-    };
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentNullException.ThrowIfNull(settings);
+        var target = new JsonObject();
+        foreach ((string name, string value) in settings.OrderBy(s => s.Key, StringComparer.Ordinal))
+        {
+            target[name] = value;
+        }
+
+        target["version"] = version;
+        target["product"] = product;
+        string details = string.Join(", ", settings.Where(s => s.Value != destination).OrderBy(s => s.Key, StringComparer.Ordinal).Select(s => $"{s.Key} {s.Value}"));
+        return new JsonObject
+        {
+            ["provider"] = provider,
+            ["action"] = DispatchAction,
+            ["identity"] = Identity(provider, destination, version),
+            ["intent"] = $"Build release {version} of {destination} through {provider}{(details.Length == 0 ? string.Empty : " (" + details + ")")} into a draft; publication stays the operator's manual step.",
+            ["target"] = target,
+            ["status"] = "not-started",
+            ["evidence"] = new JsonArray(),
+        };
+    }
 
     /// <summary>The revision after a dispatch: dispatched when the run was identified, uncertain when it was not.</summary>
     public static JsonObject AfterDispatch(JsonElement previous, DispatchReceipt receipt)
@@ -97,32 +109,29 @@ public static class ReleaseFlow
         return body;
     }
 
-    /// <summary>The revision after the run and the release were observed: success only when the run succeeded and the draft names every distributable with a hash.</summary>
-    public static JsonObject AfterObservation(JsonElement previous, RunObservation? run, ReleaseObservation? release, string version)
+    /// <summary>The revision after the run and the release were observed: success only when the run succeeded and the draft is complete by the product's profile.</summary>
+    public static JsonObject AfterObservation(JsonElement previous, RunObservation? run, ReleaseObservation? release, string version, ReleaseProfile profile, string checksums)
     {
+        ArgumentNullException.ThrowIfNull(profile);
         if (run is not null && run.Status == "completed" && run.Conclusion != "success")
         {
             return Observed(previous, "known-failure", $"Run {run.RunId} completed with conclusion {run.Conclusion ?? "none"}; no release was produced.", run.Url, run.RunId);
         }
 
-        if (release is not null && MissingDistributables(release, version).Count == 0 && (run is null || (run.Status == "completed" && run.Conclusion == "success")))
+        if (release is not null && profile.Missing(release, version, checksums).Count == 0 && (run is null || (run.Status == "completed" && run.Conclusion == "success")))
         {
-            return Observed(previous, "observed-success", $"Draft release {release.Tag} observed with {release.Assets.Count} assets and checksums for every distributable{(run is null ? string.Empty : $"; run {run.RunId} succeeded")}.", release.Url, run?.RunId);
+            string complete = profile.DeclaresArtifacts ? "every declared artifact named in its checksum file" : $"every asset named in {checksums}";
+            return Observed(previous, "observed-success", $"Draft release {release.Tag} observed with {release.Assets.Count} assets and {complete}{(run is null ? string.Empty : $"; run {run.RunId} succeeded")}.", release.Url, run?.RunId);
         }
 
         throw new InvalidOperationException("Nothing settled yet: the run is still in progress or the draft release is incomplete.");
     }
 
-    /// <summary>The distributables a release of a version must name with hashes, and does not yet.</summary>
-    public static IReadOnlyList<string> MissingDistributables(ReleaseObservation release, string version)
-    {
-        ArgumentNullException.ThrowIfNull(release);
-        return Platforms.Select(p => EstateUpgrade.DistributableName(version, p)).Where(name => !release.Assets.Any(a => a.Name == name && a.Hash is not null)).ToList();
-    }
-
     /// <summary>The candidate release record body from the observed draft.</summary>
-    public static JsonObject CandidateBody(string version, string repository, string commit, ReleaseObservation release, IReadOnlyList<string> evidence, IReadOnlyList<string> qualified, string signing, IReadOnlyList<string> limitations)
+    public static JsonObject CandidateBody(string version, string repository, string commit, ReleaseObservation release, IReadOnlyList<string> evidence, IReadOnlyList<string> qualified, string signing, IReadOnlyList<string> limitations, ReleaseProfile profile, string checksums)
     {
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentException.ThrowIfNullOrWhiteSpace(checksums);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
         ArgumentException.ThrowIfNullOrWhiteSpace(commit);
@@ -136,19 +145,19 @@ public static class ReleaseFlow
         string? notices = null;
         foreach (ReleaseAsset asset in release.Assets.OrderBy(a => a.Name, StringComparer.Ordinal))
         {
-            if (asset.Name == "SHA256SUMS" || asset.Hash is null)
+            if (asset.Name == checksums || asset.Hash is null)
             {
                 continue;
             }
 
-            string platform = Platforms.FirstOrDefault(p => EstateUpgrade.IsDistributable(asset.Name, version, p) || IsWorkbenchDistributable(asset.Name, version, p)) ?? "any";
-            artifacts.Add(new JsonObject { ["name"] = asset.Name, ["hash"] = asset.Hash, ["bytes"] = asset.Bytes, ["platform"] = platform });
-            if (asset.Name == $"vericairn-{version}-sbom.cdx.json")
+            ExpectedArtifact classified = profile.Classify(asset.Name, version);
+            artifacts.Add(new JsonObject { ["name"] = asset.Name, ["hash"] = asset.Hash, ["bytes"] = asset.Bytes, ["platform"] = classified.Platform });
+            if (classified.Role == "sbom" && sbom is null)
             {
                 sbom = asset.Hash;
             }
 
-            if (asset.Name == $"vericairn-{version}-THIRD-PARTY-NOTICES.md")
+            if (classified.Role == "notices" && notices is null)
             {
                 notices = asset.Hash;
             }
@@ -185,10 +194,6 @@ public static class ReleaseFlow
 
         return body;
     }
-
-    /// <summary>Whether an asset is the desktop's distributable for a platform (vericairn-workbench-version-platform, as the release workflow names it).</summary>
-    public static bool IsWorkbenchDistributable(string name, string version, string platform) =>
-        name == $"vericairn-workbench-{version}-{platform}.zip" || name == $"vericairn-workbench-{version}-{platform}.tar.gz";
 
     /// <summary>The published revision of a candidate: the same release with the observed publication.</summary>
     public static JsonObject PublishedBody(JsonElement candidate, ReleaseObservation release)

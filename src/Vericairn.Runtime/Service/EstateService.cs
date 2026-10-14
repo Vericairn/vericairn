@@ -17,7 +17,7 @@ using Vericairn.Records.Types;
 using Vericairn.Runtime.Objects;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Providers;
-using Vericairn.Runtime.Software;
+using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
 
@@ -39,11 +39,11 @@ public sealed class EstateService : IEstateApi, IDisposable
         this.session = session;
     }
 
-    /// <summary>The GitHub Releases provider new services start with; tests replace it with the in-memory provider.</summary>
-    public static IReleaseProvider DefaultReleaseProvider { get; set; } = new GhReleaseProvider();
-
-    /// <summary>The GitHub Releases provider this service dispatches and observes through; it runs on the runtime's machine under the user's own login.</summary>
-    public IReleaseProvider ReleaseProvider { get; set; } = DefaultReleaseProvider;
+    /// <summary>
+    /// The implementations this service may reach, as its host registered them; the process's registry unless a host gives another.
+    /// The runtime registers none of its own: an operation through a provider with no implementation here is refused.
+    /// </summary>
+    public ProviderRegistry Providers { get; set; } = ProviderRegistry.Current;
 
     /// <summary>Repository root.</summary>
     public string Root => session.Root;
@@ -439,15 +439,73 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    IReadOnlyList<ProviderRow> IEstateApi.Providers() => ProviderRows();
+
+    /// <summary>The provider and adapter implementations available to this service, with their declared settings.</summary>
+    public IReadOnlyList<ProviderRow> ProviderRows()
+    {
+        var rows = new List<ProviderRow>();
+        foreach (IReleaseProvider provider in Providers.ReleaseProviders)
+        {
+            rows.Add(Row(provider.Provider, "release", provider.Descriptor));
+        }
+
+        foreach (ISourceAdapter adapter in Providers.SourceAdapters)
+        {
+            rows.Add(Row(adapter.Kind, "source", adapter.Descriptor));
+        }
+
+        return rows;
+    }
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string identity = ReleaseFlow.Identity(request.Repository, request.Version);
+        string pending = $"release {request.Version}";
         if (!Ulid.IsValid(request.By) || !Ulid.IsValid(request.Product))
         {
-            return ReleaseProblem(identity, "not-started", "refused", "The recording principal and the product must be ULIDs.");
+            return ReleaseProblem(pending, "not-started", "refused", "The recording principal and the product must be ULIDs.");
         }
 
+        RecordResponse? productRecord = Record(request.Product);
+        if (productRecord is null || productRecord.Type != "product" || !productRecord.Current)
+        {
+            return ReleaseProblem(pending, "not-started", "not-found", $"No current product has id {request.Product}.");
+        }
+
+        ReleaseProfile profile = ReleaseProfile.FromProductBody(productRecord.Envelope.GetProperty("body"));
+        string? providerId = string.IsNullOrWhiteSpace(request.Provider) ? profile.Destination?.Provider : request.Provider.Trim();
+        if (providerId is null)
+        {
+            return ReleaseProblem(pending, "not-started", "refused", $"No release provider is selected: product {request.Product} declares no release destination and the request names no provider. Declare the destination on the product record or name the provider; nothing was recorded.");
+        }
+
+        IReleaseProvider? provider = Providers.Release(providerId);
+        if (provider is null)
+        {
+            return ReleaseProblem(pending, "not-started", "refused", $"The release provider '{providerId}' has no implementation on the runtime's machine; nothing selected another and nothing was recorded. Available: {string.Join(", ", Providers.ReleaseProviders.Select(p => p.Provider).DefaultIfEmpty("none"))}.");
+        }
+
+        var requested = new Dictionary<string, string>(request.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal);
+        AddIfGiven(requested, "repository", request.Repository);
+        AddIfGiven(requested, "ref", request.Ref);
+        AddIfGiven(requested, "workflow", request.Workflow);
+        IReadOnlyDictionary<string, string> settings = profile.Settings(provider.Descriptor, providerId, requested);
+        List<string> missing = provider.Descriptor.DeclaredSettings.Where(s => s.Required && !settings.ContainsKey(s.Name)).Select(s => s.Name).ToList();
+        string? destinationSetting = provider.Descriptor.Destination;
+        if (destinationSetting is not null && !settings.ContainsKey(destinationSetting) && !missing.Contains(destinationSetting))
+        {
+            missing.Add(destinationSetting);
+        }
+
+        if (missing.Count > 0)
+        {
+            return ReleaseProblem(pending, "not-started", "refused", $"The provider '{providerId}' needs the settings {string.Join(", ", missing)}; neither the request nor product {request.Product}'s declared destination gives them, and nothing was recorded.");
+        }
+
+        string destination = destinationSetting is null ? providerId : settings[destinationSetting];
+        string identity = ReleaseFlow.Identity(providerId, destination, request.Version);
         RecordEnvelope? current = CurrentOperation(identity);
         string? status = current is null ? null : EstateModel.BodyString(current, "status");
         switch (status)
@@ -464,7 +522,7 @@ public sealed class EstateService : IEstateApi, IDisposable
         JsonElement previousBody;
         if (current is null)
         {
-            WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.IntentBody(request.Repository, request.Workflow, request.Ref, request.Version, request.Product)), $"product:{request.Product}"));
+            WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product)), $"product:{request.Product}"));
             if (!intent.Ok)
             {
                 return ReleaseProblem(identity, "not-started", intent.Problem!);
@@ -483,7 +541,7 @@ public sealed class EstateService : IEstateApi, IDisposable
         JsonObject body;
         try
         {
-            DispatchReceipt receipt = ReleaseProvider.Dispatch(new DispatchRequest(request.Repository, request.Workflow, request.Ref, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = request.Version }));
+            DispatchReceipt receipt = provider.Dispatch(new DispatchRequest(destination, settings, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = request.Version }));
             body = status is "known-failure" or "canceled" ? ReleaseFlow.Retry(previousBody, receipt, request.Reconciliation!) : ReleaseFlow.AfterDispatch(previousBody, receipt);
         }
         catch (ProviderRefusedException exception)
@@ -516,23 +574,26 @@ public sealed class EstateService : IEstateApi, IDisposable
     public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        string identity = ReleaseFlow.Identity(request.Repository, request.Version);
         string tag = ReleaseFlow.Tag(request.Version);
+        string pending = $"release {request.Version}";
         if (!Ulid.IsValid(request.By))
         {
-            return ReleaseProblem(identity, "unknown", "refused", "The recording principal must be a ULID.");
+            return ReleaseProblem(pending, "unknown", "refused", "The recording principal must be a ULID.");
         }
 
-        RecordEnvelope? current = CurrentOperation(identity);
+        (RecordEnvelope? current, string? problem) = FindReleaseOperation(request);
         if (current is null)
         {
-            return ReleaseProblem(identity, "unknown", "not-found", $"No operation is recorded under {identity}; a submission records the intent and dispatches the workflow.");
+            return ReleaseProblem(pending, "unknown", "not-found", problem!);
         }
 
+        string identity = EstateModel.BodyString(current, "identity") ?? pending;
         JsonElement body = current.Body;
         string status = EstateModel.BodyString(current, "status") ?? "?";
-        string product = body.GetProperty("target").GetProperty("product").GetString() ?? "?";
-        string? runId = body.GetProperty("target").TryGetProperty("run", out JsonElement runElement) ? runElement.GetString() : null;
+        string providerId = EstateModel.BodyString(current, "provider") ?? "?";
+        JsonElement target = body.GetProperty("target");
+        string product = target.TryGetProperty("product", out JsonElement productElement) ? productElement.GetString() ?? "?" : "?";
+        string? runId = target.TryGetProperty("run", out JsonElement runElement) ? runElement.GetString() : null;
         if (request.Cancel is not null)
         {
             if (status is not ("not-started" or "uncertain" or "known-failure"))
@@ -544,36 +605,55 @@ public sealed class EstateService : IEstateApi, IDisposable
             return canceled.Ok ? new ReleaseResponse(identity, "canceled", $"{identity}: canceled; {request.Cancel}", true, canceled.Written) : ReleaseProblem(identity, status, canceled.Problem!);
         }
 
+        IReleaseProvider? provider = Providers.Release(providerId);
+        if (provider is null)
+        {
+            return ReleaseProblem(identity, status, "refused", $"The operation was dispatched through '{providerId}', which has no implementation on the runtime's machine; it is observed only through that provider, never another.");
+        }
+
+        RecordResponse? productRecord = Record(product);
+        ReleaseProfile profile = productRecord is not null && productRecord.Type == "product" ? ReleaseProfile.FromProductBody(productRecord.Envelope.GetProperty("body")) : ReleaseProfile.None;
+        var recordedSettings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in target.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String && p.Name is not ("version" or "product" or "run")))
+        {
+            recordedSettings[property.Name] = property.Value.GetString()!;
+        }
+
+        IReadOnlyDictionary<string, string> settings = profile.Settings(provider.Descriptor, providerId, recordedSettings);
+        string destination = provider.Descriptor.Destination is string key && settings.TryGetValue(key, out string? named) ? named : request.Repository ?? providerId;
+        string checksums = settings.TryGetValue("checksums", out string? checksumFile) ? checksumFile : "SHA256SUMS";
         ReleaseObservation? release;
         RunObservation? run;
         try
         {
-            run = runId is null ? null : ReleaseProvider.ObserveRun(request.Repository, runId);
-            release = ReleaseProvider.ObserveRelease(request.Repository, tag);
+            run = runId is null ? null : provider.ObserveRun(destination, runId);
+            release = provider.ObserveRelease(destination, tag, settings);
         }
         catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
         {
             return ReleaseProblem(identity, status, "provider", exception.Message);
         }
 
-        ReleaseRow? recorded = Releases().FirstOrDefault(r => r.Version == request.Version);
+        ReleaseRow? recorded = Releases().FirstOrDefault(r => r.Version == request.Version && SubjectProduct(r.Id) == product);
         switch (status)
         {
             case "observed-success":
-                return ObservePublication(request, identity, product, recorded, release, tag);
+                return ObservePublication(request, identity, product, recorded, release, destination, tag, provider);
             case "dispatched" or "uncertain":
             {
                 JsonObject revisionBody;
                 try
                 {
-                    revisionBody = ReleaseFlow.AfterObservation(body, run, release, request.Version);
+                    revisionBody = ReleaseFlow.AfterObservation(body, run, release, request.Version, profile, checksums);
                 }
                 catch (InvalidOperationException)
                 {
-                    string pending = run is null
-                        ? (release is null ? "no run is identified and no release is observed yet" : $"draft {tag} lacks checksums for {string.Join(", ", ReleaseFlow.MissingDistributables(release, request.Version))}")
-                        : $"run {run.RunId} is {run.Status.Replace('_', ' ')}";
-                    return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({pending}). Nothing recorded; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Pending: pending, Run: run?.RunId, Url: run?.Url ?? release?.Url);
+                    string waiting = run is not null && run.Status != "completed"
+                        ? $"run {run.RunId} is {run.Status.Replace('_', ' ')}"
+                        : release is not null
+                            ? $"draft {tag} lacks checksums for {string.Join(", ", profile.Missing(release, request.Version, checksums))}"
+                            : run is null ? "no run is identified and no release is observed yet" : $"run {run.RunId} completed and no draft {tag} is observed yet";
+                    return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({waiting}). Nothing recorded; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Pending: waiting, Run: run?.RunId, Url: run?.Url ?? release?.Url);
                 }
 
                 WriteOutcome revision = NewRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
@@ -599,19 +679,19 @@ public sealed class EstateService : IEstateApi, IDisposable
                     return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}; release {request.Version} is already recorded as {recorded.Status} ({recorded.Id}).", true, revision.Written, ReleaseId: recorded.Id, Run: run?.RunId, Url: release?.Url);
                 }
 
-                var evidence = new List<string> { $"Draft release {tag} observed at {release!.Url} with {release.Assets.Count} assets and checksums for every distributable." };
+                var evidence = new List<string> { $"Draft release {tag} observed at {release!.Url} with {release.Assets.Count} assets and checksums for every {(profile.DeclaresArtifacts ? "declared artifact" : "asset")}." };
                 if (run is not null)
                 {
-                    evidence.Insert(0, $"Release workflow run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");
+                    evidence.Insert(0, $"Release build run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");
                 }
 
-                WriteOutcome candidate = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, request.Repository, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [])), $"product:{product}"));
+                WriteOutcome candidate = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums)), $"product:{product}"));
                 if (!candidate.Ok)
                 {
                     return ReleaseProblem(identity, newStatus, candidate.Problem!);
                 }
 
-                string publish = ReleaseProvider.ManualPublicationCommand(request.Repository, tag);
+                string publish = provider.ManualPublicationCommand(destination, tag);
                 return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}. Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
             }
 
@@ -620,9 +700,9 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
     }
 
-    private ReleaseResponse ObservePublication(ReleaseObserveRequest request, string identity, string product, ReleaseRow? recorded, ReleaseObservation? release, string tag)
+    private ReleaseResponse ObservePublication(ReleaseObserveRequest request, string identity, string product, ReleaseRow? recorded, ReleaseObservation? release, string destination, string tag, IReleaseProvider provider)
     {
-        string where = release?.Url ?? "the repository";
+        string where = release?.Url ?? destination;
         if (recorded is null)
         {
             return ReleaseProblem(identity, "observed-success", "refused", $"Release {request.Version} was observed as built but no release record exists; observe it again after the operation is recorded, or record the candidate.");
@@ -635,7 +715,7 @@ public sealed class EstateService : IEstateApi, IDisposable
 
         if (release is null || release.Draft || release.PublishedAt is null)
         {
-            return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.", true, ReleaseId: recorded.Id, Publish: ReleaseProvider.ManualPublicationCommand(request.Repository, tag), Url: release?.Url);
+            return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.", true, ReleaseId: recorded.Id, Publish: provider.ManualPublicationCommand(destination, tag), Url: release?.Url);
         }
 
         RecordResponse candidate = Record(recorded.Id)!;
@@ -647,6 +727,73 @@ public sealed class EstateService : IEstateApi, IDisposable
 
         return new ReleaseResponse(identity, "published", $"release {request.Version} observed published at {release.PublishedAt}: {release.Url}", true, Release: published.Written, ReleaseId: recorded.Id, PublishedAt: release.PublishedAt, Url: release.Url);
     }
+
+    /// <summary>The current release operation a request names: by provider and destination, by product and version, or by a destination that one operation alone matches.</summary>
+    private (RecordEnvelope? Operation, string? Problem) FindReleaseOperation(ReleaseObserveRequest request)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            List<RecordEnvelope> operations = model.Current("operation")
+                .Where(o => o.Body.TryGetProperty("target", out JsonElement t) && t.ValueKind == JsonValueKind.Object && t.TryGetProperty("version", out JsonElement v) && v.GetString() == request.Version)
+                .ToList();
+            if (!string.IsNullOrWhiteSpace(request.Provider) && !string.IsNullOrWhiteSpace(request.Repository))
+            {
+                string identity = ReleaseFlow.Identity(request.Provider.Trim(), request.Repository.Trim(), request.Version);
+                RecordEnvelope? byIdentity = operations.FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
+                return byIdentity is null ? (null, $"No operation is recorded under {identity}; a submission records the intent and dispatches the build.") : (byIdentity, null);
+            }
+
+            IEnumerable<RecordEnvelope> matching = operations;
+            if (!string.IsNullOrWhiteSpace(request.Product))
+            {
+                matching = matching.Where(o => o.Body.GetProperty("target").TryGetProperty("product", out JsonElement p) && p.GetString() == request.Product);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Provider))
+            {
+                matching = matching.Where(o => EstateModel.BodyString(o, "provider") == request.Provider);
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.Repository))
+            {
+                matching = matching.Where(o => (EstateModel.BodyString(o, "identity") ?? string.Empty).EndsWith($":{request.Repository}:v{request.Version}", StringComparison.Ordinal));
+            }
+
+            List<RecordEnvelope> found = matching.ToList();
+            if (string.IsNullOrWhiteSpace(request.Product) && string.IsNullOrWhiteSpace(request.Repository))
+            {
+                return (null, "Name the product, or the destination (and the provider), of the release to observe.");
+            }
+
+            return found.Count switch
+            {
+                1 => (found[0], null),
+                0 => (null, $"No current release operation of version {request.Version} matches; a submission records the intent and dispatches the build."),
+                _ => (null, $"Several release operations of version {request.Version} match ({string.Join(", ", found.Select(o => EstateModel.BodyString(o, "identity")))}); name the provider and the destination."),
+            };
+        }
+    }
+
+    private string? SubjectProduct(string releaseId)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            return model.ById.TryGetValue(releaseId, out RecordEnvelope? release) ? release.Subject?.Id : null;
+        }
+    }
+
+    private static void AddIfGiven(Dictionary<string, string> settings, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            settings[name] = value.Trim();
+        }
+    }
+
+    private static ProviderRow Row(string provider, string kind, ProviderDescriptor descriptor) =>
+        new(provider, kind, descriptor.Id, descriptor.Contract, descriptor.Status, descriptor.Operations, descriptor.Limitations, descriptor.DeclaredSettings.Select(s => new ProviderSettingRow(s.Name, s.Summary, s.Required, s.Default)).ToList(), descriptor.Destination, descriptor.ServedLocations);
 
     private RecordEnvelope? CurrentOperation(string identity)
     {

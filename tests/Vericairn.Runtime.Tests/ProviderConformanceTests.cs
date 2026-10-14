@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using Vericairn.Adapters.Git;
+using Vericairn.Providers.GitHub;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
@@ -174,30 +176,50 @@ public sealed class RecordedSourceAdapterTests : SourceAdapterConformance
     protected override string NotARepositoryPath { get; }
 }
 
-/// <summary>The GitHub Releases provider contract against the in-memory implementation, and against GitHub itself when a live run is asked for.</summary>
+/// <summary>The release provider contract against the in-memory implementation, and against GitHub itself when a live run is asked for.</summary>
 public class ReleaseProviderConformanceTests
 {
     private const string Repository = "Example/widget";
+
+    private static readonly Dictionary<string, string> Settings = new(StringComparer.Ordinal) { ["repository"] = Repository, ["workflow"] = "release.yml", ["ref"] = "main", ["checksums"] = "SHA256SUMS" };
+
+    [Fact]
+    public void TheInMemoryProviderDeclaresWhatTheGitHubProviderDeclares()
+    {
+        var fake = new FakeReleaseProvider();
+        var github = new GitHubReleaseProvider();
+        foreach (IReleaseProvider provider in new IReleaseProvider[] { fake, github })
+        {
+            Assert.Equal(IReleaseProvider.Contract, provider.Descriptor.Contract);
+            Assert.Equal("github-releases", provider.Provider);
+            Assert.Equal("repository", provider.Descriptor.Destination);
+            Assert.Equal(["github"], provider.Descriptor.ServedLocations);
+            Assert.Contains(provider.Descriptor.Status, ProviderDescriptor.Statuses);
+        }
+
+        Assert.Equal(github.Descriptor.DeclaredSettings.Select(s => (s.Name, s.Required, s.Default)), fake.Descriptor.DeclaredSettings.Select(s => (s.Name, s.Required, s.Default)));
+        Assert.NotEqual(github.Descriptor.Id, fake.Descriptor.Id);
+    }
 
     [Fact]
     public void TheFakeProviderBehavesAsGitHubWould()
     {
         var provider = new FakeReleaseProvider();
-        Assert.Equal(IReleaseProvider.Contract, provider.Descriptor.Contract);
         Assert.Null(provider.ObserveRun(Repository, "1"));
-        Assert.Null(provider.ObserveRelease(Repository, "v9.9.9"));
+        Assert.Null(provider.ObserveRelease(Repository, "v9.9.9", Settings));
 
-        DispatchReceipt receipt = provider.Dispatch(new DispatchRequest(Repository, "release.yml", "main", new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.2.0" }));
+        DispatchReceipt receipt = provider.Dispatch(new DispatchRequest(Repository, Settings, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.2.0" }));
         Assert.NotNull(receipt.RunId);
         Assert.True(RecordParser.IsTimestamp(receipt.At));
         RunObservation run = provider.ObserveRun(Repository, receipt.RunId)!;
         Assert.Equal("in_progress", run.Status);
         Assert.Null(run.Conclusion);
-        Assert.Null(provider.ObserveRelease(Repository, "v0.2.0"));
+        Assert.Equal("github-actions", run.Method);
+        Assert.Null(provider.ObserveRelease(Repository, "v0.2.0", Settings));
 
         provider.CompleteRun(Repository, receipt.RunId, true, "0.2.0");
         Assert.Equal("success", provider.ObserveRun(Repository, receipt.RunId)!.Conclusion);
-        ReleaseObservation release = provider.ObserveRelease(Repository, "v0.2.0")!;
+        ReleaseObservation release = provider.ObserveRelease(Repository, "v0.2.0", Settings)!;
         Assert.True(release.Draft);
         Assert.Null(release.PublishedAt);
         Assert.Equal(run.HeadSha, release.TargetCommit);
@@ -207,26 +229,72 @@ public class ReleaseProviderConformanceTests
         Assert.Contains("v0.2.0", provider.ManualPublicationCommand(Repository, "v0.2.0"), StringComparison.Ordinal);
 
         provider.Publish(Repository, "v0.2.0");
-        ReleaseObservation published = provider.ObserveRelease(Repository, "v0.2.0")!;
+        ReleaseObservation published = provider.ObserveRelease(Repository, "v0.2.0", Settings)!;
         Assert.False(published.Draft);
         Assert.True(RecordParser.IsTimestamp(published.PublishedAt));
 
         provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
-        Assert.Throws<ProviderRefusedException>(() => provider.Dispatch(new DispatchRequest(Repository, "release.yml", "main", new Dictionary<string, string>(StringComparer.Ordinal))));
+        Assert.Throws<ProviderRefusedException>(() => provider.Dispatch(new DispatchRequest(Repository, Settings, new Dictionary<string, string>(StringComparer.Ordinal))));
         provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.Uncertain;
-        Assert.Null(provider.Dispatch(new DispatchRequest(Repository, "release.yml", "main", new Dictionary<string, string>(StringComparer.Ordinal))).RunId);
+        Assert.Null(provider.Dispatch(new DispatchRequest(Repository, Settings, new Dictionary<string, string>(StringComparer.Ordinal))).RunId);
     }
 
     [Fact]
     public void TheGitHubCliProviderObservesAPublishedReleaseWhenALiveRunIsAskedFor()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable("VERICAIRN_LIVE_GITHUB") == "1", "Set VERICAIRN_LIVE_GITHUB=1 with a logged-in GitHub CLI to observe Vericairn/vericairn v0.1.0 for real.");
-        var provider = new GhReleaseProvider();
+        var provider = new GitHubReleaseProvider();
         Assert.Equal(IReleaseProvider.Contract, provider.Descriptor.Contract);
-        ReleaseObservation release = provider.ObserveRelease("Vericairn/vericairn", "v0.1.0")!;
+        ReleaseObservation release = provider.ObserveRelease("Vericairn/vericairn", "v0.1.0", Settings)!;
         Assert.False(release.Draft);
         Assert.NotNull(release.PublishedAt);
         Assert.Contains(release.Assets, a => a.Name == "vericairn-0.1.0-osx-arm64.tar.gz" && a.Hash is not null);
-        Assert.Null(provider.ObserveRelease("Vericairn/vericairn", "v0.0.0-nope"));
+        Assert.Null(provider.ObserveRelease("Vericairn/vericairn", "v0.0.0-nope", Settings));
+    }
+}
+
+/// <summary>The registry makes implementations available and selects nothing: a name without an implementation is absent, never replaced.</summary>
+public class ProviderRegistryTests
+{
+    [Fact]
+    public void ARegistryResolvesOnlyWhatWasRegisteredAndByTheNameItServes()
+    {
+        var registry = new ProviderRegistry();
+        Assert.Null(registry.Release("github-releases"));
+        Assert.Null(registry.Source("git"));
+        Assert.Null(registry.ReleaseForLocation("github"));
+
+        var fake = new FakeReleaseProvider();
+        Assert.True(registry.RegisterIfAbsent(fake));
+        Assert.False(registry.RegisterIfAbsent(new GitHubReleaseProvider()));
+        Assert.Same(fake, registry.Release("github-releases"));
+        Assert.Same(fake, registry.ReleaseForLocation("github"));
+        Assert.Null(registry.Release("gitlab-releases"));
+        Assert.Null(registry.ReleaseForLocation("gitlab"));
+
+        // Two implementations serving the same location under different providers make the location ambiguous: nothing is chosen.
+        registry.Register(new FakeReleaseProvider("another-github"));
+        Assert.Null(registry.ReleaseForLocation("github"));
+
+        Assert.True(registry.RegisterIfAbsent(new GitCommandAdapter()));
+        Assert.Equal("git", Assert.Single(registry.SourceAdapters).Kind);
+        Assert.Same(fake, registry.RemoveRelease("github-releases"));
+        Assert.Null(registry.Release("github-releases"));
+    }
+}
+
+/// <summary>The foundation knows no provider, adapter or pack: its assemblies reference none of them.</summary>
+public class PlacementTests
+{
+    [Fact]
+    public void TheFoundationAssembliesReferenceNoModule()
+    {
+        foreach (System.Reflection.Assembly foundation in new[] { typeof(Vericairn.Runtime.Service.EstateService).Assembly, typeof(RecordEnvelope).Assembly, typeof(Vericairn.Protocol.IEstateApi).Assembly })
+        {
+            List<string> referenced = foundation.GetReferencedAssemblies().Select(a => a.Name ?? string.Empty).ToList();
+            Assert.DoesNotContain(referenced, name => name.StartsWith("Vericairn.Providers.", StringComparison.Ordinal) || name.StartsWith("Vericairn.Adapters.", StringComparison.Ordinal) || name.StartsWith("Vericairn.Packs.", StringComparison.Ordinal));
+        }
+
+        Assert.DoesNotContain(typeof(Vericairn.Runtime.Service.EstateService).Assembly.GetTypes(), type => type.Name is "GitHubReleaseProvider" or "GhReleaseProvider" or "GitCommandAdapter" or "SourceAdoption" or "Checks");
     }
 }

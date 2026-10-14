@@ -18,7 +18,7 @@ using Vericairn.Records.Types;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
-using Vericairn.Runtime.Software;
+using Vericairn.Packs.Software;
 using Vericairn.Runtime.Store;
 using Vericairn.Sdk;
 
@@ -763,17 +763,68 @@ internal static class Commands
         return Clean;
     });
 
-    internal static ISourceAdapter SourceAdapter { get; set; } = new GitCommandAdapter();
+    /// <summary>The git adapter registered in this process; tests register a recorded one.</summary>
+    internal static ISourceAdapter? SourceAdapter
+    {
+        get
+        {
+            Composition.Register(ProviderRegistry.Current);
+            return ProviderRegistry.Current.Source("git");
+        }
 
-    /// <summary>The release provider behind release submit and observe; tests substitute the in-memory one.</summary>
-    /// <summary>The GitHub Releases provider: the runtime service's default, so the command line and a daemon dispatch and observe the same way; tests replace it.</summary>
-    internal static IReleaseProvider ReleaseProvider { get => EstateService.DefaultReleaseProvider; set => EstateService.DefaultReleaseProvider = value; }
+        set
+        {
+            if (value is null)
+            {
+                ProviderRegistry.Current.RemoveSource("git");
+            }
+            else
+            {
+                ProviderRegistry.Current.Register(value);
+            }
+        }
+    }
+
+    /// <summary>The implementation registered for the github-releases provider in this process; tests register the in-memory one and restore the previous afterwards.</summary>
+    internal static IReleaseProvider? ReleaseProvider
+    {
+        get
+        {
+            Composition.Register(ProviderRegistry.Current);
+            return ProviderRegistry.Current.Release("github-releases");
+        }
+
+        set
+        {
+            if (value is null)
+            {
+                ProviderRegistry.Current.RemoveRelease("github-releases");
+            }
+            else
+            {
+                ProviderRegistry.Current.Register(value);
+            }
+        }
+    }
+
+    private static ISourceAdapter? GitAdapter(out int failure)
+    {
+        ISourceAdapter? adapter = SourceAdapter;
+        failure = adapter is null ? Fail("No git adapter is available in this distribution; repositories cannot be observed here.") : Clean;
+        return adapter;
+    }
 
     public static int SourcesInspect(string path, bool json)
     {
         try
         {
-            RepositoryObservation observation = SourceAdapter.Inspect(path);
+            ISourceAdapter? adapter = GitAdapter(out int failure);
+            if (adapter is null)
+            {
+                return failure;
+            }
+
+            RepositoryObservation observation = adapter.Inspect(path);
             if (json)
             {
                 Console.Out.WriteLine(JsonSerializer.Serialize(observation, ProtocolJson.Options));
@@ -797,7 +848,7 @@ internal static class Commands
         RepositoryObservation observation;
         try
         {
-            observation = SourceAdapter.Inspect(path);
+            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
         }
         catch (ProviderRefusedException exception)
         {
@@ -839,7 +890,7 @@ internal static class Commands
         RepositoryObservation observation;
         try
         {
-            observation = SourceAdapter.Inspect(path);
+            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
         }
         catch (ProviderRefusedException exception)
         {
@@ -864,7 +915,7 @@ internal static class Commands
         CheckRun run;
         try
         {
-            observation = SourceAdapter.Inspect(path);
+            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
             run = Checks.Run(path, command, TimeSpan.FromSeconds(timeoutSeconds));
         }
         catch (ProviderRefusedException exception)
@@ -915,29 +966,62 @@ internal static class Commands
         });
     }
 
-    public static int CheckObserve(string root, string resourceId, string repository, string runId, string workflow, string by, bool json)
+    public static int CheckObserve(string root, string resourceId, string? repository, string? providerId, string runId, string workflow, string by, bool json)
     {
-        RunObservation? run;
-        try
-        {
-            run = ReleaseProvider.ObserveRun(repository, runId);
-        }
-        catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
-        {
-            return Fail(exception.Message);
-        }
-
-        if (run is null)
-        {
-            return Fail($"No run {runId} is observable in {repository}.");
-        }
-
         return WithApi(root, api =>
         {
             RecordResponse? resource = api.Record(resourceId);
             if (resource is null || resource.Type != "resource" || !resource.Current)
             {
                 return Fail($"No current resource has id {resourceId}.");
+            }
+
+            // The provider is the one named, else the one serving the resource's recorded location; the destination likewise.
+            Composition.Register(ProviderRegistry.Current);
+            JsonElement location = resource.Envelope.GetProperty("body").TryGetProperty("location", out JsonElement l) && l.ValueKind == JsonValueKind.Object ? l : default;
+            IReleaseProvider? provider = null;
+            string? destination = repository;
+            if (!string.IsNullOrWhiteSpace(providerId))
+            {
+                provider = ProviderRegistry.Current.Release(providerId);
+                if (provider is null)
+                {
+                    return Fail($"The provider '{providerId}' has no implementation here; nothing selected another.");
+                }
+            }
+
+            if (location.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty key in location.EnumerateObject().Where(p => p.Value.ValueKind == JsonValueKind.String))
+                {
+                    IReleaseProvider? serving = ProviderRegistry.Current.ReleaseForLocation(key.Name);
+                    if (serving is not null && (provider is null || ReferenceEquals(serving, provider)))
+                    {
+                        provider ??= serving;
+                        destination ??= key.Value.GetString();
+                        break;
+                    }
+                }
+            }
+
+            if (provider is null || string.IsNullOrWhiteSpace(destination))
+            {
+                return Fail($"No provider here serves resource {resourceId}'s recorded location; name the provider and the repository.");
+            }
+
+            RunObservation? run;
+            try
+            {
+                run = provider.ObserveRun(destination, runId);
+            }
+            catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
+            {
+                return Fail(exception.Message);
+            }
+
+            if (run is null)
+            {
+                return Fail($"No run {runId} is observable in {destination}.");
             }
 
             WriteOutcome outcome = api.NewRecord(new NewRecordRequest("verification", by, Element(Checks.VerificationOfRun(run, workflow)), $"resource:{resource.Id}:{resource.Hash}"));
@@ -960,11 +1044,68 @@ internal static class Commands
         });
     }
 
-    public static int ReleaseSubmit(string root, string product, string version, string repository, string by, string reference, string workflow, string? reconciliation, bool json) =>
-        WithApi(root, api => ReportRelease(api.ReleaseSubmit(new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation)), json));
+    public static int ReleaseSubmit(string root, string product, string version, string by, string? provider, string? repository, string? reference, string? workflow, string[] settings, string? reconciliation, bool json)
+    {
+        Dictionary<string, string>? parsed = ParseSettings(settings, out string? problem);
+        return parsed is null
+            ? Fail(problem!)
+            : WithApi(root, api => ReportRelease(api.ReleaseSubmit(new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation, provider, parsed)), json));
+    }
 
-    public static int ReleaseObserve(string root, string version, string repository, string by, string[] qualified, string[] limitations, string signing, string? cancel, bool json) =>
-        WithApi(root, api => ReportRelease(api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel)), json));
+    public static int ReleaseObserve(string root, string version, string by, string? product, string? provider, string? repository, string[] qualified, string[] limitations, string signing, string? cancel, bool json) =>
+        WithApi(root, api => ReportRelease(api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel, product, provider)), json));
+
+    public static int ReleaseProviders(string root, bool json) => WithApi(root, api =>
+    {
+        IReadOnlyList<ProviderRow> rows = api.Providers();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+            return Clean;
+        }
+
+        if (rows.Count == 0)
+        {
+            Console.Out.WriteLine("No provider or adapter is available to the runtime here.");
+            return Clean;
+        }
+
+        foreach (ProviderRow row in rows)
+        {
+            Console.Out.WriteLine($"{row.Provider}  {row.Kind}  {row.Implementation}  {row.Contract}  {row.Status}{(row.Locations.Count == 0 ? string.Empty : "  serves " + string.Join(", ", row.Locations))}");
+            foreach (ProviderSettingRow setting in row.Settings)
+            {
+                string marks = (setting.Name == row.Destination ? "destination, " : string.Empty) + (setting.Required ? "required" : setting.Default is null ? "optional" : "default " + setting.Default);
+                Console.Out.WriteLine($"  {setting.Name,-12} {marks}: {setting.Summary}");
+            }
+
+            foreach (string limitation in row.Limitations)
+            {
+                Console.Out.WriteLine($"  limitation: {limitation}");
+            }
+        }
+
+        return Clean;
+    });
+
+    private static Dictionary<string, string>? ParseSettings(string[] settings, out string? problem)
+    {
+        var parsed = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (string setting in settings)
+        {
+            int equals = setting.IndexOf('=', StringComparison.Ordinal);
+            if (equals <= 0)
+            {
+                problem = $"A setting is name=value; '{setting}' is not.";
+                return null;
+            }
+
+            parsed[setting[..equals].Trim()] = setting[(equals + 1)..].Trim();
+        }
+
+        problem = null;
+        return parsed;
+    }
 
     /// <summary>Prints a release operation's outcome exactly as the runtime reported it: a problem fails, a rejected record lists its findings, and the exit code says whether the request advanced.</summary>
     private static int ReportRelease(ReleaseResponse response, bool json)

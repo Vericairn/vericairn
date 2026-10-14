@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>vericairn-docs</AssemblyName>
+    <RootNamespace>Vericairn.DocsTool</RootNamespace>
+    <Description>Vericairn's build tooling for a release's documentation set; not part of any distributable.</Description>
+    <IsPackable>false</IsPackable>
+    <RollForward>LatestMajor</RollForward>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Vericairn.Cli/Vericairn.Cli.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Protocol/Vericairn.Protocol.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

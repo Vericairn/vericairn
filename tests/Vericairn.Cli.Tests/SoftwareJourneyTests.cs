@@ -124,7 +124,7 @@ public class SoftwareJourneyTests
     {
         string root = CliHarness.TempDirectory("j04");
         string scratch = CliHarness.TempDirectory("j04-scratch");
-        IReleaseProvider previous = Commands.ReleaseProvider;
+        IReleaseProvider? previous = Commands.ReleaseProvider;
         var provider = new FakeReleaseProvider();
         Commands.ReleaseProvider = provider;
         try
@@ -137,7 +137,7 @@ public class SoftwareJourneyTests
             string resource = CliHarness.Ok("--estate", root, "--json", "records", "new", "resource", "--by", op, "--body", CliHarness.WriteJson(scratch, "resource.json", """{"kind":"repository","name":"Widget","role":"source","location":{"github":"Example/widget"},"visibility":"public"}""")).Id;
 
             // Submit: the intent is a record before the dispatch; the run is recorded as observed.
-            CliHarness.Outcome submitted = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome submitted = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal("dispatched", submitted.Json.GetProperty("status").GetString());
             string run = submitted.Json.GetProperty("run").GetString()!;
             Assert.Single(provider.Dispatches);
@@ -149,7 +149,7 @@ public class SoftwareJourneyTests
             CliHarness.Outcome pending = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Contains("in progress", pending.Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
             Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
-            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
+            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
 
             // The run succeeds and the draft appears: the operation is observed-success and the candidate is recorded with every distributable by hash.
             provider.CompleteRun("Example/widget", run, true, "0.2.0");
@@ -160,7 +160,7 @@ public class SoftwareJourneyTests
             string candidateHash = built.Json.GetProperty("candidate").GetProperty("hash").GetString()!;
             Assert.Contains("0.2.0  candidate", CliHarness.Ok("--estate", root, "release", "list").Out, StringComparison.Ordinal);
             Assert.Contains("not published", CliHarness.Run("--estate", root, "estate", "upgrade", "--to", "0.2.0", "--check").Err, StringComparison.Ordinal);
-            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
+            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Code);
 
             // Automation's verification of the run is recorded from the host's own report.
             CliHarness.Outcome ci = CliHarness.Ok("--estate", root, "--json", "check", "observe", "--resource", resource, "--repository", "Example/widget", "--run", run, "--workflow", "release.yml", "--by", builder);
@@ -181,23 +181,102 @@ public class SoftwareJourneyTests
 
             // A missing account blocks that destination, not local work; the refusal is a known failure and a retry names its reconciliation.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
-            CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "release", "submit", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(1, refused.Code);
             Assert.Equal("known-failure", refused.Json.GetProperty("status").GetString());
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
-            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Code);
-            CliHarness.Outcome retried = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "Logged in; the refused attempt had no effect.");
+            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Code);
+            CliHarness.Outcome retried = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder, "--reconciliation", "Logged in; the refused attempt had no effect.");
             Assert.Equal("dispatched", retried.Json.GetProperty("status").GetString());
 
             // An uncertain dispatch stays uncertain until reconciled; cancellation settles it once no effect is found.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.Uncertain;
-            CliHarness.Outcome uncertain = CliHarness.Run("--estate", root, "--json", "release", "submit", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome uncertain = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.4.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(1, uncertain.Code);
             Assert.Equal("uncertain", uncertain.Json.GetProperty("status").GetString());
             Assert.Contains("no run is identified", CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.4.0", "--repository", "Example/widget", "--by", builder, "--cancel", "GitHub shows no run and no release for v0.4.0.");
             Assert.Contains("github-releases:Example/widget:v0.4.0  canceled", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            Commands.ReleaseProvider = previous;
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void J04_ASecondProductReleasesThroughTheProviderItDeclaresWithItsOwnArtifacts()
+    {
+        string root = CliHarness.TempDirectory("j04-second");
+        string scratch = CliHarness.TempDirectory("j04-second-scratch");
+        IReleaseProvider? previous = Commands.ReleaseProvider;
+        var provider = new FakeReleaseProvider();
+        Commands.ReleaseProvider = provider;
+        try
+        {
+            string op = Init(root);
+            string builder = Principal(root, op, scratch, "Builder", "builder");
+            string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Delegate","statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", CliHarness.WriteJson(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering"],"reserved":["publication"],"conditions":["label self-review"],"basis":"{{decision}}"}"""));
+
+            // A product with nothing declared and a request naming no provider: refused before anything is recorded.
+            string bare = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "bare.json", Product)).Id;
+            CliHarness.Outcome unselected = CliHarness.Run("--estate", root, "release", "submit", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Equal(2, unselected.Code);
+            Assert.Contains("No release provider is selected", unselected.Err, StringComparison.Ordinal);
+            CliHarness.Outcome unknown = CliHarness.Run("--estate", root, "release", "submit", "--provider", "gitlab-releases", "--product", bare, "--version", "1.0.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Equal(2, unknown.Code);
+            Assert.Contains("'gitlab-releases' has no implementation", unknown.Err, StringComparison.Ordinal);
+            CliHarness.Outcome incomplete = CliHarness.Run("--estate", root, "release", "submit", "--provider", "github-releases", "--product", bare, "--version", "1.0.0", "--by", builder);
+            Assert.Equal(2, incomplete.Code);
+            Assert.Contains("needs the settings repository", incomplete.Err, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(root, "records", "operation")));
+            Assert.Empty(provider.Dispatches);
+
+            // A second product declares its destination and its own artifacts on its record.
+            string gadgetBody = """
+                {"name":"Gadget","slug":"gadget","summary":"A gadget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}],
+                 "release":{"destination":{"provider":"github-releases","settings":{"repository":"Example/gadget","workflow":"ship.yml"}},"checksums":"CHECKSUMS.txt",
+                  "artifacts":[{"name":"gadget-{version}-{platform}.zip","role":"distributable","platforms":["linux-x64","win-x64"]},{"name":"gadget-{version}.spdx.json","role":"sbom"},{"name":"LICENSES-{version}.txt","role":"notices"}]}}
+                """;
+            string gadget = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "gadget.json", gadgetBody)).Id;
+            CliHarness.Outcome submitted = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--product", gadget, "--version", "1.0.0", "--by", builder);
+            Assert.Equal("github-releases:Example/gadget:v1.0.0", submitted.Json.GetProperty("identity").GetString());
+            DispatchRequest dispatch = Assert.Single(provider.Dispatches);
+            Assert.Equal("Example/gadget", dispatch.Destination);
+            Assert.Equal("ship.yml", dispatch.Settings["workflow"]);
+            Assert.Equal("main", dispatch.Settings["ref"]);
+            Assert.Equal("CHECKSUMS.txt", dispatch.Settings["checksums"]);
+            string run = submitted.Json.GetProperty("run").GetString()!;
+
+            // A draft that lacks a declared artifact is not settled; the complete one becomes the candidate with the declared platforms and roles.
+            provider.CompleteRun("Example/gadget", run, true, "1.0.0", ["gadget-1.0.0-linux-x64.zip", "gadget-1.0.0.spdx.json", "LICENSES-1.0.0.txt"], "CHECKSUMS.txt");
+            CliHarness.Outcome waiting = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--product", gadget, "--version", "1.0.0", "--by", builder);
+            Assert.Contains("gadget-1.0.0-win-x64.zip", waiting.Json.GetProperty("pending").GetString(), StringComparison.Ordinal);
+            provider.CompleteRun("Example/gadget", run, true, "1.0.0", ["gadget-1.0.0-linux-x64.zip", "gadget-1.0.0-win-x64.zip", "gadget-1.0.0.spdx.json", "LICENSES-1.0.0.txt"], "CHECKSUMS.txt");
+            CliHarness.Outcome built = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--product", gadget, "--version", "1.0.0", "--by", builder);
+            Assert.Equal("observed-success", built.Json.GetProperty("status").GetString());
+            string candidateId = built.Json.GetProperty("candidate").GetProperty("id").GetString()!;
+            JsonElement candidate = JsonDocument.Parse(File.ReadAllBytes(Directory.EnumerateFiles(Path.Combine(root, "records", "release"), candidateId + ".json", SearchOption.AllDirectories).Single())).RootElement.GetProperty("body");
+            Assert.Equal("Example/gadget", candidate.GetProperty("repository").GetString());
+            Dictionary<string, string> platforms = candidate.GetProperty("artifacts").EnumerateArray().ToDictionary(a => a.GetProperty("name").GetString()!, a => a.GetProperty("platform").GetString()!);
+            Assert.Equal(4, platforms.Count);
+            Assert.Equal("win-x64", platforms["gadget-1.0.0-win-x64.zip"]);
+            Assert.Equal("any", platforms["LICENSES-1.0.0.txt"]);
+            string sbomHash = candidate.GetProperty("artifacts").EnumerateArray().Single(a => a.GetProperty("name").GetString() == "gadget-1.0.0.spdx.json").GetProperty("hash").GetString()!;
+            Assert.Equal(sbomHash, candidate.GetProperty("sbom").GetString());
+            Assert.True(candidate.TryGetProperty("notices", out _));
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+
+            // The providers the runtime can reach, with what each declares.
+            JsonElement providers = CliHarness.Ok("--estate", root, "--json", "release", "providers").Json;
+            JsonElement github = providers.EnumerateArray().Single(p => p.GetProperty("provider").GetString() == "github-releases");
+            Assert.Equal("repository", github.GetProperty("destination").GetString());
+            Assert.Contains(github.GetProperty("settings").EnumerateArray(), s => s.GetProperty("name").GetString() == "workflow" && s.GetProperty("default").GetString() == "release.yml");
+            Assert.Contains(providers.EnumerateArray(), p => p.GetProperty("kind").GetString() == "source" && p.GetProperty("provider").GetString() == "git");
+            Assert.Contains("repository   destination, required", CliHarness.Ok("--estate", root, "release", "providers").Out, StringComparison.Ordinal);
         }
         finally
         {

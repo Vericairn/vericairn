@@ -1,7 +1,26 @@
 # The software journey: repositories, checks and releases
 
-How a software product goes from a repository to a published GitHub release with its evidence as records,
+How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
+
+## Where each part lives
+
+The foundation (`Vericairn.Records`, `Vericairn.Runtime`, `Vericairn.Protocol`, the daemon, the SDK, the
+command line and Workbench) holds the record types, the release operations as intent then observed effect,
+the provider and adapter contracts, and a registry of the implementations a host makes available. It knows
+no particular product, provider or source host; a test holds that its assemblies reference none of the
+modules below. The modules ship inside the Community distributable until packages exist (milestone M4):
+
+| Module | Assembly | What it is |
+|---|---|---|
+| The git adapter (`vericairn.adapter.git`) | `Vericairn.Adapters.Git` | `GitCommandAdapter`: read-only observation of a repository over the git command |
+| The GitHub provider | `Vericairn.Providers.GitHub` | `GitHubReleaseProvider`: releases built by a dispatched GitHub Actions workflow, observed as runs and drafts through the user's own GitHub CLI login |
+| The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence |
+
+The command line is the host that registers them: being available selects nothing. A release goes through
+the provider its product declares or its request names, and a provider with no implementation on the
+runtime's machine is refused, never replaced by another (`vericairn release providers` lists what is
+available, with the settings each declares).
 
 ## The git adapter
 
@@ -11,8 +30,8 @@ branch, the origin remote, the root commit, whether the working tree is clean wi
 counts, the tags and the ten most recent commits, with an as-of time. The adapter never fetches, commits,
 pushes or changes the index; a repository without commits is refused with the next step rather than
 invented. Two implementations satisfy one conformance suite: `GitCommandAdapter` runs the git command on the
-PATH, and `RecordedSourceAdapter` replays recorded observations for offline fixtures and tests; the recorded
-one qualifies no real repository.
+PATH (in `Vericairn.Adapters.Git`), and `RecordedSourceAdapter` (beside the contract in the runtime) replays
+recorded observations for offline fixtures and tests; the recorded one qualifies no real repository.
 
 Commands:
 
@@ -31,45 +50,75 @@ platform and runtime as environment. The exit status of the command itself is in
 exits 0 once the record is written, because recording a failed check is the point. A check that does not
 finish within `--timeout` is stopped and recorded as `unknown`.
 
-`vericairn check observe --resource <id> --repository owner/name --run <id> [--workflow ci.yml] --by <id>`
+`vericairn check observe --resource <id> --run <id> [--workflow ci.yml] [--repository <destination>] [--provider <id>] --by <id>`
 asks the host for the run's status, conclusion and commit and writes a verification in the `automation`
-role with the run as evidence. Continuous integration holds no estate key, so its result is observed and
-recorded by the CLI, under the user's own GitHub CLI login; the logs are not inspected by this command and
-the record says so.
+role with the run as evidence, with the method and environment the provider reports (for GitHub,
+`github-actions` on a `github-hosted` runner). The provider is the one named, else the one serving the
+resource's recorded location (a repository located at `github` is served by the GitHub provider); the
+destination is the one named, else the location's value. Continuous integration holds no estate key, so its
+result is observed and recorded by the CLI, under the user's own login with the host; the logs are not
+inspected by this command and the record says so.
 
-## The GitHub Releases provider
+## Release providers and the product's release profile
 
-Contract `vericairn.provider.github-releases/1` (`IReleaseProvider`): `Dispatch` runs the release workflow on
-a ref with inputs and returns the run id when the run could be identified; `ObserveRun` and `ObserveRelease`
-report what the host shows, with every asset's hash taken from the release's `SHA256SUMS`; and
-`ManualPublicationCommand` names the operator's exact publication step, which no implementation runs.
-`GhReleaseProvider` uses the GitHub CLI logged in by the user on this machine; Vericairn never sees or
-stores the token, and an agent never holds one. `FakeReleaseProvider` simulates GitHub in memory for the
-conformance suite and the journeys. A provider refuses before any effect (`ProviderRefusedException`, for
-example not logged in) or reports that it cannot say whether an effect happened
-(`ProviderUncertainException`); the two are recorded differently.
+Contract `vericairn.provider.release/1` (`IReleaseProvider`): a release is built by a dispatched build on a
+ref of a destination (`Dispatch`, which returns the run id when the run could be identified), observed as a
+run (`ObserveRun`) and as a draft with the checksums of its assets (`ObserveRelease`), and published by the
+operator's own manual step, which `ManualPublicationCommand` names and no implementation runs. Each
+implementation serves a provider id that is recorded on every operation, declares its settings with their
+defaults, the setting that names the destination, and the resource locations it serves. The GitHub provider
+serves `github-releases` and declares `repository` (required, the destination), `workflow` (default
+`release.yml`), `ref` (default `main`) and `checksums` (default `SHA256SUMS`); it uses the GitHub CLI logged
+in by the user on the runtime's machine, and Vericairn never sees or stores the token. `FakeReleaseProvider`
+declares the same settings and simulates GitHub in memory for the conformance suite and the journeys. A
+provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
+cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently.
+
+A product declares how its releases are made on its own record, in an optional `release` object (read by
+release 0.4.0 and later; an estate records it only after upgrading): the `destination` (the provider id and
+the settings the product fixes), the `checksums` asset, and the `artifacts` a complete release carries, each
+a name with `{version}` and optionally `{platform}`, a role (distributable, sbom, notices, documentation or
+other) and the platforms it is built for:
+
+```json
+{"release": {"destination": {"provider": "github-releases", "settings": {"repository": "Example/gadget"}},
+             "checksums": "SHA256SUMS",
+             "artifacts": [{"name": "gadget-{version}-{platform}.zip", "role": "distributable", "platforms": ["linux-x64", "win-x64"]},
+                           {"name": "gadget-{version}.spdx.json", "role": "sbom"}]}}
+```
+
+A product that declares no artifacts is read by the generic rule: a platform identifier in an asset's name
+gives its platform, a CycloneDX or SPDX file is the bill of materials, a notices file is the notices, a docs
+archive is documentation, and a draft is complete when its checksum file names every other asset.
 
 The release as intent, then observed effect:
 
-1. `vericairn release submit --product <id> --version X --repository owner/name --by <id> [--ref main] [--workflow release.yml]`
-   writes an `operation` with status `not-started` under the identity `github-releases:<owner/name>:vX`,
-   then dispatches, then writes the revision that says what happened: `dispatched` with the run id,
-   `uncertain` when no run was identified, or `known-failure` when the provider refused before any effect.
-   While an operation under that identity is dispatched or uncertain, a second submit is refused; after a
-   failure or a cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled.
-2. `vericairn release observe --version X --repository owner/name --by <id> [--qualified rid]... [--limitation text]... [--signing ...]`
-   observes the run and the draft release. While the run is in progress or the draft lacks a checksum for
-   a distributable, nothing is recorded and the state is printed. When the run succeeded and the draft
-   names every distributable with a hash, the operation becomes `observed-success` and a `release` record
-   with status `candidate` is written from the observed assets, bill of materials and notices, with the
-   run as evidence. When the run failed, the operation becomes `known-failure`. `--cancel <reason>`
-   settles an intent that was never dispatched or an uncertain outcome reconciled as having had no effect.
+1. `vericairn release submit --product <id> --version X --by <id> [--provider <id>] [--repository ...] [--ref ...] [--workflow ...] [--setting name=value]...`
+   resolves the provider (the request's, else the product's declared one; neither is refused), the
+   settings (the provider's defaults, then the product's declared settings, then the request's own; a
+   missing required setting is refused), and writes an `operation` with status `not-started` under the
+   identity `<provider>:<destination>:vX` with every setting in its target; then it dispatches and writes
+   the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
+   identified, or `known-failure` when the provider refused before any effect. While an operation under
+   that identity is dispatched or uncertain, a second submit is refused; after a failure or a
+   cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled.
+2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
+   finds the operation (by provider and destination, by product and version, or by a destination one
+   current operation alone matches) and observes the run and the draft through the provider that
+   operation records, never another. While the run is in progress or the draft is incomplete by the
+   product's profile, nothing is recorded and what is missing is printed. When the run succeeded and the
+   draft is complete, the operation becomes `observed-success` and a `release` record with status
+   `candidate` is written with every asset's platform and the bill of materials and notices taken from
+   the profile, with the run as evidence. When the run failed, the operation becomes `known-failure`.
+   `--cancel <reason>` settles an intent that was never dispatched or an uncertain outcome reconciled as
+   having had no effect.
 3. The operator accepts the exact candidate (`vericairn records new acceptance --subject release:<id>:<hash>`)
-   and publishes by hand with the command the CLI printed (`gh release edit vX --draft=false --latest`).
+   and publishes by hand with the command the CLI printed (for GitHub, `gh release edit vX --draft=false --latest`).
    Nothing in Vericairn publishes.
 4. `vericairn release observe` again records the observed publication as the `published` revision of the
    candidate; without the operator's acceptance the runtime rejects it with `release.unaccepted`.
-5. `vericairn estate upgrade --to X` pins the estate to the published release.
+5. `vericairn estate upgrade --to X` pins the estate to the published release (for Vericairn itself; the
+   bootstrap fetches `vericairn-<version>-<platform>` by the hash the published record names).
 
 `vericairn status` lists every current operation with its state; one that is not observed-success or
 canceled needs attention.

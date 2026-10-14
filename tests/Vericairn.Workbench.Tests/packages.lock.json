@@ -340,12 +340,15 @@
         "type": "Project",
         "dependencies": {
           "System.CommandLine": "[2.0.12, )",
-          "Vericairn.Daemon": "[0.3.0-dev, )",
-          "Vericairn.Mcp": "[0.3.0-dev, )",
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )",
-          "Vericairn.Runtime": "[0.3.0-dev, )",
-          "Vericairn.Sdk": "[0.3.0-dev, )"
+          "Vericairn.Adapters.Git": "[0.4.0-dev, )",
+          "Vericairn.Daemon": "[0.4.0-dev, )",
+          "Vericairn.Mcp": "[0.4.0-dev, )",
+          "Vericairn.Packs.Software": "[0.4.0-dev, )",
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Providers.GitHub": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )",
+          "Vericairn.Sdk": "[0.4.0-dev, )"
         }
       },
       "vericairn-workbench": {
@@ -354,36 +357,56 @@
           "Avalonia": "[12.1.4, )",
           "Avalonia.Desktop": "[12.1.4, )",
           "Avalonia.Themes.Fluent": "[12.1.4, )",
-          "Vericairn.Daemon": "[0.3.0-dev, )",
-          "Vericairn.Presentation": "[0.3.0-dev, )",
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )",
-          "Vericairn.Sdk": "[0.3.0-dev, )"
+          "Vericairn.Presentation": "[0.4.0-dev, )",
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Sdk": "[0.4.0-dev, )"
+        }
+      },
+      "vericairn.adapters.git": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
         }
       },
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Runtime": "[0.3.0-dev, )",
-          "Vericairn.Sdk": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )",
+          "Vericairn.Sdk": "[0.4.0-dev, )"
         }
       },
       "vericairn.mcp": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )"
+        }
+      },
+      "vericairn.packs.software": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
         }
       },
       "vericairn.presentation": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Sdk": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Sdk": "[0.4.0-dev, )"
         }
       },
       "vericairn.protocol": {
         "type": "Project"
+      },
+      "vericairn.providers.github": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
       },
       "vericairn.records": {
         "type": "Project"
@@ -392,15 +415,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )"
         }
       },
       "Avalonia": {
