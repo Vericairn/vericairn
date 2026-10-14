@@ -9,11 +9,12 @@ command-line interface, the SDK, and the Workbench and Remote clients as they ar
 
 ## Status
 
-Release 0.2.0 is published and the Vericairn estate runs on it; 0.3.0 is in development on this branch. Each release
+Release 0.2.0 is published and the Vericairn estate runs on it; 0.3.0 is being released from this branch. Each release
 carries its own documentation set under [docs/releases](docs/releases/README.md): the 0.2.0 set is at
-[docs/releases/0.2.0](docs/releases/0.2.0/README.md) (overview, installation, the operator's guide, the generated
-command-line, API and record references, release notes and known limitations). The documents at `docs/` are the drafts
-for the next release. What exists today:
+[docs/releases/0.2.0](docs/releases/0.2.0/README.md) and the 0.3.0 set, produced before the build, at
+[docs/releases/0.3.0](docs/releases/0.3.0/README.md) (overview, installation, the operator's guide, the generated
+command-line, API and record references, frozen copies of the maintained documents, release notes and known
+limitations). The documents at `docs/` are the drafts for the next release. What exists today:
 
 - `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, signed records, devices and
   admission, estate loading, validation, cleanliness checks, status), documented in
