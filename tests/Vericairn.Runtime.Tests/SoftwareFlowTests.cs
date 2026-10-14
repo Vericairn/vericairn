@@ -74,8 +74,9 @@ public class SoftwareFlowTests
 
         JsonObject candidate = ReleaseFlow.CandidateBody("0.2.0", "Example/widget", done.HeadSha, draft, ["run passed"], ["linux-x64"], "unsigned developer build", ["none signed"]);
         Assert.Equal("candidate", candidate["status"]!.GetValue<string>());
-        Assert.Equal(8, candidate["artifacts"]!.AsArray().Count);
-        Assert.Equal(6, candidate["artifacts"]!.AsArray().Count(a => a!["platform"]!.GetValue<string>() != "any"));
+        Assert.Equal(14, candidate["artifacts"]!.AsArray().Count);
+        Assert.Equal(12, candidate["artifacts"]!.AsArray().Count(a => a!["platform"]!.GetValue<string>() != "any"));
+        Assert.Equal("osx-arm64", candidate["artifacts"]!.AsArray().Single(a => a!["name"]!.GetValue<string>() == "vericairn-workbench-0.2.0-osx-arm64.tar.gz")!["platform"]!.GetValue<string>());
         Assert.NotNull(candidate["sbom"]);
         Assert.NotNull(candidate["notices"]);
         Assert.Equal(RecordFormats.Current, candidate["recordFormat"]!["writes"]!.GetValue<long>());

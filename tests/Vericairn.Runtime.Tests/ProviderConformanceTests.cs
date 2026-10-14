@@ -201,7 +201,7 @@ public class ReleaseProviderConformanceTests
         Assert.True(release.Draft);
         Assert.Null(release.PublishedAt);
         Assert.Equal(run.HeadSha, release.TargetCommit);
-        Assert.Equal(9, release.Assets.Count);
+        Assert.Equal(15, release.Assets.Count);
         Assert.All(release.Assets.Where(a => a.Name != "SHA256SUMS"), a => Assert.StartsWith("sha256:", a.Hash, StringComparison.Ordinal));
         Assert.Contains("--draft=false", provider.ManualPublicationCommand(Repository, "v0.2.0"), StringComparison.Ordinal);
         Assert.Contains("v0.2.0", provider.ManualPublicationCommand(Repository, "v0.2.0"), StringComparison.Ordinal);

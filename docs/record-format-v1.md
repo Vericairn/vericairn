@@ -40,9 +40,11 @@ write the same file; merges are always clean file additions, and conflicts are s
 ## Types
 
 Run `vericairn records describe` for the current list and `vericairn records describe <type>` for fields.
-Format 1 admits: estate, principal, authority, decision, product, resource, document-revision, work-order,
-work-status, review, acceptance, retirement, assignment, attempt, result, amendment, device, admission,
-reconciliation. Reserved for later releases: release, migration, object.
+Format 1 admits twenty-four types. Since release 0.1.0: estate, principal, authority, decision, product,
+resource, document-revision, work-order, work-status, review, acceptance, retirement, assignment, attempt,
+result, amendment, device, admission, reconciliation, release and migration. Since 0.2.0: verification,
+observation and operation. Reserved for later releases: object. This list was corrected for 0.3.1: the 0.2.0
+and 0.3.0 copies still list release and migration as reserved.
 
 ## Work: brief, assignment, attempt, result
 
