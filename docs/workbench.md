@@ -4,7 +4,7 @@
 
 ## What exists after WB-03
 
-- The shell (WB-01): primary navigation on the left (Home, Work, Products, Releases, Runtime, Records), documents in the center as tabs, the inspector on the right, the activity log at the bottom, the target context on top (estate, pinned release, runtime state, acting principal, freshness) and a status line. Panels resize with splitters and hide, show and reset with keyboard alternatives; the layout is a per-user preference saved under the Vericairn home.
+- The shell (WB-01): primary navigation on the left (Home, Work, Products, Releases, Runtime, Records), documents in the center as tabs, the inspector on the right, the activity log at the bottom, the target context on top (estate, pinned release, runtime state, the acting principal by its current name with the device the runtime signs with, freshness) and a status line. Panels resize with splitters and hide, show and reset with keyboard alternatives; the layout is a per-user preference saved under the Vericairn home.
 - First run and returning user: open an estate's root (recent estates are remembered); a directory without `estate/manifest.json` is refused and nothing is created; when no daemon answers, Workbench starts one through the command line beside it, waits for that command to finish (never for the end of its output, which 0.3.0 did and so never opened the estate on a first launch), and reconnects.
 - Home: attention items of the six kinds, derived from the status document alone, each with why it matters, its state, freshness and the next action; selecting explains, Enter opens the subject. A result awaiting review opens in the review workspace.
 - Acting principal: chosen among the admitted devices held on this machine (the target bar's chooser), or named with `--as` for a principal whose device the runtime holds. Without one, every write surface says so before any request is sent; Workbench never evaluates authority itself.
@@ -31,6 +31,8 @@ Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attent
 ```sh
 vericairn-workbench --estate <estate root> [--as <principal id>]
 ```
+
+`--as` names the principal Workbench writes as. The selector in the target bar then shows that principal's admitted device held on this machine, the one the runtime signs its records with, and choosing another device in the selector makes that device's principal the acting principal. When the named principal has no device held here, the target bar says so: its writes are refused where the estate requires signatures, and written unsigned where it does not. (Release 0.3.1 showed such a principal under its first revision's name beside the first device held on the machine, whoever's it was; the records were still authored and signed correctly.)
 
 The command line is found beside the executable, through `VERICAIRN_CLI`, or on the path; Workbench uses it to start and stop the daemon. The accessibility probe measures every focusable target of the shell at compact density and writes an observation for the platform obligations:
 

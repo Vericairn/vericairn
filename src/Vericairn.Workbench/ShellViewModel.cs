@@ -31,6 +31,7 @@ public sealed class ShellViewModel : Observable
     private string status = "No estate open.";
     private string actingPrincipal = "read-only: no admitted device on this machine";
     private DeviceRow? selectedActing;
+    private bool choosingActing;
     private string actingRole = string.Empty;
     private string freshness = "no view yet";
     private ShellLayout layout;
@@ -83,7 +84,10 @@ public sealed class ShellViewModel : Observable
     /// <summary>Admitted devices held on this machine; the acting principal is chosen among their principals.</summary>
     public ObservableCollection<DeviceRow> ActingCandidates { get; } = [];
 
-    /// <summary>An explicit acting principal id (the --as argument), used when set instead of a held device.</summary>
+    /// <summary>
+    /// An explicit acting principal id (the --as argument). The selector then shows the admitted device of that principal held
+    /// here, the one the runtime signs with; choosing another device in the selector replaces it.
+    /// </summary>
     public string? ActingOverride { get; set; }
 
     /// <summary>The chosen device, and so the acting principal.</summary>
@@ -94,6 +98,13 @@ public sealed class ShellViewModel : Observable
         {
             if (Set(ref selectedActing, value))
             {
+                // A person choosing a device chooses its principal, which replaces a principal named with --as; the shell's own
+                // selection while it refreshes the candidates never does.
+                if (!choosingActing && value is not null && ActingOverride is not null && value.Principal != ActingOverride)
+                {
+                    ActingOverride = null;
+                }
+
                 DescribeActing();
             }
         }
@@ -255,11 +266,22 @@ public sealed class ShellViewModel : Observable
             }
             IReadOnlyList<DeviceRow> devices = connection.Api.Devices();
             List<DeviceRow> held = devices.Where(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase)).ToList();
-            Replace(ActingCandidates, held);
-            if (selectedActing is null || held.All(d => d.Id != selectedActing.Id))
+            string? previous = selectedActing?.Id;
+            choosingActing = true;
+            try
             {
-                selectedActing = held.FirstOrDefault();
+                Replace(ActingCandidates, held);
+
+                // A principal named with --as gets the device the runtime signs its records with: its first admitted device held
+                // here, in the runtime's own order. Otherwise the chosen device stays chosen while it is held, or the first is.
+                selectedActing = ActingOverride is not null
+                    ? held.FirstOrDefault(d => d.Principal == ActingOverride)
+                    : held.FirstOrDefault(d => d.Id == previous) ?? held.FirstOrDefault();
                 Raise(nameof(SelectedActing));
+            }
+            finally
+            {
+                choosingActing = false;
             }
 
             DescribeActing();
@@ -285,11 +307,12 @@ public sealed class ShellViewModel : Observable
             return;
         }
 
-        string name = selectedActing?.PrincipalName ?? id;
+        string name = ActingCandidates.FirstOrDefault(d => d.Principal == id)?.PrincipalName ?? id;
         actingRole = string.Empty;
         try
         {
-            RecordResponse? principal = connection?.Api?.Record(id);
+            // A principal is identified by its first record; its name and roles are those of its current revision.
+            RecordResponse? principal = connection?.Api is IEstateApi api ? CurrentPrincipal(api, id) : null;
             if (principal is not null && principal.Envelope.TryGetProperty("body", out JsonElement body))
             {
                 name = body.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? name : name;
@@ -304,9 +327,60 @@ public sealed class ShellViewModel : Observable
             Log("principal lookup failed: " + exception.Message);
         }
 
-        ActingPrincipal = selectedActing is null ? $"{name} (explicit)" : $"{name} (device {selectedActing.Name ?? selectedActing.Id})";
+        ActingPrincipal = selectedActing is not null && selectedActing.Principal == id
+            ? $"{name} (device {selectedActing.Name ?? selectedActing.Id})"
+            : SignaturesRequired()
+                ? $"{name} (named with --as; no admitted device of this principal is held here, so writes will be refused)"
+                : $"{name} (named with --as; no device of this principal is held here, so its records will be unsigned)";
         Raise(nameof(ActingPrincipalId));
     }
+
+    /// <summary>Whether the estate's current policy requires every record to be signed, read as the runtime reads it.</summary>
+    private bool SignaturesRequired()
+    {
+        try
+        {
+            IReadOnlyList<RecordResponse> charters = connection?.Api?.Records("estate") ?? [];
+            RecordResponse? charter = charters.Count > 0 ? charters[0] : null;
+            return charter is not null
+                && charter.Envelope.TryGetProperty("body", out JsonElement body)
+                && body.TryGetProperty("policies", out JsonElement policies)
+                && policies.TryGetProperty("signatures", out JsonElement policy)
+                && policy.ValueKind == JsonValueKind.String
+                && policy.GetString() == "required";
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Log("estate policy lookup failed: " + exception.Message);
+            return true;
+        }
+    }
+
+    /// <summary>The current revision of the principal whose identity, the id of its first record, is given; or null.</summary>
+    internal static RecordResponse? CurrentPrincipal(IEstateApi api, string identity)
+    {
+        foreach (RecordResponse candidate in api.Records("principal"))
+        {
+            string first = candidate.Id;
+            string? earlier = Supersedes(candidate.Envelope);
+            var seen = new HashSet<string>(StringComparer.Ordinal) { first };
+            while (earlier is not null && seen.Add(earlier))
+            {
+                first = earlier;
+                earlier = api.Record(earlier) is RecordResponse previous ? Supersedes(previous.Envelope) : null;
+            }
+
+            if (first == identity)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? Supersedes(JsonElement envelope) =>
+        envelope.TryGetProperty("supersedes", out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>Starts the daemon through the runtime manager and reconnects.</summary>
     public async Task StartRuntimeAsync()

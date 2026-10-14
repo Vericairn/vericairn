@@ -95,7 +95,7 @@ the body, and partial, pending and changed-target states are never flattened int
 | Command | Does |
 |---|---|
 | `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` serves the local socket only |
-| `vericairn runtime start` | Start a daemon in the background and wait until it answers |
+| `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
 | `vericairn runtime status` | Whether a daemon serves the estate and where, or whether commands run the embedded runtime |
 | `vericairn runtime install [--plan]` | Install the daemon as a per-user service that starts at login and restarts after failure: a launchd agent (`~/Library/LaunchAgents`), a systemd user unit (`~/.config/systemd/user`) or a Task Scheduler logon task; `--plan` shows the unit and the commands without installing |

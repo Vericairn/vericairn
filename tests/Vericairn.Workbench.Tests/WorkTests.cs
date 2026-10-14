@@ -42,7 +42,7 @@ public class WorkTests(HeadlessFixture fixture)
         try
         {
             await fixture.UiAsync(() => shell.OpenEstateAsync(root));
-            Assert.Equal("Operator (explicit)", shell.ActingPrincipal);
+            Assert.Equal("Operator (named with --as; no device of this principal is held here, so its records will be unsigned)", shell.ActingPrincipal);
 
             // The work order page shows the brief and no assignment yet.
             await fixture.Ui(() => shell.OpenWorkOrder("W-1"));

@@ -4,6 +4,7 @@
 using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Threading;
+using Vericairn.Records.Signing;
 using Vericairn.Workbench;
 
 [assembly: AssemblyFixture(typeof(Vericairn.Workbench.Tests.HeadlessFixture))]
@@ -20,6 +21,19 @@ public static class TestApp
 /// <summary>One headless Avalonia session shared by the collection; every test dispatches onto its UI thread.</summary>
 public sealed class HeadlessFixture : IDisposable
 {
+    /// <summary>
+    /// Gives the test process its own Vericairn home before any test runs, so that no test writes live stores, device keys,
+    /// daemon logs or preferences into the home of the person running the tests; the real command line started by a test
+    /// inherits it.
+    /// </summary>
+    public HeadlessFixture()
+    {
+        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-tests-home"));
+        }
+    }
+
     /// <summary>The session.</summary>
     public HeadlessUnitTestSession Session { get; } = HeadlessUnitTestSession.StartNew(typeof(TestApp));
 
