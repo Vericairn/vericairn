@@ -100,6 +100,11 @@ jobs:
             rm -f "out-workbench/$rid/bin/"*.pdb "out-workbench/$rid/bin/"*.xml
             cp "out/$rid/bin/"vericairn* "out-workbench/$rid/bin/"
             cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out-workbench/$rid/"
+            # The fonts are embedded in the executable; the SIL Open Font License requires their copyright notices and license to
+            # travel with every copy where the user can read them, so each archive carries the license texts under licenses/.
+            mkdir -p "out-workbench/$rid/licenses"
+            cp src/Vericairn.Workbench/Assets/Fonts/OFL-*.txt "out-workbench/$rid/licenses/"
+            test -s "out-workbench/$rid/licenses/OFL-Inter.txt" && test -s "out-workbench/$rid/licenses/OFL-JetBrainsMono.txt"
             case "$rid" in
               win-*) (cd "out-workbench/$rid" && zip -q -X -r "../../dist/vericairn-workbench-$VERSION-$rid.zip" .) ;;
               *) tar -C "out-workbench/$rid" -czf "dist/vericairn-workbench-$VERSION-$rid.tar.gz" . ;;
