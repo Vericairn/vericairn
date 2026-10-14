@@ -285,10 +285,11 @@ internal static class Commands
             if (detached)
             {
                 // Started by 'runtime start': whoever started that command may be reading its output to the end, so the daemon
-                // writes to its own log beside the live store and never to the streams it was given.
-                string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
-                Directory.CreateDirectory(directory);
-                var writer = new StreamWriter(new FileStream(Path.Combine(directory, "daemon.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+                // writes to its own log beside the live store and never to the streams it was given, which that command closes.
+                // The log is opened before anything else can fail, so every failure is written where 'runtime start' reads it.
+                string log = DaemonLogPath(root);
+                Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+                var writer = new StreamWriter(new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
                 Console.SetOut(writer);
                 Console.SetError(writer);
             }
@@ -324,7 +325,18 @@ internal static class Commands
         {
             return Fail(exception.Message);
         }
+        catch (Exception exception) when (detached)
+        {
+            // Nobody reads a detached daemon's streams: an unexpected failure goes to its log, where 'runtime start' finds it.
+            return Fail($"the daemon stopped on an unexpected {exception.GetType().Name}: {exception.Message}");
+        }
     }
+
+    /// <summary>The name of the daemon's log beside the estate's live store.</summary>
+    internal const string DaemonLogName = "daemon.log";
+
+    /// <summary>Where a daemon started by 'runtime start' writes its output and its failures for an estate on this machine.</summary>
+    internal static string DaemonLogPath(string root) => Path.Combine(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!, DaemonLogName);
 
     public static int RuntimeStart(string root, bool json)
     {
@@ -339,6 +351,21 @@ internal static class Commands
             if (existing is not null && VericairnClient.IsAlive(existing))
             {
                 return RuntimeStatus(root, json);
+            }
+
+            // The daemon's log is opened here first: a log that cannot be written stops the start with its reason, and a daemon
+            // that fails before serving is explained from what it wrote there since this point.
+            string log = DaemonLogPath(root);
+            long logStart;
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(log)!);
+                using var probe = new FileStream(log, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                logStart = probe.Length;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return Fail($"The daemon's log {log} cannot be written, so no daemon was started: {exception.Message}");
             }
 
             // The daemon gets streams of its own and writes to its log: it never inherits this command's output, which a caller
@@ -372,17 +399,40 @@ internal static class Commands
 
                 if (process.HasExited)
                 {
-                    return Fail($"The daemon exited with code {process.ExitCode} before serving.");
+                    return Fail($"The daemon exited with code {process.ExitCode} before serving{LogSince(log, logStart)}. Its log is {log}.");
                 }
 
                 Thread.Sleep(200);
             }
 
-            return Fail("The daemon did not start serving within 30 seconds.");
+            return Fail($"The daemon did not start serving within 30 seconds{LogSince(log, logStart)}. Its log is {log}.");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             return Fail(exception.Message);
+        }
+    }
+
+    /// <summary>What the daemon wrote to its log after an offset, quoted briefly for a failed start, or nothing.</summary>
+    private static string LogSince(string log, long start)
+    {
+        try
+        {
+            using var stream = new FileStream(log, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length <= start)
+            {
+                return string.Empty;
+            }
+
+            stream.Seek(start, SeekOrigin.Begin);
+            using var reader = new StreamReader(stream);
+            string[] lines = reader.ReadToEnd().Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            string said = string.Join(" ", lines.TakeLast(5).Select(line => line.StartsWith("error: ", StringComparison.Ordinal) ? line["error: ".Length..] : line)).TrimEnd('.', ' ');
+            return said.Length == 0 ? string.Empty : ": " + (said.Length > 1000 ? "..." + said[^1000..] : said);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return string.Empty;
         }
     }
 

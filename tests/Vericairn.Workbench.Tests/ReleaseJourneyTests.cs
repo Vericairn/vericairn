@@ -105,7 +105,7 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             // The operator acts now: Enter on the destination opens the candidate in the review workspace; the acceptance is typed and sent with Ctrl+Shift+Enter.
             shell.ActingOverride = op;
             await fixture.Ui(shell.Refresh);
-            Assert.Equal("Operator (explicit)", shell.ActingPrincipal);
+            Assert.Equal("Operator (named with --as; no device of this principal is held here, so its records will be unsigned)", shell.ActingPrincipal);
             await fixture.Ui(() =>
             {
                 window.UpdateLayout();
