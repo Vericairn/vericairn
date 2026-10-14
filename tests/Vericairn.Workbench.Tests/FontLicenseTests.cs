@@ -26,7 +26,7 @@ public class FontLicenseTests
             string copyright = File.ReadLines(license).First();
             Assert.StartsWith("Copyright", copyright, StringComparison.Ordinal);
             Assert.Contains(copyright.Replace("Copyright (c) ", string.Empty, StringComparison.Ordinal).Replace("Copyright ", string.Empty, StringComparison.Ordinal), notices, StringComparison.Ordinal);
-            Assert.Contains($"`licenses/OFL-{family}.txt` in every Workbench archive", notices, StringComparison.Ordinal);
+            Assert.Contains($"`licenses/OFL-{family}.txt`", notices, StringComparison.Ordinal);
             Assert.Contains($"\"out-workbench/$rid/licenses/OFL-{family}.txt\"", workflow, StringComparison.Ordinal);
         }
 

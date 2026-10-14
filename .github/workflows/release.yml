@@ -78,6 +78,10 @@ jobs:
               --output "out/$rid/bin" --nologo --verbosity quiet
             rm -f "out/$rid/bin/"*.pdb "out/$rid/bin/"*.xml
             cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out/$rid/"
+            # The license and notice texts of every component the command line bundles (THIRD-PARTY-NOTICES.md lists them).
+            mkdir -p "out/$rid/licenses"
+            cp licenses/*.txt "out/$rid/licenses/"
+            test -s "out/$rid/licenses/dotnet-LICENSE.txt" && test -s "out/$rid/licenses/Apache-2.0.txt"
             case "$rid" in
               win-*) (cd "out/$rid" && zip -q -X -r "../../dist/vericairn-$VERSION-$rid.zip" .) ;;
               *) tar -C "out/$rid" -czf "dist/vericairn-$VERSION-$rid.tar.gz" . ;;
@@ -105,6 +109,9 @@ jobs:
             mkdir -p "out-workbench/$rid/licenses"
             cp src/Vericairn.Workbench/Assets/Fonts/OFL-*.txt "out-workbench/$rid/licenses/"
             test -s "out-workbench/$rid/licenses/OFL-Inter.txt" && test -s "out-workbench/$rid/licenses/OFL-JetBrainsMono.txt"
+            # Workbench holds a copy of the command line, so its archive carries the command line's license texts and its own.
+            cp licenses/*.txt licenses/workbench/*.txt "out-workbench/$rid/licenses/"
+            test -s "out-workbench/$rid/licenses/MIT-AvaloniaUI.txt" && test -s "out-workbench/$rid/licenses/Skia-HarfBuzz-THIRD-PARTY-NOTICES.txt"
             case "$rid" in
               win-*) (cd "out-workbench/$rid" && zip -q -X -r "../../dist/vericairn-workbench-$VERSION-$rid.zip" .) ;;
               *) tar -C "out-workbench/$rid" -czf "dist/vericairn-workbench-$VERSION-$rid.tar.gz" . ;;
