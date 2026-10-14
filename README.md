@@ -4,17 +4,24 @@ Vericairn is a local-first creation and operations platform: it helps a person o
 intention into an understood, authorized, produced, reviewed, delivered and maintained result, with its
 decisions, sources, relationships and history intact.
 
-This repository holds the Community edition (Apache-2.0): the record format, the runtime, the `vericairn`
-command-line interface, the SDK, and the Workbench and Remote clients as they are built.
+This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
+`vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client follows in milestone M3.
 
-## Status
+## Releases
 
-Release 0.2.0 is published and the Vericairn estate runs on it; 0.3.0 is being released from this branch. Each release
-carries its own documentation set under [docs/releases](docs/releases/README.md): the 0.2.0 set is at
-[docs/releases/0.2.0](docs/releases/0.2.0/README.md) and the 0.3.0 set, produced before the build, at
-[docs/releases/0.3.0](docs/releases/0.3.0/README.md) (overview, installation, the operator's guide, the generated
-command-line, API and record references, frozen copies of the maintained documents, release notes and known
-limitations). The documents at `docs/` are the drafts for the next release. What exists today:
+The published releases are on the [Releases page](https://github.com/Vericairn/vericairn/releases). Each
+carries the command line's archives for Linux, macOS and Windows, `SHA256SUMS`, a software bill of materials and
+the third-party notices; from 0.3.1 a release also carries Workbench's archives and its documentation set. The
+sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md): the overview, installation
+and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
+the maintained documents, the release notes and known limitations. The index there also names the versions
+withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
+documents at `docs/` are the drafts for the next release.
+
+Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
+release and pins the one it runs on.
+
+## What is here
 
 - `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, signed records, devices and
   admission, estate loading, validation, cleanliness checks, status), documented in
@@ -24,18 +31,28 @@ limitations). The documents at `docs/` are the drafts for the next release. What
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
   an estate's live state and serves it over a local socket and pinned loopback TLS, and the typed client,
   documented in [docs/api-v1.md](docs/api-v1.md).
-- The software journey: the git adapter, verification records from commands and workflow runs, and the
-  GitHub Releases provider with intent recorded before effect and publication left to the operator,
-  documented in [docs/software.md](docs/software.md).
+- The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
+  verification evidence), `Vericairn.Adapters.Git` (read-only observation of a repository) and
+  `Vericairn.Providers.GitHub` (releases built by a GitHub Actions workflow and held as drafts, with intent
+  recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
+  The foundation keeps their contracts; a release goes through the provider its request names or its product
+  record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `sources`, `check`, `runtime`,
-  `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when one serves
-  the estate, the embedded runtime otherwise. `vericairn docs` generates a release's references from the build and
-  its notes from an estate's records, and refuses an incomplete documentation set; the release workflow runs that
-  check before it builds a draft. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a
-  client adapter over the API that lists only the tools the connected device may use, documented in
-  [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
-
-Nothing here is a release until a release record in the Vericairn estate says so.
+  `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when
+  one serves the estate, the embedded runtime otherwise. `vericairn docs` writes a release's notes from an
+  estate's records and refuses an incomplete documentation set. `vericairn mcp serve` is the Model Context
+  Protocol server for coding agents, a client adapter over the API that lists only the tools the connected
+  device may use, documented in [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
+- `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
+  the runtime: home and attention, products, work orders, assignments, results, review and decisions,
+  releases and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
+  the state language Workbench shares with the command line and the clients to come.
+- `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record
+  references and its manifest from the build, and refuses a set that disagrees with the build. The release
+  workflow runs that comparison and `vericairn docs check` before it builds a draft.
+- `brand/`: the wordmark and the mark ([brand/README.md](brand/README.md)). `licenses/` and
+  [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md): every third-party component the distributables bundle,
+  with its license text.
 
 ## Developing on Windows, Linux or macOS
 

@@ -15,6 +15,8 @@ Every release of Vericairn carries its own documentation set, one directory per 
 | `record-format.md` | a person, frozen copy | The record format document as released |
 | `api.md` | a person, frozen copy | The API document as released: transports, outcomes, problem codes |
 | `software.md` | a person, frozen copy | The software journey as released: the git adapter, checks, the release provider |
+| `workbench.md` | a person, frozen copy | Workbench as released: what exists, the keyboard, running it, the probe, limitations (declared from 0.4.0) |
+| `mcp.md` | a person, frozen copy | The MCP server as released: protocol subset, tools, running it, qualification, limitations (declared from 0.4.0) |
 | `release-notes.md` | `vericairn docs notes` | What changed, from the estate's records between the previous publication and this one |
 | `limitations-and-platforms.md` | a person, from the release record | Qualified platforms, signing, known limitations, every artifact by hash |
 | `manifest.json` | the build tooling (`vericairn-docs generate`) | The set's version, commit, generator, the documents the product declares, commands, operations and record types |
