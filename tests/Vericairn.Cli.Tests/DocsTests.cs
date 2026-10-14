@@ -144,6 +144,7 @@ public class DocsTests
     [InlineData("0.3.1")]
     [InlineData("0.4.0")]
     [InlineData("0.4.1")]
+    [InlineData("0.4.2")]
     public void TheReleasedSetsAreComplete(string version)
     {
         string? root = AppContext.BaseDirectory;
