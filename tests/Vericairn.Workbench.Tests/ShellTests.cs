@@ -19,6 +19,9 @@ internal sealed class ServiceConnection(string root) : IEstateConnection
 
     public string Root { get; } = root;
 
+    /// <summary>The in-process service, for tests that replace its provider.</summary>
+    public EstateService? Service => service;
+
     public IEstateApi? Api => service;
 
     public string Mode => service is null ? "unavailable" : "daemon";
@@ -57,6 +60,18 @@ internal sealed class FakeRuntimeManager : IRuntimeManager
     {
         Calls.Add("plan");
         return Task.FromResult(new RuntimeOutcome(true, "unit: example"));
+    }
+
+    public Task<RuntimeOutcome> InstallAsync(string root)
+    {
+        Calls.Add("install");
+        return Task.FromResult(new RuntimeOutcome(true, "installed: example"));
+    }
+
+    public Task<RuntimeOutcome> UninstallAsync(string root)
+    {
+        Calls.Add("uninstall");
+        return Task.FromResult(new RuntimeOutcome(true, "removed: example"));
     }
 }
 

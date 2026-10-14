@@ -62,6 +62,8 @@ so a copied request grants nothing and a copied key file is useless where platfo
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
 | `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke` | Devices and admission; a device is created on the runtime's machine |
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release |
+| `POST /v1/releases/submit` | Submit a release as intent before effect: the operation record is written, then the release workflow is dispatched through the GitHub Releases provider on the runtime's machine (the user's own `gh` login; no token is stored); nothing is published. Returns a `ReleaseResponse`. |
+| `POST /v1/releases/observe` | Observe a release's run, draft and publication and record what settled: the operation revision, the candidate release with every distributable by hash, and later the observed publication; or cancel an intent that had no effect. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it |
 | `GET /v1/reconcile`, `GET /v1/recover/inspect` | Reconcile tasks left by diverged copies; what this copy holds |
 | `GET /v1/objects`, `POST /v1/objects`, `GET /v1/objects/{hash}`, `GET /v1/objects/verify` | Content-addressed objects: list, store bytes, verified bytes, verify all |

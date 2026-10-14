@@ -562,3 +562,176 @@ public sealed class ComparisonDocument(string title, string leftTitle, string le
         return $"{lines.Count(l => l.Mark == '-')} removed, {lines.Count(l => l.Mark == '+')} added, {lines.Count(l => l.Mark == ' ')} unchanged";
     }
 }
+
+/// <summary>The runtime workspace: the daemon's state and health, the install plan, and the consequential actions that follow the plan.</summary>
+public sealed class RuntimeDocument : Document
+{
+    private string label = string.Empty, where = string.Empty, health = "No daemon answers.", plan = string.Empty, output = string.Empty, acting = string.Empty;
+    private bool planShown;
+
+    /// <summary>The runtime workspace.</summary>
+    public RuntimeDocument() : base("Runtime", "runtime")
+    {
+    }
+
+    /// <summary>The runtime state's label.</summary>
+    public string Label { get => label; set => Set(ref label, value); }
+
+    /// <summary>Where the daemon is, in words.</summary>
+    public string Where { get => where; set => Set(ref where, value); }
+
+    /// <summary>What the daemon reports about itself.</summary>
+    public string Health { get => health; set => Set(ref health, value); }
+
+    /// <summary>The per-user service unit and commands, as the command line printed them.</summary>
+    public string Plan { get => plan; set => Set(ref plan, value); }
+
+    /// <summary>Whether the plan has been shown in this workspace; install and uninstall wait for it.</summary>
+    public bool PlanShown { get => planShown; set => Set(ref planShown, value); }
+
+    /// <summary>What the last command printed.</summary>
+    public string Output { get => output; set => Set(ref output, value); }
+
+    /// <summary>The acting principal, repeated here because the workspace acts.</summary>
+    public string Acting { get => acting; set => Set(ref acting, value); }
+}
+
+/// <summary>One destination of a release as the records show it, with the four stages the design keeps apart.</summary>
+public sealed record DestinationRow(string Identity, string Version, string Repository, string OperationId, string OperationStatus, string? Run, string? ReleaseId, string? ReleaseStatus, string Preparation, string Submission, string ExternalReview, string Availability)
+{
+    /// <summary>First line.</summary>
+    public string Heading => $"{Version} at {Repository}: {StateLanguage.Label("operation", OperationStatus)}" + (ReleaseStatus is null ? string.Empty : $"; release {StateLanguage.Label("release", ReleaseStatus)}");
+
+    /// <summary>Second line: the four stages separately.</summary>
+    public string Detail => $"preparation: {Preparation}. submission: {Submission}. external review: {ExternalReview}. observed availability: {Availability}.";
+}
+
+/// <summary>
+/// The release workspace over the GitHub Releases provider's intent-then-effect flow: submit (the intent is recorded before the
+/// dispatch), observe (the run, the draft, the publication), accept the exact candidate, and the operator's manual publication
+/// shown as a command the client never runs.
+/// </summary>
+public sealed class ReleaseWorkspace : Document
+{
+    private string version = string.Empty, repository = string.Empty, reference = "main", workflow = "release.yml", reconciliation = string.Empty, qualified = string.Empty, limitations = string.Empty, signing = "unsigned developer build", cancelReason = string.Empty, status = "Nothing sent.", publish = string.Empty;
+    private ProductRow? product;
+    private DestinationRow? selected;
+
+    /// <summary>The release workspace.</summary>
+    public ReleaseWorkspace(IReadOnlyList<ProductRow> products) : base("Releases", "release")
+    {
+        Products = products;
+        product = products.Count > 0 ? products[0] : null;
+    }
+
+    /// <summary>Destinations: one per release operation on record.</summary>
+    public ObservableCollection<DestinationRow> Destinations { get; } = [];
+
+    /// <summary>Release records.</summary>
+    public ObservableCollection<ReleaseRowView> Releases { get; } = [];
+
+    /// <summary>The selected destination; observe and accept act on it.</summary>
+    public DestinationRow? Selected { get => selected; set => Set(ref selected, value); }
+
+    /// <summary>Products a release can belong to.</summary>
+    public IReadOnlyList<ProductRow> Products { get; }
+
+    /// <summary>The product.</summary>
+    public ProductRow? Product { get => product; set => Set(ref product, value); }
+
+    /// <summary>Version to release.</summary>
+    public string Version { get => version; set => Set(ref version, value); }
+
+    /// <summary>GitHub owner/name.</summary>
+    public string Repository { get => repository; set => Set(ref repository, value); }
+
+    /// <summary>Branch or tag to build from.</summary>
+    public string Ref { get => reference; set => Set(ref reference, value); }
+
+    /// <summary>Release workflow file.</summary>
+    public string Workflow { get => workflow; set => Set(ref workflow, value); }
+
+    /// <summary>How an earlier failed, canceled or uncertain attempt was settled; required for a retry.</summary>
+    public string Reconciliation { get => reconciliation; set => Set(ref reconciliation, value); }
+
+    /// <summary>Qualified platforms for the candidate, one per line.</summary>
+    public string Qualified { get => qualified; set => Set(ref qualified, value); }
+
+    /// <summary>Known limitations for the candidate, one per line.</summary>
+    public string Limitations { get => limitations; set => Set(ref limitations, value); }
+
+    /// <summary>Signing state recorded on the candidate.</summary>
+    public string Signing { get => signing; set => Set(ref signing, value); }
+
+    /// <summary>A reason that cancels an intent never dispatched or an outcome reconciled as having had no effect.</summary>
+    public string CancelReason { get => cancelReason; set => Set(ref cancelReason, value); }
+
+    /// <summary>What the runtime answered last.</summary>
+    public string Status { get => status; private set => Set(ref status, value); }
+
+    /// <summary>The operator's manual publication command, as the runtime named it; never run here.</summary>
+    public string Publish { get => publish; private set => Set(ref publish, value); }
+
+    /// <summary>The last response.</summary>
+    public ReleaseResponse? LastResponse { get; private set; }
+
+    /// <summary>Submits the release: the runtime records the intent, then dispatches; nothing is published.</summary>
+    public void Submit(IEstateApi api, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (string.IsNullOrWhiteSpace(by))
+        {
+            Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
+            return;
+        }
+
+        if (Product is null || string.IsNullOrWhiteSpace(Version) || string.IsNullOrWhiteSpace(Repository))
+        {
+            Status = "A product, a version and a repository are needed before anything is sent.";
+            return;
+        }
+
+        Answer(() => api.ReleaseSubmit(new ReleaseSubmitRequest(Product.Id, Version.Trim(), Repository.Trim(), by, string.IsNullOrWhiteSpace(Ref) ? "main" : Ref.Trim(), string.IsNullOrWhiteSpace(Workflow) ? "release.yml" : Workflow.Trim(), string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim())));
+    }
+
+    /// <summary>Observes the selected destination (or the form's version and repository): the run, the draft, the publication; or cancels with the reason given.</summary>
+    public void Observe(IEstateApi api, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (string.IsNullOrWhiteSpace(by))
+        {
+            Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
+            return;
+        }
+
+        string targetVersion = Selected?.Version ?? Version.Trim();
+        string targetRepository = Selected?.Repository ?? Repository.Trim();
+        if (targetVersion.Length == 0 || targetRepository.Length == 0)
+        {
+            Status = "Select a destination, or give a version and a repository, before observing.";
+            return;
+        }
+
+        Answer(() => api.ReleaseObserve(new ReleaseObserveRequest(targetVersion, targetRepository, by, Lines(Qualified), Lines(Limitations), string.IsNullOrWhiteSpace(Signing) ? "unsigned developer build" : Signing.Trim(), string.IsNullOrWhiteSpace(CancelReason) ? null : CancelReason.Trim())));
+    }
+
+    private void Answer(Func<ReleaseResponse> call)
+    {
+        try
+        {
+            ReleaseResponse response = call();
+            LastResponse = response;
+            Status = response.Problem is null ? response.Message : AssignmentComposer.Refusal(response.Problem);
+            if (response.Publish is not null)
+            {
+                Publish = response.Publish;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Status = "The runtime did not answer: " + exception.Message;
+        }
+    }
+
+    private static List<string> Lines(string text) => text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
+}

@@ -171,6 +171,47 @@ public sealed record RevokeRequest(string Device, string By, string Reason);
 /// <param name="Signing">Signing state.</param>
 public sealed record ReleaseRow(string? Version, string? Status, string? Commit, string Id, string Hash, string? Signing);
 
+/// <summary>Submit a release as intent before effect: the operation record is written, then the release workflow is dispatched through the provider; nothing is published.</summary>
+/// <param name="Product">Product record id the release belongs to.</param>
+/// <param name="Version">The version to release, for example 0.3.0.</param>
+/// <param name="Repository">GitHub owner/name of the source repository.</param>
+/// <param name="By">Principal id recording the operation.</param>
+/// <param name="Ref">Branch or tag to build from.</param>
+/// <param name="Workflow">Release workflow file.</param>
+/// <param name="Reconciliation">How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry.</param>
+public sealed record ReleaseSubmitRequest(string Product, string Version, string Repository, string By, string Ref = "main", string Workflow = "release.yml", string? Reconciliation = null);
+
+/// <summary>Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect.</summary>
+/// <param name="Version">The version.</param>
+/// <param name="Repository">GitHub owner/name.</param>
+/// <param name="By">Principal id recording the observation.</param>
+/// <param name="Qualified">Platforms whose qualification is recorded on the candidate.</param>
+/// <param name="Limitations">Known limitations recorded on the candidate.</param>
+/// <param name="Signing">Signing state recorded on the candidate.</param>
+/// <param name="Cancel">A reason that settles an intent never dispatched, or an outcome reconciled as having had no effect.</param>
+public sealed record ReleaseObserveRequest(string Version, string Repository, string By, IReadOnlyList<string>? Qualified = null, IReadOnlyList<string>? Limitations = null, string Signing = "unsigned developer build", string? Cancel = null);
+
+/// <summary>
+/// The outcome of a release operation: what was recorded and what the provider showed, never more. Ok is true when the request
+/// advanced as asked or there is nothing to record yet; false when the attempt ended refused, failed or uncertain. A problem
+/// means nothing could proceed (with findings when a record was rejected).
+/// </summary>
+/// <param name="Identity">The operation's identity (provider:repository:tag).</param>
+/// <param name="Status">The status of the operation, or of the release once one is recorded, after this call.</param>
+/// <param name="Message">What happened and the permitted next step, in words.</param>
+/// <param name="Ok">Whether the request advanced as asked or there is nothing to record yet.</param>
+/// <param name="Operation">The operation revision written by this call.</param>
+/// <param name="Candidate">The candidate release record written by this call.</param>
+/// <param name="Release">The published release revision written by this call.</param>
+/// <param name="ReleaseId">The id of the release record already on record for this version.</param>
+/// <param name="Run">The workflow run identified.</param>
+/// <param name="Pending">What is still outstanding when nothing settled.</param>
+/// <param name="Publish">The operator's manual publication command; the runtime never runs it.</param>
+/// <param name="PublishedAt">When the release was observed published.</param>
+/// <param name="Url">Where the release or run is.</param>
+/// <param name="Problem">Why nothing could proceed.</param>
+public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null);
+
 /// <summary>Plan or apply an upgrade.</summary>
 /// <param name="Version">Target version.</param>
 /// <param name="By">Applying principal (unless check).</param>

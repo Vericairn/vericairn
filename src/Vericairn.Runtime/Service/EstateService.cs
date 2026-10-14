@@ -16,6 +16,8 @@ using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Objects;
 using Vericairn.Runtime.Portability;
+using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Software;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
 
@@ -36,6 +38,12 @@ public sealed class EstateService : IEstateApi, IDisposable
     {
         this.session = session;
     }
+
+    /// <summary>The GitHub Releases provider new services start with; tests replace it with the in-memory provider.</summary>
+    public static IReleaseProvider DefaultReleaseProvider { get; set; } = new GhReleaseProvider();
+
+    /// <summary>The GitHub Releases provider this service dispatches and observes through; it runs on the runtime's machine under the user's own login.</summary>
+    public IReleaseProvider ReleaseProvider { get; set; } = DefaultReleaseProvider;
 
     /// <summary>Repository root.</summary>
     public string Root => session.Root;
@@ -428,6 +436,237 @@ public sealed class EstateService : IEstateApi, IDisposable
             return model.Current("release").OrderBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
                 .Select(r => new ReleaseRow(EstateModel.BodyString(r, "version"), EstateModel.BodyString(r, "status"), EstateModel.BodyString(r, "commit"), r.Id, r.ComputedHash, EstateModel.BodyString(r, "signing"))).ToList();
         }
+    }
+
+    /// <inheritdoc />
+    public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string identity = ReleaseFlow.Identity(request.Repository, request.Version);
+        if (!Ulid.IsValid(request.By) || !Ulid.IsValid(request.Product))
+        {
+            return ReleaseProblem(identity, "not-started", "refused", "The recording principal and the product must be ULIDs.");
+        }
+
+        RecordEnvelope? current = CurrentOperation(identity);
+        string? status = current is null ? null : EstateModel.BodyString(current, "status");
+        switch (status)
+        {
+            case "observed-success":
+                return ReleaseProblem(identity, status, "refused", $"Release {request.Version} was already observed as built under {identity}; a corrective release is a new version.");
+            case "dispatched" or "uncertain":
+                return ReleaseProblem(identity, status, "refused", $"An operation under {identity} is {status}; observe and reconcile it before any retry.");
+            case "known-failure" or "canceled" when string.IsNullOrWhiteSpace(request.Reconciliation):
+                return ReleaseProblem(identity, status, "refused", $"The earlier attempt under {identity} is {status}; retry with a reconciliation stating how it was settled under that identity.");
+        }
+
+        string previousId;
+        JsonElement previousBody;
+        if (current is null)
+        {
+            WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.IntentBody(request.Repository, request.Workflow, request.Ref, request.Version, request.Product)), $"product:{request.Product}"));
+            if (!intent.Ok)
+            {
+                return ReleaseProblem(identity, "not-started", intent.Problem!);
+            }
+
+            previousId = intent.Written!.Id;
+            previousBody = Record(previousId)!.Envelope.GetProperty("body");
+        }
+        else
+        {
+            previousId = current.Id;
+            previousBody = current.Body;
+        }
+
+        // The provider is called outside the gate: a dispatch may wait for the host, and every other operation must keep answering.
+        JsonObject body;
+        try
+        {
+            DispatchReceipt receipt = ReleaseProvider.Dispatch(new DispatchRequest(request.Repository, request.Workflow, request.Ref, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = request.Version }));
+            body = status is "known-failure" or "canceled" ? ReleaseFlow.Retry(previousBody, receipt, request.Reconciliation!) : ReleaseFlow.AfterDispatch(previousBody, receipt);
+        }
+        catch (ProviderRefusedException exception)
+        {
+            body = ReleaseFlow.AfterRefusal(previousBody, exception.Message);
+        }
+        catch (ProviderUncertainException exception)
+        {
+            body = ReleaseFlow.AfterUncertainty(previousBody, exception.Message);
+        }
+
+        WriteOutcome revision = NewRecord(new NewRecordRequest("operation", request.By, Element(body), $"product:{request.Product}", previousId));
+        if (!revision.Ok)
+        {
+            return ReleaseProblem(identity, status ?? "not-started", revision.Problem!);
+        }
+
+        string newStatus = body["status"]!.GetValue<string>();
+        string? run = body["target"]!.AsObject().TryGetPropertyValue("run", out JsonNode? runNode) ? runNode?.GetValue<string>() : null;
+        string message = newStatus switch
+        {
+            "dispatched" => "The intent was recorded before the dispatch. Observe the run and the draft; publication stays the operator's manual step.",
+            "uncertain" => "The dispatch may or may not have started a run. Observe and reconcile under this identity before any retry.",
+            _ => "Nothing was dispatched. Fix the cause, then retry with a reconciliation.",
+        };
+        return new ReleaseResponse(identity, newStatus, message, newStatus == "dispatched", revision.Written, Run: run);
+    }
+
+    /// <inheritdoc />
+    public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        string identity = ReleaseFlow.Identity(request.Repository, request.Version);
+        string tag = ReleaseFlow.Tag(request.Version);
+        if (!Ulid.IsValid(request.By))
+        {
+            return ReleaseProblem(identity, "unknown", "refused", "The recording principal must be a ULID.");
+        }
+
+        RecordEnvelope? current = CurrentOperation(identity);
+        if (current is null)
+        {
+            return ReleaseProblem(identity, "unknown", "not-found", $"No operation is recorded under {identity}; a submission records the intent and dispatches the workflow.");
+        }
+
+        JsonElement body = current.Body;
+        string status = EstateModel.BodyString(current, "status") ?? "?";
+        string product = body.GetProperty("target").GetProperty("product").GetString() ?? "?";
+        string? runId = body.GetProperty("target").TryGetProperty("run", out JsonElement runElement) ? runElement.GetString() : null;
+        if (request.Cancel is not null)
+        {
+            if (status is not ("not-started" or "uncertain" or "known-failure"))
+            {
+                return ReleaseProblem(identity, status, "refused", $"An operation that is {status} is not canceled; cancellation settles an intent that was never dispatched or an outcome reconciled as having had no effect.");
+            }
+
+            WriteOutcome canceled = NewRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.Canceled(body, request.Cancel)), $"product:{product}", current.Id));
+            return canceled.Ok ? new ReleaseResponse(identity, "canceled", $"{identity}: canceled; {request.Cancel}", true, canceled.Written) : ReleaseProblem(identity, status, canceled.Problem!);
+        }
+
+        ReleaseObservation? release;
+        RunObservation? run;
+        try
+        {
+            run = runId is null ? null : ReleaseProvider.ObserveRun(request.Repository, runId);
+            release = ReleaseProvider.ObserveRelease(request.Repository, tag);
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
+        {
+            return ReleaseProblem(identity, status, "provider", exception.Message);
+        }
+
+        ReleaseRow? recorded = Releases().FirstOrDefault(r => r.Version == request.Version);
+        switch (status)
+        {
+            case "observed-success":
+                return ObservePublication(request, identity, product, recorded, release, tag);
+            case "dispatched" or "uncertain":
+            {
+                JsonObject revisionBody;
+                try
+                {
+                    revisionBody = ReleaseFlow.AfterObservation(body, run, release, request.Version);
+                }
+                catch (InvalidOperationException)
+                {
+                    string pending = run is null
+                        ? (release is null ? "no run is identified and no release is observed yet" : $"draft {tag} lacks checksums for {string.Join(", ", ReleaseFlow.MissingDistributables(release, request.Version))}")
+                        : $"run {run.RunId} is {run.Status.Replace('_', ' ')}";
+                    return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({pending}). Nothing recorded; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Pending: pending, Run: run?.RunId, Url: run?.Url ?? release?.Url);
+                }
+
+                WriteOutcome revision = NewRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
+                if (!revision.Ok)
+                {
+                    return ReleaseProblem(identity, status, revision.Problem!);
+                }
+
+                string newStatus = revisionBody["status"]!.GetValue<string>();
+                if (newStatus != "observed-success")
+                {
+                    return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}. Retry with a reconciliation once the cause is settled.", false, revision.Written, Run: run?.RunId, Url: run?.Url);
+                }
+
+                string? commit = run?.HeadSha ?? release?.TargetCommit;
+                if (commit is null || commit.Length != 40)
+                {
+                    return ReleaseProblem(identity, newStatus, "refused", "The release was observed but its exact commit is unknown; the candidate record needs the commit the run built.");
+                }
+
+                if (recorded is not null)
+                {
+                    return new ReleaseResponse(identity, newStatus, $"{identity}: {newStatus}; release {request.Version} is already recorded as {recorded.Status} ({recorded.Id}).", true, revision.Written, ReleaseId: recorded.Id, Run: run?.RunId, Url: release?.Url);
+                }
+
+                var evidence = new List<string> { $"Draft release {tag} observed at {release!.Url} with {release.Assets.Count} assets and checksums for every distributable." };
+                if (run is not null)
+                {
+                    evidence.Insert(0, $"Release workflow run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");
+                }
+
+                WriteOutcome candidate = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, request.Repository, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [])), $"product:{product}"));
+                if (!candidate.Ok)
+                {
+                    return ReleaseProblem(identity, newStatus, candidate.Problem!);
+                }
+
+                string publish = ReleaseProvider.ManualPublicationCommand(request.Repository, tag);
+                return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}. Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
+            }
+
+            default:
+                return new ReleaseResponse(identity, status, $"{identity}: {status}. {(status == "not-started" ? "The intent is recorded and nothing was dispatched; a submission dispatches it, or a cancellation settles it." : "Retry with a reconciliation once the cause is settled.")}", false);
+        }
+    }
+
+    private ReleaseResponse ObservePublication(ReleaseObserveRequest request, string identity, string product, ReleaseRow? recorded, ReleaseObservation? release, string tag)
+    {
+        string where = release?.Url ?? "the repository";
+        if (recorded is null)
+        {
+            return ReleaseProblem(identity, "observed-success", "refused", $"Release {request.Version} was observed as built but no release record exists; observe it again after the operation is recorded, or record the candidate.");
+        }
+
+        if (recorded.Status == "published")
+        {
+            return new ReleaseResponse(identity, "published", $"release {request.Version} is published ({recorded.Id}); nothing to observe.", true, ReleaseId: recorded.Id, Url: release?.Url);
+        }
+
+        if (release is null || release.Draft || release.PublishedAt is null)
+        {
+            return new ReleaseResponse(identity, recorded.Status ?? "candidate", $"release {request.Version} is recorded as {recorded.Status} and observed as {(release is null ? "absent" : "a draft")} at {where}; publication is the operator's manual step after accepting the candidate.", true, ReleaseId: recorded.Id, Publish: ReleaseProvider.ManualPublicationCommand(request.Repository, tag), Url: release?.Url);
+        }
+
+        RecordResponse candidate = Record(recorded.Id)!;
+        WriteOutcome published = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id));
+        if (!published.Ok)
+        {
+            return ReleaseProblem(identity, recorded.Status ?? "candidate", published.Problem!);
+        }
+
+        return new ReleaseResponse(identity, "published", $"release {request.Version} observed published at {release.PublishedAt}: {release.Url}", true, Release: published.Written, ReleaseId: recorded.Id, PublishedAt: release.PublishedAt, Url: release.Url);
+    }
+
+    private RecordEnvelope? CurrentOperation(string identity)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            return model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
+        }
+    }
+
+    private static ReleaseResponse ReleaseProblem(string identity, string status, string code, string message) =>
+        new(identity, status, message, false, Problem: new Problem(code, message, []));
+
+    private static ReleaseResponse ReleaseProblem(string identity, string status, Problem problem) =>
+        new(identity, status, problem.Message, false, Problem: problem);
+
+    private static JsonElement Element(JsonObject body)
+    {
+        using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+        return document.RootElement.Clone();
     }
 
     /// <inheritdoc />
