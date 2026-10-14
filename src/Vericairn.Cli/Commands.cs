@@ -273,13 +273,24 @@ internal static class Commands
         return Clean;
     }
 
-    public static int RuntimeServe(string root, bool loopback)
+    public static int RuntimeServe(string root, bool loopback, bool detached = false)
     {
         try
         {
             if (!IsEstate(root))
             {
                 return Fail(NotAnEstate(root));
+            }
+
+            if (detached)
+            {
+                // Started by 'runtime start': whoever started that command may be reading its output to the end, so the daemon
+                // writes to its own log beside the live store and never to the streams it was given.
+                string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
+                Directory.CreateDirectory(directory);
+                var writer = new StreamWriter(new FileStream(Path.Combine(directory, "daemon.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite)) { AutoFlush = true };
+                Console.SetOut(writer);
+                Console.SetError(writer);
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
@@ -330,18 +341,25 @@ internal static class Commands
                 return RuntimeStatus(root, json);
             }
 
+            // The daemon gets streams of its own and writes to its log: it never inherits this command's output, which a caller
+            // (Workbench, a script capturing the output) may be reading to the end while the daemon runs for as long as it serves.
             IReadOnlyList<string> launcher = ServiceInstaller.CurrentLauncher();
-            var info = new ProcessStartInfo(launcher[0]) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve"]))
+            var info = new ProcessStartInfo(launcher[0]) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+            foreach (string argument in launcher.Skip(1).Concat(["--estate", Path.GetFullPath(root), "runtime", "serve", "--detached"]))
             {
                 info.ArgumentList.Add(argument);
             }
 
+            NativeMethods.KeepStandardHandlesFromChildren();
             using Process? process = Process.Start(info);
             if (process is null)
             {
                 return Fail("The daemon process did not start.");
             }
+
+            process.StandardInput.Close();
+            process.StandardOutput.Close();
+            process.StandardError.Close();
 
             var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
             while (DateTimeOffset.UtcNow < deadline)
