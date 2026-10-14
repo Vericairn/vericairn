@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Vericairn.Cli.Tests;
 
 /// <summary>
-/// Every component the distributables bundle is named in the notices with the license text its archive carries. Until 0.4.1
+/// Every component the distributables bundle, packages and shared frameworks alike, is named in the notices with the license text its archive carries. Until 0.4.2
 /// the notices named the MIT and Apache-2.0 components without their texts, and 0.4.0 shipped two embedded fonts without the
 /// license their own terms require each copy to carry.
 /// </summary>
@@ -37,6 +37,16 @@ public partial class LicenseTests
             }
         }
 
+        // Shared frameworks are not in the lock files: a project that references one bundles it in a self-contained build.
+        foreach (string project in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.csproj", SearchOption.AllDirectories))
+        {
+            foreach (Match reference in FrameworkReference().Matches(File.ReadAllText(project)))
+            {
+                shipped.Add(reference.Groups["name"].Value);
+            }
+        }
+
+        Assert.Contains("Microsoft.AspNetCore.App", shipped);
         Assert.Contains("System.CommandLine", shipped);
         Assert.Contains("Avalonia", shipped);
         string[] missing = shipped.Where(name => !Regex.IsMatch(notices, $@"(?<![\w.]){Regex.Escape(name)}(?![\w.])")).ToArray();
@@ -64,6 +74,9 @@ public partial class LicenseTests
 
     [GeneratedRegex(@"`licenses/(?<file>[A-Za-z0-9._-]+\.txt)`")]
     private static partial Regex LicensePath();
+
+    [GeneratedRegex("<FrameworkReference\\s+Include=\"(?<name>[^\"]+)\"")]
+    private static partial Regex FrameworkReference();
 
     private static string RepositoryRoot()
     {

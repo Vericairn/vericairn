@@ -23,7 +23,7 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/Vericairn/vericairn</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
-    <VersionPrefix>0.4.1</VersionPrefix>
+    <VersionPrefix>0.4.2</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
   </PropertyGroup>
 </Project>

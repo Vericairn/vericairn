@@ -204,24 +204,36 @@ internal static class Docs
             lines.Add($"- Record format: reads {reads}, writes {writes}.");
         }
 
+        // A result is listed as accepted only when an acceptance of its exact revision is on record; any other result of the
+        // period is a claim to inspect, never part of what the release is known to contain.
+        List<RecordEnvelope> results = window.Where(r => r.Type == "result").ToList();
+        var accepted = model.Current("acceptance").Where(a => a.Subject is { Type: "result" }).Select(a => (a.Subject!.Id, a.Subject.Hash)).ToHashSet();
+        List<RecordEnvelope> acceptedResults = results.Where(r => accepted.Contains((r.Id, r.ComputedHash))).ToList();
+        List<RecordEnvelope> openResults = results.Where(r => !accepted.Contains((r.Id, r.ComputedHash))).ToList();
         lines.Add(string.Empty);
         lines.Add("## Work accepted");
         lines.Add(string.Empty);
-        foreach (RecordEnvelope result in window.Where(r => r.Type == "result"))
+        if (acceptedResults.Count == 0)
         {
-            RecordEnvelope? order = OrderOf(model, result);
-            lines.Add("### " + (order is null ? "Result " + result.Id : Str(order.Body, "key") + ": " + Str(order.Body, "title")));
+            lines.Add("None in this window.");
             lines.Add(string.Empty);
-            lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}");
-            List<string> limitations = Strings(result.Body, "limitations");
-            if (limitations.Count > 0)
-            {
-                lines.Add(string.Empty);
-                lines.Add("Limitations recorded:");
-                lines.AddRange(limitations.Select(l => "- " + l));
-            }
+        }
 
+        foreach (RecordEnvelope result in acceptedResults)
+        {
+            Result(lines, model, result);
+        }
+
+        if (openResults.Count > 0)
+        {
+            lines.Add("## Work recorded, not yet accepted");
             lines.Add(string.Empty);
+            lines.Add("Results of this period with no acceptance of their exact revision: claims to inspect, not part of what the release is known to contain.");
+            lines.Add(string.Empty);
+            foreach (RecordEnvelope result in openResults)
+            {
+                Result(lines, model, result);
+            }
         }
 
         Section(lines, "Decisions", window.Where(r => r.Type == "decision").Select(r => $"**{Str(r.Body, "title")}** ({When(r.At)}, decision {r.Id}): {Str(r.Body, "summary")}"));
@@ -258,6 +270,23 @@ internal static class Docs
         else
         {
             lines.AddRange(list.Select(i => "- " + i));
+        }
+
+        lines.Add(string.Empty);
+    }
+
+    private static void Result(List<string> lines, EstateModel model, RecordEnvelope result)
+    {
+        RecordEnvelope? order = OrderOf(model, result);
+        lines.Add("### " + (order is null ? "Result " + result.Id : Str(order.Body, "key") + ": " + Str(order.Body, "title")));
+        lines.Add(string.Empty);
+        lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}");
+        List<string> limitations = Strings(result.Body, "limitations");
+        if (limitations.Count > 0)
+        {
+            lines.Add(string.Empty);
+            lines.Add("Limitations recorded:");
+            lines.AddRange(limitations.Select(l => "- " + l));
         }
 
         lines.Add(string.Empty);

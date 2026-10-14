@@ -179,6 +179,32 @@ public class SoftwareJourneyTests
             Assert.Contains("would upgrade", CliHarness.Ok("--estate", root, "estate", "upgrade", "--to", "0.2.0", "--check").Out, StringComparison.Ordinal);
             Assert.Contains("is published", CliHarness.Ok("--estate", root, "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Out, StringComparison.Ordinal);
 
+            // The release notes since 0.2.0 list a result as accepted only when its exact revision is accepted.
+            // Record times have one-second resolution and the notes start after the publication's second.
+            Thread.Sleep(1100);
+            string brief = CliHarness.WriteJson(scratch, "notes-brief.json", """{"outcome":"Notes.","sources":[],"permittedChanges":["notes"],"prohibitedEffects":["none"],"workspace":["here"],"limits":["none"],"expectedOutputs":["notes"],"reviewCriteria":["read"],"recovery":"Read the brief."}""");
+            string done = CliHarness.WriteJson(scratch, "notes-result.json", """{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""");
+            var noted = new List<string>();
+            foreach (string key in new[] { "W-8", "W-9" })
+            {
+                CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", builder, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
+                string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", key, "--contributor", builder, "--by", builder, "--brief", brief).Id;
+                string attempt = CliHarness.Ok("--estate", root, "--json", "work", "attempt", assignment, "--by", builder, "--workspace", "here", "--note", "Do it.").Id;
+                noted.Add(CliHarness.Ok("--estate", root, "--json", "work", "result", attempt, "--by", builder, "--body", done).Id);
+            }
+
+            string acceptedResult = noted[0];
+            string acceptedHash = Directory.EnumerateFiles(Path.Combine(root, "records", "result"), acceptedResult + ".json", SearchOption.AllDirectories).Select(f => JsonDocument.Parse(File.ReadAllText(f)).RootElement.GetProperty("hash").GetString()!).Single();
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"result:{acceptedResult}:{acceptedHash}", "--body", CliHarness.WriteJson(scratch, "accept-w8.json", """{"statement":"Accepted.","basis":[],"self":false}"""));
+            string notesDirectory = Path.Combine(scratch, "notes");
+            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.2.0", "--to", "0.3.0", "--out", notesDirectory);
+            string notes = File.ReadAllText(Path.Combine(notesDirectory, "release-notes.md"));
+            int acceptedSection = notes.IndexOf("## Work accepted", StringComparison.Ordinal);
+            int openSection = notes.IndexOf("## Work recorded, not yet accepted", StringComparison.Ordinal);
+            Assert.True(acceptedSection >= 0 && openSection > acceptedSection, notes);
+            Assert.InRange(notes.IndexOf("Result " + noted[0], StringComparison.Ordinal), acceptedSection, openSection);
+            Assert.True(notes.IndexOf("Result " + noted[1], StringComparison.Ordinal) > openSection, notes);
+
             // A missing account blocks that destination, not local work; the refusal is a known failure and a retry names its reconciliation.
             provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
             CliHarness.Outcome refused = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
