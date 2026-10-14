@@ -1,10 +1,11 @@
 # Third-party notices
 
-Vericairn Community is licensed under the Apache License 2.0. Its distributables bundle the third-party components below, each under its own license. Every archive carries the license and notice texts of the components it contains under `licenses/`: the command line's archives carry the files of the first five rows; Workbench's archives, which hold a copy of the command line, carry those and the rest. A test holds this list, the lock files and the `licenses` directory together, and each release also carries a generated software bill of materials (CycloneDX).
+Vericairn Community is licensed under the Apache License 2.0. Its distributables bundle the third-party components below, each under its own license. Every archive carries the license and notice texts of the components it contains under `licenses/`: the command line's archives carry the files of the first six rows; Workbench's archives, which hold a copy of the command line, carry those and the rest. A test holds this list, the lock files, the shared frameworks the projects reference and the `licenses` directory together, and each release also carries a generated software bill of materials (CycloneDX).
 
 | Component (packages) | Version | License and copyright | License text in the archive | Ships in |
 |---|---|---|---|---|
 | .NET runtime, libraries and application host (Microsoft) | 10.0 | MIT; Copyright (c) .NET Foundation and Contributors | `licenses/dotnet-LICENSE.txt`, with the runtime's own third-party notices in `licenses/dotnet-THIRD-PARTY-NOTICES.txt` | command line, Workbench |
+| ASP.NET Core shared framework (Microsoft.AspNetCore.App), the daemon's HTTP server | 10.0 | MIT; Copyright (c) .NET Foundation and Contributors | `licenses/dotnet-LICENSE.txt` (the same MIT text), with the framework's own third-party notices in `licenses/aspnetcore-THIRD-PARTY-NOTICES.txt` | command line, Workbench |
 | System.CommandLine | 2.0.12 | MIT; Copyright (c) Microsoft Corporation | `licenses/MIT-Microsoft.txt` | command line, Workbench |
 | Microsoft.Data.Sqlite, Microsoft.Data.Sqlite.Core | 10.0.11 | MIT; Copyright (c) Microsoft Corporation | `licenses/MIT-Microsoft.txt` | command line, Workbench |
 | SQLitePCLRaw.core, SQLitePCLRaw.provider.e_sqlite3, SQLitePCLRaw.lib.e_sqlite3, SQLitePCLRaw.bundle_e_sqlite3 | 2.1.12 | Apache-2.0; Copyright 2014-2024 SourceGear, LLC | `licenses/Apache-2.0.txt` and `licenses/SQLitePCLRaw-NOTICE.txt` | command line, Workbench |
