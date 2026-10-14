@@ -1,0 +1,24 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using Vericairn.Adapters.Git;
+using Vericairn.Providers.GitHub;
+using Vericairn.Runtime.Providers;
+
+namespace Vericairn.Cli;
+
+/// <summary>
+/// What this distribution ships beside the foundation: the GitHub provider and the git adapter, registered as available. Being
+/// available selects nothing: a release goes through the provider its product declares or its request names, and a provider with
+/// no implementation here is refused. Registration keeps an implementation already registered (tests register in-memory ones).
+/// </summary>
+internal static class Composition
+{
+    /// <summary>Registers the shipped implementations unless the registry already holds one for the same provider or adapter.</summary>
+    public static void Register(ProviderRegistry registry)
+    {
+        ArgumentNullException.ThrowIfNull(registry);
+        registry.RegisterIfAbsent(new GitHubReleaseProvider());
+        registry.RegisterIfAbsent(new GitCommandAdapter());
+    }
+}

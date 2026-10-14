@@ -164,8 +164,29 @@
           "xunit.v3.runner.common": "[4.0.2]"
         }
       },
+      "vericairn.adapters.git": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
+      },
+      "vericairn.packs.software": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
+      },
       "vericairn.protocol": {
         "type": "Project"
+      },
+      "vericairn.providers.github": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
       },
       "vericairn.records": {
         "type": "Project"
@@ -173,7 +194,7 @@
       "vericairn.records.tests": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.1.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )",
           "xunit.v3": "[4.0.2, )"
         }
       },
@@ -181,8 +202,8 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.1.0-dev, )",
-          "Vericairn.Records": "[0.1.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )"
         }
       },
       "Microsoft.Data.Sqlite": {

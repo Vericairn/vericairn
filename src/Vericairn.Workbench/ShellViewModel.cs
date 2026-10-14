@@ -421,7 +421,7 @@ public sealed class ShellViewModel : Observable
     /// <summary>Opens or refreshes the release workspace.</summary>
     public ReleaseWorkspace OpenRelease()
     {
-        ReleaseWorkspace page = Documents.OfType<ReleaseWorkspace>().FirstOrDefault() ?? new ReleaseWorkspace(ProductRows());
+        ReleaseWorkspace page = Documents.OfType<ReleaseWorkspace>().FirstOrDefault() ?? new ReleaseWorkspace(ProductRows(), (Try(() => connection?.Api?.Providers() ?? []) ?? []).Where(p => p.Kind == "release").ToList());
         FillRelease(page);
         Open(page);
         return page;
@@ -433,7 +433,7 @@ public sealed class ShellViewModel : Observable
         foreach (RecordResponse operation in Try(() => connection?.Api?.Records("operation") ?? []) ?? [])
         {
             JsonElement body = operation.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
-            if (Str(body, "provider") != "github-releases")
+            if (Str(body, "action") != "dispatch-release-workflow")
             {
                 continue;
             }
@@ -465,7 +465,12 @@ public sealed class ShellViewModel : Observable
                 "published" => "published, observed",
                 _ => StateLanguage.Label("release", release.Status),
             };
-            rows.Add(new DestinationRow(Str(body, "identity") ?? operation.Id, version, Str(target, "repository") ?? "?", operation.Id, status, run, release?.Id, release?.Status, "intent recorded", submission, review, availability));
+            string identity = Str(body, "identity") ?? operation.Id;
+            string provider = Str(body, "provider") ?? "?";
+            int first = identity.IndexOf(':', StringComparison.Ordinal);
+            int last = identity.LastIndexOf(":v", StringComparison.Ordinal);
+            string destination = first >= 0 && last > first ? identity[(first + 1)..last] : Str(target, "repository") ?? "?";
+            rows.Add(new DestinationRow(identity, version, destination, operation.Id, status, run, release?.Id, release?.Status, "intent recorded", submission, review, availability, provider, Str(target, "product")));
         }
 
         string? selectedIdentity = page.Selected?.Identity;
@@ -480,7 +485,18 @@ public sealed class ShellViewModel : Observable
         foreach (RecordResponse product in Try(() => connection?.Api?.Records("product") ?? []) ?? [])
         {
             JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
-            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces")));
+            string? releaseProvider = null;
+            Dictionary<string, string>? releaseSettings = null;
+            if (body.ValueKind == JsonValueKind.Object && body.TryGetProperty("release", out JsonElement release) && release.ValueKind == JsonValueKind.Object
+                && release.TryGetProperty("destination", out JsonElement destination) && destination.ValueKind == JsonValueKind.Object)
+            {
+                releaseProvider = Str(destination, "provider");
+                releaseSettings = destination.TryGetProperty("settings", out JsonElement settings) && settings.ValueKind == JsonValueKind.Object
+                    ? settings.EnumerateObject().Where(s => s.Value.ValueKind == JsonValueKind.String).ToDictionary(s => s.Name, s => s.Value.GetString()!, StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal);
+            }
+
+            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces"), releaseProvider, releaseSettings));
         }
 
         return rows;

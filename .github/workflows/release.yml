@@ -58,9 +58,13 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
-        # The release's documentation set must exist and cover every command, API operation and record type of this
-        # build before any draft is created; an incomplete set refuses the release with every gap listed.
-        run: dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "docs/releases/$VERSION"
+        # The release's documentation set must exist, hold every document the product declares, and match this build's
+        # commands, API operations and record types before any draft is created; every gap is listed at once. The shipped
+        # command line checks the set; the build tooling (not shipped) compares it with the build it documents.
+        run: |
+          set -eu
+          dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "docs/releases/$VERSION" --documents docs/releases/documents.json
+          dotnet run --configuration Release --project tools/Vericairn.DocsTool -- compare "docs/releases/$VERSION"
       - name: Publish self-contained distributables
         shell: bash
         env:

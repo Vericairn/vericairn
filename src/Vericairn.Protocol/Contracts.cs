@@ -171,25 +171,57 @@ public sealed record RevokeRequest(string Device, string By, string Reason);
 /// <param name="Signing">Signing state.</param>
 public sealed record ReleaseRow(string? Version, string? Status, string? Commit, string Id, string Hash, string? Signing);
 
-/// <summary>Submit a release as intent before effect: the operation record is written, then the release workflow is dispatched through the provider; nothing is published.</summary>
+/// <summary>
+/// Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider;
+/// nothing is published. The provider is the one the request names, else the one the product record declares; a request with
+/// neither is refused, and a provider with no implementation on the runtime's machine is refused, never replaced by another.
+/// </summary>
 /// <param name="Product">Product record id the release belongs to.</param>
-/// <param name="Version">The version to release, for example 0.3.0.</param>
-/// <param name="Repository">GitHub owner/name of the source repository.</param>
+/// <param name="Version">The version to release, for example 0.4.0.</param>
+/// <param name="Repository">The destination for the GitHub provider (owner/name); the same as the setting repository. Optional when the product declares it.</param>
 /// <param name="By">Principal id recording the operation.</param>
-/// <param name="Ref">Branch or tag to build from.</param>
-/// <param name="Workflow">Release workflow file.</param>
+/// <param name="Ref">The setting ref (branch or tag to build from); the provider's default when absent.</param>
+/// <param name="Workflow">The setting workflow (the workflow file); the provider's default when absent.</param>
 /// <param name="Reconciliation">How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry.</param>
-public sealed record ReleaseSubmitRequest(string Product, string Version, string Repository, string By, string Ref = "main", string Workflow = "release.yml", string? Reconciliation = null);
+/// <param name="Provider">The provider id, for example github-releases; the product's declared provider when absent.</param>
+/// <param name="Settings">The provider's settings by name; they override the product's declared settings and the provider's defaults.</param>
+public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null);
 
-/// <summary>Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect.</summary>
+/// <summary>
+/// Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect. The operation
+/// is found by its provider and destination, or by the product and version, or (as in 0.3.0) by the destination alone when one
+/// current operation matches; it is observed through the provider it records.
+/// </summary>
 /// <param name="Version">The version.</param>
-/// <param name="Repository">GitHub owner/name.</param>
+/// <param name="Repository">The destination (for GitHub, owner/name).</param>
 /// <param name="By">Principal id recording the observation.</param>
 /// <param name="Qualified">Platforms whose qualification is recorded on the candidate.</param>
 /// <param name="Limitations">Known limitations recorded on the candidate.</param>
 /// <param name="Signing">Signing state recorded on the candidate.</param>
 /// <param name="Cancel">A reason that settles an intent never dispatched, or an outcome reconciled as having had no effect.</param>
-public sealed record ReleaseObserveRequest(string Version, string Repository, string By, IReadOnlyList<string>? Qualified = null, IReadOnlyList<string>? Limitations = null, string Signing = "unsigned developer build", string? Cancel = null);
+/// <param name="Product">The product, to find the operation by product and version.</param>
+/// <param name="Provider">The provider, to find the operation by provider and destination.</param>
+public sealed record ReleaseObserveRequest(string Version, string? Repository, string By, IReadOnlyList<string>? Qualified = null, IReadOnlyList<string>? Limitations = null, string Signing = "unsigned developer build", string? Cancel = null, string? Product = null, string? Provider = null);
+
+/// <summary>A setting a provider declares.</summary>
+/// <param name="Name">The setting's name.</param>
+/// <param name="Summary">What it is.</param>
+/// <param name="Required">Whether an operation is refused without it.</param>
+/// <param name="Default">The provider's own default, or null.</param>
+public sealed record ProviderSettingRow(string Name, string Summary, bool Required, string? Default);
+
+/// <summary>A provider or adapter implementation available to the runtime on its machine, with what it declares.</summary>
+/// <param name="Provider">The provider or adapter it serves: for example github-releases, or git.</param>
+/// <param name="Kind">release or source.</param>
+/// <param name="Implementation">The implementation id, for example github-releases-gh.</param>
+/// <param name="Contract">The versioned contract it implements.</param>
+/// <param name="Status">candidate, implemented, qualified or available.</param>
+/// <param name="Operations">The operations it supports.</param>
+/// <param name="Limitations">What it does not do.</param>
+/// <param name="Settings">The settings an operation through it takes.</param>
+/// <param name="Destination">The setting that names the destination, or null.</param>
+/// <param name="Locations">The resource location keys it serves.</param>
+public sealed record ProviderRow(string Provider, string Kind, string Implementation, string Contract, string Status, IReadOnlyList<string> Operations, IReadOnlyList<string> Limitations, IReadOnlyList<ProviderSettingRow> Settings, string? Destination, IReadOnlyList<string> Locations);
 
 /// <summary>
 /// The outcome of a release operation: what was recorded and what the provider showed, never more. Ok is true when the request

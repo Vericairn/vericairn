@@ -9,7 +9,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
 
-namespace Vericairn.Runtime.Software;
+namespace Vericairn.Packs.Software;
 
 /// <summary>What running a check command observed.</summary>
 /// <param name="Command">The command line as run.</param>
@@ -92,7 +92,7 @@ public static class Checks
             ["platform"] = Records.Signing.VericairnHome.Platform(),
             ["architecture"] = RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(),
             ["os"] = RuntimeInformation.OSDescription,
-            ["vericairn"] = Service.EstateService.Version,
+            ["vericairn"] = Vericairn.Runtime.Service.EstateService.Version,
         };
         foreach ((string key, string value) in extra ?? new Dictionary<string, string>(StringComparer.Ordinal))
         {
@@ -175,7 +175,7 @@ public static class Checks
         return body;
     }
 
-    /// <summary>The verification body for a workflow run observed at its host: automation's claim, with the run as evidence.</summary>
+    /// <summary>The verification body for a build run observed at its host: automation's claim, with the run as evidence; the method and the environment are what the provider reports about its host.</summary>
     public static JsonObject VerificationOfRun(RunObservation run, string workflow)
     {
         ArgumentNullException.ThrowIfNull(run);
@@ -184,11 +184,12 @@ public static class Checks
         string summary = run.Status != "completed"
             ? $"Run {run.RunId} of {workflow} is {run.Status.Replace('_', ' ')}; its result is not yet known."
             : $"Run {run.RunId} of {workflow} completed with conclusion {run.Conclusion ?? "none"}.";
+        var environment = new Dictionary<string, string>(run.Environment ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal) { ["workflow"] = workflow };
         return VerificationBody(
-            "github-actions",
+            run.Method,
             run.HeadSha,
             null,
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["runner"] = "github-hosted", ["workflow"] = workflow },
+            environment,
             "automation",
             outcome,
             summary,

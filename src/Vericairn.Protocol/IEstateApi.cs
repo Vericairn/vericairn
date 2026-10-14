@@ -63,6 +63,9 @@ public interface IEstateApi
     /// <summary>Current release records.</summary>
     IReadOnlyList<ReleaseRow> Releases();
 
+    /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
+    IReadOnlyList<ProviderRow> Providers();
+
     /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
     ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
 

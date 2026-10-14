@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The git adapter (vericairn.adapter.git): read-only observation of a repository over the git command. Shipped inside Vericairn Community until packages exist.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

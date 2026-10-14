@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Vericairn.Runtime.Providers;
 
-namespace Vericairn.Runtime.Software;
+namespace Vericairn.Packs.Software;
 
 /// <summary>Turns a read-only repository observation into the records that adopt and observe a repository, with no machine path in either.</summary>
 public static partial class SourceAdoption

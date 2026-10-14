@@ -1,14 +1,20 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Vericairn.Adapters.Git/Vericairn.Adapters.Git.csproj" />
     <Project Path="src/Vericairn.Cli/Vericairn.Cli.csproj" />
     <Project Path="src/Vericairn.Daemon/Vericairn.Daemon.csproj" />
     <Project Path="src/Vericairn.Mcp/Vericairn.Mcp.csproj" />
+    <Project Path="src/Vericairn.Packs.Software/Vericairn.Packs.Software.csproj" />
     <Project Path="src/Vericairn.Presentation/Vericairn.Presentation.csproj" />
     <Project Path="src/Vericairn.Protocol/Vericairn.Protocol.csproj" />
+    <Project Path="src/Vericairn.Providers.GitHub/Vericairn.Providers.GitHub.csproj" />
     <Project Path="src/Vericairn.Records/Vericairn.Records.csproj" />
     <Project Path="src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <Project Path="src/Vericairn.Sdk/Vericairn.Sdk.csproj" />
     <Project Path="src/Vericairn.Workbench/Vericairn.Workbench.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Vericairn.DocsTool/Vericairn.DocsTool.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj" />

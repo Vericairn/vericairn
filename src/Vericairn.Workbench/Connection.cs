@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Net.Http;
-using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Sdk;
 
@@ -61,7 +60,7 @@ public sealed class DaemonConnection : IEstateConnection
         client = null;
         try
         {
-            DaemonEndpoint? endpoint = DaemonHost.Discover(Root);
+            DaemonEndpoint? endpoint = DaemonDiscovery.Discover(Root);
             if (endpoint is not null && VericairnClient.IsAlive(endpoint))
             {
                 client = new VericairnClient(endpoint);

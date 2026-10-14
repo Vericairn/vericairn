@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vericairn.Protocol;
+using Vericairn.Sdk;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
@@ -54,13 +55,7 @@ public sealed class DaemonHost : IAsyncDisposable
     public DaemonEndpoint Endpoint { get; }
 
     /// <summary>The endpoint file of an estate on this machine, beside its live store.</summary>
-    public static string EndpointFilePath(string root)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        var findings = new FindingList();
-        EstateManifest manifest = EstateManifest.Load(Path.GetFullPath(root), findings) ?? throw new InvalidOperationException(string.Join("; ", findings.Select(f => f.Message)));
-        return Path.Combine(Path.GetDirectoryName(EstateSession.LiveStorePath(root, manifest.Estate, manifest.Profile))!, "daemon.json");
-    }
+    public static string EndpointFilePath(string root) => DaemonDiscovery.EndpointFilePath(root);
 
     /// <summary>
     /// The default local-socket endpoint for an estate on this machine, named by a hash of its live-store directory: a named pipe on
@@ -105,32 +100,7 @@ public sealed class DaemonHost : IAsyncDisposable
     }
 
     /// <summary>Reads the endpoint file of an estate, or null when no daemon has published one.</summary>
-    public static DaemonEndpoint? Discover(string root)
-    {
-        string file;
-        try
-        {
-            file = EndpointFilePath(root);
-        }
-        catch (InvalidOperationException)
-        {
-            return null;
-        }
-
-        if (!File.Exists(file))
-        {
-            return null;
-        }
-
-        try
-        {
-            return JsonSerializer.Deserialize<DaemonEndpoint>(File.ReadAllBytes(file), ProtocolJson.Options);
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
+    public static DaemonEndpoint? Discover(string root) => DaemonDiscovery.Discover(root);
 
     /// <summary>Starts a daemon for the estate at a root, publishes the endpoint file, and serves loopback TLS unless told not to.</summary>
     public static async Task<DaemonHost> StartAsync(string root, string? endpoint = null, bool loopback = true, CancellationToken cancellationToken = default)

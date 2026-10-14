@@ -312,8 +312,6 @@
                     <TextBlock Text="Submit" FontWeight="SemiBold" />
                     <TextBlock Text="Version" />
                     <TextBox Text="{Binding Version}" MinHeight="28" Width="240" HorizontalAlignment="Left" AutomationProperties.Name="Version" />
-                    <TextBlock Text="Repository (owner/name)" />
-                    <TextBox Text="{Binding Repository}" MinHeight="28" Width="360" HorizontalAlignment="Left" AutomationProperties.Name="Repository" />
                     <TextBlock Text="Product" />
                     <ComboBox ItemsSource="{Binding Products}" SelectedItem="{Binding Product}" MinHeight="28" MinWidth="240" AutomationProperties.Name="Product">
                       <ComboBox.ItemTemplate>
@@ -322,11 +320,24 @@
                         </DataTemplate>
                       </ComboBox.ItemTemplate>
                     </ComboBox>
-                    <TextBlock Text="Ref and workflow" />
-                    <StackPanel Orientation="Horizontal" Spacing="8">
-                      <TextBox Text="{Binding Ref}" MinHeight="28" Width="160" AutomationProperties.Name="Ref" />
-                      <TextBox Text="{Binding Workflow}" MinHeight="28" Width="200" AutomationProperties.Name="Workflow" />
-                    </StackPanel>
+                    <TextBlock Text="Provider (the product's declared one is selected; otherwise choose; nothing is selected for you)" TextWrapping="Wrap" />
+                    <ComboBox ItemsSource="{Binding Providers}" SelectedItem="{Binding SelectedProvider}" MinHeight="28" MinWidth="240" AutomationProperties.Name="Provider">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="proto:ProviderRow">
+                          <TextBlock Text="{Binding Provider}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <ItemsControl ItemsSource="{Binding Settings}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:SettingField">
+                          <StackPanel Spacing="2" Margin="0,2">
+                            <TextBlock Text="{Binding Label}" />
+                            <TextBox Text="{Binding Value}" MinHeight="28" Width="360" HorizontalAlignment="Left" AutomationProperties.Name="{Binding Name}" ToolTip.Tip="{Binding Summary}" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <TextBlock Text="Reconciliation (required for a retry after a failed, canceled or uncertain attempt)" />
                     <TextBox Text="{Binding Reconciliation}" MinHeight="28" AutomationProperties.Name="Reconciliation" />
                     <Button Content="Submit the release (intent, then dispatch)" MinHeight="32" Click="OnSubmitRelease" />

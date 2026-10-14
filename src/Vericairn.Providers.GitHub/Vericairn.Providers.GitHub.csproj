@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The GitHub provider: releases built by a dispatched GitHub Actions workflow and observed as runs and draft releases, through the GitHub CLI logged in as the user. Shipped inside Vericairn Community until packages exist.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

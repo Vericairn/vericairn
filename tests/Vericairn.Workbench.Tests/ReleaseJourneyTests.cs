@@ -19,7 +19,8 @@ namespace Vericairn.Workbench.Tests;
 [Collection("workbench")]
 public class ReleaseJourneyTests(HeadlessFixture fixture)
 {
-    private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free.","license":"Apache-2.0"}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}]}""";
+    // The product declares its provider and one setting; the repository is left for the form, as a person would type it.
+    private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free.","license":"Apache-2.0"}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}],"release":{"destination":{"provider":"github-releases","settings":{"workflow":"release.yml"}}}}""";
 
     static ReleaseJourneyTests()
     {
@@ -41,8 +42,7 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "product.json", Product));
 
         var provider = new FakeReleaseProvider();
-        IReleaseProvider previous = EstateService.DefaultReleaseProvider;
-        EstateService.DefaultReleaseProvider = provider;
+        IReleaseProvider? previous = ProviderRegistry.Current.Register(provider);
         ServiceConnection? connection = null;
         // The builder's device submits and observes; the operator's device accepts. Both are held on this machine, as on the operator's own.
         var shell = new ShellViewModel(r => connection = new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-release"))) { ActingOverride = builder };
@@ -50,20 +50,24 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         try
         {
             await fixture.UiAsync(() => shell.OpenEstateAsync(root));
-            Assert.Same(provider, connection!.Service!.ReleaseProvider);
+            Assert.Same(provider, connection!.Service!.Providers.Release("github-releases"));
 
             // Ctrl+Shift+E opens the release workspace with the keyboard in its first field; the form is typed, Ctrl+Enter submits.
             await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null); });
             ReleaseWorkspace workspace = Assert.IsType<ReleaseWorkspace>(shell.SelectedDocument);
             Assert.Equal("Widget", workspace.Product?.Name);
+            Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
+            Assert.Equal(["repository", "workflow", "ref", "checksums"], workspace.Settings.Select(s => s.Name));
+            Assert.Equal("release.yml", workspace.Settings.Single(s => s.Name == "workflow").Value);
+            Assert.Equal("ref (default main when empty)", workspace.Settings.Single(s => s.Name == "ref").Label);
             // The keyboard lands in the first field of the workspace.
             Assert.True(await fixture.Ui(() => window.DocumentTabs.IsKeyboardFocusWithin && window.GetVisualDescendants().OfType<TextBox>().Any(b => b.IsFocused && AutomationProperties.GetName(b) == "Version")), await fixture.Ui(() => "focused: " + string.Join("; ", window.GetVisualDescendants().OfType<InputElement>().Where(i => i.IsFocused).Select(i => i.GetType().Name + "/" + AutomationProperties.GetName(i)))));
             await fixture.Ui(() => Keys.Type(window, "0.9.0"));
             Assert.Equal("0.9.0", workspace.Version);
             // Tab order is the platform's traversal, which the headless harness does not reproduce from a focused control; the next field is focused by name.
-            await fixture.Ui(() => Keys.Focus(window, "Repository"));
-            await fixture.Ui(() => Keys.Type(window, "Example/widget", "Repository"));
-            Assert.Equal("Example/widget", workspace.Repository);
+            await fixture.Ui(() => Keys.Focus(window, "repository"));
+            await fixture.Ui(() => Keys.Type(window, "Example/widget", "repository"));
+            Assert.Equal("Example/widget", workspace.Settings.Single(s => s.Name == "repository").Value);
             await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null));
             Assert.True(workspace.Status.Contains("intent was recorded before the dispatch", StringComparison.Ordinal), workspace.Status);
             Assert.Equal("dispatched", workspace.LastResponse!.Status);
@@ -141,7 +145,15 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         }
         finally
         {
-            EstateService.DefaultReleaseProvider = previous;
+            if (previous is null)
+            {
+                ProviderRegistry.Current.RemoveRelease("github-releases");
+            }
+            else
+            {
+                ProviderRegistry.Current.Register(previous);
+            }
+
             await fixture.Ui(window.Close);
         }
     }

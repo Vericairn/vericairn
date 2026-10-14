@@ -38,6 +38,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/devices/admit", (AdmitRequest request) => Outcome(service.DeviceAdmit(request)));
         app.MapPost($"{v}/devices/revoke", (RevokeRequest request) => Outcome(service.DeviceRevoke(request)));
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
+        app.MapGet($"{v}/providers", () => Results.Json(service.Providers(), ProtocolJson.Options));
         app.MapPost($"{v}/releases/submit", (ReleaseSubmitRequest request) => Results.Json(service.ReleaseSubmit(request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/observe", (ReleaseObserveRequest request) => Results.Json(service.ReleaseObserve(request), ProtocolJson.Options));
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>

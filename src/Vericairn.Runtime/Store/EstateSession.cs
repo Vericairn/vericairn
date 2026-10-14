@@ -43,13 +43,7 @@ public sealed class EstateSession : IDisposable
     public IObjectStore Objects { get; }
 
     /// <summary>Where the live store of an estate opened from a root lives: under the per-user state, keyed by estate id and root path.</summary>
-    public static string LiveStorePath(string root, string estateId, string profile)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(root);
-        ArgumentException.ThrowIfNullOrWhiteSpace(estateId);
-        string key = profile == "local-only" ? "local" : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(root))))[..16];
-        return Path.Combine(VericairnHome.Path(), "estates", estateId, key, "live.db");
-    }
+    public static string LiveStorePath(string root, string estateId, string profile) => EstateLocations.LiveStorePath(root, estateId, profile);
 
     /// <summary>Opens the estate at a root; the manifest decides the profile.</summary>
     public static EstateSession Open(string root)

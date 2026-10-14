@@ -29,7 +29,7 @@ public sealed class TextDocument(string title, string text, string kind) : Docum
 }
 
 /// <summary>A product as its record states it.</summary>
-public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces);
+public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces, string? ReleaseProvider = null, IReadOnlyDictionary<string, string>? ReleaseSettings = null);
 
 /// <summary>The products of the estate from their records; projects are not a record type of format 1 and the page says so.</summary>
 public sealed class ProductsDocument(IReadOnlyList<ProductRow> products) : Document("Products", "products")
@@ -597,31 +597,55 @@ public sealed class RuntimeDocument : Document
 }
 
 /// <summary>One destination of a release as the records show it, with the four stages the design keeps apart.</summary>
-public sealed record DestinationRow(string Identity, string Version, string Repository, string OperationId, string OperationStatus, string? Run, string? ReleaseId, string? ReleaseStatus, string Preparation, string Submission, string ExternalReview, string Availability)
+public sealed record DestinationRow(string Identity, string Version, string Repository, string OperationId, string OperationStatus, string? Run, string? ReleaseId, string? ReleaseStatus, string Preparation, string Submission, string ExternalReview, string Availability, string Provider = "", string? Product = null)
 {
     /// <summary>First line.</summary>
-    public string Heading => $"{Version} at {Repository}: {StateLanguage.Label("operation", OperationStatus)}" + (ReleaseStatus is null ? string.Empty : $"; release {StateLanguage.Label("release", ReleaseStatus)}");
+    public string Heading => $"{Version} at {Repository} through {Provider}: {StateLanguage.Label("operation", OperationStatus)}" + (ReleaseStatus is null ? string.Empty : $"; release {StateLanguage.Label("release", ReleaseStatus)}");
 
     /// <summary>Second line: the four stages separately.</summary>
     public string Detail => $"preparation: {Preparation}. submission: {Submission}. external review: {ExternalReview}. observed availability: {Availability}.";
 }
 
+/// <summary>One setting the selected provider declares, as the release form shows it: the product's declared value, or empty for the provider's default.</summary>
+public sealed class SettingField(ProviderSettingRow setting, string? declared) : Observable
+{
+    private string value = declared ?? string.Empty;
+
+    /// <summary>The setting's name, which is also the field's accessible name.</summary>
+    public string Name { get; } = setting.Name;
+
+    /// <summary>What the setting is.</summary>
+    public string Summary { get; } = setting.Summary;
+
+    /// <summary>Whether the provider refuses without it.</summary>
+    public bool Required { get; } = setting.Required;
+
+    /// <summary>The label: name, and where the value comes from when the field is left empty.</summary>
+    public string Label => Name + (declared is not null ? " (declared on the product)" : setting.Default is not null ? $" (default {setting.Default} when empty)" : setting.Required ? " (required)" : " (optional)");
+
+    /// <summary>The value the request carries; empty means the product's or the provider's.</summary>
+    public string Value { get => value; set => Set(ref this.value, value); }
+}
+
 /// <summary>
-/// The release workspace over the GitHub Releases provider's intent-then-effect flow: submit (the intent is recorded before the
-/// dispatch), observe (the run, the draft, the publication), accept the exact candidate, and the operator's manual publication
-/// shown as a command the client never runs.
+/// The release workspace over a provider's intent-then-effect flow: the provider and its declared settings (the product's
+/// declared destination preselects them; nothing is selected for a product that declares none), submit (the intent is recorded
+/// before the dispatch), observe (the run, the draft, the publication), accept the exact candidate, and the operator's manual
+/// publication shown as a command the client never runs.
 /// </summary>
 public sealed class ReleaseWorkspace : Document
 {
-    private string version = string.Empty, repository = string.Empty, reference = "main", workflow = "release.yml", reconciliation = string.Empty, qualified = string.Empty, limitations = string.Empty, signing = "unsigned developer build", cancelReason = string.Empty, status = "Nothing sent.", publish = string.Empty;
+    private string version = string.Empty, reconciliation = string.Empty, qualified = string.Empty, limitations = string.Empty, signing = "unsigned developer build", cancelReason = string.Empty, status = "Nothing sent.", publish = string.Empty;
     private ProductRow? product;
+    private ProviderRow? provider;
     private DestinationRow? selected;
 
-    /// <summary>The release workspace.</summary>
-    public ReleaseWorkspace(IReadOnlyList<ProductRow> products) : base("Releases", "release")
+    /// <summary>The release workspace over the products and the release providers the runtime can reach.</summary>
+    public ReleaseWorkspace(IReadOnlyList<ProductRow> products, IReadOnlyList<ProviderRow> providers) : base("Releases", "release")
     {
         Products = products;
-        product = products.Count > 0 ? products[0] : null;
+        Providers = providers;
+        Product = products.Count > 0 ? products[0] : null;
     }
 
     /// <summary>Destinations: one per release operation on record.</summary>
@@ -636,20 +660,45 @@ public sealed class ReleaseWorkspace : Document
     /// <summary>Products a release can belong to.</summary>
     public IReadOnlyList<ProductRow> Products { get; }
 
-    /// <summary>The product.</summary>
-    public ProductRow? Product { get => product; set => Set(ref product, value); }
+    /// <summary>The release providers the runtime can reach on its machine.</summary>
+    public IReadOnlyList<ProviderRow> Providers { get; }
+
+    /// <summary>The settings the selected provider declares, filled from the product's declaration.</summary>
+    public ObservableCollection<SettingField> Settings { get; } = [];
+
+    /// <summary>The product; its declared destination selects its provider.</summary>
+    public ProductRow? Product
+    {
+        get => product;
+        set
+        {
+            if (Set(ref product, value))
+            {
+                if (value?.ReleaseProvider is string declared && Providers.FirstOrDefault(p => p.Provider == declared) is ProviderRow match)
+                {
+                    SelectedProvider = match;
+                }
+
+                RebuildSettings();
+            }
+        }
+    }
+
+    /// <summary>The provider the release goes through; chosen by the person or by the product's declaration, never by default.</summary>
+    public ProviderRow? SelectedProvider
+    {
+        get => provider;
+        set
+        {
+            if (Set(ref provider, value))
+            {
+                RebuildSettings();
+            }
+        }
+    }
 
     /// <summary>Version to release.</summary>
     public string Version { get => version; set => Set(ref version, value); }
-
-    /// <summary>GitHub owner/name.</summary>
-    public string Repository { get => repository; set => Set(ref repository, value); }
-
-    /// <summary>Branch or tag to build from.</summary>
-    public string Ref { get => reference; set => Set(ref reference, value); }
-
-    /// <summary>Release workflow file.</summary>
-    public string Workflow { get => workflow; set => Set(ref workflow, value); }
 
     /// <summary>How an earlier failed, canceled or uncertain attempt was settled; required for a retry.</summary>
     public string Reconciliation { get => reconciliation; set => Set(ref reconciliation, value); }
@@ -685,16 +734,30 @@ public sealed class ReleaseWorkspace : Document
             return;
         }
 
-        if (Product is null || string.IsNullOrWhiteSpace(Version) || string.IsNullOrWhiteSpace(Repository))
+        if (Product is null || string.IsNullOrWhiteSpace(Version))
         {
-            Status = "A product, a version and a repository are needed before anything is sent.";
+            Status = "A product and a version are needed before anything is sent.";
             return;
         }
 
-        Answer(() => api.ReleaseSubmit(new ReleaseSubmitRequest(Product.Id, Version.Trim(), Repository.Trim(), by, string.IsNullOrWhiteSpace(Ref) ? "main" : Ref.Trim(), string.IsNullOrWhiteSpace(Workflow) ? "release.yml" : Workflow.Trim(), string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim())));
+        if (SelectedProvider is null)
+        {
+            Status = "Choose the provider the release goes through; the product declares none, and nothing is selected for you.";
+            return;
+        }
+
+        List<string> missing = Settings.Where(s => s.Required && s.Value.Trim().Length == 0 && Product.ReleaseSettings?.ContainsKey(s.Name) != true).Select(s => s.Name).ToList();
+        if (missing.Count > 0)
+        {
+            Status = $"The provider {SelectedProvider.Provider} needs {string.Join(", ", missing)} before anything is sent.";
+            return;
+        }
+
+        var values = Settings.Where(s => s.Value.Trim().Length > 0).ToDictionary(s => s.Name, s => s.Value.Trim(), StringComparer.Ordinal);
+        Answer(() => api.ReleaseSubmit(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values)));
     }
 
-    /// <summary>Observes the selected destination (or the form's version and repository): the run, the draft, the publication; or cancels with the reason given.</summary>
+    /// <summary>Observes the selected destination (or the form's product and version): the run, the draft, the publication; or cancels with the reason given.</summary>
     public void Observe(IEstateApi api, string? by)
     {
         ArgumentNullException.ThrowIfNull(api);
@@ -705,14 +768,33 @@ public sealed class ReleaseWorkspace : Document
         }
 
         string targetVersion = Selected?.Version ?? Version.Trim();
-        string targetRepository = Selected?.Repository ?? Repository.Trim();
-        if (targetVersion.Length == 0 || targetRepository.Length == 0)
+        if (targetVersion.Length == 0 || (Selected is null && Product is null))
         {
-            Status = "Select a destination, or give a version and a repository, before observing.";
+            Status = "Select a destination, or give a product and a version, before observing.";
             return;
         }
 
-        Answer(() => api.ReleaseObserve(new ReleaseObserveRequest(targetVersion, targetRepository, by, Lines(Qualified), Lines(Limitations), string.IsNullOrWhiteSpace(Signing) ? "unsigned developer build" : Signing.Trim(), string.IsNullOrWhiteSpace(CancelReason) ? null : CancelReason.Trim())));
+        string? cancel = string.IsNullOrWhiteSpace(CancelReason) ? null : CancelReason.Trim();
+        string signingState = string.IsNullOrWhiteSpace(Signing) ? "unsigned developer build" : Signing.Trim();
+        ReleaseObserveRequest request = Selected is not null
+            ? new ReleaseObserveRequest(targetVersion, Selected.Repository, by, Lines(Qualified), Lines(Limitations), signingState, cancel, Selected.Product, Selected.Provider)
+            : new ReleaseObserveRequest(targetVersion, null, by, Lines(Qualified), Lines(Limitations), signingState, cancel, Product!.Id);
+        Answer(() => api.ReleaseObserve(request));
+    }
+
+    private void RebuildSettings()
+    {
+        Settings.Clear();
+        if (SelectedProvider is null)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<string, string>? declared = Product?.ReleaseProvider == SelectedProvider.Provider ? Product.ReleaseSettings : null;
+        foreach (ProviderSettingRow setting in SelectedProvider.Settings)
+        {
+            Settings.Add(new SettingField(setting, declared is not null && declared.TryGetValue(setting.Name, out string? value) ? value : null));
+        }
     }
 
     private void Answer(Func<ReleaseResponse> call)

@@ -43,22 +43,43 @@
           "SQLitePCLRaw.core": "2.1.12"
         }
       },
+      "vericairn.adapters.git": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
+      },
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Runtime": "[0.3.0-dev, )",
-          "Vericairn.Sdk": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )",
+          "Vericairn.Sdk": "[0.4.0-dev, )"
         }
       },
       "vericairn.mcp": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )"
+        }
+      },
+      "vericairn.packs.software": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
         }
       },
       "vericairn.protocol": {
         "type": "Project"
+      },
+      "vericairn.providers.github": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.4.0-dev, )",
+          "Vericairn.Runtime": "[0.4.0-dev, )"
+        }
       },
       "vericairn.records": {
         "type": "Project"
@@ -67,15 +88,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.3.0-dev, )",
-          "Vericairn.Records": "[0.3.0-dev, )"
+          "Vericairn.Protocol": "[0.4.0-dev, )",
+          "Vericairn.Records": "[0.4.0-dev, )"
         }
       },
       "Microsoft.Data.Sqlite": {

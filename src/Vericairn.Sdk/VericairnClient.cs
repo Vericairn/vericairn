@@ -161,6 +161,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public IReadOnlyList<ReleaseRow> Releases() => Get<List<ReleaseRow>>("/v1/releases")!;
 
     /// <inheritdoc />
+    public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
 
     /// <inheritdoc />
