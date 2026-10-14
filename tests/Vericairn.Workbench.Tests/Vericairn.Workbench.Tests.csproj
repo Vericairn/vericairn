@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1707;CA2007;CA1515</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="Avalonia.Headless" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/Vericairn.Workbench/Vericairn.Workbench.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Presentation/Vericairn.Presentation.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Cli/Vericairn.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

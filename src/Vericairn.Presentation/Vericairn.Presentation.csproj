@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Shared view models and the state-language presentation used by Workbench and Remote: the same words as the command line and the API, from the same responses.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
+    <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>
