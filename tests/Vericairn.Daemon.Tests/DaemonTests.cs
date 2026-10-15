@@ -207,6 +207,10 @@ public class DaemonTests
         WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.BuilderId, "Test device", "file"));
         Assert.True(device.Ok, device.Problem?.Message);
         string id = device.Written!.Id;
+        // In record format 2 every admission is signed, so the operator's own device, the first authority, comes first.
+        WriteOutcome operatorDevice = socket.DeviceCreate(new DeviceCreateRequest(estate.OperatorId, "Operator device", "file"));
+        Assert.True(operatorDevice.Ok, operatorDevice.Problem?.Message);
+        Assert.True(socket.DeviceAdmit(new AdmitRequest(operatorDevice.Written!.Id, estate.OperatorId, "The first authority.")).Ok);
         Assert.True(socket.DeviceAdmit(new AdmitRequest(id, estate.OperatorId, "Rotation test.")).Ok);
 
         // The key the rotation replaces is kept aside, to show the daemon refuses it afterwards.

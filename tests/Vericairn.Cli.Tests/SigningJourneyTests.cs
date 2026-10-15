@@ -77,6 +77,42 @@ public class SigningJourneyTests
     }
 
     [Fact]
+    public void AnAdmissionIsSignedWhateverTheSignaturePolicy()
+    {
+        string a = CliHarness.TempDirectory("sign-admission");
+        string home = CliHarness.TempDirectory("sign-admission-home");
+        string scratch = CliHarness.TempDirectory("sign-admission-scratch");
+        string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
+            string op = CliHarness.Ok("--estate", a, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Admissions.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", a, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string builderDevice = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", builder, "--name", "Build machine", "--custody", "file").Id;
+
+            // The charter leaves signatures optional, yet with no device of its own the operator cannot admit another one unsigned.
+            int before = Directory.EnumerateFiles(Path.Combine(a, "records"), "*.json", SearchOption.AllDirectories).Count();
+            CliHarness.Outcome refused = CliHarness.Run("--estate", a, "--json", "devices", "admit", builderDevice, "--by", op, "--note", "Too early.");
+            Assert.Equal(2, refused.Code);
+            Assert.Contains("first authority", refused.Err, StringComparison.Ordinal);
+            Assert.Equal(before, Directory.EnumerateFiles(Path.Combine(a, "records"), "*.json", SearchOption.AllDirectories).Count());
+
+            // The operator's own device admits itself, once, and then signs the builder's admission.
+            string operatorDevice = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", op, "--name", "Operator laptop", "--custody", "file").Id;
+            CliHarness.Ok("--estate", a, "--json", "devices", "admit", operatorDevice, "--by", op, "--note", "The first authority.");
+            CliHarness.Outcome admitted = CliHarness.Ok("--estate", a, "--json", "devices", "admit", builderDevice, "--by", op, "--note", "The builder's machine.");
+            string admission = File.ReadAllText(Path.Combine(a, admitted.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains(operatorDevice, admission, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", a, "estate", "check").Code);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+            CliHarness.Delete(a, home, scratch);
+        }
+    }
+
+    [Fact]
     public void ADeviceIsRenamedAndRotatedAndKeepsItsIdentityAdmissionAndHistory()
     {
         string a = CliHarness.TempDirectory("rotate-a");

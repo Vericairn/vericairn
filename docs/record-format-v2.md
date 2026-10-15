@@ -127,6 +127,12 @@ build cannot read.
 - An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
   in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
 - A device revision keeps its principal and its purpose, and keeps the device's identity (below).
+- An admission, admitting or revoking, is signed: by a device already admitted or, for the operator's first device, by
+  the device it admits, the estate's first authority. An unsigned one is refused when it is written and, whatever the
+  charter's signature policy, admits nothing, revokes nothing and unseats no admission it supersedes
+  (`signature.admission-unsigned`). Format 1 counted an unsigned admission while signatures were optional, and its
+  records keep that rule, so in an estate begun under format 1 the devices admitted that way stay admitted until an
+  administrator revokes them.
 - Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
   without an expiry, as every format-1 grant is, behave as they always did.
 - Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names

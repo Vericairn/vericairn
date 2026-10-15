@@ -363,6 +363,48 @@ public class SigningTests : IDisposable
         }
     }
 
+    [Fact]
+    public void InRecordFormatTwoAnUnsignedAdmissionAdmitsAndRevokesNothing()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = CreateDevice(estate, estate.OperatorId, "First laptop", extra: FormatTwo);
+        RecordEnvelope root = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", first.Reference, signer: Signer(first));
+        Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+
+        // While the charter leaves signatures optional, anyone able to add records could write an unsigned admission of a device they
+        // made for the operator; in format 2 it admits nothing, and what that device signs is refused.
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", extra: FormatTwo);
+        RecordEnvelope unsigned = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Unsigned."}""", minted.Reference);
+        RecordEnvelope forged = estate.Add("work-order", estate.OperatorId, OrderBody, signer: Signer(minted));
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.admission-unsigned" && f.Location == unsigned.ExpectedPath);
+        Assert.False(SignatureChecks.IsAdmitted(model, minted));
+        Assert.Contains(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+
+        // Nor does an unsigned revocation end the first device's admission: it keeps signing.
+        string revokedAt = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));
+        RecordEnvelope revocation = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"revoked","note":"Unsigned.","revokedAt":"{{revokedAt}}"}""", first.Reference, supersedes: root.Id);
+        RecordEnvelope later = estate.Add("work-order", estate.OperatorId, OrderBody.Replace("W-1", "W-2", StringComparison.Ordinal), signer: Signer(first));
+        model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.admission-unsigned" && f.Location == revocation.ExpectedPath);
+        Assert.True(SignatureChecks.IsAdmitted(model, first));
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(later.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InRecordFormatOneAnUnsignedAdmissionStillCountsWhileSignaturesAreOptional()
+    {
+        // Format 1 keeps its own rule: records written under it do not change meaning when a later release reads them.
+        using var estate = new TestEstate();
+        RecordEnvelope builderDevice = CreateDevice(estate, estate.BuilderId, "Build machine");
+        RecordEnvelope admission = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.BuilderId}}","status":"admitted","note":"Unsigned, under format 1."}""", builderDevice.Reference);
+        estate.Add("work-order", estate.BuilderId, OrderBody, signer: Signer(builderDevice));
+        EstateModel model = estate.Load();
+        Assert.Empty(admission.Signatures);
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.True(SignatureChecks.IsAdmitted(model, builderDevice));
+    }
+
     private RecordEnvelope CreateDevice(TestEstate estate, string principal, string name, string custody = "file-owner-only", string extra = "", long? format = null)
     {
         string id = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
