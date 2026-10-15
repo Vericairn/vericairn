@@ -248,7 +248,7 @@ prints what was observed. The request, its transmission, the harness's acknowled
 containment are separate facts: the worker that observes the run transmits the stop at its next heartbeat, by creating the
 file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to the harness; a harness acknowledges it by printing
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
-named) has passed, the worker kills its process tree; containment is its exit, observed. The settlement records the facts
+named) has passed, the worker terminates its containment boundary; containment requires observing the whole boundary exited. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
 and the run stays in flight.
 
@@ -297,8 +297,8 @@ the machine that ran them, never in a record or a repository.
 Limitations: the launchers are implemented against the harnesses' `--help` and tested with a stand-in process that speaks
 their streams, and none is yet qualified against a live harness. Windows has no signal a windowless process receives, so a
 harness that does not watch the stop file is contained by escalation. Files of the operating-system user stay readable to
-the harness, which only running the worker as another user changes, and a process that leaves the harness's process tree
-is not followed. Codex keeps the MCP servers of the user's own configuration beside vericairn. No MCP tool launches or
+the harness, which only running the worker as another user changes. A process that deliberately leaves its POSIX process
+group is outside that boundary; the worker is not an OS security sandbox. Codex keeps the MCP servers of the user's own configuration beside vericairn. No MCP tool launches or
 stops a run.
 
 ## The synthetic migration
@@ -316,3 +316,5 @@ knows is refused rather than misread. Migrations never rewrite records; they sta
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
 
 Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
+
+Harnesses enter a containment boundary before executing: a Windows Job Object (no breakaway), or a new POSIX process group on Linux and macOS. Stops signal the group; escalation terminates the whole boundary. Root exit alone does not establish containment. The worker observes every remaining member exited (including kernel zombie exit state) before settling. A failed escalation is retained in local state and settlement evidence and retried, without claiming a kill. Failure to observe the boundary leaves the allowance reserved. A POSIX process that deliberately creates another session can escape this same-user boundary; use OS isolation for hostile code.

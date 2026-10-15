@@ -20,6 +20,70 @@ namespace Vericairn.Runtime.Tests;
 public class WorkerTests
 {
     [Fact]
+    public void AFailedEscalationIsKeptAndRetriedWithoutClaimingAKill()
+    {
+        using var run = new RunEstate();
+        int escalations = 0;
+        bool failureObserved = false;
+        RunDirectory? files = null;
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeSignal = force =>
+            {
+                if (force && Interlocked.Increment(ref escalations) == 1)
+                {
+                    throw new System.ComponentModel.Win32Exception("A stand-in signal failure.");
+                }
+
+                if (force)
+                {
+                    RunObservedState? state = files!.Read();
+                    failureObserved = state?.Stop?.EscalatedAt is null && state?.EscalationFailure?.Contains("will be retried", StringComparison.Ordinal) == true;
+                }
+            },
+        };
+        RunResponse started = run.Start("generic", "ignore-stop", run.Report("retry-signal"));
+        Assert.True(started.Ok, started.Message);
+        files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        WaitUntil(() => File.Exists(run.Report("retry-signal")));
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop.", 0));
+        Assert.Equal("contained", stopped.State);
+        Assert.True(escalations >= 2);
+        Assert.True(failureObserved);
+        Assert.Contains("failed", files.Read()!.EscalationFailure, StringComparison.Ordinal);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+    }
+
+    [Fact]
+    public void ContainmentWaitsForTheChildEvenWhenTheRootAcknowledgesAndExits()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("descendants");
+        RunResponse started = run.Start("generic", "child-survives-root", report);
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(report + ".child"));
+        int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
+        Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop the whole boundary.", 1));
+        RunRow settled = run.Settled(started.Run);
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        Assert.NotNull(stopped.Stop!.AcknowledgedAt);
+        Assert.NotNull(stopped.Stop.EscalatedAt);
+        Assert.NotNull(stopped.Stop.ContainedAt);
+        try
+        {
+            Assert.True(System.Diagnostics.Process.GetProcessById(child).HasExited);
+        }
+        catch (ArgumentException)
+        {
+            // The operating system already reaped it.
+        }
+
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void AFailedInitialStateWriteKeepsTheLaunchedRunsAllowanceAndSupervision()
     {
         using var run = new RunEstate();
@@ -220,7 +284,7 @@ public class WorkerTests
         Assert.Contains("VERICAIRN_STOP_FILE", stop.Transmission, StringComparison.Ordinal);
         Assert.Null(stop.AcknowledgedAt);
         Assert.NotNull(stop.EscalatedAt);
-        Assert.Contains("process tree was killed", stop.Escalation, StringComparison.Ordinal);
+        Assert.Contains("containment boundary", stop.Escalation, StringComparison.Ordinal);
         Assert.NotNull(stop.ContainedAt);
         Assert.True(string.CompareOrdinal(stop.RequestedAt, stop.ContainedAt) <= 0);
 

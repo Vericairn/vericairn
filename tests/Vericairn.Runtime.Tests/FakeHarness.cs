@@ -86,6 +86,7 @@ internal static class FakeHarness
             ["environment"] = environment,
             ["directory"] = Directory.GetCurrentDirectory(),
             ["process"] = Environment.ProcessId,
+            ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
         File.AppendAllText(report, line.ToJsonString() + "\n");
         bool listing = arguments.Contains("features") && arguments.Contains("list");
@@ -132,6 +133,17 @@ internal static class FakeHarness
             case "generic":
                 Emit("The generic harness ran.");
                 return 0;
+            case "child-survives-root":
+                var childInfo = new ProcessStartInfo { FileName = Command("ignore-stop", report + ".child")[0], UseShellExecute = false };
+                foreach (string argument in Command("ignore-stop", report + ".child").Skip(1))
+                {
+                    childInfo.ArgumentList.Add(argument);
+                }
+
+                using (Process.Start(childInfo))
+                {
+                    return Linger(acknowledge: true);
+                }
             case "ignore-stop":
                 return Linger(acknowledge: false);
             case "ack-stop":
@@ -255,6 +267,11 @@ internal static class FakeHarness
 
         return 0;
     }
+
+#pragma warning disable SYSLIB1054
+    [DllImport("libc")]
+    private static extern int getpgid(int pid);
+#pragma warning restore SYSLIB1054
 
     private static void Emit(string line)
     {

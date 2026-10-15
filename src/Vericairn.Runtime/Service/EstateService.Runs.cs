@@ -285,6 +285,15 @@ public sealed partial class EstateService
                 }
             }
         }
+        catch (RunLaunchException exception)
+        {
+            WriteOutcome uncertain = Revise(run, request.By, previous =>
+            {
+                previous["status"] = "uncertain";
+                previous["dispatchedAt"] = RecordParser.FormatTimestamp(exception.LaunchedAt);
+            });
+            return new RunResponse(run, uncertain.Ok ? "uncertain" : "not-started", "The harness was created but launch observation failed; its full allowance remains reserved pending reconciliation.", false, uncertain.Written ?? intent, Element(plan.Cap), where);
+        }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
         {
             // The record says what happened without the reason's words, which can name paths on this machine.
@@ -793,6 +802,11 @@ public sealed partial class EstateService
         body["usage"] = usage;
         JsonArray evidence = body["evidence"] as JsonArray ?? [];
         evidence.Add(new JsonObject { ["summary"] = $"Observed by the worker on the machine that ran it at {outcome.Heartbeats.ToString(CultureInfo.InvariantCulture)} heartbeats every {WorkerOptions.Heartbeat.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds, from {RecordParser.FormatTimestamp(outcome.LaunchedAt)} to its exit at {RecordParser.FormatTimestamp(outcome.ExitedAt)}; its output is kept on that machine." });
+        if (outcome.EscalationFailure is string failure)
+        {
+            evidence.Add(new JsonObject { ["summary"] = failure });
+        }
+
         body["evidence"] = evidence;
         return body;
     }
