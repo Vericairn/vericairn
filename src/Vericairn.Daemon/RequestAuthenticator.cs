@@ -361,8 +361,8 @@ internal sealed class RequestAuthenticator
 
     /// <summary>
     /// The digest a request's signature covers: version 1 on loopback, version 2 for the estate and runtime identity bound in on the
-    /// local network. Null when the body does not arrive before the signature is stale: the read is cancelled then, so a body
-    /// trickled in holds nothing past its five minutes.
+    /// local network. Null when the body does not arrive before the signature is stale: the pending pipe read is cancelled then.
+    /// The host completes the refusal before bounded cleanup of the unread body; none of those bytes can reach an operation.
     /// </summary>
     private async Task<(byte[] Digest, byte[] Body)?> DigestAsync(HttpContext context, string signedAt, (string Estate, string Identity)? binding)
     {

@@ -467,6 +467,8 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Authenticates every request by the profile it came over: device-signed on loopback; on the local network a paired device by its certificate and its signature; the local socket by operating-system identity.</summary>
     private async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
     {
+        // Keep the transport's reader: authentication may replace Request.Body with the bytes it verified for binding.
+        PipeReader body = context.Request.BodyReader;
         IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
         bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
         Problem? denied = localNetwork
@@ -476,12 +478,54 @@ public sealed class DaemonHost : IAsyncDisposable
                 : null;
         if (denied is not null)
         {
-            await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
-            await context.Response.CompleteAsync().ConfigureAwait(false);
+            await RefuseAuthenticationAsync(context, body, denied).ConfigureAwait(false);
             return;
         }
 
         await next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Completes the refusal before discarding the remaining body. Returning with unread TCP data can reset the connection on
+    /// Windows and discard the 401 before the peer reads it, particularly through the local-network TLS screen. Completing the
+    /// response alone does not consume that data, and a Connection: close request need not get Kestrel's keep-alive body drain.
+    /// Cleanup reads no more than 64 KiB for ten seconds, never dispatches the request, and never cancels the transport to stop a read.
+    /// </summary>
+    internal static async Task RefuseAuthenticationAsync(HttpContext context, PipeReader body, Problem denied)
+    {
+        await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
+        await context.Response.CompleteAsync().ConfigureAwait(false);
+        await DrainRefusedBodyAsync(body, 64 * 1024, TimeSpan.FromSeconds(10), context.RequestAborted).ConfigureAwait(false);
+    }
+
+    /// <summary>Discards a refused body's remainder within byte and time limits, leaving the response and transport live.</summary>
+    internal static async Task<long> DrainRefusedBodyAsync(PipeReader reader, long maximum, TimeSpan limit, CancellationToken aborted)
+    {
+        long consumed = 0;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(aborted);
+        deadline.CancelAfter(limit);
+        // As in authentication, cancelling the pipe's pending read preserves TLS; cancelling a stream read need not.
+        using CancellationTokenRegistration pending = deadline.Token.Register(reader.CancelPendingRead);
+        try
+        {
+            while (consumed < maximum && !deadline.IsCancellationRequested)
+            {
+                ReadResult read = await reader.ReadAsync(CancellationToken.None).ConfigureAwait(false);
+                long take = Math.Min(read.Buffer.Length, maximum - consumed);
+                reader.AdvanceTo(read.Buffer.GetPosition(take));
+                consumed += take;
+                if (read.IsCompleted || read.IsCanceled)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            // The refusal is already complete. A disconnected peer or malformed remainder changes no authentication outcome.
+        }
+
+        return consumed;
     }
 
     /// <summary>Presents the current certificate to a new TLS connection and remembers which one it was.</summary>

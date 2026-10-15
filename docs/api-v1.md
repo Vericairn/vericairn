@@ -64,8 +64,8 @@ exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body 
 is UTF-8: one whose `Content-Type` names another charset is refused, and so is one that begins with a byte order
 mark; any other body is taken as the bytes it is. The daemon accepts a signature only from a device that is
 current and admitted now in the estate it serves, within five minutes of its own clock when the request starts and
-still when its body is in, and once: the body is read only until the signature is five minutes old, and a request
-whose body has not arrived by then is refused. It remembers each device's accepted signatures until five minutes
+still when its body is in, and once: authentication reads the body only until the signature is five minutes old,
+and a request whose body has not arrived by then is refused. It remembers each device's accepted signatures until five minutes
 after their signing time, when they would be refused as stale anyway, refuses a signature already stale, and
 forgets none sooner: a device with 10,000 in that window is refused until older ones lapse, so no flood, by that
 device or another, and no body held back, makes room for a replay. It remembers a signature by its 64 bytes with
@@ -76,6 +76,13 @@ answered with `401` and a problem with code `denied`; revoking the device ends a
 with no restart. The SDK signs with `DeviceRequestSigner`, which uses the device key in this machine's custody, so
 a copied request is refused, as stale after five minutes and as a repeat before then, and a copied key file is
 useless where platform custody holds the key.
+
+An authentication refusal completes its `401` response with its length and `Connection: close` before cleanup.
+The daemon then discards at most 64 KiB of the unread body for at most ten seconds, on loopback as on the local
+network, before returning to close the connection. Those bytes never reach an operation or extend the signature's
+validity. Cleanup stops by cancelling only a pending pipe read, preserving the TLS transport and the completed
+response. This lets a late body finish without closing a Windows TCP connection with unread data, whose reset
+could otherwise discard the response before the client reads it.
 
 From 0.6.0 a device-signed request acts for its device's principal, on loopback as on the local network. When the
 request an operation receives names the principal acting, in its `by` or `principal`, as records, assignments,
