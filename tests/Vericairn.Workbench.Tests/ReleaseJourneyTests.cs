@@ -159,6 +159,81 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task SwitchingToAProductWithoutAReachableProviderClearsTheProviderAndItsSettings()
+    {
+        // In 0.5.2 the provider an earlier product declared, or the person chose, stayed selected when the person switched to a
+        // product that declares none, and a submission would have gone through it.
+        string root = Seed.Temp("wb-release-switch");
+        string scratch = Seed.Temp("wb-release-switch-scratch");
+        string op = Seed.Init(root);
+        Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "widget.json", Product));
+        Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "gadget.json", """{"name":"Gadget","slug":"gadget","summary":"A gadget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}]}"""));
+        Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "gizmo.json", """{"name":"Gizmo","slug":"gizmo","summary":"A gizmo.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}],"release":{"destination":{"provider":"elsewhere-releases","settings":{"workflow":"ship.yml"}}}}"""));
+
+        var provider = new FakeReleaseProvider();
+        IReleaseProvider? previous = ProviderRegistry.Current.Register(provider);
+        var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-release-switch"))) { ActingOverride = op };
+        MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
+        try
+        {
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null); });
+            ReleaseWorkspace workspace = Assert.IsType<ReleaseWorkspace>(shell.SelectedDocument);
+            Assert.Equal("Widget", workspace.Product?.Name);
+            Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
+            Assert.Equal("release.yml", workspace.Settings.Single(s => s.Name == "workflow").Value);
+            ComboBox products = await fixture.Ui(() => Combo(window, "Product"));
+            ComboBox providers = await fixture.Ui(() => Combo(window, "Provider"));
+
+            // A product that declares no provider: nothing is selected and no setting field is left from the earlier product.
+            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Gadget"));
+            Assert.Equal("Gadget", workspace.Product?.Name);
+            Assert.Null(workspace.SelectedProvider);
+            Assert.Null(await fixture.Ui(() => providers.SelectedItem));
+            Assert.Empty(workspace.Settings);
+            Assert.False(await fixture.Ui(() => SettingFieldShown(window, "repository")));
+            await fixture.Ui(() => { workspace.Version = "1.0.0"; window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null); });
+            Assert.StartsWith("Choose the provider the release goes through; the product declares none", workspace.Status, StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+
+            // The person's own choice for that product holds until the product changes again.
+            await fixture.Ui(() => providers.SelectedItem = workspace.Providers.Single(p => p.Provider == "github-releases"));
+            Assert.Equal(["repository", "workflow", "ref", "checksums"], workspace.Settings.Select(s => s.Name));
+            Assert.Equal(string.Empty, workspace.Settings.Single(s => s.Name == "workflow").Value);
+            Assert.True(await fixture.Ui(() => SettingFieldShown(window, "repository")));
+
+            // A product whose declared provider the runtime cannot reach selects nothing either, and the refusal names that provider.
+            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Gizmo"));
+            Assert.Null(workspace.SelectedProvider);
+            Assert.Null(await fixture.Ui(() => providers.SelectedItem));
+            Assert.Empty(workspace.Settings);
+            Assert.False(await fixture.Ui(() => SettingFieldShown(window, "repository")));
+            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null));
+            Assert.StartsWith("Choose the provider the release goes through; the product declares elsewhere-releases, which the runtime cannot reach", workspace.Status, StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+
+            // Back on the product that declares one, its provider and declared values are selected again.
+            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Widget"));
+            Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
+            Assert.Same(workspace.SelectedProvider, await fixture.Ui(() => providers.SelectedItem));
+            Assert.Equal("release.yml", workspace.Settings.Single(s => s.Name == "workflow").Value);
+        }
+        finally
+        {
+            if (previous is null)
+            {
+                ProviderRegistry.Current.RemoveRelease("github-releases");
+            }
+            else
+            {
+                ProviderRegistry.Current.Register(previous);
+            }
+
+            await fixture.Ui(window.Close);
+        }
+    }
+
+    [Fact]
     public async Task TheRuntimeWorkspaceShowsThePlanBeforeInstallOrUninstall()
     {
         string root = Seed.Temp("wb-runtime-ws");
@@ -219,5 +294,17 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             Assert.Equal(16, contrast.Count);
             Assert.All(contrast, c => Assert.True(c.Meets, $"{c.Variant}: {c.Foreground} on {c.Background} is {c.Ratio}, minimum {c.Minimum}"));
         });
+    }
+
+    private static ComboBox Combo(Window window, string automationName)
+    {
+        window.UpdateLayout();
+        return window.GetVisualDescendants().OfType<ComboBox>().First(c => c.DataContext is ReleaseWorkspace && AutomationProperties.GetName(c) == automationName);
+    }
+
+    private static bool SettingFieldShown(Window window, string name)
+    {
+        window.UpdateLayout();
+        return window.GetVisualDescendants().OfType<TextBox>().Any(b => b.DataContext is SettingField && AutomationProperties.GetName(b) == name && b.IsEffectivelyVisible);
     }
 }
