@@ -254,7 +254,8 @@ public sealed partial class EstateService
         environment["VERICAIRN_BRIEF"] = brief;
         environment["VERICAIRN_MCP_CONFIG"] = directory.McpConfiguration;
         environment["VERICAIRN_CONDITION"] = plan.Condition;
-        RunSupervisor supervisor;
+        RunSupervisor? supervisor = null;
+        IReadOnlyList<(string Device, string Reason)> lapsed = [];
         try
         {
             directory.Create();
@@ -272,7 +273,17 @@ public sealed partial class EstateService
             };
             File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
             IReadOnlyList<string> command = launcher.Command(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment));
-            supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"));
+
+            // The custody precondition once more, immediately before the launch and under the gate, so that no exception is revised
+            // or expires between this judgment and the start: one that lapsed since the intent, or a key that arrived, launches nothing.
+            lock (gate)
+            {
+                lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
+                if (lapsed.Count == 0)
+                {
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"));
+                }
+            }
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
         {
@@ -284,6 +295,21 @@ public sealed partial class EstateService
                 previous["usage"] = ZeroUsage(plan.Cap);
             });
             return new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, []));
+        }
+
+        if (supervisor is null)
+        {
+            // Cancelled before dispatch: the record names the devices and the exception, never the reasons' words, which name this machine's user.
+            string ids = string.Join(", ", lapsed.Select(e => e.Device));
+            string devices = lapsed.Count == 1 ? $"device {ids} of an operator or of the goal's sponsor signed without its owner's presence" : $"devices {ids} of an operator or of the goal's sponsor signed without their owners' presence";
+            string named = excepted is null ? string.Empty : $", and the custody exception {excepted.Id} its intent named was no longer in force";
+            WriteOutcome canceled = Revise(run, request.By, previous =>
+            {
+                previous["status"] = "canceled";
+                previous["observed"] = new JsonObject { ["summary"] = $"Cancelled before dispatch: when the harness was about to start, {devices} on the machine that ran the worker, with no custody exception in force for the goal{named}. Nothing was launched and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+            });
+            string refusal = CustodyRefusal(plan.Goal, lapsed);
+            return new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, []));
         }
 
         WriteOutcome dispatched = Revise(run, request.By, previous =>
@@ -596,6 +622,22 @@ public sealed partial class EstateService
         }
 
         return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal)), null, null);
+    }
+
+    /// <summary>
+    /// The custody precondition judged immediately before a launch: the devices of an operator or of the goal's sponsor, at the goal's
+    /// current revision, whose keys sign here without their owners' presence, when no custody exception is in force for the goal now;
+    /// empty when the launch may go on.
+    /// </summary>
+    private static IReadOnlyList<(string Device, string Reason)> Lapsed(EstateModel model, string goalId, string agent)
+    {
+        if (AgentRuns.GoalAt(model, goalId) is not RecordEnvelope goal)
+        {
+            return [];
+        }
+
+        IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, agent), DeviceKeyStores.All(), Environment.UserName);
+        return exposed.Count > 0 && CustodyExceptions.InForce(model, goal, DateTimeOffset.UtcNow) is null ? exposed : [];
     }
 
     /// <summary>The custody guard's refusal of an unattended run of a goal, with each device it found exposed and the way to an exception.</summary>

@@ -423,8 +423,11 @@ and its `cap`, taken from the goal's budget. Beside the operator and a principal
 every external operation, the sponsor of the goal a run is charged to records the run's operation when the sponsor is a
 person, from 0.6.0 (`operation.author`). The intent is the
 `not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
-(`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
-operation never records that the work is done: the agent's result is a claim another principal reviews.
+(`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. A run
+whose custody precondition no longer holds when its harness is about to start, judged again then, is `canceled` before
+any dispatch, from 0.6.0, with what was observed naming the devices and the exception its intent named: it is neither
+in flight nor charged. The operation never records that the work is done: the agent's result is a claim another
+principal reviews.
 
 A run is charged to its goal, unit by unit:
 

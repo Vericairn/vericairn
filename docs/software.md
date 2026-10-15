@@ -238,7 +238,10 @@ the response says so, and `vericairn goal next` shows it on every agent's route 
 needs a fresh exception. The guard judges the run before its workspace is prepared and again, against the records and
 the keys as they are then, when its intent is recorded: an exception revised or expired meanwhile lifts nothing, and the
 intent names the one in force at that moment. The records judge that name as of the intent, so a run stays valid when its
-exception is revised or expires afterwards, and one naming an exception already revised before it is refused.
+exception is revised or expires afterwards, and one naming an exception already revised before it is refused. The guard
+judges once more immediately before the launch, under the runtime's gate, so nothing changes between that judgment and
+the start: an exception that lapsed after the intent, or a key of an operator or of the sponsor that arrived here, launches
+nothing, and the run is recorded `canceled` before dispatch, naming the devices and the exception, never charged.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
