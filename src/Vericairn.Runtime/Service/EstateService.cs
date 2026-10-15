@@ -336,7 +336,9 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
         catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
         {
-            return Refuse(exception.Message);
+            // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
+            string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
+            return Refuse(message);
         }
 
         lock (gate)
