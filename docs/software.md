@@ -256,18 +256,19 @@ nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>
 [--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
 Community's conductor, one step in sequence; Pro's program plans and schedules many. The goal must be active. An agent's
 step goes on with the assignment that holds it; when none does, routing signs an assignment to the agent, with a brief
-made from the work order and the goal (its scope, deliverables and exit question, the goal's constraints, and nothing
-reserved without a grant in force), and stores it only with the run's intent, after the worker's whole preflight, so
-that neither is ever left alone. The run starts through the worker with the launcher routing chose and the settings
-given, all as `worker run` does, the custody precondition included; without `--detach` the command follows the run until
-it settles. Every refusal before the intent records nothing, routing's assignment included: no repository or an unknown
-one, a cap under one wall minute, a setting the launcher does not take, the custody guard with no exception in force, the
-budget, the launcher's verification, or the workspace's preparation. A harness that cannot start once the intent is
-recorded leaves the assignment and the run, recorded as a known failure that spent nothing. A person's step is assigned
-to the person and asked of them, the two stored together or neither; a reserved action routed to a person who holds it
-likewise; and a step no principal is available for is asked of who decides for the goal, with the recommendation that
-fits why, and assigned to no one. With every eligible step held, the command says what holds each and records nothing.
-It activates, funds, accepts and answers nothing.
+made from the work order and the goal (its scope, deliverables and exit question, the goal's constraints, and every
+reserved action prohibited unless a grant in force covers it, with the grant that lets the agent carry a reserved step
+named apart), and stores it only with the run's intent, after the worker's whole preflight, so that neither is ever left
+alone. The run starts through the worker with the launcher routing chose and the settings given, all as `worker run`
+does, the custody precondition included; without `--detach` the command follows the run until it settles. Every refusal
+before the intent records nothing, routing's assignment included: no repository or an unknown one, a cap under one wall
+minute, a setting the launcher does not take, the custody guard with no exception in force, the budget, the launcher's
+verification, or the workspace's preparation. A harness that cannot start once the intent is recorded leaves the
+assignment and the run, recorded as a known failure that spent nothing. A person's step is assigned to the person and
+asked of them, the two stored together or neither; a reserved action routed to a person who holds it likewise; and a step
+no principal is available for is asked of who decides for the goal, with the recommendation that fits why, and assigned
+to no one. With every eligible step held, the command says what holds each and records nothing. It activates, funds,
+accepts and answers nothing.
 
 **A hand-over.** `vericairn work takeover <assignment> --by <principal> [--contributor <person>] [--note <text>]` hands a
 step an agent holds over to a person: a new assignment of the work order to the person, the hand-over record, carries the

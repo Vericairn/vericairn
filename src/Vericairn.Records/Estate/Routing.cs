@@ -113,6 +113,23 @@ public static class Routing
     }
 
     /// <summary>
+    /// The grant in force at a time that gives a principal a scope, such as publication: the latest current authority record that names
+    /// it the grantee of the scope and has not expired then; null when none does, as for an operator, who holds every reserved action by
+    /// its role.
+    /// </summary>
+    public static RecordEnvelope? Grant(EstateModel model, string? principal, string scope, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(scope);
+        return principal is null ? null : model.Current("authority")
+            .Where(a => EstateModel.BodyString(a, "grantee") == principal && !EstateModel.Expired(a, at)
+                && a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array
+                && scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+            .LastOrDefault();
+    }
+
+    /// <summary>
     /// Whether a principal the roster names for a role can carry a step of a goal from this machine, and why not. An agent needs a
     /// launcher here for its harness, a key of one of its admitted devices held here, and the goal's budget to leave something for a run
     /// of the step (<see cref="AgentRuns.Exhausted"/>), and for a reserved action a grant in force that covers it; a person needs its

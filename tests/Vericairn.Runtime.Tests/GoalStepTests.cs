@@ -49,6 +49,7 @@ public class GoalStepTests
         Assert.Equal(["widget, a work branch"], brief.GetProperty("workspace").EnumerateArray().Select(w => w.GetString()));
         Assert.Equal("The exit question is answered yes: Does the guide describe the widget?", brief.GetProperty("reviewCriteria")[0].GetString());
         Assert.Contains(brief.GetProperty("prohibitedEffects").EnumerateArray(), p => p.GetString() == "no change outside the widget");
+        Assert.Contains(brief.GetProperty("prohibitedEffects").EnumerateArray(), p => p.GetString() == ReservedEffects);
         Assert.Equal("observed-success", run.Settled(second.Run!.Run).Status);
         Done(run, second.Assignment.Id);
 
@@ -219,11 +220,49 @@ public class GoalStepTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void APublisherAgentsBriefProhibitsEveryReservedEffectAndNamesItsGrant()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+
+        // The roster names the builder for publication, and a grant of publication in force lets it carry W-0, a publisher's step.
+        string roster = run.Estate.Load().Current("roster").Single().Id;
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("roster", op, RunEstate.Json($$"""{"roles":[{"role":"builder","principals":["{{builder}}"]},{"role":"publisher","principals":["{{builder}}"]},{"role":"decider","principals":["{{op}}"]}]}"""), Supersedes: roster)));
+        string expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddDays(1));
+        string grant = Grant(run, builder, "publication", expires);
+        Order(run, "W-0", ""","role":"publisher" """);
+
+        GoalStepResponse step = Step(run, "publisher");
+        Assert.True(step.Ok, step.Message);
+        Assert.Equal(("run", "W-0", "agent", builder), (step.Outcome, step.Step, step.Route, step.Principal));
+        string[] prohibited = [.. run.Estate.Load().ById[step.Assignment!.Id].Body.GetProperty("brief").GetProperty("prohibitedEffects").EnumerateArray().Select(p => p.GetString()!)];
+        Assert.Contains("no change outside the widget", prohibited);
+        Assert.Contains(ReservedEffects, prohibited);
+        Assert.Contains($"no publication except under grant {grant}, which gives it to Test Builder until {expires}", prohibited);
+        Assert.Equal("observed-success", run.Settled(step.Run!.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    /// <summary>The reserved effects every routed brief prohibits unless a grant in force covers one.</summary>
+    private const string ReservedEffects = "nothing reserved to the operator (publication, spending, credentials, DNS, destructive operations, material product changes, milestone and release acceptance) unless a grant in force covers it";
+
     private static Dictionary<string, string> Command(RunEstate run, string report) =>
         new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
 
     private static JsonElement Next(RunEstate run, string key) =>
         Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key);
+
+    /// <summary>The operator's grant of a scope to a principal, on a decision of the operator's; returns the grant's id.</summary>
+    private static string Grant(RunEstate run, string grantee, string scope, string? expires = null)
+    {
+        string op = run.Estate.OperatorId;
+        string decision = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, RunEstate.Json($$"""{"title":"A grant","statement":"Grant {{scope}}.","summary":"A grant.","synthesis":"A grant of {{scope}}.","effects":["{{scope}}"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"medium","notAuthorized":[]}""")))).Id;
+        string until = expires is null ? string.Empty : ",\"expires\":\"" + expires + "\"";
+        return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("authority", op, RunEstate.Json($$"""{"grantee":"{{grantee}}","scope":["{{scope}}"],"reserved":[],"conditions":[],"basis":"{{decision}}"{{until}}}""")))).Id;
+    }
 
     private static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
         run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, run.Report(report)) }));

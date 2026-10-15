@@ -227,12 +227,13 @@ The view also says whether the goal's budget allows each step now. It reads the 
 the progress report it is not the same on every machine; it is a read-only query, and it records and starts nothing.
 
 The one-step operation (`vericairn goal step`) records what a route produces: for a step routed to a principal it chose,
-an `assignment` to that principal, whose brief names the work order and the goal among its sources and whose note says
-why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is the work order
-(without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it unanswered. An
-agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask. A hand-over of a
-step an agent holds to a person (`vericairn work takeover`) is an `assignment` of the step to the person, whose brief
-carries the agent's brief with the agent's assignment among its sources.
+an `assignment` to that principal, whose brief names the work order and the goal among its sources, prohibits every
+reserved action unless a grant in force covers it, names the grant that lets its principal carry a reserved step, and
+whose note says why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is
+the work order (without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it
+unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask. A
+hand-over of a step an agent holds to a person (`vericairn work takeover`) is an `assignment` of the step to the person,
+whose brief carries the agent's brief with the agent's assignment among its sources.
 
 ## Living documents due
 

@@ -312,10 +312,14 @@ public sealed partial class EstateService
     private static JsonObject RoutedAssignment(EstateModel model, RecordEnvelope goal, RecordEnvelope order, NextEligible.Route route, string workspace)
     {
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
+        // Every brief carries the reserved effects, a reserved step's too; the grant that lets a principal other than an operator carry
+        // the step's own reserved action is named apart, so the brief says exactly what it covers.
         List<string> constraints = Strings(goal.Body, "constraints");
-        if (route.Reserved is null)
+        constraints.Add(ReservedEffects);
+        if (route.Reserved is string action && route.Principal is string carrier && !model.HasRole(carrier, Roles.Operator) && Routing.Grant(model, carrier, action, DateTimeOffset.UtcNow) is RecordEnvelope grant)
         {
-            constraints.Add("nothing reserved to the operator (publication, spending, credentials, DNS, destructive operations, material product changes, milestone and release acceptance) without a grant in force");
+            string until = EstateModel.BodyString(grant, "expires") is string expires ? $" until {expires}" : string.Empty;
+            constraints.Add($"no {action} except under grant {grant.Id}, which gives it to {Routing.NameOf(model, carrier)}{until}");
         }
 
         List<string> scope = Strings(order.Body, "scope");
@@ -337,6 +341,9 @@ public sealed partial class EstateService
         };
         return new JsonObject { ["contributor"] = route.Principal, ["brief"] = brief, ["note"] = Clip($"Routed by roster ({route.Role}, from {route.Source.Description}): {route.Reason}.", 4000) };
     }
+
+    /// <summary>The reserved effects every routed brief prohibits (design/goals.md § 6, step 1), unless a grant in force covers one.</summary>
+    private const string ReservedEffects = "nothing reserved to the operator (publication, spending, credentials, DNS, destructive operations, material product changes, milestone and release acceptance) unless a grant in force covers it";
 
     private static string Clip(string text, int length) => text.Length <= length ? text : text[..(length - 1)] + "…";
 
