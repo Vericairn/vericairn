@@ -468,7 +468,7 @@ internal static class CliApp
 
     private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
-        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit and revoke.");
+        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit, revoke, rename and rotate.");
         var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
 
         var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
@@ -512,6 +512,22 @@ internal static class CliApp
         revoke.Options.Add(reasonOption);
         revoke.SetAction(parseResult => Commands.DevicesRevoke(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(revoke);
+
+        var newNameOption = new Option<string>("--name") { Description = "The device's new descriptive name, never a machine path.", Required = true };
+        var rename = new Command("rename", "Rename a device whose key is held here; it keeps its identity, key and admission (record format 2).");
+        rename.Arguments.Add(deviceArgument);
+        rename.Options.Add(newNameOption);
+        rename.SetAction(parseResult => Commands.DevicesRename(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(newNameOption)!, parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(rename);
+
+        var rotateCustodyOption = new Option<string?>("--custody") { Description = "Custody of the new key: default, file, cng, or secure-enclave on a Mac (default: the custody the device has)." };
+        var rotatePresenceOption = new Option<bool?>("--presence") { Description = "Every signature with the new key needs its owner's presence (Secure Enclave custody only, never for an agent); '--presence false' removes it. Default: the device's presence, where the new custody enforces it." };
+        var rotate = new Command("rotate", "Replace a device's key with a new one, signed by both keys; the device keeps its identity and admission, and its earlier records stay valid (record format 2).");
+        rotate.Arguments.Add(deviceArgument);
+        rotate.Options.Add(rotateCustodyOption);
+        rotate.Options.Add(rotatePresenceOption);
+        rotate.SetAction(parseResult => Commands.DevicesRotate(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(rotateCustodyOption), parseResult.GetValue(rotatePresenceOption), parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(rotate);
         return devices;
     }
 

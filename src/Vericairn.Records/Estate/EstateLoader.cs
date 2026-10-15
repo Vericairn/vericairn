@@ -242,7 +242,8 @@ public static class EstateLoader
         }
 
         RecordEnvelope latest = model.Latest(target);
-        if (record.Subject.Hash is not null && latest.Id != target.Id && !ReleaseType.IsPublicationOf(target, latest))
+        // An admission follows its device's identity, so a rename or a rotation of the device leaves it in force.
+        if (record.Subject.Hash is not null && latest.Id != target.Id && !ReleaseType.IsPublicationOf(target, latest) && !(record.Type == "admission" && target.Type == "device"))
         {
             findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
         }

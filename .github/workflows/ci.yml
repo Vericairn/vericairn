@@ -28,8 +28,8 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Build the Secure Enclave helper
-        # The helper is Swift and builds on macOS only. The virtual Macs here have no Secure Enclave, so its store's test skips,
-        # but every change to the helper is compiled and its availability probe runs.
+        # The helper is Swift and builds on macOS only. The Apple-silicon runners expose a Secure Enclave to it, so the store's
+        # test creates, signs with and removes a real enclave key there (one without presence, so nothing waits for a person).
         if: runner.os == 'macOS'
         run: |
           set -eu

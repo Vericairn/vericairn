@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Vericairn.Records.Signing;
 
@@ -74,4 +75,112 @@ public class SigningJourneyTests
             CliHarness.Delete(a, b, homeA, homeB, scratch);
         }
     }
+
+    [Fact]
+    public void ADeviceIsRenamedAndRotatedAndKeepsItsIdentityAdmissionAndHistory()
+    {
+        string a = CliHarness.TempDirectory("rotate-a");
+        string home = CliHarness.TempDirectory("rotate-home");
+        string elsewhere = CliHarness.TempDirectory("rotate-elsewhere");
+        string scratch = CliHarness.TempDirectory("rotate-scratch");
+        string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
+            string op = Init(a);
+            string device = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", op, "--name", "Operator laptop", "--custody", "file").Id;
+            CliHarness.Ok("--estate", a, "--json", "devices", "admit", device, "--by", op, "--note", "The operator's own laptop.");
+            CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-1"));
+            string keys = Path.Combine(home, "keys");
+            byte[] firstKey = File.ReadAllBytes(Path.Combine(keys, device + ".p8"));
+
+            // A rename keeps the device's identity, its key and its admission.
+            CliHarness.Ok("--estate", a, "--json", "devices", "rename", device, "--name", "Operator workstation");
+            JsonElement row = CliHarness.Ok("--estate", a, "--json", "devices", "list").Json.EnumerateArray().Single();
+            Assert.Equal(device, row.GetProperty("id").GetString());
+            Assert.Equal("Operator workstation", row.GetProperty("name").GetString());
+            Assert.Equal("admitted", row.GetProperty("admission").GetString());
+            Assert.Equal(firstKey, File.ReadAllBytes(Path.Combine(keys, device + ".p8")));
+
+            // A file key cannot enforce presence: the rotation is refused and nothing changes.
+            CliHarness.Outcome refused = CliHarness.Run("--estate", a, "--json", "devices", "rotate", device, "--presence");
+            Assert.Equal(2, refused.Code);
+            Assert.Contains("cannot enforce", refused.Err, StringComparison.Ordinal);
+            Assert.Equal([device + ".p8"], Directory.EnumerateFiles(keys).Select(Path.GetFileName));
+
+            // A rotation: a new key in the device's name, signed by the previous key and the new one, replaces the old key here.
+            CliHarness.Outcome rotation = CliHarness.Ok("--estate", a, "--json", "devices", "rotate", device);
+            Assert.Equal([device + ".p8"], Directory.EnumerateFiles(keys).Select(Path.GetFileName));
+            Assert.NotEqual(firstKey, File.ReadAllBytes(Path.Combine(keys, device + ".p8")));
+            using (JsonDocument rotated = JsonDocument.Parse(File.ReadAllText(Path.Combine(a, rotation.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar)))))
+            {
+                JsonElement signatures = rotated.RootElement.GetProperty("signatures");
+                Assert.Equal(2, signatures.GetArrayLength());
+                Assert.All(signatures.EnumerateArray(), s => Assert.Equal(device, s.GetProperty("device").GetString()));
+            }
+
+            // The device signs on with its new key, the records the old key signed stay valid, and the admission stands.
+            CliHarness.Outcome after = CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-2"));
+            Assert.Contains(device, File.ReadAllText(Path.Combine(a, after.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar))), StringComparison.Ordinal);
+            CliHarness.Outcome check = CliHarness.Run("--estate", a, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+            Assert.DoesNotContain("subject-stale", check.Out, StringComparison.Ordinal);
+            Assert.Equal("admitted", CliHarness.Ok("--estate", a, "--json", "devices", "list").Json.EnumerateArray().Single().GetProperty("admission").GetString());
+
+            // A machine that does not hold the key can neither rename nor rotate the device.
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, elsewhere);
+            CliHarness.Outcome notHere = CliHarness.Run("--estate", a, "--json", "devices", "rename", device, "--name", "Elsewhere");
+            Assert.Equal(2, notHere.Code);
+            Assert.Contains("holds no key", notHere.Err, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+            CliHarness.Delete(a, home, elsewhere, scratch);
+        }
+    }
+
+    [Fact]
+    [SupportedOSPlatform("macos")]
+    public void AFileKeyRotatesIntoTheSecureEnclave()
+    {
+        if (!OperatingSystem.IsMacOS() || !SecureEnclaveKeyStore.Available())
+        {
+            Assert.Skip("Secure Enclave custody needs a Mac with an enclave and the vericairn-enclave helper (VERICAIRN_ENCLAVE_HELPER).");
+        }
+
+        string a = CliHarness.TempDirectory("enclave-a");
+        string home = CliHarness.TempDirectory("enclave-home");
+        string scratch = CliHarness.TempDirectory("enclave-scratch");
+        string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
+            string op = Init(a);
+            string device = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", op, "--name", "Operator laptop", "--custody", "file").Id;
+            CliHarness.Ok("--estate", a, "--json", "devices", "admit", device, "--by", op, "--note", "The operator's own laptop.");
+
+            // Without presence, so the test never asks anyone for Touch ID; the file key is gone once the enclave key takes its place.
+            CliHarness.Ok("--estate", a, "--json", "devices", "rotate", device, "--custody", "secure-enclave");
+            Assert.Equal([device + ".se"], Directory.EnumerateFiles(Path.Combine(home, "keys")).Select(Path.GetFileName));
+            JsonElement row = CliHarness.Ok("--estate", a, "--json", "devices", "list").Json.EnumerateArray().Single();
+            Assert.Equal(SecureEnclaveCustody.Kind, row.GetProperty("custody").GetString());
+            Assert.Equal("none", row.GetProperty("presence").GetString());
+            Assert.True(row.GetProperty("heldHere").GetBoolean());
+            CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-1"));
+            CliHarness.Outcome check = CliHarness.Run("--estate", a, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+            CliHarness.Delete(a, home, scratch);
+        }
+    }
+
+    private static string Init(string root) =>
+        CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Device journey.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+
+    private static string Order(string scratch, string key) =>
+        CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Signed work","intent":"Prove signing.","scope":["x"],"exitQuestion":"Signed?","inputs":[],"deliverables":["y"]}""");
 }

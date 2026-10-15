@@ -105,9 +105,35 @@ build cannot read.
   corrects what surrounds them, and different words are a new decision (`decision.statement`).
 - An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
   in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
-- A device revision keeps its principal and its purpose.
+- A device revision keeps its principal and its purpose, and keeps the device's identity (below).
 - Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
   without an expiry, as every format-1 grant is, behave as they always did.
 - Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names
   bytes without granting access to them.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.
+
+## A device keeps its identity
+
+From format 2 a device is its first record: that record's id is the device's identity, and a rename or a new key is a
+revision of it that keeps the identity, the principal, the purpose and the admission. Format 1 had no other way to
+give a device a new key than to record a new device.
+
+- Signatures name the identity, and each verifies against the key the device held at the record's `at`: the key of
+  its latest revision dated at or before it. Times are whole seconds, so a record dated in the very second of a
+  rotation verifies with either key. A signature that verifies only with a key the device held at another time is
+  refused as `signature.key-time`, naming the revision whose key it was: a key used after its rotation, or a
+  rotation dated earlier than it was made.
+- A device revision is signed by the device itself in the name of its identity (`device.unsigned`). A rotation, a
+  revision with a new public key, is signed by the previous key, which proves continuity, and by the new key, which
+  proves possession (`device.rotation`, `signature.rotation`). Custody and presence change only with the key, by a
+  rotation (`device.custody`). A device first recorded in format 1 reads as presence `none` and purpose `signing`.
+- An admission names a device by any of its records and stays in force across its renames and rotations, without
+  being reported as referring to an earlier revision. A self-signed admission is recognized by identity, so no
+  revision hides one: the estate's first authority stays the only self-admission accepted.
+- Records signed before a rotation stay valid, and the replaced key signs nothing dated after it. Like revocation,
+  this rests on the times records state: a key that may have leaked is revoked by an administrator, not only rotated.
+- `vericairn devices rename` and `vericairn devices rotate` write these revisions on the machine that holds the
+  device's key. A rotation makes the new key beside the old one, records the revision, and only then lets the new key
+  take the old one's place, so a refused rotation leaves the device as it was. Moving a key into other custody, from
+  a file into the Secure Enclave for example, is a rotation with `--custody`; the new key keeps the device's presence
+  where its custody enforces it, and `--presence` sets it.

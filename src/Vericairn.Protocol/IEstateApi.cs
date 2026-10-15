@@ -57,6 +57,12 @@ public interface IEstateApi
     /// <summary>Admit a device.</summary>
     WriteOutcome DeviceAdmit(AdmitRequest request);
 
+    /// <summary>Renames a device, keeping its identity; signed by the device's own key.</summary>
+    WriteOutcome DeviceRename(DeviceRenameRequest request);
+
+    /// <summary>Gives a device a new key, keeping its identity; signed by the previous key and the new one.</summary>
+    WriteOutcome DeviceRotate(DeviceRotateRequest request);
+
     /// <summary>Revoke a device's admission.</summary>
     WriteOutcome DeviceRevoke(RevokeRequest request);
 

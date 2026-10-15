@@ -34,6 +34,16 @@ public class FormatOneFixtureTests
             string op = model.CurrentEstate!.Body.GetProperty("operator").GetString()!;
 
             using var service = EstateService.Open(copy);
+
+            // A device keeps its identity across renames and rotations from format 2 only; before the move both are refused.
+            string unknown = Records.Identity.Ulid.NewUlid().Value;
+            WriteOutcome rename = service.DeviceRename(new DeviceRenameRequest(unknown, "Renamed"));
+            WriteOutcome rotate = service.DeviceRotate(new DeviceRotateRequest(unknown));
+            Assert.False(rename.Ok);
+            Assert.False(rotate.Ok);
+            Assert.Contains("record format 2", rename.Problem!.Message, StringComparison.Ordinal);
+            Assert.Contains("record format 2", rotate.Problem!.Message, StringComparison.Ordinal);
+
             (UpgradeResponse? check, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
             Assert.Null(refused);
             Assert.Equal(["record-format-2"], check!.Migrations);

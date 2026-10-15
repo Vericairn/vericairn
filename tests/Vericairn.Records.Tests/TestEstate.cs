@@ -43,11 +43,11 @@ public sealed class TestEstate : IDisposable
     /// <summary>A fixed, advancing clock so records are ordered deterministically.</summary>
     public DateTimeOffset Clock { get; private set; } = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
 
-    public RecordEnvelope Add(string type, string by, string bodyJson, RecordReference? subject = null, string? supersedes = null, string? id = null, IRecordSigner? signer = null, long? format = null)
+    public RecordEnvelope Add(string type, string by, string bodyJson, RecordReference? subject = null, string? supersedes = null, string? id = null, IRecordSigner? signer = null, long? format = null, IReadOnlyList<IRecordSigner>? signers = null)
     {
         Clock = Clock.AddSeconds(1);
         using JsonDocument body = JsonDocument.Parse(bodyJson);
-        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, body.RootElement, subject, supersedes, Clock, id, format ?? RecordFormat), signer);
+        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, body.RootElement, subject, supersedes, Clock, id, format ?? RecordFormat), signers ?? (signer is null ? [] : [signer]));
         RecordAuthor.Write(Root, record);
         return record.Envelope;
     }

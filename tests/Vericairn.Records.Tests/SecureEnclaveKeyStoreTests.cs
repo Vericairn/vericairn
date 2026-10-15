@@ -10,8 +10,8 @@ namespace Vericairn.Records.Tests;
 
 /// <summary>
 /// macOS custody: keys generated inside the Secure Enclave and kept as enclave-wrapped blobs through the vericairn-enclave helper.
-/// Skipped where there is no helper or no enclave (other platforms, and the virtual Macs continuous integration runs on); a key
-/// without presence is used, so the test never asks anyone for Touch ID or a password.
+/// Skipped where there is no helper or no enclave (other platforms, and Macs without one); the Apple-silicon runners of continuous
+/// integration have one. A key without presence is used, so the test never asks anyone for Touch ID or a password.
 /// </summary>
 public class SecureEnclaveKeyStoreTests : IDisposable
 {
@@ -48,6 +48,31 @@ public class SecureEnclaveKeyStoreTests : IDisposable
 
         store.Remove(id);
         Assert.False(store.Has(id));
+        new SecureEnclaveKeyStore(Path.Combine(home, "never")).Remove(Ulid.NewUlid().Value);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("macos")]
+    public void ARotatedEnclaveKeyTakesTheDevicesPlaceAndTheReplacedOneIsGone()
+    {
+        if (!OperatingSystem.IsMacOS() || !SecureEnclaveKeyStore.Available())
+        {
+            Assert.Skip("Secure Enclave custody needs a Mac with an enclave and the vericairn-enclave helper (VERICAIRN_ENCLAVE_HELPER).");
+        }
+
+        var store = new SecureEnclaveKeyStore(home);
+        string device = Ulid.NewUlid().Value;
+        string revision = Ulid.NewUlid().Value;
+        byte[] replaced = store.Create(device);
+        byte[] next = store.Create(revision);
+        store.Promote(revision, device);
+        Assert.False(store.Has(revision));
+        Assert.Equal(next, store.PublicKey(device));
+        Assert.NotEqual(replaced, store.PublicKey(device));
+        byte[] digest = RecordSigning.Digest("sha256:" + new string('b', 64));
+        Assert.True(RecordSigning.Verify(RecordSigning.EncodePublicKey(next), digest, Base64Url.EncodeToString(store.Sign(device, digest))));
+        Assert.Throws<InvalidOperationException>(() => store.Promote(revision, device));
+        store.Remove(device);
     }
 
     [Fact]

@@ -105,18 +105,43 @@ public sealed class DeviceType : IRecordType
             context.Error("device.author", "A device record is authored by its principal, by the operator, or under the 'administer' scope.");
         }
 
-        if (!context.Record.Signatures.Any(s => s.Device == context.Record.Id))
-        {
-            context.Error("device.unsigned", "A device record is signed by its own key to prove possession.");
-        }
-
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
-        if (previous is not null && previous.Type == Name && EstateModel.BodyString(previous, "publicKey") != publicKey)
+        bool revision = previous is not null && previous.Type == Name;
+        bool keyChanged = revision && EstateModel.BodyString(previous!, "publicKey") != publicKey;
+        if (context.Format >= 2 && revision)
         {
-            context.Error("device.key-change", "A device revision keeps its public key; a new key is a new device.");
+            // From format 2 a device keeps its identity, its first record, across renames and rotations: a revision is signed in the
+            // identity's name, and a new key is signed both by the previous key (continuity) and by the new one (possession).
+            string identity = context.Model.Chain(previous!)[0];
+            int named = context.Record.Signatures.Count(s => s.Device == identity);
+            if (named == 0)
+            {
+                context.Error("device.unsigned", $"A device revision is signed by the device itself, in the name of its identity {identity}.");
+            }
+            else if (keyChanged && named < 2)
+            {
+                context.Error("device.rotation", "A new key is signed both by the device's previous key and by the new one.");
+            }
+
+            if (!keyChanged && (EstateModel.BodyString(previous!, "custody") != custody || (EstateModel.BodyString(previous!, "presence") ?? "none") != presence))
+            {
+                context.Error("device.custody", "A device's custody and presence change only with its key, by a rotation.");
+            }
+        }
+        else
+        {
+            if (!context.Record.Signatures.Any(s => s.Device == context.Record.Id))
+            {
+                context.Error("device.unsigned", "A device record is signed by its own key to prove possession.");
+            }
+
+            if (keyChanged)
+            {
+                context.Error("device.key-change", "A device revision keeps its public key; a new key is a new device, or a rotation from record format 2.");
+            }
         }
 
-        if (previous is not null && previous.Type == Name && (EstateModel.BodyString(previous, "principal") != principal || (context.Format >= 2 && previous.Format >= 2 && EstateModel.BodyString(previous, "purpose") != purpose)))
+        if (previous is not null && previous.Type == Name && (EstateModel.BodyString(previous, "principal") != principal || (context.Format >= 2 && (EstateModel.BodyString(previous, "purpose") ?? "signing") != purpose)))
         {
             context.Error("device.identity", "A device revision keeps its principal and its purpose; a different one is a different device.");
         }
