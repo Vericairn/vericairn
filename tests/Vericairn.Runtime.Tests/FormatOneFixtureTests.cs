@@ -9,7 +9,9 @@ using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
+// The upgrade tests change the process-wide formats and migrations a test reads, so they run one at a time.
 /// <summary>A format-1 estate written by the released 0.4.2 binary, kept byte for byte, read and moved to format 2 by this build.</summary>
+[Collection("upgrade")]
 public class FormatOneFixtureTests
 {
     [Fact]
