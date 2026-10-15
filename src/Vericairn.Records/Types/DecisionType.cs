@@ -42,6 +42,7 @@ public sealed class DecisionType : IRecordType
         new("notAuthorized", "string[]", true, "What this answer does not authorize, so no one reads more into it; may be empty.", 2),
         new("answers", "ulid[]", false, "The asks this decision answers; an ask is answered by the principal it was put to, and never by waiting.", 2),
         new("obligations", "object[]", false, "What the answer leaves owed: key, summary, owner (ulid), resolution (action|evidence|review|decision), discharge (what discharges it) and optionally gates (the operation or work it holds); each stays open until a discharge record names it.", 2),
+        new("documents", "string[]", false, "The living documents this decision changes, by path or by declaration id; each becomes due until it is cleared.", 2),
     ];
 
     /// <inheritdoc />
@@ -73,6 +74,7 @@ public sealed class DecisionType : IRecordType
 
         IReadOnlyList<string>? answers = body.Since(2, "answers") ? body.StringArray("answers", false, allowEmpty: false, maxItemLength: Identity.Ulid.Length) : null;
         IReadOnlyList<BodyReader>? obligations = body.Since(2, "obligations") ? body.NestedArray("obligations", false, allowEmpty: false) : null;
+        IReadOnlyList<string>? documents = body.Since(2, "documents") ? body.StringArray("documents", false, allowEmpty: false, maxItemLength: 500) : null;
         body.NoOtherKeys();
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader obligation in obligations ?? [])
@@ -91,6 +93,19 @@ public sealed class DecisionType : IRecordType
 
             context.RequireReference("obligations.owner", owner, "principal");
         }
+        // A document is named by its path or by its declaration; a path need not be declared yet, a declaration id must exist.
+        foreach (string document in documents ?? [])
+        {
+            if (Identity.Ulid.IsValid(document))
+            {
+                context.RequireReference("documents", document, "living-document");
+            }
+            else if (!Patterns.RelativePath.IsMatch(document))
+            {
+                body.Error("body.pattern", "documents", $"'{document}' is neither a normalized repository-relative path nor a declaration id.");
+            }
+        }
+
         foreach (string id in answers ?? [])
         {
             if (context.RequireReference("answers", id, "ask") is not { } ask)
