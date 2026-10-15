@@ -119,9 +119,12 @@ public class DaemonTests
             Assert.True(item.TryGetProperty(method.ToLowerInvariant(), out _), method + " " + path);
         }
 
-        // Shutdown through the API stops the daemon and removes the endpoint file; a second stop is harmless.
+        // Shutdown through the API stops the daemon and removes the endpoint file. The daemon stops answering before its stop
+        // finishes removing the file, so the test awaits that same stop (StopAsync returns the stop in flight, never a second one)
+        // before it looks for the file; a second stop is harmless.
         client.Shutdown();
         await DaemonTestHome.WaitUntilGoneAsync(discovered);
+        await host.StopAsync();
         Assert.Null(DaemonHost.Discover(estate.Root));
         await host.StopAsync();
     }
