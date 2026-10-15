@@ -239,7 +239,10 @@ file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to the harn
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
 named) has passed, the worker kills its process tree; containment is its exit, observed. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
-and the run stays in flight.
+and the run stays in flight. Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
+an agent sponsors) and the principal who started the run stop it, on every profile; anyone else is refused before anything
+is asked of the run. The command waits for what the worker observes for at most 30 seconds, whatever grace it names, and
+then prints what it has; the settlement records the rest.
 
 `vericairn worker runs` lists every run with its cap, its usage once settled, what it is charged and its stop's facts, and
 the ledger of every goal with a run or active now: each unit's budget, spend and remainder, the runs in flight, and why a

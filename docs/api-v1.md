@@ -57,23 +57,25 @@ rotation refuses the new certificate on its next connection and is made again fr
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
 
-A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At`
-(RFC 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the
-SHA-256 of the line-feed-joined string `vericairn-request/1`, the upper-case method, the request target (path
-and query exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty for no body).
-The body is UTF-8: a request whose `Content-Type` names another charset is refused, and so is a JSON body that
-begins with a byte order mark. The daemon accepts a signature only from a device that is current and admitted
-now in the estate it serves, within five minutes of its own clock, and once. It remembers each device's accepted
-signatures until five minutes after their signing time, when they would be refused as stale anyway, and forgets
-none sooner: a device with 10,000 in that window is refused until older ones lapse, so no flood, by that device or
-another, makes room for a replay. It remembers a signature by its 64 bytes with `s` replaced by the smaller of
-`s` and `n - s`, `n` being the order of the P-256 group, so neither another base64url spelling of the same bytes
-nor the malleated twin `(r, n - s)`, which verifies just as well, passes for a new signature; the device signing
-the same request again makes a new one, which is accepted. Anything else is answered with `401` and a problem with
-code `denied`; revoking the device ends access from the next request on, with no restart. The SDK signs with
-`DeviceRequestSigner`, which uses the device key in this machine's custody, so a copied request is refused, as
-stale after five minutes and as a repeat before then, and a copied key file is useless where platform custody
-holds the key.
+A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At` (RFC
+3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the SHA-256
+of the line-feed-joined string `vericairn-request/1`, the upper-case method, the request target (path and query
+exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty for no body). A JSON body
+is UTF-8: one whose `Content-Type` names another charset is refused, and so is one that begins with a byte order
+mark; any other body is taken as the bytes it is. The daemon accepts a signature only from a device that is
+current and admitted now in the estate it serves, within five minutes of its own clock when the request starts and
+still when its body is in, and once: the body is read only until the signature is five minutes old, and a request
+whose body has not arrived by then is refused. It remembers each device's accepted signatures until five minutes
+after their signing time, when they would be refused as stale anyway, refuses a signature already stale, and
+forgets none sooner: a device with 10,000 in that window is refused until older ones lapse, so no flood, by that
+device or another, and no body held back, makes room for a replay. It remembers a signature by its 64 bytes with
+`s` replaced by the smaller of `s` and `n - s`, `n` being the order of the P-256 group, so neither another
+base64url spelling of the same bytes nor the malleated twin `(r, n - s)`, which verifies just as well, passes for
+a new signature; the device signing the same request again makes a new one, which is accepted. Anything else is
+answered with `401` and a problem with code `denied`; revoking the device ends access from the next request on,
+with no restart. The SDK signs with `DeviceRequestSigner`, which uses the device key in this machine's custody, so
+a copied request is refused, as stale after five minutes and as a repeat before then, and a copied key file is
+useless where platform custody holds the key.
 
 From 0.6.0 a device-signed request acts for its device's principal, on loopback as on the local network. When the
 request an operation receives names the principal acting, in its `by` or `principal`, as records, assignments,
@@ -129,8 +131,11 @@ certificate would be encrypted, out of reach. So the runtime and the SDK read ea
 clear and refuse, before this machine's TLS sees it, a certificate that names an address to fetch (authority or
 subject information access, CRL distribution points, a freshest CRL), one that does not parse, a list of more than
 one, and an offer to fetch certificates from addresses (`certificate_url`). The policy that downloads nothing
-stays as well. What TLS 1.2 gives up against 1.3 is certificates hidden from whoever watches the network, which
-the constant subject answers in part, and one round trip on each new connection.
+stays as well, and the listener refuses a client's renegotiation, which would carry a new certificate inside the
+encrypted channel, out of the screen's sight. What TLS 1.2 gives up against 1.3 is certificates hidden from whoever
+watches the network, and one round trip on each new connection. The constant subject answers the first in part
+only: the client certificate names no device, but its signature is the device key's and travels in clear too, so
+whoever holds the estate's device records can tell which device connects.
 
 Before any other request on a connection the device asks `GET /v1/runtime/identity?nonce=<32 random bytes,
 base64url>`, signed as on loopback (`vericairn-request/1`), since nothing has yet proven which runtime answers,
@@ -153,10 +158,11 @@ paired with, and then the method, the request target, the signed-at time and the
 request signed for one runtime is refused by any other, even a runtime of the same estate on another machine,
 which knows the same device. Until the connection's client certificate verifies with the current key of the
 device a request names, every refusal is the same one, so nobody learns from it whether a device exists, is
-revoked or is permitted the profile. The runtime reads the device from the records at every request and refuses
-it unless it is current, admitted now and permitted `local-network` in its device record's `profiles`, and
-unless the signature verifies with its key. A revoked device is therefore refused at its next request, on a
-connection it already has open as well; disconnection alone revokes nothing. The device acts for its own
+revoked or is permitted the profile. The runtime reads the device from the records at every request, when it
+starts and again once its body is in, and refuses it unless it is current, admitted now and permitted
+`local-network` in its device record's `profiles`, and unless the signature verifies with its key. A revoked
+device is therefore refused at its next request, on a connection it already has open as well, and a request whose
+body arrives after the revocation is refused too; disconnection alone revokes nothing. The device acts for its own
 principal, as on loopback. What acts on the runtime's own machine is refused: `POST /v1/shutdown`,
 `/v1/devices`, `/v1/devices/rename`, `/v1/devices/rotate`, `/v1/devices/recovery`, `/v1/estate/export`,
 `/v1/pairings`, `/v1/runtime/certificate`, `/v1/releases/submit` and `/v1/releases/observe` (which use the
@@ -171,10 +177,14 @@ unsigned when the charter leaves signatures optional, and refused when the chart
 device's key signs its requests and its connection certificates, never the records the runtime writes, so a
 record's signature names a device on the runtime's machine, not the paired device that asked for it. The runtime
 refuses such a write when that device's every signature needs its owner's presence, rather than ask the person at
-its machine to approve what someone elsewhere sent. It keeps each write a paired device made, when, which device,
-for which principal, the operation, and the record's id, hash and path, in `local-network-writes.jsonl` beside
-the live store, an owner-only file it only appends to, outside the records, where the device's revocation leaves
-it; `vericairn devices writes [<device>]` lists them. Records signed by the paired device itself, on its own
+its machine to approve what someone elsewhere sent. It keeps each write a paired device asks for in
+`local-network-writes.jsonl` beside the live store, an owner-only file it only appends to, outside the records,
+where the device's revocation leaves it: before the write, its intent (when, which device, for which principal,
+the operation), flushed to disk, and when that cannot be kept the write is refused with `503` and nothing is
+written; after the write, its outcome under the same id, written with the record's id, hash and path (for a run's
+stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
+interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
+devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
 machine, are the design to come: the Remote profile, planned for 0.7.0, needs them, since a remote device's
 writes cannot rest on a key of the runtime's machine. Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
@@ -203,9 +213,13 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
 3. The device sends `POST /v1/pairing/hello` with a 32-byte nonce and an HMAC-SHA256 under the device's key
    over the nonce and the fingerprint of the certificate its own handshake showed.
 4. The runtime tries every code it holds against that MAC, with the certificate it presented on this
-   connection. A hello that proves none is refused alike, whatever was tried, and its connection is closed; an
-   address that sends ten such hellos within a minute is refused until the minute ends. A code the hello
-   proves is refused when it has expired, was used or has no attempts left. Otherwise the runtime answers a
+   connection; its MAC is exactly 32 bytes, refused unread otherwise, and a pairing message's body is read only
+   as far as 16 KiB (`413` beyond). A hello that proves none is refused alike, whatever was tried, and its
+   connection is closed. An address that sends 50 such hellos within a minute is refused until its minute ends;
+   an address is never forgotten while its minute runs, so while 1,024 addresses are counted a new one waits;
+   and once 4,096 such hellos have come in all within a minute, every hello waits for the next, which bounds
+   the work of trying codes. A code the hello proves is refused when it has expired, was used or has no
+   attempts left. Otherwise the runtime answers a
    `PairingChallenge`: both nonces, the estate with its name, the runtime identity's public key, the
    fingerprint of the certificate it presented on this connection, the principal with its name and kind, the
    profiles, and the id, time and record format of the device record it will write, with an HMAC-SHA256 under
@@ -218,9 +232,10 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    platform, its custody and presence, its public key, the profiles), signs the record's content hash with
    the new key, and sends `POST /v1/pairing/confirm` with its key, its descriptive identity and that signature,
    with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields.
-6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired or was used
-   meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the code's five
-   attempts; and it refuses a device name with control or formatting characters. It rebuilds the device record
+6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used or has
+   no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
+   code's five attempts; the last one closes every exchange of the code still open. It refuses a device name
+   with control or formatting characters. It rebuilds the device record
    from its own challenge and the device's fields, verifies the signature with the key presented, writes the
    device record with that signature, the device's own, and then the admission by the administrator, signed
    by the administrator's admitted device; when the admission is refused the device record is removed again.
@@ -253,10 +268,13 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
   guesses against it offline: the exchange uses no password-authenticated key exchange, so the secret is long
   enough instead. Each guess succeeds with probability 2^-80, so even odds take some 2^79 guesses, each a
   chain of HMAC-SHA256 computations, beyond reach in a code's ten minutes; and a code once used or expired is
-  worth nothing. Online guesses are bounded tighter still, by ten failed hellos an address a minute.
+  worth nothing. Online guesses are bounded tighter still, by 50 failed hellos an address a minute and 4,096
+  in all.
 - Nobody without the code can use up its attempts: a hello that proves no code uses none, and only a
   confirmation of an exchange that a proving hello opened can. An address that floods hellos is refused a
-  minute at a time.
+  minute at a time, and enough addresses flooding together make every hello wait a minute: a denial of
+  service, as using up a code is, after which the device pairs again. A few mistyped codes from behind a shared
+  address refuse no other device there.
 - Whoever learns a code before its device uses it can pair a key of their own in its place, once and within
   ten minutes. The genuine device is then refused as "used already", which names no device, and `vericairn
   devices list` shows the device that did pair; the administrator revokes it. A code is shown only to the
@@ -280,7 +298,7 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
   refused at its next request.
 - A captured request is accepted once, within five minutes of its signing time, only over a connection whose
   certificate the device's key issued, and only by the runtime it was signed for; no flood makes the runtime
-  forget a signature before it is stale.
+  forget a signature before it is stale, and a copy whose body is held back until then is refused.
 - No certificate makes either side connect anywhere: the local network speaks TLS 1.2 only, so a certificate that
   names an address is refused in clear before the platform's TLS reads it, on every platform, and nothing a
   certificate names is fetched.
@@ -316,10 +334,10 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 | `GET /v1/launchers` | The coding-agent launchers available to the runtime on its machine, providers of `vericairn.launcher.agent/1`, as `ProviderRow`s of kind launcher; the generic launcher's first limitation says that generic process launch is not complete agent support. From 0.6.0 |
 | `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused over the local network, and, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator nor holds `local-engineering`, when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
 | `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, and whether its launcher is generic), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
-| `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. From 0.6.0 |
+| `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The request waits for what the worker observes for at most 30 seconds, whatever grace it names, and answers with what it has; the settlement records the rest. From 0.6.0 |
 | `POST /v1/releases/submit` | Submit a release as intent before effect, on the runtime's machine (refused over the local network, as observing is, since both use the provider's credentials there): the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
-| `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it |
+| `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it. From 0.6.0 a device-signed export names its device's principal as `by`, which must be an operator or hold the `administer` scope; over the local network it is refused |
 | `GET /v1/reconcile`, `GET /v1/recover/inspect` | Reconcile tasks left by diverged copies; what this copy holds |
 | `GET /v1/objects`, `POST /v1/objects`, `GET /v1/objects/{hash}`, `GET /v1/objects/verify` | Content-addressed objects: list, store bytes (refused over the local network), verified bytes, verify all |
 | `POST /v1/shutdown` | Ask the daemon to stop; closing a client never stops it |
@@ -346,10 +364,10 @@ record was rejected:
 | Code | Meaning | HTTP |
 |---|---|---|
 | `rejected` | The estate would be invalid with this record; the findings say why; nothing was written | 422 |
-| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit) |
+| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit and a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
-| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a body in another charset than UTF-8 or a JSON body with a byte order mark; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
+| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a body that arrives after its signature is stale, or after its device was revoked; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
 
 `conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
