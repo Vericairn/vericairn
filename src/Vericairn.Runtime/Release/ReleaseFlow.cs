@@ -1,12 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Release;
+
+/// <summary>The record formats a release reads and the newest it writes, as its release record states them.</summary>
+/// <param name="Reads">Every format it reads, oldest first.</param>
+/// <param name="Writes">The newest format it writes; an estate gets its own format, never one beyond this.</param>
+public sealed record ReleaseRecordFormat(IReadOnlyList<long> Reads, long Writes)
+{
+    /// <summary>The formats of this build: what a runtime records for a release whose draft states none.</summary>
+    public static ReleaseRecordFormat ThisBuild => new(RecordFormats.Reads, RecordFormats.Current);
+
+    /// <summary>The formats for a person, for example "reads 1, 2; writes 2".</summary>
+    public string Describe() => $"reads {string.Join(", ", Reads.Select(f => f.ToString(CultureInfo.InvariantCulture)))}; writes {Writes.ToString(CultureInfo.InvariantCulture)}";
+}
 
 /// <summary>
 /// The release as intent, then observed effect: an operation record is written before the build is dispatched through the
@@ -27,6 +41,67 @@ public static class ReleaseFlow
 
     /// <summary>The tag a version is released under.</summary>
     public static string Tag(string version) => "v" + version;
+
+    /// <summary>The format of a documentation set's manifest, which states the record formats of the build it documents.</summary>
+    public const string DocumentationManifest = "vericairn.docs/1";
+
+    /// <summary>The largest documentation archive the observer reads for the record formats its manifest states.</summary>
+    public const long DocumentationLimit = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// The record formats a release states in the documentation set it carries: the archive's manifest of format vericairn.docs/1 for
+    /// the same version (<c>&lt;version&gt;/manifest.json</c>, or <c>manifest.json</c> at its root), whose <c>recordFormat</c> the
+    /// product's build tooling writes from the build. Null when the archive states none, as the sets of releases before 0.6.0 do, with
+    /// what the archive lacks, worded to follow its name.
+    /// </summary>
+    public static ReleaseRecordFormat? DocumentedRecordFormat(byte[] archive, string version, out string missing)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        try
+        {
+            using var zip = new ZipArchive(new MemoryStream(archive, writable: false), ZipArchiveMode.Read);
+            ZipArchiveEntry? entry = zip.GetEntry(version + "/manifest.json") ?? zip.GetEntry("manifest.json");
+            if (entry is null || entry.Length > 1024 * 1024)
+            {
+                missing = "holds no manifest.json of its set";
+                return null;
+            }
+
+            using Stream content = entry.Open();
+            using JsonDocument document = JsonDocument.Parse(content);
+            JsonElement manifest = document.RootElement;
+            if (manifest.ValueKind != JsonValueKind.Object || Text(manifest, "format") != DocumentationManifest || Text(manifest, "version") != version)
+            {
+                missing = $"holds no {DocumentationManifest} manifest of version {version}";
+                return null;
+            }
+
+            if (!manifest.TryGetProperty("recordFormat", out JsonElement format))
+            {
+                missing = "has a manifest that states none";
+                return null;
+            }
+
+            List<long>? reads = format.ValueKind == JsonValueKind.Object && format.TryGetProperty("reads", out JsonElement r) && r.ValueKind == JsonValueKind.Array && r.GetArrayLength() > 0
+                ? r.EnumerateArray().Select(f => f.ValueKind == JsonValueKind.Number && f.TryGetInt64(out long n) && n is >= 1 and <= 1000 ? n : 0).ToList()
+                : null;
+            long writes = format.ValueKind == JsonValueKind.Object && format.TryGetProperty("writes", out JsonElement w) && w.ValueKind == JsonValueKind.Number && w.TryGetInt64(out long v) ? v : 0;
+            if (reads is null || reads.Contains(0) || reads.Distinct().Count() != reads.Count || !reads.Contains(writes))
+            {
+                missing = "has a manifest whose recordFormat is malformed (reads: distinct formats from 1; writes: one of them)";
+                return null;
+            }
+
+            missing = string.Empty;
+            return new ReleaseRecordFormat([.. reads.Order()], writes);
+        }
+        catch (Exception exception) when (exception is InvalidDataException or JsonException)
+        {
+            missing = "is not a zip archive holding a readable manifest";
+            return null;
+        }
+    }
 
     /// <summary>The intent, recorded before any dispatch: the provider, the destination, every setting it runs with, the version and the product.</summary>
     public static JsonObject IntentBody(string provider, string destination, IReadOnlyDictionary<string, string> settings, string version, string product)
@@ -127,8 +202,11 @@ public static class ReleaseFlow
         throw new InvalidOperationException("Nothing settled yet: the run is still in progress or the draft release is incomplete.");
     }
 
-    /// <summary>The candidate release record body from the observed draft.</summary>
-    public static JsonObject CandidateBody(string version, string repository, string commit, ReleaseObservation release, IReadOnlyList<string> evidence, IReadOnlyList<string> qualified, string signing, IReadOnlyList<string> limitations, ReleaseProfile profile, string checksums)
+    /// <summary>
+    /// The candidate release record body from the observed draft, with the record formats the release states, or this build's when
+    /// none are given.
+    /// </summary>
+    public static JsonObject CandidateBody(string version, string repository, string commit, ReleaseObservation release, IReadOnlyList<string> evidence, IReadOnlyList<string> qualified, string signing, IReadOnlyList<string> limitations, ReleaseProfile profile, string checksums, ReleaseRecordFormat? recordFormat = null)
     {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentException.ThrowIfNullOrWhiteSpace(checksums);
@@ -163,12 +241,7 @@ public static class ReleaseFlow
             }
         }
 
-        var reads = new JsonArray();
-        for (long format = 1; format <= RecordFormats.Latest; format++)
-        {
-            reads.Add(format);
-        }
-
+        ReleaseRecordFormat formats = recordFormat ?? ReleaseRecordFormat.ThisBuild;
         var body = new JsonObject
         {
             ["version"] = version,
@@ -176,7 +249,7 @@ public static class ReleaseFlow
             ["commit"] = commit,
             ["status"] = "candidate",
             ["artifacts"] = artifacts,
-            ["recordFormat"] = new JsonObject { ["reads"] = reads, ["writes"] = RecordFormats.Current },
+            ["recordFormat"] = new JsonObject { ["reads"] = new JsonArray(formats.Reads.Select(f => (JsonNode)f).ToArray()), ["writes"] = formats.Writes },
             ["evidence"] = new JsonArray(evidence.Select(e => (JsonNode)new JsonObject { ["summary"] = e }).ToArray()),
             ["qualified"] = new JsonArray(qualified.Select(q => (JsonNode)q).ToArray()),
             ["signing"] = signing,
@@ -231,4 +304,7 @@ public static class ReleaseFlow
     }
 
     private static JsonObject Copy(JsonElement previous) => JsonNode.Parse(previous.GetRawText())!.AsObject();
+
+    private static string? Text(JsonElement element, string name) =>
+        element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 }

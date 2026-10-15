@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Runtime.Providers;
@@ -78,6 +79,13 @@ public interface IReleaseProvider
 
     /// <summary>The operator's manual publication command for a tag; the provider never runs it.</summary>
     string ManualPublicationCommand(string destination, string tag);
+
+    /// <summary>
+    /// Reads one asset of a release by its name; null when the release or the asset does not exist, or when the implementation reads
+    /// no assets, as one written before this member was added does not. The observer reads the documentation set a draft carries
+    /// this way, for the record formats the release states, and holds what it read to the hash the release's checksum file names.
+    /// </summary>
+    byte[]? ReadAsset(string destination, string tag, string name) => null;
 }
 
 /// <summary>An in-memory release provider for conformance tests and journeys: it behaves as the GitHub provider would, under the test's control, declares the same settings, and qualifies no live service.</summary>
@@ -85,6 +93,7 @@ public sealed class FakeReleaseProvider : IReleaseProvider
 {
     private readonly Dictionary<string, RunObservation> runs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ReleaseObservation> releases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> assetContents = new(StringComparer.Ordinal);
     private readonly List<DispatchRequest> dispatches = [];
     private int nextRun = 1000;
 
@@ -163,9 +172,10 @@ public sealed class FakeReleaseProvider : IReleaseProvider
 
     /// <summary>
     /// Completes a run; on success a draft release appears with its assets and a checksum file. Without names, the assets are
-    /// Vericairn's own (the command line and Workbench per platform, the bill of materials, the notices); with names, exactly those.
+    /// Vericairn's own (the command line and Workbench per platform, the bill of materials, the notices); with names, exactly those,
+    /// and an asset the contents name has those bytes, their size and their hash, and can be read.
     /// </summary>
-    public void CompleteRun(string repository, string runId, bool success, string version, IReadOnlyList<string>? names = null, string checksums = "SHA256SUMS")
+    public void CompleteRun(string repository, string runId, bool success, string version, IReadOnlyList<string>? names = null, string checksums = "SHA256SUMS", IReadOnlyDictionary<string, byte[]>? contents = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repository);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
@@ -179,13 +189,27 @@ public sealed class FakeReleaseProvider : IReleaseProvider
         }
 
         string tag = "v" + version;
+        foreach (string stale in assetContents.Keys.Where(k => k.StartsWith(repository + "#" + tag + "#", StringComparison.Ordinal)).ToList())
+        {
+            assetContents.Remove(stale);
+        }
+
         var assets = new List<ReleaseAsset>();
         if (names is not null)
         {
             int k = 1;
             foreach (string name in names)
             {
-                assets.Add(new ReleaseAsset(name, 100 + k, "sha256:" + new string('c', 60) + k.ToString("D4", CultureInfo.InvariantCulture)));
+                if (contents is not null && contents.TryGetValue(name, out byte[]? content))
+                {
+                    assetContents[repository + "#" + tag + "#" + name] = content.ToArray();
+                    assets.Add(new ReleaseAsset(name, content.Length, ContentHash.Sha256(content)));
+                }
+                else
+                {
+                    assets.Add(new ReleaseAsset(name, 100 + k, "sha256:" + new string('c', 60) + k.ToString("D4", CultureInfo.InvariantCulture)));
+                }
+
                 k++;
             }
 
@@ -237,4 +261,13 @@ public sealed class FakeReleaseProvider : IReleaseProvider
 
     /// <inheritdoc />
     public string ManualPublicationCommand(string destination, string tag) => $"gh release edit {tag} -R {destination} --draft=false --latest";
+
+    /// <inheritdoc />
+    public byte[]? ReadAsset(string destination, string tag, string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        return assetContents.TryGetValue(destination + "#" + tag + "#" + name, out byte[]? content) ? content.ToArray() : null;
+    }
 }

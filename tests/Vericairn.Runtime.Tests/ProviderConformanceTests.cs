@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using Vericairn.Adapters.Git;
 using Vericairn.Providers.GitHub;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
@@ -233,6 +234,16 @@ public class ReleaseProviderConformanceTests
         Assert.False(published.Draft);
         Assert.True(RecordParser.IsTimestamp(published.PublishedAt));
 
+        // An asset whose content the run names is read back with the hash the checksum file gives it; another cannot be read.
+        DispatchReceipt docs = provider.Dispatch(new DispatchRequest(Repository, Settings, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = "0.3.0" }));
+        byte[] content = "the documentation set"u8.ToArray();
+        provider.CompleteRun(Repository, docs.RunId!, true, "0.3.0", ["widget-0.3.0-docs.zip", "widget-0.3.0-linux-x64.zip"], contents: new Dictionary<string, byte[]>(StringComparer.Ordinal) { ["widget-0.3.0-docs.zip"] = content });
+        ReleaseAsset asset = provider.ObserveRelease(Repository, "v0.3.0", Settings)!.Assets.Single(a => a.Name == "widget-0.3.0-docs.zip");
+        Assert.Equal((content.Length, ContentHash.Sha256(content)), (asset.Bytes, asset.Hash));
+        Assert.Equal(content, provider.ReadAsset(Repository, "v0.3.0", "widget-0.3.0-docs.zip"));
+        Assert.Null(provider.ReadAsset(Repository, "v0.3.0", "widget-0.3.0-linux-x64.zip"));
+        Assert.Null(provider.ReadAsset(Repository, "v9.9.9", "widget-0.3.0-docs.zip"));
+
         provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.RefuseAuthentication;
         Assert.Throws<ProviderRefusedException>(() => provider.Dispatch(new DispatchRequest(Repository, Settings, new Dictionary<string, string>(StringComparer.Ordinal))));
         provider.NextDispatch = FakeReleaseProvider.DispatchBehavior.Uncertain;
@@ -250,6 +261,9 @@ public class ReleaseProviderConformanceTests
         Assert.NotNull(release.PublishedAt);
         Assert.Contains(release.Assets, a => a.Name == "vericairn-0.1.0-osx-arm64.tar.gz" && a.Hash is not null);
         Assert.Null(provider.ObserveRelease("Vericairn/vericairn", "v0.0.0-nope", Settings));
+        ReleaseAsset notices = release.Assets.Single(a => a.Name == "vericairn-0.1.0-THIRD-PARTY-NOTICES.md");
+        Assert.Equal(notices.Hash, ContentHash.Sha256(provider.ReadAsset("Vericairn/vericairn", "v0.1.0", notices.Name)!));
+        Assert.Null(provider.ReadAsset("Vericairn/vericairn", "v0.1.0", "no-such-asset.txt"));
     }
 }
 

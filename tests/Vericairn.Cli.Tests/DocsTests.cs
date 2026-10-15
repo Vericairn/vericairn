@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.DocsTool;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Cli.Tests;
 
@@ -41,6 +42,11 @@ public class DocsTests
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Equal(13, manifest.RootElement.GetProperty("documents").GetArrayLength());
+
+            // The record formats of the build, which the release observer reads from the set as the release's own.
+            JsonElement formats = manifest.RootElement.GetProperty("recordFormat");
+            Assert.Equal(RecordFormats.Reads, formats.GetProperty("reads").EnumerateArray().Select(f => f.GetInt64()));
+            Assert.Equal(RecordFormats.Current, formats.GetProperty("writes").GetInt64());
 
             string cli = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
@@ -131,6 +137,23 @@ public class DocsTests
             Assert.Equal(1, code);
             Assert.Contains("This build has the command vericairn docs check and the set does not", text, StringComparison.Ordinal);
             Assert.Contains("The set documents the command vericairn docs retired-verb, which this build does not have", text, StringComparison.Ordinal);
+
+            // Record formats other than this build's, or none, are refused too: the release observer records what the set states.
+            string writes = $"\"writes\": {RecordFormats.Current}";
+            Assert.Contains(writes, manifest, StringComparison.Ordinal);
+            File.WriteAllText(manifestPath, manifest.Replace(writes, "\"writes\": 1", StringComparison.Ordinal));
+            (code, text) = Tool(() => ReferenceSet.CompareWithBuild(output, json: false));
+            Assert.Equal(1, code);
+            string reads = string.Join(", ", RecordFormats.Reads);
+            Assert.Contains($"The set states that the release reads record formats {reads} and writes 1, and this build reads record formats {reads} and writes {RecordFormats.Current}", text, StringComparison.Ordinal);
+            using (JsonDocument stale = JsonDocument.Parse(manifest))
+            {
+                File.WriteAllText(manifestPath, JsonSerializer.Serialize(stale.RootElement.EnumerateObject().Where(p => p.Name != "recordFormat").ToDictionary(p => p.Name, p => p.Value)));
+            }
+
+            (code, text) = Tool(() => ReferenceSet.CompareWithBuild(output, json: false));
+            Assert.Equal(1, code);
+            Assert.Contains($"This build reads record formats {reads} and writes {RecordFormats.Current}, and the set states no record formats", text, StringComparison.Ordinal);
         }
         finally
         {
