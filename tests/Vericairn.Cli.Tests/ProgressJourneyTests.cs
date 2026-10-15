@@ -2,13 +2,15 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
 
 /// <summary>
 /// <c>vericairn progress</c> over an estate built through the command line: every section from the records alone, the same bytes on a
-/// fresh copy, the states status derives, and what each release contained as <c>vericairn docs notes</c> derives it.
+/// fresh copy, the states status derives, what each release contained as <c>vericairn docs notes</c> derives it, and a document that
+/// carries the report in a generated region the estate check holds to a fresh generation.
 /// </summary>
 [Collection("cli")]
 public class ProgressJourneyTests
@@ -93,6 +95,51 @@ public class ProgressJourneyTests
         finally
         {
             CliHarness.Delete(root, scratch, copy ?? string.Empty);
+        }
+    }
+
+    [Fact]
+    public void ADocumentCarriesTheReportInARegionTheEstateCheckHoldsToAFreshGeneration()
+    {
+        string root = CliHarness.TempDirectory("progress-region");
+        string scratch = CliHarness.TempDirectory("progress-region-scratch");
+        try
+        {
+            string op = Init(root);
+            Order(root, scratch, op, "W-1", "ordinary", "[]");
+            string document = Path.Combine(root, "docs", "progress.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(document)!);
+            File.WriteAllText(document, "# Progress\n\nWritten by hand.\n<!-- vericairn:generated progress -->\n<!-- vericairn:end progress -->\nMore by hand.\n");
+            CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "declaration.json", """{"path":"docs/progress.md","title":"Progress","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"remind"}],"regions":[{"id":"progress","generator":"vericairn.records/progress"}],"checks":["matches-generator"],"summary":"Carries the progress report."}"""));
+
+            // Empty, the region is not what its generator makes; regenerated, it holds the report and the estate check passes.
+            Assert.Contains("document.generated-edited", CliHarness.Run("--estate", root, "estate", "check").Out, StringComparison.Ordinal);
+            Assert.Contains("rewrote progress", CliHarness.Ok("--estate", root, "docs", "regenerate", "docs/progress.md").Out, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+            string text = File.ReadAllText(document);
+            Assert.StartsWith("# Progress\n\nWritten by hand.\n<!-- vericairn:generated progress -->\n```text\nProgress of Example (example), rendered from its records", text, StringComparison.Ordinal);
+            Assert.EndsWith("```\n<!-- vericairn:end progress -->\nMore by hand.\n", text, StringComparison.Ordinal);
+
+            // It is the report vericairn progress prints, except that its check names the records alone and says why.
+            string region = GeneratedRegions.Content(text, "progress")!;
+            string printed = CliHarness.Ok("--estate", root, "progress").Out;
+            List<string> differing = printed.Split('\n').Except(region.Split('\n'), StringComparer.Ordinal).ToList();
+            Assert.Equal(["  Check: 0 errors, 0 warnings [every record and the repository, as vericairn estate check runs them]"], differing);
+            Assert.Contains("  Check: 0 errors, 0 warnings in the records [every record; the repository checks, which read this document, are vericairn estate check's]\n", region, StringComparison.Ordinal);
+
+            // A new record makes it stale until it is generated again; nothing outside the markers changes.
+            Order(root, scratch, op, "W-2", "ordinary", "[]");
+            CliHarness.Outcome stale = CliHarness.Run("--estate", root, "estate", "check");
+            Assert.Equal(1, stale.Code);
+            Assert.Contains("region progress differs from a fresh generation by vericairn.records/progress", stale.Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "docs", "regenerate", "docs/progress.md");
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+            Assert.Contains("    W-2  ordinary   Order W-2 [work-order ", File.ReadAllText(document), StringComparison.Ordinal);
+            Assert.EndsWith("<!-- vericairn:end progress -->\nMore by hand.\n", File.ReadAllText(document), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
         }
     }
 

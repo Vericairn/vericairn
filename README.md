@@ -45,7 +45,8 @@ release and pins the one it runs on.
   when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress report from
   the records alone, the same on every machine: where the estate stands, the work orders by state, each published
   release and what it contained, what comes next by release, the next eligible work and what waits on the operator,
-  every line naming the records it rests on; the API, an MCP tool and Workbench's home carry the same report. `vericairn goal` carries an objective: a goal is
+  every line naming the records it rests on; the API, an MCP tool, Workbench's home and a generated region of a
+  document carry the same report. `vericairn goal` carries an objective: a goal is
   proposed and activated, record predicates and an evaluator who did none of its work judge it condition by
   condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
   given can activate, fund or accept one. There is no conductor yet: people and agents do a goal's steps.

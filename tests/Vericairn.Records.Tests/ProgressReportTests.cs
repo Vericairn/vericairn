@@ -351,6 +351,34 @@ public class ProgressReportTests
             text.Split("\n\n").Select(s => s.Split('\n')[0]).Select(h => h.StartsWith("Progress of ", StringComparison.Ordinal) ? "Progress of " : h.Split(':')[0]));
     }
 
+    [Fact]
+    public void TheProgressRegionIsTheReportFromTheRecordsAloneHeldToAFreshGeneration()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        Order(estate, "W-1");
+        estate.Add("living-document", estate.OperatorId, """{"path":"docs/progress.md","title":"Progress","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"remind"}],"regions":[{"id":"progress","generator":"vericairn.records/progress"}],"checks":["matches-generator"],"summary":"Carries the progress report."}""");
+        IDocumentGenerator generator = DocumentGenerators.Find("vericairn.records/progress")!;
+        Assert.Null(generator.Generate(estate.Load(), null, []));
+        string region = generator.Generate(estate.Load(), "progress", [])!;
+        Assert.Equal("```text\n" + ProgressReport.Render(estate.Load(), null) + "```\n", region);
+        Assert.Contains("in the records [every record; the repository checks, which read this document, are vericairn estate check's]", region, StringComparison.Ordinal);
+        Assert.True(LivingDocuments.IsAvailable("vericairn.records/progress"));
+        Assert.Empty(Assert.Single(LivingDocuments.Derive(estate.Load())).Unavailable);
+
+        // In place it passes the estate check, which never runs within itself; a new record makes it stale until it is generated again.
+        estate.WriteFile("docs/progress.md", "# Progress\n\n<!-- vericairn:generated progress -->\n" + region + "<!-- vericairn:end progress -->\n");
+        Assert.DoesNotContain(EstateChecks.Run(estate.Load()), f => f.Code.StartsWith("document.generated", StringComparison.Ordinal));
+        Order(estate, "W-2");
+        Assert.Contains(EstateChecks.Run(estate.Load()), f => f.Code == "document.generated-edited" && f.Message.Contains("region progress differs from a fresh generation by vericairn.records/progress", StringComparison.Ordinal));
+        string text = File.ReadAllText(Path.Combine(estate.Root, "docs", "progress.md"));
+        estate.WriteFile("docs/progress.md", GeneratedRegions.Replace(text, "progress", generator.Generate(estate.Load(), "progress", [])!)!);
+        Assert.DoesNotContain(EstateChecks.Run(estate.Load()), f => f.Code.StartsWith("document.generated", StringComparison.Ordinal));
+
+        // No title or question closes the fence: it is longer than any run of backticks in the report.
+        estate.Add("work-order", estate.OperatorId, OrderBody("W-3", "ordinary", string.Empty).Replace("\"Order W-3\"", "\"Run ```vericairn``` here\"", StringComparison.Ordinal));
+        Assert.StartsWith("````text\n", generator.Generate(estate.Load(), "progress", []), StringComparison.Ordinal);
+    }
+
     internal static RecordEnvelope Product(TestEstate estate) =>
         estate.Add("product", estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
 
