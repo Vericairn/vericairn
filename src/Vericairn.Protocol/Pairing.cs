@@ -17,27 +17,31 @@ namespace Vericairn.Protocol;
 public sealed record PairingIssueRequest(string Principal, string By, IReadOnlyList<string>? Profiles = null);
 
 /// <summary>A pairing code, shown to the administrator and entered on the new device: short-lived, single-use and limited in attempts.</summary>
-/// <param name="Code">The code, five groups of four characters; the first group names the pairing and the other four are its secret.</param>
+/// <param name="Code">The code, four groups of four characters, all of them secret.</param>
 /// <param name="Principal">The principal the new device will act for.</param>
 /// <param name="PrincipalName">That principal's name.</param>
 /// <param name="Profiles">The connectivity profiles the device will be permitted.</param>
 /// <param name="ExpiresAt">When the code stops working.</param>
-/// <param name="Attempts">How many exchanges the code allows.</param>
+/// <param name="Attempts">How many confirmations that do not match the code it survives.</param>
 /// <param name="Address">Where the device reaches the runtime: the local-network profile's address and port.</param>
 /// <param name="Estate">The estate's id.</param>
 /// <param name="Identity">The fingerprint of the runtime identity the device will pin (sha256:hex of its public key), to compare on the device.</param>
 public sealed record PairingIssued(string Code, string Principal, string? PrincipalName, IReadOnlyList<string> Profiles, string ExpiresAt, int Attempts, string Address, string Estate, string Identity);
 
-/// <summary>The new device's first message: the code's handle and a fresh nonce. Nothing in it depends on the code's secret.</summary>
-/// <param name="Handle">The first four characters of the code, which name the pairing.</param>
+/// <summary>
+/// The new device's first message: a fresh nonce and its MAC, with the key the code gives the device, over the nonce and the
+/// certificate this connection showed it. The code is named nowhere: the runtime finds it by trying the codes it holds, and a hello
+/// that matches none is refused alike, whatever was tried.
+/// </summary>
 /// <param name="Nonce">32 random bytes, base64url.</param>
-public sealed record PairingHello(string Handle, string Nonce);
+/// <param name="Mac">HMAC-SHA256 with the device's key over the hello transcript, base64url.</param>
+public sealed record PairingHello(string Nonce, string Mac);
 
 /// <summary>
-/// The runtime's answer to a hello: who it is, the certificate it presented on this connection, what it will record, and a MAC over
-/// all of it with the key the code gives the runtime. Each answer uses one of the code's attempts.
+/// The runtime's answer to a hello that proved the code: who it is, the certificate it presented on this connection, what it will
+/// record, and a MAC over all of it and the hello with the key the code gives the runtime. Nothing in it is sent to anyone who has
+/// not proved the code.
 /// </summary>
-/// <param name="Handle">The pairing's handle.</param>
 /// <param name="DeviceNonce">The device's nonce, echoed.</param>
 /// <param name="RuntimeNonce">32 random bytes, base64url; names this exchange.</param>
 /// <param name="Estate">The estate's id.</param>
@@ -53,9 +57,9 @@ public sealed record PairingHello(string Handle, string Nonce);
 /// <param name="Format">The record format the device record is written in.</param>
 /// <param name="ExpiresAt">When the code stops working.</param>
 /// <param name="Mac">HMAC-SHA256 with the runtime's key over the challenge transcript, base64url.</param>
-public sealed record PairingChallenge(string Handle, string DeviceNonce, string RuntimeNonce, string Estate, string? EstateName, string Identity, string Certificate, string Principal, string? PrincipalName, string PrincipalKind, IReadOnlyList<string> Profiles, string Record, string At, long Format, string ExpiresAt, string Mac);
+public sealed record PairingChallenge(string DeviceNonce, string RuntimeNonce, string Estate, string? EstateName, string Identity, string Certificate, string Principal, string? PrincipalName, string PrincipalKind, IReadOnlyList<string> Profiles, string Record, string At, long Format, string ExpiresAt, string Mac);
 
-/// <summary>The new device as it presents itself: its descriptive identity and its public key.</summary>
+/// <summary>The new device as it presents itself: its descriptive identity and its public key. The runtime cannot verify the custody, presence, platform or name a device states, and records them as the device's own statement.</summary>
 /// <param name="Name">Descriptive name, never a machine path.</param>
 /// <param name="Platform">Operating system family.</param>
 /// <param name="Custody">How its key is held.</param>
@@ -64,12 +68,11 @@ public sealed record PairingChallenge(string Handle, string DeviceNonce, string 
 public sealed record PairingDevice(string Name, string Platform, string Custody, string PublicKey, string? Presence = null);
 
 /// <summary>The device's confirmation: its key and descriptive identity, its signature of the device record, and a MAC with the key the code gives the device.</summary>
-/// <param name="Handle">The pairing's handle.</param>
 /// <param name="RuntimeNonce">The runtime's nonce, which names the exchange.</param>
 /// <param name="Device">The device as it presents itself.</param>
 /// <param name="Signature">The device key's signature of the device record's content hash, base64url.</param>
 /// <param name="Mac">HMAC-SHA256 with the device's key over the confirmation transcript, base64url.</param>
-public sealed record PairingConfirm(string Handle, string RuntimeNonce, PairingDevice Device, string Signature, string Mac);
+public sealed record PairingConfirm(string RuntimeNonce, PairingDevice Device, string Signature, string Mac);
 
 /// <summary>The runtime's last message: the records it wrote, with a MAC over the whole exchange.</summary>
 /// <param name="Device">The device record's id: the device's identity.</param>
@@ -79,9 +82,9 @@ public sealed record PairingConfirm(string Handle, string RuntimeNonce, PairingD
 public sealed record PairingCompleted(string Device, string Admission, string Hash, string Mac);
 
 /// <summary>
-/// The pairing exchange, version 1: a code of 20 characters from Crockford's base32 alphabet, the first four naming the pending
-/// pairing and the other sixteen its 80-bit secret; HKDF-SHA256 over the secret gives the runtime and the device a key each, and
-/// every message after the hello carries an HMAC-SHA256 over the transcript so far. Standard primitives only: no new cryptography.
+/// The pairing exchange, version 1: a code of 16 characters from Crockford's base32 alphabet, 80 secret bits and nothing else;
+/// HKDF-SHA256 over it gives the runtime and the device a key each, and every message carries an HMAC-SHA256 over the transcript so
+/// far, the hello's over the certificate the device's connection showed. Standard primitives only: no new cryptography.
 /// </summary>
 public static class PairingProtocol
 {
@@ -91,16 +94,10 @@ public static class PairingProtocol
     /// <summary>Crockford's base32 alphabet: digits and upper-case letters without I, L, O and U.</summary>
     public const string Alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
-    /// <summary>Characters naming the pairing; not secret.</summary>
-    public const int HandleLength = 4;
+    /// <summary>Characters of a code: 16 characters of 5 bits, 80 secret bits.</summary>
+    public const int CodeLength = 16;
 
-    /// <summary>Characters of the secret: 16 characters of 5 bits, 80 bits.</summary>
-    public const int SecretLength = 16;
-
-    /// <summary>Characters of a whole code.</summary>
-    public const int CodeLength = HandleLength + SecretLength;
-
-    /// <summary>How many exchanges one code allows: each answer the runtime gives to a hello uses one.</summary>
+    /// <summary>How many confirmations that do not match the code it survives; a hello that matches no code uses none.</summary>
     public const int Attempts = 5;
 
     /// <summary>How long a code works after it is issued.</summary>
@@ -109,7 +106,7 @@ public static class PairingProtocol
     /// <summary>A new code from the system's cryptographic random number generator, ungrouped.</summary>
     public static string NewCode() => new(RandomNumberGenerator.GetItems<char>(Alphabet, CodeLength));
 
-    /// <summary>A code as shown: five groups of four characters.</summary>
+    /// <summary>A code as shown: four groups of four characters.</summary>
     public static string Display(string code)
     {
         ArgumentNullException.ThrowIfNull(code);
@@ -117,9 +114,8 @@ public static class PairingProtocol
     }
 
     /// <summary>Reads a code as a person typed it: case is ignored, as are hyphens and spaces, and I and L read as 1, O as 0.</summary>
-    public static bool TryParse(string? text, out string handle, out string secret)
+    public static bool TryParse(string? text, out string secret)
     {
-        handle = string.Empty;
         secret = string.Empty;
         if (text is null)
         {
@@ -153,23 +149,21 @@ public static class PairingProtocol
             return false;
         }
 
-        handle = normalized.ToString(0, HandleLength);
-        secret = normalized.ToString(HandleLength, SecretLength);
+        secret = normalized.ToString();
         return true;
     }
 
-    /// <summary>The two keys a code gives: HKDF-SHA256 extracts from the secret with the scheme as salt, and expands once for the runtime and once for the device.</summary>
-    public static (byte[] Runtime, byte[] Device) Keys(string handle, string secret)
+    /// <summary>The two keys a code gives: HKDF-SHA256 extracts from the code with the scheme as salt, and expands once for the runtime and once for the device.</summary>
+    public static (byte[] Runtime, byte[] Device) Keys(string secret)
     {
-        ArgumentException.ThrowIfNullOrEmpty(handle);
         ArgumentException.ThrowIfNullOrEmpty(secret);
         byte[] material = Encoding.UTF8.GetBytes(secret);
         byte[] prk = HKDF.Extract(HashAlgorithmName.SHA256, material, Encoding.UTF8.GetBytes(Scheme));
         try
         {
             return (
-                HKDF.Expand(HashAlgorithmName.SHA256, prk, 32, Encoding.UTF8.GetBytes(Scheme + " runtime " + handle)),
-                HKDF.Expand(HashAlgorithmName.SHA256, prk, 32, Encoding.UTF8.GetBytes(Scheme + " device " + handle)));
+                HKDF.Expand(HashAlgorithmName.SHA256, prk, 32, Encoding.UTF8.GetBytes(Scheme + " runtime")),
+                HKDF.Expand(HashAlgorithmName.SHA256, prk, 32, Encoding.UTF8.GetBytes(Scheme + " device")));
         }
         finally
         {
@@ -185,18 +179,21 @@ public static class PairingProtocol
     public static bool IsNonce(string? text) =>
         !string.IsNullOrEmpty(text) && text.Length <= 88 && Base64Url.IsValid(text) && Base64Url.DecodeFromChars(text).Length is >= 16 and <= 64;
 
-    /// <summary>The runtime's MAC over a challenge, every field but the MAC.</summary>
-    public static string ChallengeMac(byte[] runtimeKey, PairingChallenge challenge) => Mac(runtimeKey, ChallengeTranscript(challenge));
+    /// <summary>The device's MAC over its nonce and the fingerprint of the certificate its connection showed it.</summary>
+    public static string HelloMac(byte[] deviceKey, string nonce, string certificate) => Mac(deviceKey, HelloTranscript(nonce, certificate));
 
-    /// <summary>The device's MAC over the challenge as received, with its MAC, and the confirmation, every field but its MAC.</summary>
-    public static string ConfirmMac(byte[] deviceKey, PairingChallenge challenge, PairingConfirm confirm) => Mac(deviceKey, ConfirmTranscript(challenge, confirm));
+    /// <summary>The runtime's MAC over the hello and a challenge, every field but the challenge's MAC.</summary>
+    public static string ChallengeMac(byte[] runtimeKey, PairingHello hello, PairingChallenge challenge) => Mac(runtimeKey, ChallengeTranscript(hello, challenge));
+
+    /// <summary>The device's MAC over the exchange so far and the confirmation, every field but its MAC.</summary>
+    public static string ConfirmMac(byte[] deviceKey, PairingHello hello, PairingChallenge challenge, PairingConfirm confirm) => Mac(deviceKey, ConfirmTranscript(hello, challenge, confirm));
 
     /// <summary>The runtime's MAC over the whole exchange and what it recorded.</summary>
-    public static string CompletedMac(byte[] runtimeKey, PairingChallenge challenge, PairingConfirm confirm, PairingCompleted completed)
+    public static string CompletedMac(byte[] runtimeKey, PairingHello hello, PairingChallenge challenge, PairingConfirm confirm, PairingCompleted completed)
     {
         ArgumentNullException.ThrowIfNull(completed);
         var transcript = new Transcript("completed");
-        transcript.Add(ConfirmTranscript(challenge, confirm));
+        transcript.Add(ConfirmTranscript(hello, challenge, confirm));
         transcript.Add(confirm.Mac);
         transcript.Add(completed.Device);
         transcript.Add(completed.Admission);
@@ -224,11 +221,21 @@ public static class PairingProtocol
         return Base64Url.EncodeToString(HMACSHA256.HashData(key, transcript));
     }
 
-    private static byte[] ChallengeTranscript(PairingChallenge challenge)
+    private static byte[] HelloTranscript(string nonce, string certificate)
     {
+        var transcript = new Transcript("hello");
+        transcript.Add(nonce);
+        transcript.Add(certificate);
+        return transcript.ToArray();
+    }
+
+    private static byte[] ChallengeTranscript(PairingHello hello, PairingChallenge challenge)
+    {
+        ArgumentNullException.ThrowIfNull(hello);
         ArgumentNullException.ThrowIfNull(challenge);
         var transcript = new Transcript("challenge");
-        transcript.Add(challenge.Handle);
+        transcript.Add(hello.Nonce);
+        transcript.Add(hello.Mac);
         transcript.Add(challenge.DeviceNonce);
         transcript.Add(challenge.RuntimeNonce);
         transcript.Add(challenge.Estate);
@@ -246,14 +253,13 @@ public static class PairingProtocol
         return transcript.ToArray();
     }
 
-    private static byte[] ConfirmTranscript(PairingChallenge challenge, PairingConfirm confirm)
+    private static byte[] ConfirmTranscript(PairingHello hello, PairingChallenge challenge, PairingConfirm confirm)
     {
         ArgumentNullException.ThrowIfNull(confirm);
         ArgumentNullException.ThrowIfNull(confirm.Device);
         var transcript = new Transcript("confirm");
-        transcript.Add(ChallengeTranscript(challenge));
+        transcript.Add(ChallengeTranscript(hello, challenge));
         transcript.Add(challenge.Mac);
-        transcript.Add(confirm.Handle);
         transcript.Add(confirm.RuntimeNonce);
         transcript.Add(confirm.Device.Name);
         transcript.Add(confirm.Device.Platform);

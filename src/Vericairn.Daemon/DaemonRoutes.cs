@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -57,11 +58,14 @@ internal static class DaemonRoutes
 
         string? name = host.Service.PairingPlan(request.Principal).PrincipalName;
         string address = new IPEndPoint(IPAddress.Parse(served.Host), served.Port).ToString();
-        host.Log($"pairing code {pairing.Handle} issued by {request.By} for {request.Principal} ({string.Join(", ", profiles)}), until {RecordParser.FormatTimestamp(pairing.ExpiresAt)}");
+        host.Log($"pairing {pairing.Id} issued by {request.By} for {request.Principal} ({string.Join(", ", profiles)}), until {RecordParser.FormatTimestamp(pairing.ExpiresAt)}");
         return Results.Json(new PairingIssued(PairingProtocol.Display(code), request.Principal, name, profiles, RecordParser.FormatTimestamp(pairing.ExpiresAt), PairingRegistry.Attempts, address, host.Service.Session.Manifest.Estate, host.Identity.Fingerprint), ProtocolJson.Options);
     }
 
-    /// <summary>Answers a device's hello: who the runtime is, the certificate on this connection and what will be recorded, with the runtime's MAC.</summary>
+    /// <summary>
+    /// Answers a device's hello that proves a code it holds: who the runtime is, the certificate on this connection and what will be
+    /// recorded, with the runtime's MAC. A hello that proves no code is refused alike and its connection closed.
+    /// </summary>
     private static IResult Hello(DaemonHost host, HttpContext context, PairingHello hello)
     {
         if (!DaemonHost.OnLocalNetwork(context) || host.Identity is null)
@@ -69,21 +73,24 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status401Unauthorized, "denied", "Pairing runs over the local-network profile, at the address the administrator gave with the code.");
         }
 
-        if (hello is null || string.IsNullOrWhiteSpace(hello.Handle) || !PairingProtocol.IsNonce(hello.Nonce))
+        if (hello is null || !PairingProtocol.IsNonce(hello.Nonce) || string.IsNullOrEmpty(hello.Mac))
         {
-            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A hello names the pairing code's handle and carries a nonce of 32 random bytes in base64url.");
+            context.Response.Headers.Connection = "close";
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A hello carries a nonce of 32 random bytes and its MAC, both base64url.");
         }
 
-        (PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Hello(hello);
+        string certificate = host.CertificateOf(context);
+        (PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Hello(hello, certificate, context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
         if (pairing is null)
         {
+            context.Response.Headers.Connection = "close";
             return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
         }
 
         PairingPlan plan = host.Service.PairingPlan(pairing.Principal);
-        var challenge = new PairingChallenge(pairing.Handle, hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, host.CertificateOf(context), plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty);
-        challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, challenge) };
-        host.Pairings.Open(pairing, challenge, plan);
+        var challenge = new PairingChallenge(hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty);
+        challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, hello, challenge) };
+        host.Pairings.Open(pairing, hello, challenge, plan);
         return Results.Json(challenge, ProtocolJson.Options);
     }
 
@@ -103,13 +110,19 @@ internal static class DaemonRoutes
         (PairingRegistry.Pairing? pairing, PairingRegistry.Exchange? exchange, string? problem) = host.Pairings.Confirm(confirm);
         if (pairing is null || exchange is null)
         {
+            context.Response.Headers.Connection = "close";
             return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
         }
 
         string? device = null;
         try
         {
-            string note = $"Paired over the local network with a pairing code {pairing.By} issued at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record.";
+            if (DescriptiveRefusal(confirm.Device) is string descriptive)
+            {
+                return Problem(StatusCodes.Status422UnprocessableEntity, "refused", descriptive);
+            }
+
+            string note = $"Paired over the local network with a pairing code {pairing.By} issued at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
             (WriteOutcome written, WriteOutcome? admitted) = host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.By, note);
             if (!written.Ok || admitted?.Written is null)
             {
@@ -118,8 +131,8 @@ internal static class DaemonRoutes
 
             device = written.Written!.Id;
             var completed = new PairingCompleted(device, admitted.Written.Id, written.Written.Hash, string.Empty);
-            completed = completed with { Mac = PairingProtocol.CompletedMac(pairing.RuntimeKey, exchange.Challenge, confirm, completed) };
-            host.Log($"device {device} ({confirm.Device.Name}, {confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By} with code {pairing.Handle}");
+            completed = completed with { Mac = PairingProtocol.CompletedMac(pairing.RuntimeKey, exchange.Hello, exchange.Challenge, confirm, completed) };
+            host.Log($"device {device} ({confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By}, pairing {pairing.Id}");
             return Results.Json(completed, ProtocolJson.Options);
         }
         finally
@@ -127,6 +140,12 @@ internal static class DaemonRoutes
             host.Pairings.Finish(pairing, device);
         }
     }
+
+    /// <summary>A device's descriptive name is text a person reads: no control or formatting characters, which could hide or reorder what is shown.</summary>
+    private static string? DescriptiveRefusal(PairingDevice device) =>
+        device.Name is null || device.Name.Any(c => char.IsControl(c) || CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.Format)
+            ? "A device's name is text without control or formatting characters; nothing was recorded."
+            : null;
 
     /// <summary>The runtime identity's proof for a nonce, over the certificate this connection presented; written with its length, for a client that reads it before any other request.</summary>
     private static IResult Prove(DaemonHost host, HttpContext context, string? nonce)

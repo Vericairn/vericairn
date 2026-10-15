@@ -33,13 +33,22 @@ public sealed class RuntimeConnections
         this.keys = keys;
     }
 
-    /// <summary>Pairs with the runtime at an address using a code and keeps the connection; throws <see cref="PairingException"/> when the pairing does not complete.</summary>
+    /// <summary>
+    /// Pairs with the runtime at an address using a code and keeps the connection; throws <see cref="PairingException"/> when the pairing
+    /// does not complete. Pairing again replaces the earlier connections to the same estate that pin another runtime identity, which
+    /// the runtime replaced, or that are for the same principal: their devices stay admitted until an administrator revokes them.
+    /// </summary>
     public RuntimeConnection Add(string address, string code, PairingOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
         PairedRuntime paired = RuntimePairing.Pair(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys });
         var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         Save(connection);
+        foreach (RuntimeConnection earlier in List().Where(c => c.Id != connection.Id && c.Estate == connection.Estate && (c.Identity != connection.Identity || c.Principal == connection.Principal)))
+        {
+            File.Delete(PathOf(earlier.Id));
+        }
+
         return connection;
     }
 

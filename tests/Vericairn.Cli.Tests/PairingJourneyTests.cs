@@ -50,10 +50,11 @@ public class PairingJourneyTests
             string code = issued.GetProperty("code").GetString()!;
             string address = issued.GetProperty("address").GetString()!;
             string mistyped = code[..^1] + (code[^1] == '0' ? '1' : '0');
-            Assert.Contains("does not know this pairing code", CliHarness.Run("connections", "add", address, "--code", mistyped, "--name", "Build laptop", "--custody", "file").Err, StringComparison.Ordinal);
+            Assert.Contains("No pairing here matches this code", CliHarness.Run("connections", "add", address, "--code", mistyped, "--name", "Build laptop", "--custody", "file").Err, StringComparison.Ordinal);
             JsonElement added = CliHarness.Ok("--json", "connections", "add", address, "--code", code, "--name", "Build laptop", "--custody", "file").Json;
             Assert.Equal("current", added.GetProperty("state").GetString());
             Assert.Equal(issued.GetProperty("identity").GetString(), added.GetProperty("identity").GetString());
+            Assert.Equal(0, added.GetProperty("replaced").GetArrayLength());
             string connection = added.GetProperty("id").GetString()!;
             string device = added.GetProperty("device").GetString()!;
             Assert.Contains("used already", CliHarness.Run("connections", "add", address, "--code", code, "--name", "Another laptop", "--custody", "file").Err, StringComparison.Ordinal);

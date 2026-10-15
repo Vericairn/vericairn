@@ -39,7 +39,7 @@ public class PairingTests
     {
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         PairingIssued issued = harness.Issue(harness.Estate.BuilderId);
-        Assert.Matches("^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){4}$", issued.Code);
+        Assert.Matches("^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$", issued.Code);
         Assert.Equal(["local-network"], issued.Profiles);
         Assert.Equal(PairingProtocol.Attempts, issued.Attempts);
         Assert.Equal(harness.Address, issued.Address);
@@ -103,7 +103,8 @@ public class PairingTests
         RuntimeConnection first = harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone"));
         PairingException reused = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Second phone")));
         Assert.Equal("denied", reused.Code);
-        Assert.Contains($"used already, by device {first.Device}", reused.Message, StringComparison.Ordinal);
+        Assert.Contains("used already", reused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(first.Device, reused.Message, StringComparison.Ordinal);
         Assert.Single(harness.Socket.Devices(), d => d.Principal == harness.Estate.BuilderId);
         Assert.Single(harness.Connections.List());
         Assert.Single(Directory.EnumerateFiles(Path.Combine(harness.DeviceHome, "keys")));
@@ -115,38 +116,38 @@ public class PairingTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         PairingIssued issued = harness.Issue(harness.Estate.BuilderId);
 
-        // Mistyped in its secret: the runtime's answer does not verify with it, so the device makes no key and sends nothing more.
+        // Mistyped, or never issued here: no code the runtime holds matches the hello, which is refused alike, and nothing is made.
         string code = issued.Code.Replace("-", string.Empty, StringComparison.Ordinal);
         string mistyped = code[..^1] + (code[^1] == '0' ? '1' : '0');
-        PairingException wrong = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, mistyped, new PairingOptions("Phone")));
-        Assert.Equal("denied", wrong.Code);
-        Assert.Contains("does not know this pairing code", wrong.Message, StringComparison.Ordinal);
+        foreach (string wrongCode in new[] { mistyped, PairingProtocol.NewCode() })
+        {
+            PairingException wrong = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, wrongCode, new PairingOptions("Phone")));
+            Assert.Equal("denied", wrong.Code);
+            Assert.Contains("No pairing here matches this code", wrong.Message, StringComparison.Ordinal);
+        }
+
         NothingPaired(harness);
 
-        // A code no pairing here has.
-        string handle = code[..PairingProtocol.HandleLength];
-        string other = (handle == "ZZZZ" ? "YYYY" : "ZZZZ") + code[PairingProtocol.HandleLength..];
-        PairingException unknown = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, other, new PairingOptions("Phone")));
-        Assert.Contains("No pairing here has this code", unknown.Message, StringComparison.Ordinal);
-
-        // Someone who sees an exchange but lacks the code cannot complete it: a confirmation with any other MAC is refused and ends it.
+        // Whoever holds the code but changes the confirmation is refused, and the exchange ends; each such confirmation uses an attempt.
         using HttpClient pairing = PairingClient(harness);
-        PairingChallenge challenge = await Hello(pairing, handle);
-        var forged = new PairingConfirm(handle, challenge.RuntimeNonce, new PairingDevice("Planted", "linux", "file-owner-only", harness.Host.IdentityPublicKey!, "none"), "AAAA", PairingProtocol.NewNonce());
+        (PairingHello hello, PairingChallenge challenge) = await Hello(harness, pairing, issued.Code);
+        var forged = new PairingConfirm(challenge.RuntimeNonce, new PairingDevice("Planted", "linux", "file-owner-only", harness.Host.IdentityPublicKey!, "none"), "AAAA", PairingProtocol.NewNonce());
         (HttpStatusCode status, Problem? problem) = await Confirm(pairing, forged);
         Assert.Equal(HttpStatusCode.Unauthorized, status);
         Assert.Contains("does not match this pairing code", problem!.Message, StringComparison.Ordinal);
-        Assert.Contains("No exchange of this pairing code is open", (await Confirm(pairing, forged)).Problem!.Message, StringComparison.Ordinal);
+        Assert.Contains("No exchange of a pairing code is open", (await Confirm(pairing, forged)).Problem!.Message, StringComparison.Ordinal);
+        Assert.NotNull(hello);
         NothingPaired(harness);
 
-        // Each answer used one of the code's attempts: after the fifth, the right code is refused too.
-        for (int attempt = 3; attempt <= PairingProtocol.Attempts; attempt++)
+        // After five confirmations that did not match, the right code is refused too.
+        for (int attempt = 2; attempt <= PairingProtocol.Attempts; attempt++)
         {
-            await Hello(pairing, handle);
+            (_, PairingChallenge next) = await Hello(harness, pairing, issued.Code);
+            Assert.Equal(HttpStatusCode.Unauthorized, (await Confirm(pairing, forged with { RuntimeNonce = next.RuntimeNonce })).Status);
         }
 
         PairingException spent = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone")));
-        Assert.Contains("attempts", spent.Message, StringComparison.Ordinal);
+        Assert.Contains("confirmations that did not match it", spent.Message, StringComparison.Ordinal);
         NothingPaired(harness);
     }
 
@@ -169,7 +170,7 @@ public class PairingTests
         await using DaemonHost restarted = await DaemonHost.StartAsync(harness.Estate.Root, options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()) }, cancellationToken: TestContext.Current.CancellationToken);
         string address = $"{restarted.Endpoint.LocalNetwork!.Host}:{restarted.Endpoint.LocalNetwork.Port}";
         PairingException forgotten = Assert.Throws<PairingException>(() => harness.Connections.Add(address, last.Code, new PairingOptions("Phone")));
-        Assert.Contains("No pairing here has this code", forgotten.Message, StringComparison.Ordinal);
+        Assert.Contains("No pairing here matches this code", forgotten.Message, StringComparison.Ordinal);
         Assert.Equal(harness.Host.IdentityPublicKey, restarted.IdentityPublicKey);
     }
 
@@ -207,48 +208,48 @@ public class PairingTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         PairingIssued issued = harness.Issue(harness.Estate.BuilderId);
 
-        // A relay that ends TLS with its own certificate and passes the exchange on to the runtime: the runtime's MAC names the
-        // certificate the runtime presented, which is not the one the device saw, and the relay cannot change it without the code.
+        // A relay that ends TLS with its own certificate and passes the exchange on to the runtime: the device's hello is over the
+        // relay's certificate, which is not the one the runtime presented, so it matches no code there, and nothing goes further.
         string directory = Path.Combine(harness.DeviceHome, "relay");
         using X509Certificate2 own = RuntimeCertificate.Load(directory);
         using HttpClient upstream = PairingClient(harness);
         await using var relay = new Relay(own, upstream);
         PairingException found = Assert.Throws<PairingException>(() => harness.Connections.Add(relay.Address, issued.Code, new PairingOptions("Phone")));
         Assert.Equal("denied", found.Code);
-        Assert.Contains("named a certificate other than the one this connection showed", found.Message, StringComparison.Ordinal);
+        Assert.Contains("No pairing here matches this code over this connection", found.Message, StringComparison.Ordinal);
         NothingPaired(harness);
 
-        // The code is still the device's to use directly, with an attempt fewer.
+        // The code is still the device's to use directly, with all its attempts.
         RuntimeConnection connection = harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone"));
         Assert.Equal(ConnectionStates.Current, harness.Connections.Probe(connection).State);
     }
 
     [Fact]
-    public void ThePairingCodeIsTwentyCharactersWithEightySecretBits()
+    public void ThePairingCodeIsSixteenCharactersAllOfThemSecret()
     {
         HashSet<string> codes = [.. Enumerable.Range(0, 64).Select(_ => PairingProtocol.NewCode())];
         Assert.Equal(64, codes.Count);
-        Assert.All(codes, c => Assert.Matches("^[0-9A-HJKMNP-TV-Z]{20}$", c));
-        Assert.Equal(80, PairingProtocol.SecretLength * 5);
+        Assert.All(codes, c => Assert.Matches("^[0-9A-HJKMNP-TV-Z]{16}$", c));
+        Assert.Equal(80, PairingProtocol.CodeLength * 5);
         string code = codes.First();
         string shown = PairingProtocol.Display(code);
-        Assert.Matches("^([0-9A-HJKMNP-TV-Z]{4}-){4}[0-9A-HJKMNP-TV-Z]{4}$", shown);
+        Assert.Matches("^([0-9A-HJKMNP-TV-Z]{4}-){3}[0-9A-HJKMNP-TV-Z]{4}$", shown);
 
         // As typed: case, hyphens and spaces do not matter, and I, L and O read as 1, 1 and 0.
-        Assert.True(PairingProtocol.TryParse(" " + shown.ToLowerInvariant().Replace("-", " - ", StringComparison.Ordinal) + " ", out string handle, out string secret));
-        Assert.Equal(code, handle + secret);
-        Assert.True(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRS-TVWO", out _, out string read));
-        Assert.EndsWith("TVW0", read, StringComparison.Ordinal);
-        Assert.True(PairingProtocol.TryParse("ilIL-0000-0000-0000-0000", out string ones, out _));
-        Assert.Equal("1111", ones);
-        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRS-TVWU", out _, out _));
-        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRS-TVW", out _, out _));
-        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRS-TVWXY", out _, out _));
+        Assert.True(PairingProtocol.TryParse(" " + shown.ToLowerInvariant().Replace("-", " - ", StringComparison.Ordinal) + " ", out string secret));
+        Assert.Equal(code, secret);
+        Assert.True(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRO", out string read));
+        Assert.EndsWith("PQR0", read, StringComparison.Ordinal);
+        Assert.True(PairingProtocol.TryParse("ilIL-0000-0000-0000", out string ones));
+        Assert.StartsWith("1111", ones, StringComparison.Ordinal);
+        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRU", out _));
+        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQR", out _));
+        Assert.False(PairingProtocol.TryParse("ABCD-EFGH-JKMN-PQRST", out _));
 
-        // Each side's key differs, and a different secret gives different keys.
-        (byte[] runtime, byte[] device) = PairingProtocol.Keys(handle, secret);
+        // Each side's key differs, and a different code gives different keys.
+        (byte[] runtime, byte[] device) = PairingProtocol.Keys(secret);
         Assert.NotEqual(runtime, device);
-        Assert.NotEqual(runtime, PairingProtocol.Keys(handle, secret[..^1] + (secret[^1] == '0' ? '1' : '0')).Runtime);
+        Assert.NotEqual(runtime, PairingProtocol.Keys(secret[..^1] + (secret[^1] == '0' ? '1' : '0')).Runtime);
     }
 
     private static string Refused(LocalNetworkHarness harness, PairingIssueRequest request)
@@ -269,7 +270,7 @@ public class PairingTests
     }
 
     /// <summary>A client of the pairing exchange without any credential, pinned to the runtime's certificate.</summary>
-    private static HttpClient PairingClient(LocalNetworkHarness harness)
+    internal static HttpClient PairingClient(LocalNetworkHarness harness)
     {
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
         var handler = new SocketsHttpHandler
@@ -282,14 +283,19 @@ public class PairingTests
         return new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri($"https://{harness.Address}/") };
     }
 
-    private static async Task<PairingChallenge> Hello(HttpClient client, string handle)
+    /// <summary>A hello that proves the code, over the runtime certificate the pinned client sees, and the challenge it gets.</summary>
+    internal static async Task<(PairingHello Hello, PairingChallenge Challenge)> Hello(LocalNetworkHarness harness, HttpClient client, string code)
     {
-        using HttpResponseMessage response = await client.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), new PairingHello(handle, PairingProtocol.NewNonce()), ProtocolJson.Options, TestContext.Current.CancellationToken);
+        Assert.True(PairingProtocol.TryParse(code, out string secret));
+        (_, byte[] deviceKey) = PairingProtocol.Keys(secret);
+        string nonce = PairingProtocol.NewNonce();
+        var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, harness.Host.Endpoint.Loopback!.Certificate));
+        using HttpResponseMessage response = await client.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), hello, ProtocolJson.Options, TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<PairingChallenge>(ProtocolJson.Options, TestContext.Current.CancellationToken))!;
+        return (hello, (await response.Content.ReadFromJsonAsync<PairingChallenge>(ProtocolJson.Options, TestContext.Current.CancellationToken))!);
     }
 
-    private static async Task<(HttpStatusCode Status, Problem? Problem)> Confirm(HttpClient client, PairingConfirm confirm)
+    internal static async Task<(HttpStatusCode Status, Problem? Problem)> Confirm(HttpClient client, PairingConfirm confirm)
     {
         using HttpResponseMessage response = await client.PostAsJsonAsync(new Uri("/v1/pairing/confirm", UriKind.Relative), confirm, ProtocolJson.Options, TestContext.Current.CancellationToken);
         return (response.StatusCode, await response.Content.ReadFromJsonAsync<Problem>(ProtocolJson.Options, TestContext.Current.CancellationToken));

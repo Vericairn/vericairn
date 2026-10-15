@@ -19,8 +19,11 @@ namespace Vericairn.Sdk;
 /// </summary>
 internal static class LocalNetworkTransport
 {
-    private const int MaxHeader = 16 * 1024;
-    private const int MaxBody = 64 * 1024;
+    /// <summary>
+    /// The chain policy of every TLS handshake the SDK makes with a runtime: nothing is fetched to build a chain and no revocation is
+    /// checked, since the certificate is accepted by its fingerprint and the runtime identity's proof, never by a chain.
+    /// </summary>
+    public static X509ChainPolicy OfflineChainPolicy() => new() { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
 
     public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken)
     {
@@ -39,6 +42,7 @@ internal static class LocalNetworkTransport
                     AllowTlsResume = false,
                     ApplicationProtocols = [SslApplicationProtocol.Http11],
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                    CertificateChainPolicy = OfflineChainPolicy(),
                     LocalCertificateSelectionCallback = (_, _, _, _, _) => own,
 
                     // Any certificate completes the handshake: the runtime identity's proof that follows decides whether it is the runtime's.
@@ -77,15 +81,15 @@ internal static class LocalNetworkTransport
         string request = $"GET {target} HTTP/1.1\r\nHost: {connection.Address}\r\n{RequestSigning.DeviceHeader}: {signer.DeviceId}\r\n{RequestSigning.SignedAtHeader}: {signedAt}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n";
         await tls.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken).ConfigureAwait(false);
         await tls.FlushAsync(cancellationToken).ConfigureAwait(false);
-        (int status, byte[] body) = await ReadResponseAsync(tls, cancellationToken).ConfigureAwait(false);
+        (int status, byte[] body) = await RawHttp.ReadResponseAsync(tls, cancellationToken).ConfigureAwait(false);
         if (status == 401)
         {
-            throw new RuntimeConnectionException(ConnectionStates.Denied, ProblemMessage(body) ?? $"The runtime at {connection.Address} refused device {signer.DeviceId}.");
+            throw new RuntimeConnectionException(ConnectionStates.Denied, RawHttp.ProblemOf(body)?.Message ?? $"The runtime at {connection.Address} refused device {signer.DeviceId}.");
         }
 
         if (status != 200)
         {
-            throw new RuntimeConnectionException(ConnectionStates.Unavailable, $"The runtime at {connection.Address} answered {status} instead of proving its identity{(ProblemMessage(body) is string said ? ": " + said : ".")}");
+            throw new RuntimeConnectionException(ConnectionStates.Unavailable, $"The runtime at {connection.Address} answered {status} instead of proving its identity{(RawHttp.ProblemOf(body)?.Message is string said ? ": " + said : ".")}");
         }
 
         RuntimeIdentityProof? proof;
@@ -104,138 +108,4 @@ internal static class LocalNetworkTransport
         }
     }
 
-    private static string? ProblemMessage(byte[] body)
-    {
-        try
-        {
-            return body.Length == 0 ? null : JsonSerializer.Deserialize<Problem>(body, ProtocolJson.Options)?.Message;
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-    }
-
-    /// <summary>Reads one HTTP/1.1 response exactly, so the connection is left clean for the requests that follow.</summary>
-    private static async Task<(int Status, byte[] Body)> ReadResponseAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        string head = await ReadHeadAsync(stream, cancellationToken).ConfigureAwait(false);
-        string[] lines = head.Split("\r\n");
-        string[] statusLine = lines[0].Split(' ', 3);
-        if (statusLine.Length < 2 || !statusLine[0].StartsWith("HTTP/1.", StringComparison.Ordinal) || !int.TryParse(statusLine[1], NumberStyles.None, CultureInfo.InvariantCulture, out int status))
-        {
-            throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime's answer is not HTTP/1.1.");
-        }
-
-        long? length = null;
-        bool chunked = false;
-        foreach (string line in lines.Skip(1))
-        {
-            int colon = line.IndexOf(':', StringComparison.Ordinal);
-            if (colon <= 0)
-            {
-                continue;
-            }
-
-            string name = line[..colon].Trim();
-            string value = line[(colon + 1)..].Trim();
-            if (name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) && long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long parsed))
-            {
-                length = parsed;
-            }
-            else if (name.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) && value.Contains("chunked", StringComparison.OrdinalIgnoreCase))
-            {
-                chunked = true;
-            }
-        }
-
-        if (chunked)
-        {
-            using var body = new MemoryStream();
-            while (true)
-            {
-                string size = (await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false)).Split(';')[0].Trim();
-                if (!int.TryParse(size, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out int chunk) || chunk < 0 || body.Length + chunk > MaxBody)
-                {
-                    throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime's answer is malformed.");
-                }
-
-                if (chunk == 0)
-                {
-                    while ((await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false)).Length > 0)
-                    {
-                        // Trailers are ignored.
-                    }
-
-                    return (status, body.ToArray());
-                }
-
-                body.Write(await ReadExactlyAsync(stream, chunk, cancellationToken).ConfigureAwait(false));
-                await ReadLineAsync(stream, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        if (length is null)
-        {
-            return (status, []);
-        }
-
-        if (length > MaxBody)
-        {
-            throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime's answer is too long for an identity proof.");
-        }
-
-        return (status, await ReadExactlyAsync(stream, (int)length.Value, cancellationToken).ConfigureAwait(false));
-    }
-
-    private static async Task<string> ReadHeadAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var head = new List<byte>(512);
-        byte[] one = new byte[1];
-        while (head.Count < MaxHeader)
-        {
-            if (await stream.ReadAsync(one, cancellationToken).ConfigureAwait(false) == 0)
-            {
-                throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime closed the connection before answering.");
-            }
-
-            head.Add(one[0]);
-            int n = head.Count;
-            if (n >= 4 && head[n - 4] == '\r' && head[n - 3] == '\n' && head[n - 2] == '\r' && head[n - 1] == '\n')
-            {
-                return Encoding.ASCII.GetString(head.ToArray(), 0, n - 4);
-            }
-        }
-
-        throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime's answer has no end of its headers.");
-    }
-
-    private static async Task<string> ReadLineAsync(Stream stream, CancellationToken cancellationToken)
-    {
-        var line = new List<byte>(16);
-        byte[] one = new byte[1];
-        while (line.Count < MaxHeader)
-        {
-            if (await stream.ReadAsync(one, cancellationToken).ConfigureAwait(false) == 0)
-            {
-                throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime closed the connection while answering.");
-            }
-
-            if (one[0] == '\n')
-            {
-                return Encoding.ASCII.GetString(line.ToArray()).TrimEnd('\r');
-            }
-
-            line.Add(one[0]);
-        }
-
-        throw new RuntimeConnectionException(ConnectionStates.Unavailable, "The runtime's answer is malformed.");
-    }
-
-    private static async Task<byte[]> ReadExactlyAsync(Stream stream, int count, CancellationToken cancellationToken)
-    {
-        byte[] bytes = new byte[count];
-        await stream.ReadExactlyAsync(bytes, cancellationToken).ConfigureAwait(false);
-        return bytes;
-    }
 }

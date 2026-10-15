@@ -1728,16 +1728,25 @@ internal static class Commands
         try
         {
             var connections = new RuntimeConnections();
+            IReadOnlyList<RuntimeConnection> before = connections.List();
             RuntimeConnection connection = connections.Add(address, code, new PairingOptions(name) { Custody = custody, Presence = presence });
+            List<RuntimeConnection> replaced = [.. before.Where(earlier => connections.Find(earlier.Id) is null)];
             ConnectionStatus status = connections.Probe(connection);
             if (json)
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(ConnectionJson(status), ProtocolJson.Options));
+                Json.JsonObject added = Json.JsonNode.Parse(JsonSerializer.Serialize(ConnectionJson(status), ProtocolJson.Options))!.AsObject();
+                added["replaced"] = Json.JsonNode.Parse(JsonSerializer.Serialize(replaced.Select(r => new { id = r.Id, device = r.Device, principal = r.Principal }), ProtocolJson.Options));
+                Console.Out.WriteLine(added.ToJsonString());
                 return Clean;
             }
 
             Console.Out.WriteLine($"paired as device {connection.Device} of {connection.PrincipalName ?? connection.Principal} ({connection.Principal}) with {connection.EstateName ?? connection.Estate} at {connection.Address}, permitted {string.Join(", ", connection.Profiles)}");
             Console.Out.WriteLine($"  runtime identity {RuntimeIdentityScheme.Fingerprint(connection.Identity)}, pinned on this machine");
+            foreach (RuntimeConnection earlier in replaced)
+            {
+                Console.Out.WriteLine($"  replaced connection {earlier.Id}: device {earlier.Device} stays admitted until an administrator revokes it");
+            }
+
             Console.Out.WriteLine($"connection {connection.Id}  {status.State}: {status.Message}");
             return Clean;
         }

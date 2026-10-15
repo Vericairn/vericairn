@@ -281,6 +281,99 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F6_WithoutTheCodeNothingOfAPendingPairingIsLearntOrUsedAndAnAddressIsLimited()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        PairingIssued issued = harness.Issue(harness.Estate.OperatorId);
+        using HttpClient pairing = PairingTests.PairingClient(harness);
+
+        // The code is named nowhere: a hello that does not prove it gets the one answer an unknown code gets, naming nothing of the
+        // estate or the principal, and its connection is closed; the reviewer's probe of the handle space has nothing to probe.
+        for (int i = 0; i < PairingRegistry.MaxFailures; i++)
+        {
+            using HttpResponseMessage miss = await pairing.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), new PairingHello(PairingProtocol.NewNonce(), PairingProtocol.NewNonce()), ProtocolJson.Options, TestContext.Current.CancellationToken);
+            string body = await miss.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, miss.StatusCode);
+            Assert.Contains("No pairing here matches this code", Message(body), StringComparison.Ordinal);
+            Assert.DoesNotContain("Test Estate", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("Test Operator", body, StringComparison.Ordinal);
+            Assert.True(miss.Headers.ConnectionClose == true);
+        }
+
+        // The address that sent them is refused for a minute, even with the right code; then the code pairs, none of its attempts used.
+        PairingException limited = Assert.Throws<PairingException>(() => harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone")));
+        Assert.Contains("Too many pairing attempts", limited.Message, StringComparison.Ordinal);
+        harness.Time.Advance(PairingRegistry.FailureWindow);
+        RuntimeConnection connection = harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone"));
+        Assert.Equal("Test Estate", connection.EstateName);
+        Assert.Equal("Test Operator", connection.PrincipalName);
+    }
+
+    [Fact]
+    public async Task F15_ADevicesClaimsAreRecordedAsItsOwnStatementAndItsNameIsPlainText()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        PairingIssued issued = harness.Issue(harness.Estate.OperatorId);
+        Assert.True(PairingProtocol.TryParse(issued.Code, out string secret));
+        (_, byte[] deviceKey) = PairingProtocol.Keys(secret);
+        using HttpClient pairing = PairingTests.PairingClient(harness);
+
+        async Task<(HttpStatusCode Status, string Body, string Record)> Present(string name, string platform, string custody, string presence)
+        {
+            (PairingHello hello, PairingChallenge challenge) = await PairingTests.Hello(harness, pairing, issued.Code);
+            byte[] spki = harness.DeviceKeys.Create(challenge.Record);
+            var device = new PairingDevice(name, platform, custody, RecordSigning.EncodePublicKey(spki), presence);
+            DateTimeOffset at = DateTimeOffset.ParseExact(challenge.At, "yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
+            var body = Records.Authoring.DeviceRecords.Body(challenge.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, challenge.Profiles, challenge.Format, device.Presence);
+            string hash = Records.Authoring.DeviceRecords.Hash(Records.Authoring.DeviceRecords.Draft(challenge.Principal, challenge.Record, at, challenge.Format, body));
+            var confirm = new PairingConfirm(challenge.RuntimeNonce, device, Base64Url.EncodeToString(harness.DeviceKeys.Sign(challenge.Record, RecordSigning.Digest(hash))), string.Empty);
+            confirm = confirm with { Mac = PairingProtocol.ConfirmMac(deviceKey, hello, challenge, confirm) };
+            using HttpResponseMessage done = await pairing.PostAsJsonAsync(new Uri("/v1/pairing/confirm", UriKind.Relative), confirm, ProtocolJson.Options, TestContext.Current.CancellationToken);
+            return (done.StatusCode, await done.Content.ReadAsStringAsync(TestContext.Current.CancellationToken), challenge.Record);
+        }
+
+        // A name that hides or reorders what a person reads is refused, and nothing is recorded.
+        foreach (string name in new[] { "Phone\u0007", "\u202Eenohp", "Line\nbreak" })
+        {
+            (HttpStatusCode refused, string body, _) = await Present(name, "linux", "file-owner-only", "none");
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, refused);
+            Assert.Contains("without control or formatting characters", Message(body), StringComparison.Ordinal);
+        }
+
+        Assert.Single(harness.Socket.Devices());
+
+        // Custody, presence and platform cannot be verified from here: a key in a file, stated as a Secure Enclave key needing Touch ID on
+        // linux, is recorded as stated, and its admission says that what the device stated is its own statement.
+        (HttpStatusCode status, string answer, string record) = await Present("Claims an enclave", "linux", SecureEnclaveCustody.Kind, "required");
+        Assert.True(status == HttpStatusCode.OK, answer);
+        DeviceRow row = Assert.Single(harness.Socket.Devices(), d => d.Id == record);
+        Assert.Equal((SecureEnclaveCustody.Kind, "required", "linux"), (row.Custody, row.Presence, row.Platform));
+        RecordEnvelope admission = Assert.Single(harness.Estate.Load().About(record, "admission"));
+        Assert.Contains("its own statement", EstateModel.BodyString(admission, "note"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task F16_PairingAgainReplacesTheConnectionsAReplacedIdentityLeftStale()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection laptop = harness.Pair(harness.Estate.BuilderId, "Laptop");
+        RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Phone");
+        Assert.Equal(2, harness.Connections.List().Count);
+
+        // Another principal's device on the same machine is a connection of its own; pairing the same principal again replaces its own.
+        RuntimeConnection laptopAgain = harness.Pair(harness.Estate.BuilderId, "Laptop, paired again");
+        Assert.Equal([phone.Id, laptopAgain.Id], harness.Connections.List().Select(c => c.Id).Order(StringComparer.Ordinal));
+        Assert.Null(harness.Connections.Find(laptop.Id));
+
+        // Once the runtime replaces its identity, pairing again replaces every connection still pinned to the old one.
+        Assert.NotNull(harness.Socket.RotateCertificate(new CertificateRotateRequest(Identity: true)).Rotated);
+        RuntimeConnection fresh = harness.Pair(harness.Estate.BuilderId, "Laptop, paired once more");
+        RuntimeConnection only = Assert.Single(harness.Connections.List());
+        Assert.Equal(fresh.Id, only.Id);
+        Assert.Equal(harness.Host.IdentityPublicKey, only.Identity);
+    }
+
+    [Fact]
     public void F2_EveryRequestTypeOfTheProtocolIsHeldToAPrincipal()
     {
         // A request type an operation could bind that the scope does not know would be refused for every device; this keeps the table whole.
@@ -341,10 +434,10 @@ public class ReviewRegressionTests
         // Case, a trailing slash and a percent-encoded letter still route to the pairing endpoint itself, which is the exemption's purpose.
         foreach (string head in new[] { "POST /V1/PAIRING/HELLO/ HTTP/1.1", "POST /v1/%70airing/hello HTTP/1.1" })
         {
-            byte[] body = Encoding.UTF8.GetBytes("{\"handle\":\"ZZZZ\",\"nonce\":\"" + PairingProtocol.NewNonce() + "\"}");
+            byte[] body = Encoding.UTF8.GetBytes("{\"nonce\":\"" + PairingProtocol.NewNonce() + "\",\"mac\":\"" + PairingProtocol.NewNonce() + "\"}");
             string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, [.. Encoding.ASCII.GetBytes($"{head}\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TimeSpan.FromSeconds(3));
             Say($"{head} -> {answer.Split("\r\n")[0]} {answer[(answer.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4)..]}");
-            Assert.Contains("No pairing here has this code", answer, StringComparison.Ordinal);
+            Assert.Contains("No pairing here matches this code", answer, StringComparison.Ordinal);
         }
 
         Assert.Equal(harness.Estate.Estate.Id, harness.Socket.Health().Estate);
@@ -387,13 +480,15 @@ public class ReviewRegressionTests
         Assert.StartsWith("HTTP/1.1 401", answer, StringComparison.Ordinal);
         Assert.DoesNotContain("<<timeout", answer, StringComparison.Ordinal);
 
-        // An exempt pairing request answered 401 by the endpoint keeps the connection; what follows is still authenticated afresh.
-        byte[] hello = Encoding.UTF8.GetBytes("{\"handle\":\"ZZZZ\",\"nonce\":\"" + PairingProtocol.NewNonce() + "\"}");
+        // A pairing request the endpoint refuses closes the connection too (F6): what was pipelined after it is not served.
+        byte[] hello = Encoding.UTF8.GetBytes("{\"nonce\":\"" + PairingProtocol.NewNonce() + "\",\"mac\":\"" + PairingProtocol.NewNonce() + "\"}");
         string pipelined = $"POST /v1/pairing/hello HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {hello.Length}\r\n\r\n{Encoding.UTF8.GetString(hello)}GET /v1/status HTTP/1.1\r\nHost: x\r\n\r\n";
         string second = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(pipelined), TimeSpan.FromSeconds(3));
         Say(second);
-        Assert.Equal(2, second.Split("HTTP/1.1 401").Length - 1);
-        Assert.Contains("paired device", second, StringComparison.Ordinal);
+        Assert.Equal(1, second.Split("HTTP/1.1 ").Length - 1);
+        Assert.StartsWith("HTTP/1.1 401", second, StringComparison.Ordinal);
+        Assert.Contains("No pairing here matches this code", second, StringComparison.Ordinal);
+        Assert.DoesNotContain("<<timeout", second, StringComparison.Ordinal);
     }
 }
 
