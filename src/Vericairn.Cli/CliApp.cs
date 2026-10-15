@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
@@ -30,6 +30,7 @@ internal static class CliApp
         root.Subcommands.Add(RecordsFamily(estateOption, jsonOption));
         root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
+        root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
         root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
         root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
@@ -591,6 +592,103 @@ internal static class CliApp
         rotate.SetAction(parseResult => Commands.DevicesRotate(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(rotateCustodyOption), parseResult.GetValue(rotatePresenceOption), parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(rotate);
         return devices;
+    }
+
+    private static Command GoalFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var goal = new Command("goal", "Goals: objectives the estate carries out, done when their record predicates hold, an evaluator who did none of the work finds every condition met, and they are accepted. Without a subcommand, the current goal condition by condition: the one goal neither achieved nor ended, or with none or several, the list.");
+        goal.SetAction(parseResult => Commands.Goal(parseResult.GetValue(estateOption)!, null, parseResult.GetValue(jsonOption)));
+        var shownArgument = new Argument<string?>("goal") { Description = "Goal record id (any revision); omit for the current goal.", Arity = ArgumentArity.ZeroOrOne };
+        var show = new Command("show", "Show a goal condition by condition: its status, the budget its activation grants, each condition's verdict with the records it read beside its current evaluation's, its steps, and what stands between it and its acceptance.");
+        show.Arguments.Add(shownArgument);
+        show.SetAction(parseResult => Commands.Goal(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(show);
+
+        var byOption = new Option<string>("--by") { Description = "Acting principal id (ULID).", Required = true };
+        var goalArgument = new Argument<string>("goal") { Description = "Goal record id (any revision)." };
+
+        var titleOption = new Option<string>("--title") { Description = "Short title.", Required = true };
+        var objectiveOption = new Option<string>("--objective") { Description = "What the sponsor wants, in the sponsor's words.", Required = true };
+        var doneOption = new Option<string[]>("--done") { Description = "A completion condition as JSON; repeatable. A record predicate, {\"type\": ...} with optional subject, product, fields, state, min and max (or the same inside {\"record\": ...}), or an evidence statement, {\"evidence\": ..., \"check\": ...}.", Required = true };
+        var sponsorOption = new Option<string?>("--sponsor") { Description = "The accountable principal, who activates it and, being a person, accepts it; the proposer when omitted. An agent may propose a goal, never activate one." };
+        var constraintOption = new Option<string[]>("--constraint") { Description = "What must not change or happen; repeatable." };
+        var budgetOption = new Option<string[]>("--budget") { Description = "A cap its activation grants, unit=value; repeatable: wallMinutes and attemptsPerStep (both required), tokens, concurrency, or currency=<amount in minor units>:<unit> such as currency=5000:USD. A unit not given is not granted." };
+        var rosterOption = new Option<string?>("--roster") { Description = "The roster record whose roles it uses; the estate's current roster when omitted." };
+        var kindOption = new Option<string>("--kind") { Description = "finite (ends when done) or stewardship (holds a standing condition).", DefaultValueFactory = _ => "finite" };
+        var workOrderOption = new Option<string[]>("--work-order") { Description = "A work order the sponsor gives as its plan; repeatable. Without one a planner proposes its work, as work orders that name the goal among their inputs." };
+        var inputOption = new Option<string[]>("--input") { Description = "A record it builds on, as type:id; repeatable." };
+        var deadlineOption = new Option<string?>("--deadline") { Description = "A stop condition: when it stops, for example 2026-12-01T00:00:00Z." };
+        var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation." };
+        var propose = new Command("propose", "Propose a goal, or a revision of one: what done looks like, its constraints, its budget and its sponsor. A proposal authorizes and funds nothing.");
+        propose.Options.Add(byOption);
+        propose.Options.Add(titleOption);
+        propose.Options.Add(objectiveOption);
+        propose.Options.Add(doneOption);
+        propose.Options.Add(sponsorOption);
+        propose.Options.Add(constraintOption);
+        propose.Options.Add(budgetOption);
+        propose.Options.Add(rosterOption);
+        propose.Options.Add(kindOption);
+        propose.Options.Add(workOrderOption);
+        propose.Options.Add(inputOption);
+        propose.Options.Add(deadlineOption);
+        propose.Options.Add(supersedesOption);
+        propose.SetAction(parseResult => Commands.GoalPropose(
+            parseResult.GetValue(estateOption)!,
+            new Commands.GoalProposal(
+                parseResult.GetValue(byOption)!,
+                parseResult.GetValue(titleOption)!,
+                parseResult.GetValue(objectiveOption)!,
+                parseResult.GetValue(doneOption) ?? [],
+                parseResult.GetValue(sponsorOption),
+                parseResult.GetValue(constraintOption) ?? [],
+                parseResult.GetValue(budgetOption) ?? [],
+                parseResult.GetValue(rosterOption),
+                parseResult.GetValue(kindOption)!,
+                parseResult.GetValue(workOrderOption) ?? [],
+                parseResult.GetValue(inputOption) ?? [],
+                parseResult.GetValue(deadlineOption),
+                parseResult.GetValue(supersedesOption)),
+            parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(propose);
+
+        var noteOption = new Option<string?>("--note") { Description = "Why, and what remains; a sentence naming the action when omitted." };
+        foreach ((string name, string description) in new[]
+        {
+            ("activate", "Activate a proposed goal: its sponsor, a person who holds the operator role or a grant of the spending scope, grants its budget. An agent never activates a goal."),
+            ("pause", "Pause an active goal; its sponsor's."),
+            ("resume", "Resume a paused, budget-limited or blocked goal, which grants its budget again; its sponsor's, as activation is."),
+            ("stop", "Stop a goal: its sponsor ends it as abandoned, and nothing follows. No step runs before the worker contract exists, so there is nothing to contain yet."),
+        })
+        {
+            var command = new Command(name, description);
+            command.Arguments.Add(goalArgument);
+            command.Options.Add(byOption);
+            command.Options.Add(noteOption);
+            command.SetAction(parseResult => Commands.GoalAction(parseResult.GetValue(estateOption)!, name, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(noteOption), parseResult.GetValue(jsonOption)));
+            goal.Subcommands.Add(command);
+        }
+
+        var summaryOption = new Option<string>("--summary") { Description = "What was reviewed and how.", Required = true };
+        var verdictOption = new Option<string[]>("--verdict") { Description = "A condition's verdict, n:verdict:reason with n from 1 and the verdict met, not-yet or impossible; repeatable. Every evidence statement needs one; a record predicate gets the runtime's, unless the evaluator judges one the runtime does not find met impossible." };
+        var readOption = new Option<string[]>("--read") { Description = "A record the evaluator read for a condition, n:record-id; repeatable. An evidence statement found met names at least one." };
+        var evaluate = new Command("evaluate", "Record the evaluation of a goal's current revision, condition by condition, with the records each verdict read; by a principal other than any step's author.");
+        evaluate.Arguments.Add(goalArgument);
+        evaluate.Options.Add(byOption);
+        evaluate.Options.Add(summaryOption);
+        evaluate.Options.Add(verdictOption);
+        evaluate.Options.Add(readOption);
+        evaluate.SetAction(parseResult => Commands.GoalEvaluate(parseResult.GetValue(estateOption)!, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(summaryOption)!, parseResult.GetValue(verdictOption) ?? [], parseResult.GetValue(readOption) ?? [], parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(evaluate);
+
+        var statementOption = new Option<string>("--statement") { Description = "What is accepted and on what basis.", Required = true };
+        var accept = new Command("accept", "Accept a goal at its current revision, relying on its current evaluation: by its sponsor when the sponsor is a person and by an operator when an agent sponsors it, never by its evaluator or a step's author, once every condition is found met and every record predicate holds.");
+        accept.Arguments.Add(goalArgument);
+        accept.Options.Add(byOption);
+        accept.Options.Add(statementOption);
+        accept.SetAction(parseResult => Commands.GoalAccept(parseResult.GetValue(estateOption)!, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(statementOption)!, parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(accept);
+        return goal;
     }
 
     private static Command WorkFamily(Option<string> estateOption, Option<bool> jsonOption)

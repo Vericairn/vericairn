@@ -78,6 +78,33 @@ public interface IEstateApi
     /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
     WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
 
+    /// <summary>The estate's current goals with their status.</summary>
+    IReadOnlyList<GoalRow> Goals();
+
+    /// <summary>A goal by the id of any of its revisions, with each condition's verdict, its evaluation and its steps; null when no goal has that id.</summary>
+    GoalResponse? Goal(string id);
+
+    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing.</summary>
+    WriteOutcome GoalPropose(GoalProposeRequest request);
+
+    /// <summary>Activates a proposed goal: its sponsor, a person with the authority to spend, grants its budget.</summary>
+    WriteOutcome GoalActivate(string goal, GoalActionRequest request);
+
+    /// <summary>Pauses an active goal; its sponsor's.</summary>
+    WriteOutcome GoalPause(string goal, GoalActionRequest request);
+
+    /// <summary>Resumes a paused, budget-limited or blocked goal, which grants its budget again; its sponsor's, as activation is.</summary>
+    WriteOutcome GoalResume(string goal, GoalActionRequest request);
+
+    /// <summary>Stops a goal: its sponsor ends it as abandoned, and nothing follows.</summary>
+    WriteOutcome GoalStop(string goal, GoalActionRequest request);
+
+    /// <summary>Records the evaluation of a goal's current revision, condition by condition, by a principal other than any step's author.</summary>
+    WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request);
+
+    /// <summary>Accepts a goal's current revision once its current evaluation finds every condition met and every record predicate holds; never by its evaluator or a step's author.</summary>
+    WriteOutcome GoalAccept(string goal, GoalAcceptRequest request);
+
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
     IReadOnlyList<ProviderRow> Providers();
 

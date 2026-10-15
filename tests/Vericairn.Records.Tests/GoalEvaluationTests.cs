@@ -110,6 +110,20 @@ public class GoalEvaluationTests
         Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error && f.Location == evaluation.ExpectedPath);
     }
 
+    [Fact]
+    public void AWorkOrderRevisedAfterAnEvaluationKeepsTheAuthorsOfItsSteps()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        Work work = Work.Write(estate);
+        RecordEnvelope byBuilder = estate.Add("review", estate.BuilderId, Evaluation("pass", Met(work.Result), Met(work.Result)), work.Goal.Reference);
+        RecordEnvelope revised = estate.Add("work-order", estate.OperatorId, work.Order.Body.GetRawText().Replace("\"Work.\"", "\"Work, revised.\"", StringComparison.Ordinal), supersedes: work.Order.Id);
+
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "review.evaluator" && f.Location == byBuilder.ExpectedPath);
+        Assert.Equal([revised.Id], GoalRules.Work(model, work.Goal, byBuilder).Select(o => o.Id));
+        Assert.Null(GoalRules.CurrentEvaluation(model, work.Goal));
+    }
+
     internal static string Evaluation(string outcome, params string[] conditions) => Evaluation(outcome, conditions, "independent-agent");
 
     internal static string Evaluation(string outcome, string first, string second, string independence) => Evaluation(outcome, [first, second], independence);

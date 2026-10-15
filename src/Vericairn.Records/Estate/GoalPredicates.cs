@@ -87,10 +87,10 @@ public static class GoalPredicates
         var matches = new List<RecordEnvelope>();
         var undecided = new List<(RecordEnvelope Record, string Why)>();
         var details = new List<string>();
-        StateReader states = new(model, type);
+        StateReader? states = state is null ? null : new(model, type);
         foreach (RecordEnvelope candidate in candidates)
         {
-            if (state is null)
+            if (states is null || state is null)
             {
                 matches.Add(candidate);
                 continue;

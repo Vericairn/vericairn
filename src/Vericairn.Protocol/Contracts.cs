@@ -214,6 +214,53 @@ public sealed record DocumentReviewRequest(string By, string Outcome, string Sum
 /// <param name="Location">Where, optionally.</param>
 public sealed record DocumentFinding(string Severity, string Summary, string? Location = null);
 
+/// <summary>One goal: its current revision, title and status, and its sponsor.</summary>
+/// <param name="Id">The current revision's record id.</param>
+/// <param name="Hash">The current revision's hash.</param>
+/// <param name="Title">The title.</param>
+/// <param name="Status">proposed, active, paused, budget-limited, blocked, impossible, abandoned or achieved.</param>
+/// <param name="Sponsor">The sponsor's principal id.</param>
+/// <param name="SponsorName">The sponsor's name.</param>
+public sealed record GoalRow(string Id, string Hash, string Title, string Status, string Sponsor, string? SponsorName);
+
+/// <summary>
+/// A goal as <c>vericairn goal</c> shows it: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met
+/// or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its
+/// acceptance. The same on every machine for the same records.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical.</param>
+public sealed record GoalResponse(string Text, JsonElement Json);
+
+/// <summary>Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation.</summary>
+/// <param name="By">The proposing principal.</param>
+/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits.</param>
+/// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
+public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
+
+/// <summary>Activate, pause, resume or stop a goal.</summary>
+/// <param name="By">The principal acting: the goal's sponsor.</param>
+/// <param name="Note">Why, and what remains; a sentence naming the action when omitted.</param>
+public sealed record GoalActionRequest(string By, string? Note = null);
+
+/// <summary>Evaluate a goal: the runtime gives each record predicate its verdict, and the evaluator each evidence statement.</summary>
+/// <param name="By">The evaluating principal, who authored none of the goal's steps.</param>
+/// <param name="Summary">What was reviewed and how.</param>
+/// <param name="Verdicts">The evaluator's verdicts: one for each evidence statement, and impossible for a record predicate the runtime does not find met, where the evaluator judges so.</param>
+public sealed record GoalEvaluateRequest(string By, string Summary, IReadOnlyList<GoalVerdict>? Verdicts = null);
+
+/// <summary>An evaluator's verdict on one completion condition.</summary>
+/// <param name="Condition">The condition's position in the goal, from 1.</param>
+/// <param name="Verdict">met, not-yet or impossible.</param>
+/// <param name="Reason">Why.</param>
+/// <param name="Read">The ids of the records the evaluator read; an evidence statement found met names at least one.</param>
+public sealed record GoalVerdict(int Condition, string Verdict, string Reason, IReadOnlyList<string>? Read = null);
+
+/// <summary>Accept a goal at its current revision, relying on its current evaluation.</summary>
+/// <param name="By">The accepting principal: the sponsor when the sponsor is a person, an operator when an agent sponsors it.</param>
+/// <param name="Statement">What is accepted and on what basis.</param>
+public sealed record GoalAcceptRequest(string By, string Statement);
+
 /// <summary>Revoke a device's admission.</summary>
 /// <param name="Device">Device id.</param>
 /// <param name="By">Revoking principal.</param>

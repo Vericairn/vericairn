@@ -101,6 +101,182 @@ internal static class Commands
     public static int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
         WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.Amend(new AmendRequest(assignmentId, by, body)), json)));
 
+    /// <summary>The current goal condition by condition: the one named, or the one goal neither achieved nor ended; with none or several, the list.</summary>
+    public static int Goal(string root, string? id, bool json) => WithApi(root, api =>
+    {
+        if (id is null)
+        {
+            IReadOnlyList<GoalRow> rows = api.Goals();
+            List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
+            if (open.Count != 1)
+            {
+                if (json)
+                {
+                    Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+                    return Clean;
+                }
+
+                Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
+                foreach (GoalRow row in rows)
+                {
+                    Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
+                }
+
+                return Clean;
+            }
+
+            id = open[0].Id;
+        }
+
+        GoalResponse? goal = api.Goal(id);
+        if (goal is null)
+        {
+            return Fail($"No goal has id {id}.");
+        }
+
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(goal.Json) : goal.Text);
+        return Clean;
+    });
+
+    /// <summary>What <c>vericairn goal propose</c> was given.</summary>
+    internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);
+
+    /// <summary>Proposes a goal from its options: the conditions as JSON, the caps as unit=value, the inputs as type:id.</summary>
+    public static int GoalPropose(string root, GoalProposal proposal, bool json)
+    {
+        ArgumentNullException.ThrowIfNull(proposal);
+        var completion = new Json.JsonArray();
+        foreach (string condition in proposal.Done)
+        {
+            Json.JsonNode? node;
+            try
+            {
+                node = Json.JsonNode.Parse(condition);
+            }
+            catch (JsonException exception)
+            {
+                return Fail($"--done '{condition}' is not JSON: {exception.Message}");
+            }
+
+            if (node is not Json.JsonObject entry)
+            {
+                return Fail($"--done '{condition}' is not a JSON object.");
+            }
+
+            completion.Add(entry.ContainsKey("record") || entry.ContainsKey("evidence") ? entry : new Json.JsonObject { ["record"] = entry });
+        }
+
+        var caps = new Json.JsonObject();
+        foreach (string cap in proposal.Budget)
+        {
+            int equals = cap.IndexOf('=', StringComparison.Ordinal);
+            string unit = equals > 0 ? cap[..equals] : string.Empty;
+            string value = equals > 0 ? cap[(equals + 1)..] : string.Empty;
+            string[] currency = value.Split(':');
+            if (unit == "currency" && currency.Length == 2 && long.TryParse(currency[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long amount))
+            {
+                caps[unit] = new Json.JsonObject { ["amount"] = amount, ["unit"] = currency[1] };
+            }
+            else if (unit != "currency" && Caps.UnitNames.Contains(unit) && long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long number))
+            {
+                caps[unit] = number;
+            }
+            else
+            {
+                return Fail($"A cap is unit=value with the unit one of {string.Join(", ", Caps.UnitNames)}, and currency=<amount in minor units>:<unit>: '{cap}'.");
+            }
+        }
+
+        var inputs = new Json.JsonArray();
+        foreach (string input in proposal.Inputs)
+        {
+            int colon = input.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0)
+            {
+                return Fail($"An input is type:id: '{input}'.");
+            }
+
+            inputs.Add(new Json.JsonObject { ["type"] = input[..colon], ["id"] = input[(colon + 1)..] });
+        }
+
+        var body = new Json.JsonObject
+        {
+            ["title"] = proposal.Title,
+            ["objective"] = proposal.Objective,
+            ["completion"] = completion,
+            ["constraints"] = new Json.JsonArray(proposal.Constraints.Select(c => (Json.JsonNode)c).ToArray()),
+            ["kind"] = proposal.Kind,
+            ["sponsor"] = proposal.Sponsor ?? proposal.By,
+            ["budget"] = caps,
+            ["plan"] = proposal.WorkOrders.Length == 0
+                ? new Json.JsonObject { ["policy"] = "proposed-by-planner", ["approval"] = "sponsor-approves" }
+                : new Json.JsonObject { ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new Json.JsonArray(proposal.WorkOrders.Select(w => (Json.JsonNode)w).ToArray()) },
+            ["inputs"] = inputs,
+        };
+        if (proposal.Roster is not null)
+        {
+            body["roster"] = proposal.Roster;
+        }
+
+        if (proposal.Deadline is not null)
+        {
+            body["limits"] = new Json.JsonObject { ["deadline"] = proposal.Deadline };
+        }
+
+        return WithApi(root, api => ReportOutcome(api.GoalPropose(new GoalProposeRequest(proposal.By, Element(body), proposal.Supersedes)), json));
+    }
+
+    /// <summary>Activates, pauses, resumes or stops a goal.</summary>
+    public static int GoalAction(string root, string action, string goal, string by, string? note, bool json) => WithApi(root, api =>
+    {
+        var request = new GoalActionRequest(by, note);
+        return ReportOutcome(action switch
+        {
+            "activate" => api.GoalActivate(goal, request),
+            "pause" => api.GoalPause(goal, request),
+            "resume" => api.GoalResume(goal, request),
+            _ => api.GoalStop(goal, request),
+        }, json);
+    });
+
+    /// <summary>Records a goal's evaluation from the evaluator's verdicts, n:verdict:reason, and the records read, n:id.</summary>
+    public static int GoalEvaluate(string root, string goal, string by, string summary, string[] verdicts, string[] reads, bool json)
+    {
+        var given = new SortedDictionary<int, (string Verdict, string Reason)>();
+        foreach (string verdict in verdicts)
+        {
+            string[] parts = verdict.Split(':', 3);
+            if (parts.Length != 3 || !int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int condition) || !given.TryAdd(condition, (parts[1], parts[2].Trim())))
+            {
+                return Fail($"A verdict is n:verdict:reason, once for each condition, with n from 1: '{verdict}'.");
+            }
+        }
+
+        var read = new Dictionary<int, List<string>>();
+        foreach (string entry in reads)
+        {
+            string[] parts = entry.Split(':', 2);
+            if (parts.Length != 2 || !int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int condition) || !given.ContainsKey(condition))
+            {
+                return Fail($"A record read is n:record-id, for a condition given a verdict: '{entry}'.");
+            }
+
+            if (!read.TryGetValue(condition, out List<string>? ids))
+            {
+                read[condition] = ids = [];
+            }
+
+            ids.Add(parts[1]);
+        }
+
+        List<GoalVerdict> list = given.Select(g => new GoalVerdict(g.Key, g.Value.Verdict, g.Value.Reason, read.TryGetValue(g.Key, out List<string>? ids) ? ids : null)).ToList();
+        return WithApi(root, api => ReportOutcome(api.GoalEvaluate(goal, new GoalEvaluateRequest(by, summary, list)), json));
+    }
+
+    /// <summary>Accepts a goal at its current revision, relying on its current evaluation.</summary>
+    public static int GoalAccept(string root, string goal, string by, string statement, bool json) =>
+        WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
+
     public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
     {
         try

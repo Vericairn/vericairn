@@ -82,30 +82,33 @@ public static class GoalRules
     }
 
     /// <summary>
-    /// The work orders a goal is made of: those its plan gives, at their latest revisions, and the current ones that name any revision
-    /// of the goal among their inputs, which is how a planner proposes work for it. Ordered by key and identifier.
+    /// The work orders a goal is made of, each at its latest revision: those its plan gives, and those of which a revision names any
+    /// revision of the goal among its inputs, which is how a planner proposes work for it. Ordered by key and identifier.
     /// </summary>
     public static IReadOnlyList<RecordEnvelope> Work(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         IReadOnlyList<string> chain = model.Chain(goal);
-        var orders = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        var named = new List<RecordEnvelope>();
         if (goal.Body.TryGetProperty("plan", out JsonElement plan) && plan.ValueKind == JsonValueKind.Object && plan.TryGetProperty("workOrders", out JsonElement given) && given.ValueKind == JsonValueKind.Array)
         {
             foreach (JsonElement id in given.EnumerateArray().Where(i => i.ValueKind == JsonValueKind.String))
             {
                 if (model.ById.TryGetValue(id.GetString()!, out RecordEnvelope? order) && order.Type == "work-order")
                 {
-                    RecordEnvelope latest = model.Latest(order);
-                    orders[latest.Id] = latest;
+                    named.Add(order);
                 }
             }
         }
 
-        foreach (RecordEnvelope order in model.Current("work-order").Where(o => (before is null || Before(o, before)) && Inputs(o).Any(chain.Contains)))
+        named.AddRange(model.OfType("work-order").Where(o => (before is null || Before(o, before)) && Inputs(o).Any(chain.Contains)));
+
+        // A work order is one whatever its revisions: the first record of its chain names it, and its latest revision stands for it.
+        var orders = new Dictionary<string, RecordEnvelope>(StringComparer.Ordinal);
+        foreach (RecordEnvelope order in named)
         {
-            orders[order.Id] = order;
+            orders[model.Chain(order)[0]] = model.Latest(order);
         }
 
         return orders.Values.OrderBy(o => EstateModel.BodyString(o, "key"), StringComparer.Ordinal).ThenBy(o => o.Id, StringComparer.Ordinal).ToList();

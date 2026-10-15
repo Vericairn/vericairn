@@ -246,12 +246,13 @@ is due" is `{"type": "living-document", "product": "<P>", "state": "due", "max":
 latest: a predicate about a commit names the commit.
 
 The runtime gives each condition a verdict, `met`, `not-met` or `unknown`, with its reason and the records it read,
-each at its exact hash; `vericairn goal` shows them. A record predicate is `unknown` only when a record it might count
-cannot be decided here and the verdict turns on it: a living document that names a contribution no installed pack
-provides, or whose covered paths are in a repository with no clone registered here. A living document that is due is
-due whatever else could not be evaluated. Like status, a living document's `covers` trigger compares its covered paths
-in the working tree; every other input of a verdict is a record, so every machine gives the same verdicts for the same
-records. An evidence statement is always `unknown` to the runtime: the evaluation judges it.
+each at its exact hash; `vericairn goal show <goal>` shows them, and `vericairn goal` those of the one goal that is
+neither achieved nor ended. A record predicate is `unknown` only when a record it might count cannot be decided here
+and the verdict turns on it: a living document that names a contribution no installed pack provides, or whose covered
+paths are in a repository with no clone registered here. A living document that is due is due whatever else could not
+be evaluated. Like status, a living document's `covers` trigger compares its covered paths in the working tree; every
+other input of a verdict is a record, so every machine gives the same verdicts for the same records. An evidence
+statement is always `unknown` to the runtime: the evaluation judges it.
 
 ## A goal's evaluation
 
@@ -267,7 +268,15 @@ plan gives and the current ones that name the goal, by any revision, among their
 are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
 one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
 authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
-goal's current evaluation is the latest one of its exact revision; a revised goal is evaluated afresh.
+goal's current evaluation is the latest one of its exact revision that counts: one that gives a known verdict for
+each condition and whose author authored no step when it was written. A revised goal is evaluated afresh.
+
+`vericairn goal evaluate <goal> --by <id> --summary <text> [--verdict n:verdict:reason]... [--read n:record-id]...`
+records an evaluation through the runtime, which gives each record predicate its own verdict, `met`, or `not-yet` when
+it does not find it met, with the records it read, and refuses an evaluator's verdict that contradicts it; the
+evaluator may still judge a predicate the runtime does not find met `impossible`. Each evidence statement takes the
+evaluator's verdict, and one found met names the records read. The runtime refuses a step's author before anything is
+written. The evaluator is told the conditions, never an expected answer.
 
 ## A goal's activation and acceptance
 
@@ -297,6 +306,13 @@ A goal is achieved by an `acceptance` of its exact revision, which:
 
 Each is judged from the records before the acceptance, so a later record never unmakes it. Until an acceptance passes
 all four, the goal's status is the latest status of its exact revision, and `proposed` before any.
+
+`vericairn goal propose` writes a goal from its options (`--done` takes each condition as JSON, `--budget` each cap as
+`unit=value`), `vericairn goal activate|pause|resume|stop <goal> --by <id>` record its statuses in their order, the
+sponsor's each time, and `vericairn goal accept <goal> --by <id> --statement <text>` accepts it on its current
+evaluation. Records can change after an evaluation, so the runtime also refuses an acceptance while a record predicate
+does not hold, before anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is
+not, why.
 
 ## A device keeps its identity
 

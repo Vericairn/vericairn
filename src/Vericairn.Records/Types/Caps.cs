@@ -13,6 +13,32 @@ public static class Caps
     /// <summary>The units, in plain words, for field documentation.</summary>
     public const string Units = "wallMinutes, attemptsPerStep, tokens and concurrency (positive integers) and currency ({amount in minor units, unit: three upper-case letters}); an absent unit is not an unlimited one";
 
+    /// <summary>The units by name, in the order a budget is shown.</summary>
+    public static readonly string[] UnitNames = ["wallMinutes", "attemptsPerStep", "tokens", "concurrency", "currency"];
+
+    /// <summary>
+    /// What a caps object grants, unit by unit in the order of <see cref="UnitNames"/>: the cap in words, or null for a unit it does
+    /// not state, which is not granted at all, never granted without limit.
+    /// </summary>
+    public static IReadOnlyList<(string Unit, string? Cap)> Granted(System.Text.Json.JsonElement caps)
+    {
+        var granted = new List<(string Unit, string? Cap)>();
+        foreach (string unit in UnitNames)
+        {
+            string? cap = null;
+            if (caps.ValueKind == System.Text.Json.JsonValueKind.Object && caps.TryGetProperty(unit, out System.Text.Json.JsonElement value))
+            {
+                cap = value.ValueKind == System.Text.Json.JsonValueKind.Object
+                    ? $"{(value.TryGetProperty("amount", out System.Text.Json.JsonElement amount) ? amount.GetRawText() : "?")} minor units of {(value.TryGetProperty("unit", out System.Text.Json.JsonElement currency) ? currency.GetString() : "?")}"
+                    : value.GetRawText();
+            }
+
+            granted.Add((unit, cap));
+        }
+
+        return granted;
+    }
+
     /// <summary>Reads a caps object; the named units are required.</summary>
     public static void Read(BodyReader caps, params string[] required)
     {
