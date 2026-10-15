@@ -23,6 +23,7 @@
       <MenuItem Header="_Work">
         <MenuItem Header="Result _inbox" InputGesture="Ctrl+I" Click="OnOpenInbox" />
         <MenuItem Header="_Products" Click="OnOpenProducts" />
+        <MenuItem Header="Living _documents" InputGesture="Ctrl+Shift+D" Click="OnOpenLivingDocuments" />
         <MenuItem Header="_Assign the open work order" InputGesture="Ctrl+Shift+A" Click="OnOpenComposer" />
         <MenuItem Header="_Compare the open record with its earlier revision" Click="OnCompareOpen" />
         <Separator />
@@ -231,6 +232,35 @@
                     <TextBlock Text="Note" />
                     <TextBox Text="{Binding Note}" MinHeight="28" AutomationProperties.Name="Note" />
                     <Button Content="Send the assignment" MinHeight="32" Click="OnSubmitAssignment" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" />
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:LivingDocumentsWorkspace">
+                <ScrollViewer>
+                  <StackPanel Margin="8" Spacing="6" MaxWidth="900" HorizontalAlignment="Left">
+                    <TextBlock Text="Living documents" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Opacity="0.8" />
+                    <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Focusable="True" MaxHeight="360" AutomationProperties.Name="Living documents">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:LivingDocumentRow">
+                          <StackPanel MinHeight="32">
+                            <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Detail}" FontSize="11" Opacity="0.8" TextWrapping="Wrap" />
+                          </StackPanel>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="Review the selected document: the runtime reads its content, records what the review answers and runs its declared checks." TextWrapping="Wrap" FontWeight="SemiBold" />
+                    <TextBlock Text="Outcome" />
+                    <ComboBox ItemsSource="{Binding Outcomes}" SelectedItem="{Binding Outcome}" MinHeight="28" AutomationProperties.Name="Outcome" />
+                    <TextBlock Text="What was checked" />
+                    <TextBox Text="{Binding Summary}" MinHeight="28" AutomationProperties.Name="Summary" />
+                    <TextBlock Text="{Binding CommitHint}" />
+                    <TextBox Text="{Binding Commit}" MinHeight="28" AutomationProperties.Name="Commit" />
+                    <TextBlock Text="Findings, one per line as severity: text" />
+                    <TextBox Text="{Binding Findings}" AcceptsReturn="True" MinHeight="56" AutomationProperties.Name="Findings" />
+                    <Button Content="Record the review" MinHeight="32" Click="OnSubmitDocumentReview" />
                     <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" />
                   </StackPanel>
                 </ScrollViewer>

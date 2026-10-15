@@ -104,6 +104,11 @@ public partial class MainWindow : Window
             shell.OpenRelease();
             FocusDocument();
         }
+        else if (command && shift && e.Key == Key.D)
+        {
+            shell.OpenLivingDocuments();
+            FocusDocument();
+        }
         else if (command && shift && e.Key == Key.U)
         {
             shell.OpenRuntime();
@@ -390,6 +395,22 @@ public partial class MainWindow : Window
 
     private void OnOpenProducts(object? sender, RoutedEventArgs e) => shell.OpenProducts();
 
+    private void OnOpenLivingDocuments(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenLivingDocuments();
+        FocusDocument();
+    }
+
+    private void OnSubmitDocumentReview(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<LivingDocumentsWorkspace>(sender) is LivingDocumentsWorkspace page && shell.Api is not null)
+        {
+            page.Submit(shell.Api, shell.ActingPrincipalId);
+            shell.Status = page.Status.Split('\n')[0];
+            shell.Refresh();
+        }
+    }
+
     private void OnOpenComposer(object? sender, RoutedEventArgs e)
     {
         if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
@@ -582,6 +603,9 @@ public partial class MainWindow : Window
                 break;
             case ReleaseWorkspace:
                 OnSubmitRelease(null, e);
+                break;
+            case LivingDocumentsWorkspace:
+                OnSubmitDocumentReview(null, e);
                 break;
             default:
                 shell.Status = "The open document has nothing to send.";
