@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   build-test:
-    # Pull requests build on Linux; merges to main and manual runs cover all three platforms,
-    # which keeps the private repository inside its included Actions minutes.
+    # Pull requests build on Linux; merges to main and manual runs cover all three platforms. The split began while the
+    # repository was private, to stay inside its included Actions minutes; the repository is public now.
     strategy:
       fail-fast: false
       matrix:

@@ -62,9 +62,10 @@ release and pins the one it runs on.
 
 Development is supported on all three. Requires the .NET SDK pinned in `global.json` and git on the PATH.
 Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
-every platform, and continuous integration builds and tests on all three operating systems. Building the
-iOS client and signing for Apple platforms will require macOS, which is Apple's constraint, not ours;
-everything else, including the Android client, builds anywhere.
+every platform, and continuous integration builds and tests on all three operating systems and scans the
+commits of every pushed branch and pull request for secrets with a pinned, checksum-verified gitleaks.
+Building the iOS client and signing for Apple platforms will require macOS, which is Apple's constraint,
+not ours; everything else, including the Android client, builds anywhere.
 
 ## Build
 
