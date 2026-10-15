@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
@@ -82,7 +84,18 @@ public sealed class ResultType : IRecordType
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {
-            context.Warning("result.checks", "The result claims completed while a check failed; the reviewer decides whether that is acceptable.");
+            // The reviewer's decision is an acceptance: once one is recorded after the result, the failed check has its answer.
+            RecordEnvelope? acceptance = AcceptanceAfter(context.Model, context.Record);
+            if (acceptance is null)
+            {
+                context.Warning("result.checks", "The result claims completed while a check failed; the reviewer decides whether that is acceptable.");
+            }
+            else
+            {
+                string accepted = acceptance.Subject!.Id == context.Record.Id ? "this result" : $"its work order {EstateModel.BodyString(context.Model.ById[acceptance.Subject.Id], "key")}";
+                bool self = acceptance.Body.TryGetProperty("self", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
+                context.Findings.Info("result.checks-accepted", context.Location, $"The result claims completed while a check failed, and acceptance {acceptance.Id}, recorded after it, accepts {accepted}; it is {(self ? "a self-acceptance" : "not a self-acceptance")}.");
+            }
         }
 
         if (context.Principal(context.Record.By) is null)
@@ -106,6 +119,21 @@ public sealed class ResultType : IRecordType
         {
             context.Error("result.duplicate", "Another current result exists for the same attempt; a corrected result supersedes the earlier one instead of standing beside it.");
         }
+    }
+
+    /// <summary>
+    /// The latest current acceptance recorded after the result, by time and then by id, that accepts the result itself or its work
+    /// order (any revision of the order its attempt and assignment lead to); null when there is none.
+    /// </summary>
+    private static RecordEnvelope? AcceptanceAfter(EstateModel model, RecordEnvelope result)
+    {
+        RecordEnvelope? order = WorkView.OrderOfResult(model, result);
+        IReadOnlyList<string> orders = order is null ? [] : model.Chain(model.Latest(order));
+        return model.Current("acceptance")
+            .Where(a => a.Subject is { } subject && ((subject.Id == result.Id && subject.Hash == result.ComputedHash) || (subject.Type == "work-order" && orders.Contains(subject.Id, StringComparer.Ordinal))))
+            .Where(a => string.CompareOrdinal(a.At, result.At) > 0 || (a.At == result.At && string.CompareOrdinal(a.Id, result.Id) > 0))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+            .LastOrDefault();
     }
 
     private static void VerifyOutput(ValidationContext context, BodyReader output, string? hash, long? bytes, string? location)

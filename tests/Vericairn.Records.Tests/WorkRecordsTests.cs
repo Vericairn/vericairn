@@ -105,6 +105,38 @@ public class WorkRecordsTests
     }
 
     [Fact]
+    public void AFailedCheckIsInformationOnceAnAcceptanceRecordedAfterTheResultAnswersIt()
+    {
+        using var estate = new TestEstate();
+        GrantEngineering(estate);
+        RecordEnvelope attempt = StartAttempt(estate, OrdinaryBody);
+        RecordEnvelope order = WorkView.FindOrder(estate.Load(), "W-1")!;
+        const string SelfAcceptance = """{"statement":"Accepted as it stands.","basis":[],"self":true}""";
+
+        // An acceptance of the work order recorded before the result has not seen the failed check.
+        estate.Add("acceptance", estate.BuilderId, SelfAcceptance, order.Reference);
+        RecordEnvelope result = estate.Add("result", estate.BuilderId, """{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[{"name":"tests","outcome":"failed","summary":"One test fails."}],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""", attempt.Reference);
+        Assert.Contains(estate.Load().Findings, f => f.Code == "result.checks" && f.Severity == Severity.Warning && f.Location == result.ExpectedPath);
+
+        // The builder's own acceptance of the work order after the result answers it, and the finding names it as a self-acceptance.
+        RecordEnvelope ofOrder = estate.Add("acceptance", estate.BuilderId, SelfAcceptance, order.Reference);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.DoesNotContain(model.Findings, f => f.Code == "result.checks");
+        Finding answered = Assert.Single(model.Findings, f => f.Code == "result.checks-accepted");
+        Assert.Equal(Severity.Info, answered.Severity);
+        Assert.Equal(result.ExpectedPath, answered.Location);
+        Assert.Contains($"acceptance {ofOrder.Id}", answered.Message, StringComparison.Ordinal);
+        Assert.Contains("its work order W-1; it is a self-acceptance.", answered.Message, StringComparison.Ordinal);
+
+        // The operator's later acceptance of the result itself is the one named, and it is not a self-acceptance.
+        RecordEnvelope ofResult = estate.Add("acceptance", estate.OperatorId, """{"statement":"Accepted with the failing test.","basis":[],"self":false}""", result.Reference);
+        answered = Assert.Single(estate.Load().Findings, f => f.Code == "result.checks-accepted");
+        Assert.Contains($"acceptance {ofResult.Id}", answered.Message, StringComparison.Ordinal);
+        Assert.Contains("this result; it is not a self-acceptance.", answered.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResultsTowardMilestonesAreAcceptedByTheOperatorOnly()
     {
         using var estate = new TestEstate();

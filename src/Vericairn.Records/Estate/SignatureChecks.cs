@@ -44,7 +44,7 @@ public static class SignatureChecks
             }
 
             Rotation(model, record, findings);
-            RecoveryUse(model, record, findings);
+            RecoveryUse(model, record, rootOperator, firstAuthority, anchored, findings);
         }
     }
 
@@ -57,9 +57,11 @@ public static class SignatureChecks
 
     /// <summary>
     /// Every use of a recovery device stays in view until the operator reviews it: a record it signed, other than its own device
-    /// records, carries a warning until a review by an operator names that exact record.
+    /// records, carries a warning until a current review by an operator names that exact record and is signed by an admitted device
+    /// that is not a recovery device. An unsigned review clears nothing, since anyone able to add records can write one in the
+    /// operator's name while the charter leaves signatures optional.
     /// </summary>
-    private static void RecoveryUse(EstateModel model, RecordEnvelope record, FindingList findings)
+    private static void RecoveryUse(EstateModel model, RecordEnvelope record, string? rootOperator, string? firstAuthority, IReadOnlySet<string> anchored, FindingList findings)
     {
         string? recovery = record.Signatures.Select(s => IdentityOf(model, s.Device)).FirstOrDefault(identity => Recovers(model, identity));
         if (recovery is null || (record.Type == "device" && model.Chain(record)[0] == recovery))
@@ -68,11 +70,31 @@ public static class SignatureChecks
         }
 
         bool reviewed = model.About(record.Id, "review").Any(review =>
-            model.IsCurrent(review) && model.HasRole(review.By, Types.Roles.Operator) && review.Subject?.Hash == record.ComputedHash && !review.Signatures.Any(s => Recovers(model, s.Device)));
+            model.IsCurrent(review) && model.HasRole(review.By, Types.Roles.Operator) && review.Subject?.Hash == record.ComputedHash && SignedByAdmittedDevices(model, review, rootOperator, firstAuthority, anchored));
         if (!reviewed)
         {
-            findings.Warning("recovery.unreviewed", record.ExpectedPath, $"Signed by recovery device {recovery}: emergency access stays in view until the operator reviews this record.");
+            findings.Warning("recovery.unreviewed", record.ExpectedPath, $"Signed by recovery device {recovery}: emergency access stays in view until an operator records a review of this record that an admitted device other than a recovery device signs.");
         }
+    }
+
+    /// <summary>
+    /// True when a record is signed, by no recovery device, and every signature verifies by a device admitted when the record was
+    /// authored, through admissions that count.
+    /// </summary>
+    private static bool SignedByAdmittedDevices(EstateModel model, RecordEnvelope record, string? rootOperator, string? firstAuthority, IReadOnlySet<string> anchored)
+    {
+        if (record.Signatures.Count == 0 || record.Signatures.Any(s => Recovers(model, s.Device)))
+        {
+            return false;
+        }
+
+        var verified = new FindingList();
+        foreach (RecordSignature signature in record.Signatures)
+        {
+            Verify(model, record, signature, rootOperator, firstAuthority, verified, anchored);
+        }
+
+        return !verified.HasErrors;
     }
 
     /// <summary>The identity of a device: the id of its first device record, which every revision keeps; null when the id names none.</summary>

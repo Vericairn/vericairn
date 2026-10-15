@@ -49,10 +49,11 @@ Format 1 counted an admission recorded without a signature while the charter lef
 every admission recorded without a signature, revocations and superseded ones included, by id and hash, in the migration
 record's `anchored`, and from then on an unsigned admission counts only when that list names it (rules, below). The list
 counts only when the migration is signed by the root operator, or by a principal with the `administer` scope, with a
-device whose own admission rests on signatures; so `estate upgrade`, when there is anything to list, refuses before
-changing anything unless the principal applying it is one of those and holds such a device on this machine, and
-`--check` names the admissions the move would list. An estate created at format 2 has no list, and in it no unsigned
-admission ever counts.
+device whose own admission rests on signatures; a migration that lists admissions is refused when it is unsigned
+(`migration.anchor-unsigned`) or written by anyone else, another operator included (`migration.anchor-author`). So
+`estate upgrade`, when there is anything to list, refuses before changing anything unless the root operator or an
+administrator applies it and holds such a device on this machine, and `--check` names the admissions the move would
+list. An estate created at format 2 has no list, and in it no unsigned admission ever counts.
 
 ## Types new in format 2
 
@@ -229,8 +230,10 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   memory with its passphrase: to admit a replacement device and to revoke a lost one. A recovery device signs device
   records, admissions and revocations, and nothing else (`signature.recovery-scope`).
 - Each record it signs, other than its own device records, carries the warning `recovery.unreviewed`. The warning shows
-  in `vericairn status` and `vericairn estate check` until an operator records a review of that exact record that no
-  recovery device signed (a review without a signature clears it too).
+  in `vericairn status` and `vericairn estate check` until an operator records a review of that exact record signed by
+  a device that is not a recovery device and was admitted, by admissions that count, when the review was written. A
+  review without a signature clears nothing, since anyone able to add records can write one in the operator's name
+  while the charter leaves signatures optional.
 - Losing every device without a recovery device leaves the estate readable and its history verifiable, but no device can
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said

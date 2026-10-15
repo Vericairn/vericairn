@@ -306,6 +306,36 @@ public class SigningTests : IDisposable
     }
 
     [Fact]
+    public void ARecoveryUseLeavesViewOnlyByAReviewThatAnAdmittedDeviceOtherThanARecoveryDeviceSigns()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope laptop = CreateDevice(estate, estate.OperatorId, "Operator laptop", extra: FormatTwo);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Root."}""", laptop.Reference, signer: Signer(laptop));
+        RecordEnvelope recovery = CreateDevice(estate, estate.OperatorId, "Recovery key", custody: "offline", extra: Recovery);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The recovery device."}""", recovery.Reference, signer: Signer(laptop));
+        RecordEnvelope replacement = CreateDevice(estate, estate.OperatorId, "Replacement laptop", extra: FormatTwo);
+        RecordEnvelope use = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Replaces the lost laptop."}""", replacement.Reference, signer: Signer(recovery));
+        const string Review = """{"independence":"self","outcome":"pass","summary":"The operator's own recovery, after the laptop was lost.","findings":[]}""";
+
+        // While the charter leaves signatures optional, anyone able to add records can write a review in the operator's name
+        // without a signature: it is accepted as a record, and it clears nothing.
+        estate.Add("review", estate.OperatorId, Review, use.Reference);
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error);
+        Assert.Contains(findings, f => f.Code == "recovery.unreviewed" && f.Location == use.ExpectedPath);
+
+        // Nor does a review signed by a device of the operator whose admission does not count: an unsigned one, at format 2.
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", extra: FormatTwo);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Unsigned."}""", minted.Reference);
+        estate.Add("review", estate.OperatorId, Review, use.Reference, signer: Signer(minted));
+        Assert.Contains(estate.Load().Findings, f => f.Code == "recovery.unreviewed" && f.Location == use.ExpectedPath);
+
+        // The operator's review signed by the admitted replacement takes the use out of view.
+        estate.Add("review", estate.OperatorId, Review, use.Reference, signer: Signer(replacement));
+        Assert.DoesNotContain(estate.Load().Findings, f => f.Code == "recovery.unreviewed");
+    }
+
+    [Fact]
     public void OnlyARecoveryDevicesKeyIsOfflineAndARecoveryDeviceIsNeverTheFirstAuthority()
     {
         using var estate = new TestEstate(recordFormat: 2);
@@ -452,6 +482,36 @@ public class SigningTests : IDisposable
         model = estate.Load();
         Assert.Contains(model.Findings, f => f.Code == "migration.anchor-author");
         Assert.False(SignatureChecks.IsAdmitted(model, minted));
+    }
+
+    [Fact]
+    public void AnotherOperatorsListOfAnchoredAdmissionsIsRefusedUnlessTheyMayAdminister()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope laptop = CreateDevice(estate, estate.OperatorId, "Operator laptop");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", laptop.Reference, signer: Signer(laptop));
+        RecordEnvelope second = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Second Operator","roles":["operator"]}""", signer: Signer(laptop));
+        RecordEnvelope secondLaptop = CreateDevice(estate, second.Id, "Second operator's laptop");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{second.Id}}","status":"admitted","note":"The second operator's laptop."}""", secondLaptop.Reference, signer: Signer(laptop));
+        RecordEnvelope builderDevice = CreateDevice(estate, estate.BuilderId, "Build machine");
+        RecordEnvelope unsigned = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.BuilderId}}","status":"admitted","note":"Admitted unsigned under format 1."}""", builderDevice.Reference);
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Administration","statement":"The second operator administers the estate.","summary":"Delegation.","synthesis":"The second operator may record principals, authority and admissions.","effects":["second operator administers"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+        Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+
+        // Anchors count only for the root operator or an administrator: the operator role alone writes a list that would anchor
+        // nothing, so it is refused rather than accepted and ignored.
+        estate.MoveTo(2);
+        string body = $$"""{"fromPin":"release 0.4.2","toPin":"release 0.5.2","fromFormat":1,"toFormat":2,"migrations":["record-format-2"],"changes":[],"anchored":[{"id":"{{unsigned.Id}}","hash":"{{unsigned.ComputedHash}}"}]}""";
+        RecordEnvelope migration = estate.Add("migration", second.Id, body, signer: Signer(secondLaptop));
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "migration.anchor-author" && f.Location.StartsWith(migration.ExpectedPath, StringComparison.Ordinal));
+        Assert.False(SignatureChecks.IsAdmitted(model, builderDevice));
+
+        // Granted 'administer', the same principal's signed list is valid and is the one that keeps the admission counting.
+        estate.Add("authority", estate.OperatorId, $$"""{"grantee":"{{second.Id}}","scope":["administer"],"reserved":[],"conditions":[],"basis":"{{decision.Id}}"}""", signer: Signer(laptop));
+        model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.True(SignatureChecks.IsAdmitted(model, builderDevice));
     }
 
     [Fact]

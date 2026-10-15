@@ -46,6 +46,18 @@ public sealed class ReleaseType : IRecordType
         return left.Count == right.Count && left.All(pair => right.TryGetValue(pair.Key, out string? value) && value == pair.Value);
     }
 
+    /// <summary>
+    /// True when <paramref name="latest"/>, the latest revision of the release record <paramref name="earlier"/> is a revision of,
+    /// withdraws that release. Whatever was said of an earlier revision (of a first candidate that was corrected and then withdrawn,
+    /// for one) is answered by the withdrawal, and nothing is left to reconsider.
+    /// </summary>
+    public static bool IsWithdrawalOf(RecordEnvelope earlier, RecordEnvelope latest)
+    {
+        ArgumentNullException.ThrowIfNull(earlier);
+        ArgumentNullException.ThrowIfNull(latest);
+        return earlier.Type == "release" && latest.Type == "release" && latest.Id != earlier.Id && EstateModel.BodyString(latest, "status") == "withdrawn";
+    }
+
     /// <inheritdoc />
     public string Name => "release";
 
