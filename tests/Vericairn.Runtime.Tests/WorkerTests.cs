@@ -57,6 +57,34 @@ public class WorkerTests
     }
 
     [Fact]
+    public void TransmissionIsTimestampedAfterItsActualSignalAttemptRatherThanTheEarlierHeartbeat()
+    {
+        using var run = new RunEstate();
+        string? attemptedAt = null;
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeSignal = force =>
+            {
+                if (!force)
+                {
+                    Thread.Sleep(1100);
+                    attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                }
+            },
+        };
+        RunResponse started = run.Start("generic", "ack-stop", run.Report("transmission-time"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("transmission-time")));
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Observe transmission after the attempt.", 5));
+        Assert.Equal("contained", stopped.State);
+        Assert.NotNull(attemptedAt);
+        Assert.True(string.CompareOrdinal(stopped.Stop!.TransmittedAt, attemptedAt) >= 0);
+        Assert.True(string.CompareOrdinal(stopped.Stop.AcknowledgedAt, stopped.Stop.TransmittedAt) >= 0);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void TheStallLimitIsPinnedFromTheGoalCurrentWhenTheIntentIsRecorded()
     {
         using var run = new RunEstate();

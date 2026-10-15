@@ -218,28 +218,28 @@ public sealed class RunSupervisor
                 {
                     if (rootExited)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited while descendants remained in its containment boundary"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited while descendants remained in its containment boundary"));
                     }
                     else if (directory.ReadStop() is StopRequest asked)
                     {
-                        Begin(asked, now);
+                        Begin(asked);
                     }
                     else if (silence.TotalSeconds >= 2L * liveness.StallSeconds)
                     {
                         state.Liveness = liveness with { StoppedAt = RecordParser.FormatTimestamp(now) };
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the worker observed the event stream silent for twice the stall limit of {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the worker observed the event stream silent for twice the stall limit of {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds"));
                     }
                     else if (now >= deadline)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its wall-time stop threshold below its allowance of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes, reserving shutdown headroom"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its wall-time stop threshold below its allowance of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes, reserving shutdown headroom"));
                     }
                     else if ((limits?.Tokens ?? tokenCap) is long cap && tokens >= cap)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported reached the operational threshold of {cap.ToString(CultureInfo.InvariantCulture)}, below the reserved cap of {tokenCap?.ToString(CultureInfo.InvariantCulture)}"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported reached the operational threshold of {cap.ToString(CultureInfo.InvariantCulture)}, below the reserved cap of {tokenCap?.ToString(CultureInfo.InvariantCulture)}"));
                     }
                     else if (limits?.Currency is long currency && priceUnit == limits.CurrencyUnit && price >= currency)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"));
                     }
                 }
                 else if (transmitted is DateTimeOffset at && now - at >= grace)
@@ -285,7 +285,7 @@ public sealed class RunSupervisor
         }
     }
 
-    private void Begin(StopRequest request, DateTimeOffset now)
+    private void Begin(StopRequest request)
     {
         grace = request.GraceSeconds is int seconds and >= 0 ? TimeSpan.FromSeconds(seconds) : options.Grace;
         state.Stop = new RunStop(request.RequestedAt, request.RequestedBy, request.Reason);
@@ -311,8 +311,8 @@ public sealed class RunSupervisor
             transmission.Append(failure is null ? ", and SIGTERM to the whole process group" : $"; SIGTERM was not sent ({failure})");
         }
 
-        transmitted = now;
-        state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(now), Transmission = transmission.ToString() };
+        transmitted = DateTimeOffset.UtcNow;
+        state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
     }
 
     private void Escalate(DateTimeOffset now)

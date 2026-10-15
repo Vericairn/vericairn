@@ -318,7 +318,8 @@ session can escape this same-user boundary; use OS isolation for hostile code.
 Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may
 precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously
 recorded stop property, including the request and explanatory text, is immutable across revisions
-(`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
+(`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`). Transmission is timestamped
+after delivery attempts finish, rather than at an earlier heartbeat.
 
 A failed dispatch write is recovered from the worker's launch observation before settlement. If it cannot be recorded,
 the run remains in flight at its full reservation; it is never settled as an unstarted zero-charge failure.

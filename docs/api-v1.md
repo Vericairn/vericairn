@@ -139,7 +139,8 @@ charged at its cap.
   listed; unsafe names are hashed. This is an observation, not acceptance or a filesystem sandbox.
 
 A stop's acknowledgment and escalation follow transmission; containment follows all prior facts and does not follow
-`observed.at`. Stop facts remain unchanged across revisions. Containment requires observing the whole Windows Job
+`observed.at`. Stop facts remain unchanged across revisions. Transmission is timestamped after delivery attempts
+finish, rather than at an earlier heartbeat. Containment requires observing the whole Windows Job
 Object or POSIX process group exited, not just the root process. Failed escalations remain evidence and are retried
 without claiming a kill. A lost observer leaves the reservation in flight.
 

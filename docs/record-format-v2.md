@@ -489,7 +489,8 @@ cap; complete explicit zero counts remain known zero.
 Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may
 precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously
 recorded stop property, including the request and explanatory text, is immutable across revisions
-(`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
+(`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`). Transmission is timestamped
+after delivery attempts finish, rather than at an earlier heartbeat.
 
 New worker intents state `target.capMode: "soft"` and evidence describing each operational threshold and the
 launcher's native controls. The ledger reserves the full cap. The worker subtracts grace plus one heartbeat from wall
