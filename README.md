@@ -36,27 +36,38 @@ release and pins the one it runs on.
   configures an address, the local network to paired devices with mutual TLS, and the typed client with the
   device's side of pairing and its connections, documented in [docs/api-v1.md](docs/api-v1.md).
 - The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
-  verification evidence), `Vericairn.Adapters.Git` (read-only observation of a repository) and
+  verification evidence, and the coding-agent launchers and git worktree workspaces the worker uses),
+  `Vericairn.Adapters.Git` (read-only observation of a repository) and
   `Vericairn.Providers.GitHub` (releases built by a GitHub Actions workflow and held as drafts, with intent
   recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
-- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `devices`, `connections`, `release`, `sources`, `check`,
-  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the
-  daemon when one serves the estate, the embedded runtime otherwise. `vericairn devices pair` issues a
-  short-lived pairing code under an administrator's authority, `vericairn connections add` pairs another
-  machine with the runtime over the local network, and `vericairn connections list` shows each connection's
-  state; a revoked device is refused at its next request. `vericairn goal` carries an objective: a goal is
-  proposed and activated, record predicates and an evaluator who did none of its work judge it condition by
-  condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
-  given can activate, fund or accept one. There is no conductor yet: people and agents do a goal's steps.
+- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
+  `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `decisions`, `doctor`, `version`; a
+  client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
+  report from the records alone, the same on every machine: where the estate stands, the work orders by state, each
+  published release and what it contained, what comes next by release, the next eligible work and what waits on the
+  operator, every line naming the records it rests on; the API, an MCP tool, Workbench's home and a generated region
+  of a document carry the same report. `vericairn goal` carries an objective: a
+  goal is proposed and activated, record predicates and an evaluator who did none of its work judge it condition
+  by condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
+  given can activate, fund or accept one, and only its sponsor, or an operator for a goal an agent sponsors,
+  revises it. `vericairn worker` carries one of a goal's assignments with a coding agent (the worker contract
+  `vericairn.worker/1`): through Claude Code's or Codex's own `/goal`, or a generic launch, in a git worktree on
+  a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
+  after, unknown usage charged at the cap, a stop's facts kept apart, and nothing launched while an operator's
+  or the sponsor's key on the machine signs without presence. There is no conductor yet: people choose a
+  goal's next step, and the worker or a person carries it. `vericairn devices pair` issues a short-lived pairing
+  code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
+  the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
+  its next request.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over
   the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
   `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
-  the runtime: home and attention, products, work orders, assignments, results, review and decisions,
+  the runtime: home with attention and the progress report, products, work orders, assignments, results, review and decisions,
   releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record

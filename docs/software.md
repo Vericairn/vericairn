@@ -16,7 +16,7 @@ three. The modules ship inside the Community distributable until packages exist 
 |---|---|---|
 | The git adapter (`vericairn.adapter.git`) | `Vericairn.Adapters.Git` | `GitCommandAdapter`: read-only observation of a repository over the git command; also `GitFileSource`, the software pack's living-document source `vericairn.software/git-file` |
 | The GitHub provider | `Vericairn.Providers.GitHub` | `GitHubReleaseProvider`: releases built by a dispatched GitHub Actions workflow, observed as runs and drafts through the user's own GitHub CLI login |
-| The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence |
+| The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence, and from 0.6.0 the coding-agent launchers (Claude Code, Codex and the generic one) and git worktrees as the workspaces agents work in |
 
 The command line is the host that registers them: being available selects nothing. A release goes through
 the provider its product declares or its request names, and a provider with no implementation on the
@@ -166,6 +166,92 @@ sets. For a previous set that records no window, as 0.5.2's and earlier sets do,
 notes state, to the minute, and with no previous set at the previous publication; `--since <time>` names
 the beginning instead. Until the version's publication is recorded they end at the second before they are
 generated.
+
+## Coding agents: the worker and its launchers
+
+The worker contract, `vericairn.worker/1` (the estate's `design/goals.md` § 7), carries one assignment with a coding agent
+toward its work order's exit question. It lives in the runtime; the launchers that start a harness (contract
+`vericairn.launcher.agent/1`, `IAgentLauncher`) and the workspaces it works in (contract `vericairn.workspace/1`,
+`IWorkspaceProvider`) are providers the host registers, listed as the release providers are: `vericairn worker
+launchers` lists the launchers, and `vericairn release providers` lists them with every other implementation. The
+Software Domain Pack ships three launchers and the git worktree workspace:
+
+| Launcher | Runs |
+|---|---|
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config`, in the workspace: Claude Code's own `/goal`, in auto permission mode, with the vericairn MCP server as its only MCP server. It reads the tokens of the stream's final result. |
+| `codex` | `codex exec --json --cd <workspace> --sandbox workspace-write -c mcp_servers.vericairn.command=<vericairn> -c mcp_servers.vericairn.args=[...] [-c mcp_servers.vericairn.env.<name>=<value>]... "/goal <condition>"`: Codex's own `/goal`. Before a run is recorded it reads `codex features list`, with the run's environment, and refuses, saying why, unless the `goals` feature shows `true`. It adds up the input and output tokens of each completed turn. |
+| `generic` | The command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Generic process launch is not complete agent support: it knows nothing of the harness's goal, sign-in, usage or stop, and it is listed and run with that label. |
+
+The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
+recorded through the MCP tools as its checks, and the brief's prohibited effects, the goal's constraints and only the
+changes the brief permits as its constraints, on one line. Every flag is one that `claude --help`, `codex --help` or
+`codex exec --help` lists. The `command` setting of each launcher names another executable, or a JSON array of one and
+its leading arguments. No launcher reads a price, so a cap in currency is charged in full.
+
+`vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--detach]`:
+
+1. Refuses, before anything is recorded: an agent that is not the assignment's contributor, or has no admitted device
+   whose key this machine holds (its MCP server would list only the read-only tools); a recording principal that is
+   neither the operator nor holds `local-engineering`; work that belongs to no goal, or to several active goals unless
+   `--goal` names one; a goal that is not active, or whose budget does not allow the run (record-format-v2.md, [An agent
+   run and its goal's ledger](record-format-v2.md#an-agent-run-and-its-goals-ledger)), in which case a crossed cap marks
+   the goal `budget-limited`; a branch another run in flight works on; a repository with no clone registered here
+   (`vericairn sources clone`); the custody precondition, below; and a launcher that cannot run, such as Codex without
+   its goals feature.
+2. Prepares the workspace: a git worktree of the repository's registered clone on the work branch (`work/` and the work
+   order's key unless `--branch` names another, made from `--base` or the clone's HEAD), beside the estate's state on this
+   machine and never the clone's own working tree; a later run of the branch takes its worktree up again. The brief, as
+   `vericairn work brief` gives it, is exported into the workspace as `.vericairn/brief.md`, in a directory that ignores
+   itself so that nothing in it is committed.
+3. Records the intent, the `agent-run` operation with the run's cap from the goal's budget, before anything starts.
+4. Configures the MCP server for the agent, `vericairn --estate <estate root> mcp serve --as <agent>`, in a file outside
+   the workspace, and launches the harness in the workspace with an environment built from an allowlist: the path, the
+   home and temporary directories, the locale and the platform's own variables, what the MCP server needs to find the
+   agent's key (`VERICAIRN_HOME`), and the harness's own configuration (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). No variable
+   whose name marks a credential passes, whatever the worker's environment holds: no GitHub, cloud, package-registry or
+   model-provider token, since a brief grants none. The harness signs in with its own login under the user's home. It is
+   told `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
+5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and its exit. Only
+   the exit ends a run: output that closes, or a worker that stops observing, is no stop, and the run stays in flight,
+   charged at its cap. A run that reaches its wall minutes, or whose reported tokens cross its cap, is stopped by the
+   worker.
+6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
+   only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
+   result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
+
+Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
+the estate launches and observes the run, and the command returns.
+
+**The custody precondition** (design/goals.md § 10). A key that a store of this machine holds for the operating-system
+user the worker runs as can be used by the agent, which runs as that user. So the worker launches nothing while a device
+of an operator, or of the sponsor of the goal the run is charged to, has its key held here in custody that signs without
+its owner's presence: a file, keychain, secret-service or CNG key, or a key whose record claims presence while it is held
+where presence cannot be enforced. Every such device counts, admitted, revoked or not yet admitted, since a revoked key
+still signs records dated before its revocation, and the refusal names each device, its custody and the user. The agent's
+own key is not one of them. Rotate the key into the Secure Enclave with presence (`vericairn devices rotate <device>
+--custody secure-enclave --presence`), or run the worker as an operating-system user that cannot read it. Recorded
+exceptions, and dispatch, are GOAL-04's.
+
+**Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
+prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
+containment are separate facts: the worker that observes the run transmits the stop at its next heartbeat, by creating the
+file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to the harness; a harness acknowledges it by printing
+`{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
+named) has passed, the worker kills its process tree; containment is its exit, observed. The settlement records the facts
+in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
+and the run stays in flight.
+
+`vericairn worker runs` lists every run with its cap, its usage once settled, what it is charged and its stop's facts, and
+the ledger of every goal with a run or active now: each unit's budget, spend and remainder, the runs in flight, and why a
+new run would be fenced. The runs' own files, their state, output and MCP configuration, stay under the Vericairn home on
+the machine that ran them, never in a record or a repository.
+
+Limitations: the launchers are implemented against the harnesses' `--help` and tested with a stand-in process that speaks
+their streams, and none is yet qualified against a live harness. Windows has no signal a windowless process receives, so a
+harness that does not watch the stop file is contained by escalation. Files of the operating-system user stay readable to
+the harness, which only running the worker as another user changes, and a process that leaves the harness's process tree
+is not followed. Codex keeps the MCP servers of the user's own configuration beside vericairn. No MCP tool launches or
+stops a run.
 
 ## The synthetic migration
 

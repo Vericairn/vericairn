@@ -272,11 +272,7 @@ public static class GoalPredicates
 
                 case "ask":
                 {
-                    IReadOnlyList<string> chain = model.Chain(record);
-                    List<RecordEnvelope> answers = EstateModel.BodyString(record, "state") == "withdrawn" ? [] : model.Current("decision")
-                        .Where(d => d.Body.TryGetProperty("answers", out JsonElement ids) && ids.ValueKind == JsonValueKind.Array && ids.EnumerateArray().Any(i => i.ValueKind == JsonValueKind.String && chain.Contains(i.GetString()!)))
-                        .ToList();
-                    string derived = answers.Count > 0 ? "answered" : EstateModel.BodyString(record, "state") ?? "open";
+                    (string derived, IReadOnlyList<RecordEnvelope> answers) = Asks.State(model, record);
                     return (derived == state ? Match.Yes : Match.No, answers, null);
                 }
 

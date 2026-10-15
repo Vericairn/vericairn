@@ -20,7 +20,7 @@ public interface IDocumentGenerator
 /// <summary>The generators installed here: the foundation's, and those packs register. Registering one makes its name available.</summary>
 public static class DocumentGenerators
 {
-    private static readonly Dictionary<string, IDocumentGenerator> Installed = new(StringComparer.Ordinal) { [ReleasesTable.Name] = new ReleasesTable() };
+    private static readonly Dictionary<string, IDocumentGenerator> Installed = new(StringComparer.Ordinal) { [ReleasesTable.Name] = new ReleasesTable(), [ProgressRegion.Name] = new ProgressRegion() };
 
     /// <summary>Installs a generator; a pack registers its own.</summary>
     public static void Register(IDocumentGenerator generator)
@@ -76,6 +76,41 @@ public static class DocumentGenerators
             }
 
             return text.ToString();
+        }
+    }
+
+    /// <summary>
+    /// vericairn.records/progress: the progress report (<see cref="ProgressReport"/>) in a region, as a fenced text block of what
+    /// <c>vericairn progress</c> prints, from the records alone; it takes no inputs. Its check shows the records' own validation and
+    /// says that it leaves out the repository checks: those read the document that carries the region, so a region that showed them
+    /// could never equal a fresh generation, and generating them inside the estate check would run the check within itself.
+    /// </summary>
+    private sealed class ProgressRegion : IDocumentGenerator
+    {
+        public const string Name = "vericairn.records/progress";
+
+        public string Id => Name;
+
+        public string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs)
+        {
+            if (region is null)
+            {
+                return null;
+            }
+
+            string report = ProgressReport.Render(model, null);
+
+            // The fence is longer than any run of backticks in the report, so no title or question can close it.
+            int longest = 0;
+            int run = 0;
+            foreach (char c in report)
+            {
+                run = c == '`' ? run + 1 : 0;
+                longest = Math.Max(longest, run);
+            }
+
+            string fence = new('`', Math.Max(3, longest + 1));
+            return fence + "text\n" + report + fence + "\n";
         }
     }
 }

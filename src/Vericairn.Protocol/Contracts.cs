@@ -68,6 +68,16 @@ public sealed record HealthResponse(string Api, string Vericairn, string Estate,
 /// <param name="HasErrors">Whether errors exist.</param>
 public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors);
 
+/// <summary>
+/// The progress report, rendered from the records alone: where the estate stands, its work orders by state, each published release and
+/// what it contained, what comes next by release, the next eligible work and what waits on the operator. The same on every machine for
+/// the same records.
+/// </summary>
+/// <param name="Text">The report as text; every line names the records it rests on.</param>
+/// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>
+/// <param name="HasErrors">Whether the check the report shows found errors.</param>
+public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors);
+
 /// <summary>Findings of a validation or check.</summary>
 /// <param name="Summary">For example '161 records'.</param>
 /// <param name="Errors">Error count.</param>
@@ -233,8 +243,12 @@ public sealed record GoalRow(string Id, string Hash, string Title, string Status
 /// <param name="Json">Machine form, canonical.</param>
 public sealed record GoalResponse(string Text, JsonElement Json);
 
-/// <summary>Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation.</summary>
-/// <param name="By">The proposing principal.</param>
+/// <summary>
+/// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
+/// activation. Anyone may propose a new goal; a revision of an existing one is recorded only by its sponsor when the sponsor is a
+/// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).
+/// </summary>
+/// <param name="By">The proposing principal; for a revision, who decides for the goal it supersedes.</param>
 /// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits.</param>
 /// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
@@ -320,7 +334,7 @@ public sealed record ProviderSettingRow(string Name, string Summary, bool Requir
 
 /// <summary>A provider or adapter implementation available to the runtime on its machine, with what it declares.</summary>
 /// <param name="Provider">The provider or adapter it serves: for example github-releases, or git.</param>
-/// <param name="Kind">release or source.</param>
+/// <param name="Kind">release, source, launcher (from 0.6.0, a coding-agent launcher) or workspace (from 0.6.0).</param>
 /// <param name="Implementation">The implementation id, for example github-releases-gh.</param>
 /// <param name="Contract">The versioned contract it implements.</param>
 /// <param name="Status">candidate, implemented, qualified or available.</param>
@@ -351,6 +365,112 @@ public sealed record ProviderRow(string Provider, string Kind, string Implementa
 /// <param name="Url">Where the release or run is.</param>
 /// <param name="Problem">Why nothing could proceed.</param>
 public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null);
+
+/// <summary>
+/// Start a coding agent's run on an assignment through a launcher (the worker contract, vericairn.worker/1): the runtime prepares a
+/// workspace on a work branch of the repository, records the run's intent with its cap from the goal's budget, launches the harness
+/// with the brief and the MCP server for the agent's principal, observes it and settles it. It accepts nothing.
+/// </summary>
+/// <param name="Assignment">The assignment, whose contributor is the agent.</param>
+/// <param name="Launcher">The launcher, for example claude-code, codex or generic.</param>
+/// <param name="Agent">The agent principal the harness acts for: the assignment's contributor.</param>
+/// <param name="By">The principal recording the run: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="Repository">The repository resource whose clone, registered on the runtime's machine, the workspace is made from.</param>
+/// <param name="Goal">The goal the run is charged to, when the assignment's work belongs to more than one active goal.</param>
+/// <param name="Branch">The work branch; work/ and the work order's key when omitted.</param>
+/// <param name="Base">What a new work branch starts from; the clone's HEAD when omitted.</param>
+/// <param name="WallMinutes">The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more.</param>
+/// <param name="Settings">The launcher's settings by name, for example command.</param>
+public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null);
+
+/// <summary>Ask a run to stop.</summary>
+/// <param name="By">The principal asking.</param>
+/// <param name="Reason">Why.</param>
+/// <param name="GraceSeconds">How long the harness has to stop once the stop is transmitted before its process tree is killed; the worker's default when omitted.</param>
+public sealed record RunStopRequest(string By, string? Reason = null, int? GraceSeconds = null);
+
+/// <summary>
+/// A stop's facts, each one present only once observed: requested, transmitted to the harness, acknowledged by it, escalated, and
+/// observed as contained. A stop that is not observed is reported as requested.
+/// </summary>
+/// <param name="RequestedAt">When it was asked.</param>
+/// <param name="RequestedBy">The principal that asked, or worker for a cap the run reached.</param>
+/// <param name="Reason">Why, when given.</param>
+/// <param name="TransmittedAt">When the worker delivered it to the harness.</param>
+/// <param name="Transmission">How it was delivered.</param>
+/// <param name="AcknowledgedAt">When the harness acknowledged it.</param>
+/// <param name="Acknowledgment">How it acknowledged it.</param>
+/// <param name="EscalatedAt">When the worker escalated it, the harness not having stopped within the grace period.</param>
+/// <param name="Escalation">What the escalation did.</param>
+/// <param name="ContainedAt">When the worker observed the harness gone.</param>
+public sealed record RunStop(string RequestedAt, string RequestedBy, string? Reason = null, string? TransmittedAt = null, string? Transmission = null, string? AcknowledgedAt = null, string? Acknowledgment = null, string? EscalatedAt = null, string? Escalation = null, string? ContainedAt = null)
+{
+    /// <summary>The furthest fact observed: contained, escalated, acknowledged, transmitted or requested.</summary>
+    [JsonIgnore]
+    public string State => ContainedAt is not null ? "contained" : EscalatedAt is not null ? "escalated" : AcknowledgedAt is not null ? "acknowledged" : TransmittedAt is not null ? "transmitted" : "requested";
+}
+
+/// <summary>What starting a run did: what was recorded and launched, never more. A problem means nothing was launched.</summary>
+/// <param name="Run">The run's id: its intent's record id, once recorded.</param>
+/// <param name="Status">The run's operation status after this call: dispatched when launched.</param>
+/// <param name="Message">What happened and what follows, in words.</param>
+/// <param name="Ok">Whether the harness was launched.</param>
+/// <param name="Operation">The latest operation revision written.</param>
+/// <param name="Cap">The run's cap, as its intent records it.</param>
+/// <param name="Workspace">The workspace, a repository and branch.</param>
+/// <param name="Problem">Why nothing was launched.</param>
+public sealed record RunResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, JsonElement? Cap = null, string? Workspace = null, Problem? Problem = null);
+
+/// <summary>What asking a run to stop observed: the stop's facts, the furthest one its state.</summary>
+/// <param name="Run">The run.</param>
+/// <param name="State">requested, transmitted, acknowledged, escalated or contained.</param>
+/// <param name="Message">What was observed, in words.</param>
+/// <param name="Ok">Whether the request stands; a stop that was not observed stands as requested.</param>
+/// <param name="Stop">The stop's facts.</param>
+/// <param name="Problem">Why no stop was asked.</param>
+public sealed record RunStopResponse(string Run, string State, string Message, bool Ok, RunStop? Stop = null, Problem? Problem = null);
+
+/// <summary>One agent run as the records and this machine show it.</summary>
+/// <param name="Run">The run's id: its intent's record id.</param>
+/// <param name="Identity">Its operation's identity.</param>
+/// <param name="Launcher">The launcher it ran through.</param>
+/// <param name="Agent">The agent principal.</param>
+/// <param name="Assignment">The assignment it carried.</param>
+/// <param name="Goal">The goal it is charged to.</param>
+/// <param name="Workspace">The workspace, a repository and branch.</param>
+/// <param name="Status">Its operation's status.</param>
+/// <param name="Cap">Its cap, recorded before it started.</param>
+/// <param name="Usage">Its observed usage once settled, with the units not reported.</param>
+/// <param name="Charged">What it is charged, by unit: its usage, its cap for what was not reported, and its whole cap while in flight.</param>
+/// <param name="Stop">A stop's facts, recorded or observed here.</param>
+/// <param name="Heartbeat">When the worker on this machine last observed it running.</param>
+/// <param name="Observed">Whether a worker on this machine observes it now.</param>
+/// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic);
+
+/// <summary>One unit of a goal's ledger.</summary>
+/// <param name="Unit">wallMinutes, tokens or currency.</param>
+/// <param name="Budget">What the goal's budget grants.</param>
+/// <param name="Spent">What its runs are charged, runs in flight at their caps.</param>
+/// <param name="Remaining">What remains.</param>
+/// <param name="Currency">The currency, for currency.</param>
+public sealed record LedgerUnit(string Unit, long Budget, long Spent, long Remaining, string? Currency = null);
+
+/// <summary>A goal's agent-run ledger.</summary>
+/// <param name="Goal">The goal's current revision.</param>
+/// <param name="Title">Its title.</param>
+/// <param name="Status">Its status.</param>
+/// <param name="Units">Each charged unit its budget states.</param>
+/// <param name="InFlight">Its runs in flight.</param>
+/// <param name="Concurrency">How many may be in flight at once.</param>
+/// <param name="AttemptsPerStep">How many runs each step may have.</param>
+/// <param name="Fenced">Why a new run of it would not start now; empty when one would.</param>
+public sealed record LedgerRow(string Goal, string? Title, string Status, IReadOnlyList<LedgerUnit> Units, int InFlight, int Concurrency, int AttemptsPerStep, IReadOnlyList<string> Fenced);
+
+/// <summary>The agent runs and the ledgers of the goals they are charged to.</summary>
+/// <param name="Runs">Every run, oldest first.</param>
+/// <param name="Goals">The ledger of every goal with a run or active now.</param>
+public sealed record RunsResponse(IReadOnlyList<RunRow> Runs, IReadOnlyList<LedgerRow> Goals);
 
 /// <summary>Plan or apply an upgrade.</summary>
 /// <param name="Version">Target version.</param>

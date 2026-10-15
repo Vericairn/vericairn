@@ -17,7 +17,7 @@ namespace Vericairn.Records.Estate;
 public static class LivingDocuments
 {
     /// <summary>The foundation's own contributions that are named namespace/name: its generators.</summary>
-    public static readonly string[] FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes", "vericairn.records/releases"];
+    public static readonly string[] FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes", "vericairn.records/releases", "vericairn.records/progress"];
 
     private static readonly HashSet<string> Contributions = new(FoundationGenerators, StringComparer.Ordinal);
 

@@ -33,6 +33,7 @@ public partial class MainWindow : Window
         EstatePathBox.AddHandler(KeyDownEvent, OnEstatePathKeyDown, RoutingStrategies.Tunnel);
         RecentList.AddHandler(KeyDownEvent, OnRecentKeyDown, RoutingStrategies.Tunnel);
         AttentionList.AddHandler(KeyDownEvent, OnAttentionKeyDown, RoutingStrategies.Tunnel);
+        ProgressList.AddHandler(KeyDownEvent, OnProgressKeyDown, RoutingStrategies.Tunnel);
         // Lists inside documents are templated, so Enter for them is caught at the window before any list sees it.
         AddHandler(KeyDownEvent, OnWindowTunnelKeyDown, RoutingStrategies.Tunnel);
         shell.PropertyChanged += OnShellChanged;
@@ -107,6 +108,11 @@ public partial class MainWindow : Window
         else if (command && shift && e.Key == Key.D)
         {
             shell.OpenLivingDocuments();
+            FocusDocument();
+        }
+        else if (command && shift && e.Key == Key.P)
+        {
+            shell.OpenProgress();
             FocusDocument();
         }
         else if (command && shift && e.Key == Key.U)
@@ -248,6 +254,12 @@ public partial class MainWindow : Window
             return true;
         }
 
+        if (ProgressList.IsKeyboardFocusWithin && ProgressList.SelectedItem is ProgressRow)
+        {
+            shell.OpenProgress();
+            return true;
+        }
+
         if (RecentList.IsKeyboardFocusWithin && RecentList.SelectedItem is string root)
         {
             _ = shell.OpenEstateAsync(root);
@@ -385,6 +397,22 @@ public partial class MainWindow : Window
         {
             shell.Inspect(item);
         }
+    }
+
+    private void OnProgressKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && ProgressList.SelectedItem is ProgressRow)
+        {
+            e.Handled = true;
+            shell.OpenProgress();
+            FocusDocument();
+        }
+    }
+
+    private void OnOpenProgress(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenProgress();
+        FocusDocument();
     }
 
     private void OnOpenInbox(object? sender, RoutedEventArgs e)

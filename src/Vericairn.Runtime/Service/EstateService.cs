@@ -21,6 +21,7 @@ using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Service;
 
@@ -29,7 +30,7 @@ namespace Vericairn.Runtime.Service;
 /// the estate. Every operation loads the current records first, evaluates authority through the record validators, and signs new
 /// records with the author's admitted device held on this machine.
 /// </summary>
-public sealed class EstateService : IEstateApi, IDisposable
+public sealed partial class EstateService : IEstateApi, IDisposable
 {
     private readonly object gate = new();
     private readonly EstateSession session;
@@ -86,6 +87,18 @@ public sealed class EstateService : IEstateApi, IDisposable
             FindingList checks = EstateChecks.Run(model);
             using JsonDocument json = JsonDocument.Parse(EstateStatus.RenderJson(model, checks));
             return new StatusResponse(EstateStatus.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
+        }
+    }
+
+    /// <inheritdoc />
+    public ProgressResponse Progress()
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            FindingList checks = EstateChecks.Run(model);
+            using JsonDocument json = JsonDocument.Parse(ProgressReport.RenderJson(model, checks));
+            return new ProgressResponse(ProgressReport.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 
@@ -880,6 +893,13 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return previous is null ? NotFound($"No goal has id {request.Supersedes}.") : Refuse($"Goal {request.Supersedes} was revised by {previous.Id}; a revision supersedes the current one.");
             }
 
+            // Who decides for the goal revises it (decision 01M50A8KHJT1MSSS84KZKHKRHB), refused before anything is written as the record's rule would refuse it.
+            IReadOnlyList<(string Code, string Message)> refusals = previous is null ? [] : GoalRules.RevisionRefusals(model, previous, request.By);
+            if (refusals.Count > 0)
+            {
+                return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
+            }
+
             return WriteLocked(new RecordDraft("goal", request.By, request.Body, null, request.Supersedes), model);
         }
     }
@@ -1227,6 +1247,16 @@ public sealed class EstateService : IEstateApi, IDisposable
         foreach (ISourceAdapter adapter in Providers.SourceAdapters)
         {
             rows.Add(Row(adapter.Kind, "source", adapter.Descriptor));
+        }
+
+        foreach (IAgentLauncher launcher in Providers.Launchers)
+        {
+            rows.Add(Row(launcher.Launcher, "launcher", launcher.Descriptor));
+        }
+
+        foreach (IWorkspaceProvider workspaces in Providers.Workspaces)
+        {
+            rows.Add(Row(workspaces.Kind, "workspace", workspaces.Descriptor));
         }
 
         return rows;
@@ -2269,8 +2299,15 @@ public sealed class EstateService : IEstateApi, IDisposable
             ? profiles.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!).ToList()
             : [];
 
-    /// <inheritdoc />
-    public void Dispose() => session.Dispose();
+    /// <summary>
+    /// Closes the estate. The runs this service supervises are left running, unobserved: a supervision that ends is not a stopped run,
+    /// and each stays in flight, charged at its cap, until a worker observes its end.
+    /// </summary>
+    public void Dispose()
+    {
+        AbandonRuns();
+        session.Dispose();
+    }
 
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
     private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner

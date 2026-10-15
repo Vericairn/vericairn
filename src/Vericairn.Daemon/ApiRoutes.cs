@@ -20,6 +20,7 @@ public static class ApiRoutes
         string v = ApiVersion.Prefix;
         app.MapGet($"{v}/health", () => Results.Json(service.Health(), ProtocolJson.Options));
         app.MapGet($"{v}/status", () => Results.Json(service.Status(), ProtocolJson.Options));
+        app.MapGet($"{v}/progress", () => Results.Json(service.Progress(), ProtocolJson.Options));
         app.MapGet($"{v}/validate", () => Results.Json(service.Validate(), ProtocolJson.Options));
         app.MapGet($"{v}/check", () => Results.Json(service.Check(), ProtocolJson.Options));
         app.MapGet($"{v}/records/{{id}}", (string id) => service.Record(id) is RecordResponse record ? Results.Json(record, ProtocolJson.Options) : Results.NotFound());
@@ -53,6 +54,10 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals/{{id}}/evaluate", (string id, GoalEvaluateRequest request) => Outcome(service.GoalEvaluate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/accept", (string id, GoalAcceptRequest request) => Outcome(service.GoalAccept(id, request)));
         app.MapGet($"{v}/providers", () => Results.Json(service.Providers(), ProtocolJson.Options));
+        app.MapGet($"{v}/launchers", () => Results.Json(service.Launchers(), ProtocolJson.Options));
+        app.MapGet($"{v}/runs", () => Results.Json(service.Runs(), ProtocolJson.Options));
+        app.MapPost($"{v}/runs", (RunStartRequest request) => Results.Json(service.RunStart(request), ProtocolJson.Options));
+        app.MapPost($"{v}/runs/{{id}}/stop", (string id, RunStopRequest request) => Results.Json(service.RunStop(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/submit", (ReleaseSubmitRequest request) => Results.Json(service.ReleaseSubmit(request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/observe", (ReleaseObserveRequest request) => Results.Json(service.ReleaseObserve(request), ProtocolJson.Options));
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
