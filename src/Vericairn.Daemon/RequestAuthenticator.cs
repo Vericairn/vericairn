@@ -7,26 +7,36 @@ using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Net.Http.Headers;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Daemon;
 
+/// <summary>A device a request was authenticated as, on loopback or the local network: what the request may act for once it is bound.</summary>
+/// <param name="Identity">The device's identity.</param>
+/// <param name="Principal">The principal it acts for, and the only one its requests may name as acting.</param>
+/// <param name="LocalNetwork">Whether the request came over the local network.</param>
+internal sealed record AuthenticatedDevice(string Identity, string Principal, bool LocalNetwork);
+
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
-/// the daemon serves, the signing time must be within the permitted skew, the signature must verify over the method, the request
-/// target, the time and the body, and a signature is accepted once, in whichever of its equivalent forms it comes. On the local
-/// network the device must also be permitted that profile, present a TLS client certificate its own key issued, and act for its
-/// own principal, and the operations on the runtime's own machine are refused.
+/// the daemon serves, the signing time must be within the permitted skew, the body must be UTF-8 without a byte order mark, the
+/// signature must verify over the method, the request target, the time and the body, and a signature is accepted once, in
+/// whichever of its equivalent forms it comes. On the local network the device must also be permitted that profile and present a
+/// TLS client certificate its own key issued, and the operations on the runtime's own machine are refused. The device it verified
+/// is left on the request, so that once the request is bound <see cref="RequestScope"/> holds it to its own principal.
 /// </summary>
 internal sealed class RequestAuthenticator
 {
+    /// <summary>The key under which a verified request carries its <see cref="AuthenticatedDevice"/>.</summary>
+    internal static readonly object DeviceItem = new();
+
     /// <summary>The profile name a device must be permitted to use the local network.</summary>
     internal const string LocalNetworkProfile = "local-network";
 
@@ -88,14 +98,25 @@ internal sealed class RequestAuthenticator
             return Denied("The signing time is malformed or more than five minutes from the runtime's clock.");
         }
 
-        (byte[] digest, _) = await DigestAsync(context, signedAt).ConfigureAwait(false);
-        string? publicKey = service.AdmittedDevicePublicKey(device);
-        if (publicKey is null)
+        (byte[] digest, byte[] body) = await DigestAsync(context, signedAt).ConfigureAwait(false);
+        if (Encoded(request, body) is Problem encoding)
+        {
+            return encoding;
+        }
+
+        DeviceStanding? standing = service.Standing(device);
+        if (standing is null || standing.Admission != "admitted")
         {
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
         }
 
-        return Signed(publicKey, digest, signature);
+        if (Signed(standing.PublicKey, digest, signature) is Problem problem)
+        {
+            return problem;
+        }
+
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: false);
+        return null;
     }
 
     /// <summary>
@@ -154,6 +175,11 @@ internal sealed class RequestAuthenticator
         }
 
         (byte[] digest, byte[] body) = await DigestAsync(context, signedAt).ConfigureAwait(false);
+        if (Encoded(request, body) is Problem encoding)
+        {
+            return encoding;
+        }
+
         if (Signed(standing.PublicKey, digest, signature) is Problem problem)
         {
             return problem;
@@ -164,7 +190,8 @@ internal sealed class RequestAuthenticator
             return Denied($"{operation} acts on the runtime's own machine and is refused over the local network; run it on that machine.");
         }
 
-        return WithinScope(request, body, standing);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: true);
+        return null;
     }
 
     /// <summary>
@@ -210,42 +237,40 @@ internal sealed class RequestAuthenticator
     }
 
     /// <summary>
-    /// A device on the local network acts for its own principal: a request whose body names an acting principal, as by or principal
-    /// at its top level in any spelling, names the device's. Its principal's authority is then evaluated by the runtime as for any
-    /// request. Nor does it reach the runtime's files: a recovery key is a file on the runtime's machine, used there only.
+    /// A device-signed body is UTF-8 without a byte order mark: the bytes the signature covers are then exactly the text the runtime
+    /// binds, so nothing a check reads can differ from what the operation receives. A declared charset other than UTF-8 is refused
+    /// whatever the content, and a JSON body that starts with a byte order mark is refused.
     /// </summary>
-    private static Problem? WithinScope(HttpRequest request, byte[] body, DeviceStanding standing)
+    private static Problem? Encoded(HttpRequest request, byte[] body)
     {
-        if (body.Length == 0 || request.ContentType is null || !request.ContentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+        if (request.ContentType is not string type || !MediaTypeHeaderValue.TryParse(type, out MediaTypeHeaderValue? media))
         {
             return null;
         }
 
-        try
+        if (media.Charset.HasValue && media.Charset.Length > 0)
         {
-            using JsonDocument document = JsonDocument.Parse(body);
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            string charset = HeaderUtilities.RemoveQuotes(media.Charset).ToString();
+            bool utf8;
+            try
             {
-                return null;
+                utf8 = System.Text.Encoding.GetEncoding(charset).CodePage == System.Text.Encoding.UTF8.CodePage;
+            }
+            catch (ArgumentException)
+            {
+                utf8 = false;
             }
 
-            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            if (!utf8)
             {
-                bool acting = property.Name.Equals("by", StringComparison.OrdinalIgnoreCase) || property.Name.Equals("principal", StringComparison.OrdinalIgnoreCase);
-                if (acting && property.Value.ValueKind != JsonValueKind.Null && (property.Value.ValueKind != JsonValueKind.String || property.Value.GetString() != standing.Principal))
-                {
-                    return Denied($"Device {standing.Identity} acts for its own principal {standing.Principal} over the local network; this request names another in '{property.Name}'.");
-                }
-
-                if (property.Name.Equals("recovery", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind != JsonValueKind.Null)
-                {
-                    return Denied("A recovery key is a file on the runtime's own machine and is used there only; it is refused over the local network.");
-                }
+                return Denied($"A device-signed request carries its body in UTF-8; the runtime refuses the charset '{charset}'.");
             }
         }
-        catch (JsonException)
+
+        bool json = media.MediaType.Value?.Contains("json", StringComparison.OrdinalIgnoreCase) == true;
+        if (json && body.Length >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF)
         {
-            // Malformed: the route refuses it.
+            return Denied("A device-signed request carries its JSON body in UTF-8 without a byte order mark; this one starts with one.");
         }
 
         return null;

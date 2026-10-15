@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Vericairn.Protocol;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
@@ -19,7 +20,7 @@ namespace Vericairn.Daemon;
 internal static class DaemonRoutes
 {
     /// <summary>Maps the daemon's own routes.</summary>
-    public static void Map(WebApplication app, DaemonHost host)
+    public static void Map(IEndpointRouteBuilder app, DaemonHost host)
     {
         string v = ApiVersion.Prefix;
         app.MapPost($"{v}/pairings", (PairingIssueRequest request) => Issue(host, request));

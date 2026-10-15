@@ -253,8 +253,11 @@ public sealed class DaemonHost : IAsyncDisposable
         WebApplication app = builder.Build();
         host.app = app;
         app.Use(host.AuthenticateAsync);
-        ApiRoutes.Map(app, service, () => _ = Task.Run(host.StopAsync));
-        DaemonRoutes.Map(app, host);
+        // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
+        RouteGroupBuilder routes = app.MapGroup(string.Empty);
+        routes.AddEndpointFilter(new RequestScope(service));
+        ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
+        DaemonRoutes.Map(routes, host);
         try
         {
             await app.StartAsync(cancellationToken).ConfigureAwait(false);

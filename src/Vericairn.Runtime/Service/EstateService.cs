@@ -1893,6 +1893,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>Whether a principal administers this estate now: it holds the operator role or a grant of the 'administer' scope.</summary>
+    public bool Administers(string principal)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            return model.HasRole(principal, Roles.Operator) || model.HasScope(principal, Scopes.Administer, DateTimeOffset.UtcNow);
+        }
+    }
+
     /// <summary>
     /// Why a device cannot be paired for a principal under an administrator here, or null when it can: the principal exists, the
     /// profiles are known, the administrator is the operator or holds the 'administer' scope, and the admission a pairing ends
