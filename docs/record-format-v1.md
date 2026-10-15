@@ -72,7 +72,10 @@ A **device** record binds a public key to a principal with its platform, custody
 `macos-keychain`, `linux-secret-service` or `file-owner-only`) and permitted connectivity profiles; it is
 signed by its own key to prove possession. An **admission** record, authored by the operator or under the
 `administer` scope and pinned to the exact device record, admits the device to author records; a superseding
-admission with status `revoked` and `revokedAt` ends it. A signature is `ecdsa-p256-sha256` over the 32 digest
+admission with status `revoked` and `revokedAt` ends it. The root operator's admission of a device that signed that
+admission itself is the estate's first authority and is accepted once in its history, for its first device; every later
+device is admitted under the signature of a device already admitted, so nobody able to add records can mint a device for
+the operator and sign as the operator (release 0.4.2 and earlier accepted any such self-admission). A signature is `ecdsa-p256-sha256` over the 32 digest
 bytes of the record's `hash`, encoded as a 64-byte base64url value in IEEE P1363 form. On load, every signature
 is verified against its device's public key; a signature by a device of another principal, by an unadmitted
 device, before its admission, or from its revocation onward is an error. The estate's `policies.signatures`

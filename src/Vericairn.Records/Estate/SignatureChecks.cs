@@ -17,6 +17,7 @@ public static class SignatureChecks
         RecordEnvelope? estate = model.CurrentEstate;
         bool required = estate is not null && estate.Body.TryGetProperty("policies", out System.Text.Json.JsonElement policies) && policies.TryGetProperty("signatures", out System.Text.Json.JsonElement policy) && policy.GetString() == "required";
         string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
+        string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         foreach (RecordEnvelope record in model.Records)
         {
             if (record.Signatures.Count == 0)
@@ -31,9 +32,23 @@ public static class SignatureChecks
 
             foreach (RecordSignature signature in record.Signatures)
             {
-                Verify(model, record, signature, rootOperator, findings);
+                Verify(model, record, signature, rootOperator, firstAuthority, findings);
             }
         }
+    }
+
+    /// <summary>
+    /// The estate's first authority: the earliest admission by the root operator of a device that signed that admission itself.
+    /// It is the only self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can
+    /// add records can mint a device for the operator and sign as the operator with it.
+    /// </summary>
+    public static RecordEnvelope? FirstAuthority(EstateModel model, string? rootOperator)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return rootOperator is null ? null : model.OfType("admission")
+            .Where(a => a.By == rootOperator && a.Subject is not null && a.Signatures.Any(s => s.Device == a.Subject.Id))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+            .FirstOrDefault();
     }
 
     /// <summary>The current admission of a device: the latest admission record about any revision of the device.</summary>
@@ -71,15 +86,22 @@ public static class SignatureChecks
     /// <summary>
     /// The admission state of a device at a record time, from every admission record about the device in time order:
     /// an admitted record starts admission at its authoring time, a revoked record ends it at revokedAt, and a later
-    /// admitted record starts it again.
+    /// admitted record starts it again. An admission the device signed for itself counts only as the estate's first authority.
     /// </summary>
     public static AdmissionState AdmissionStateAt(EstateModel model, RecordEnvelope device, string at)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(device);
+        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         var events = new List<(string Time, int Order, bool Admitted)>();
         foreach (RecordEnvelope admission in model.Chain(device).SelectMany(id => model.About(id, "admission")))
         {
+            if (admission.Id != firstAuthority && admission.Subject is not null && admission.Signatures.Any(s => s.Device == admission.Subject.Id))
+            {
+                continue;
+            }
+
             string? status = EstateModel.BodyString(admission, "status");
             if (status == "admitted")
             {
@@ -115,7 +137,7 @@ public static class SignatureChecks
         };
     }
 
-    private static void Verify(EstateModel model, RecordEnvelope record, RecordSignature signature, string? rootOperator, FindingList findings)
+    private static void Verify(EstateModel model, RecordEnvelope record, RecordSignature signature, string? rootOperator, string? firstAuthority, FindingList findings)
     {
         string location = record.ExpectedPath + "#signatures";
         if (signature.Algorithm != RecordSigning.Algorithm)
@@ -150,8 +172,14 @@ public static class SignatureChecks
         }
 
         bool selfAdmission = record.Type == "admission" && record.Subject?.Id == device.Id && record.By == rootOperator;
-        if (selfAdmission)
+        if (selfAdmission && record.Id == firstAuthority)
         {
+            return;
+        }
+
+        if (selfAdmission && AdmissionStateAt(model, device, record.At) != AdmissionState.Admitted)
+        {
+            findings.Error("signature.self-admission", location, $"Device {device.Id} admitted itself for the operator; that is accepted once, for the estate's first device ({firstAuthority}). A later device is admitted under the signature of a device already admitted.");
             return;
         }
 
