@@ -1,12 +1,14 @@
 # API version 1
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
-(`IEstateApi`), the request and response types, the state language, the problem codes and the OpenAPI
-document (`OpenApiDocument.Json`, served at `/openapi/v1.json`). `Vericairn.Runtime` implements it once
-(`EstateService`); the daemon (`Vericairn.Daemon`) serves that implementation; the SDK (`Vericairn.Sdk`)
-calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime otherwise. Authority
-is evaluated behind the API, never in front of it: a client presents and requests, the runtime decides,
-and every response is what the runtime observed.
+(`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
+(`OpenApiDocument.Json`, served at `/openapi/v1.json`). The problem codes are those listed under Outcomes
+and problems. The state language that clients present is the table in `Vericairn.Presentation`, which
+tests hold to `docs/state-language.json` and to the runtime's own strings. `Vericairn.Runtime` implements
+it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implementation; the SDK
+(`Vericairn.Sdk`) calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime
+otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
+the runtime decides, and every response is what the runtime observed.
 
 ## One owner
 
@@ -15,15 +17,17 @@ machine). Clients never open the live store; they call the daemon. The daemon pu
 in an endpoint file beside the live store:
 
 ```
-<VericairnHome>/estates/<estate id>/<sha256(root)[:16]>/daemon.json
+<VericairnHome>/estates/<estate id>/<key>/daemon.json
 ```
 
-with `kind` (`unix` or `pipe`), `address`, `processId`, `startedAt`, `root`, `api` and, when served, the
-`loopback` endpoint (`host`, `port`, `certificate`). A daemon refuses to start while another answers for
-the same estate; a stale endpoint file or socket left by a crashed daemon never blocks the next owner.
-The CLI follows the same rule on every command: it reads the endpoint file, checks that the daemon
-answers, and otherwise opens the estate itself with the embedded runtime. Both routes produce the same
-records, the same refusals and the same status bytes; nothing lives only in the daemon.
+where `<key>` is `local` for a local-only estate and otherwise the first 16 hexadecimal digits of the
+SHA-256 of the root's full path, with `kind` (`unix` or `pipe`), `address`, `processId`, `startedAt`,
+`root`, `api` and, when served, the `loopback` endpoint (`host`, `port`, `certificate`). A daemon
+refuses to start while another answers for the same estate; a stale endpoint file or socket left by a
+crashed daemon never blocks the next owner. The CLI follows the same rule on every estate command except
+the four named at the end of Operations: it reads the endpoint file, checks that the daemon answers, and
+otherwise opens the estate itself with the embedded runtime. Both routes produce the same records, the
+same refusals and the same status bytes; nothing lives only in the daemon.
 
 ## Transports
 
@@ -42,10 +46,11 @@ A loopback request carries three headers: `Vericairn-Device` (the device record 
 the SHA-256 of the line-feed-joined string `vericairn-request/1`, the upper-case method, the request target
 (path and query exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty
 for no body). The daemon accepts a signature only from a device that is current and admitted now in the
-estate it serves, within five minutes of its own clock, and once. Anything else is answered with `401`
-and a problem with code `denied`; revoking the device ends access from the next request on, with no
-restart. The SDK signs with `DeviceRequestSigner`, which uses the device key in this machine's custody,
-so a copied request grants nothing and a copied key file is useless where platform custody holds the key.
+estate it serves, within five minutes of its own clock, and once (a repeat is refused while the signature
+is among the last 4,096 the daemon accepted). Anything else is answered with `401` and a problem with code
+`denied`; revoking the device ends access from the next request on, with no restart. The SDK signs with
+`DeviceRequestSigner`, which uses the device key in this machine's custody, so a copied request grants
+nothing and a copied key file is useless where platform custody holds the key.
 
 ## Operations
 
@@ -56,7 +61,7 @@ so a copied request grants nothing and a copied key file is useless where platfo
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
-| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device, validated with the estate, removed again when the estate would be invalid |
+| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), it is written unsigned, except an admission from record format 2, which is always signed. The record is validated with the estate and removed again when the estate would be invalid. |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
@@ -65,15 +70,16 @@ so a copied request grants nothing and a copied key file is useless where platfo
 | `GET /v1/documents` | The declared living documents (`DocumentRow`: path, repository, declaration, title, state current, due or unavailable, level, reasons, latest clearance, unavailable contributions, notes) |
 | `POST /v1/documents/{id}/reviews` | Review a living document by its declaration (`DocumentReviewRequest`: by, outcome, summary, findings, commit). The runtime reads the content, records its hash, the covered paths' identity and the triggers the review answers, works out the reviewer's independence and runs the declared checks; a failed check, or the declaration's `clearedBy`, refuses a clearance. Returns a `WriteOutcome`. |
 | `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
-| `POST /v1/releases/submit` | Submit a release as intent before effect: the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.0 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Returns a `ReleaseResponse`. |
+| `POST /v1/releases/submit` | Submit a release as intent before effect: the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it |
 | `GET /v1/reconcile`, `GET /v1/recover/inspect` | Reconcile tasks left by diverged copies; what this copy holds |
 | `GET /v1/objects`, `POST /v1/objects`, `GET /v1/objects/{hash}`, `GET /v1/objects/verify` | Content-addressed objects: list, store bytes, verified bytes, verify all |
 | `POST /v1/shutdown` | Ask the daemon to stop; closing a client never stops it |
 
-Restore and `recover compare` are not estate operations: they create or read other copies, so the CLI
-performs them itself.
+Restore, `recover compare`, `docs notes` and `docs regenerate` do not go through the API. Restore
+creates another copy. The other three load this copy (and, for compare, the other copy too) directly
+from its files and live store, even while a daemon serves it.
 
 ## Outcomes and problems
 
@@ -84,10 +90,16 @@ record was rejected:
 | Code | Meaning | HTTP |
 |---|---|---|
 | `rejected` | The estate would be invalid with this record; the findings say why; nothing was written | 422 |
-| `refused` | Malformed input, an unknown type, no admitted device key on this machine, or a limit | 422 (409 for upgrade and export, 413 for an object above the size limit) |
+| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit | 422 (409 for upgrade and export, 413 for an object above the size limit) |
 | `not-found` | The subject named does not exist | 404 |
-| `invalid` | The estate has errors and the operation needs a valid estate | 409 |
+| `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now | 401 |
+| `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded | 200, inside the `ReleaseResponse` |
+
+The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
+they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there
+is nothing to record yet, and a refusal is its `problem`, not an HTTP status. A read of a missing
+subject answers 404 with an empty body.
 
 Exit status and HTTP status report whether the operation itself completed; the observed state is in
 the body, and partial, pending and changed-target states are never flattened into success.
@@ -96,7 +108,7 @@ the body, and partial, pending and changed-target states are never flattened int
 
 | Command | Does |
 |---|---|
-| `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` serves the local socket only |
+| `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` serves the local socket only; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
 | `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
 | `vericairn runtime status` | Whether a daemon serves the estate and where, or whether commands run the embedded runtime |
@@ -116,6 +128,7 @@ the embedded `EstateService`.
 
 ## Changes visible to scripts
 
-`vericairn estate upgrade --json` now prints the plan with camel-case names (`fromPin`, `toPin`,
-`fromFormat`, `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`), the same shape the
-API returns.
+`vericairn estate upgrade --json` prints the plan with camel-case names (`fromPin`, `toPin`, `fromFormat`,
+`toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
+API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
+record format 2 anchors, and is `null` otherwise.

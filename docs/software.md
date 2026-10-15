@@ -8,12 +8,13 @@ intent recorded before every external effect, and publication left to the operat
 The foundation (`Vericairn.Records`, `Vericairn.Runtime`, `Vericairn.Protocol`, the daemon, the SDK, the
 command line and Workbench) holds the record types, the release operations as intent then observed effect,
 the provider and adapter contracts, and a registry of the implementations a host makes available. It knows
-no particular product, provider or source host; a test holds that its assemblies reference none of the
-modules below. The modules ship inside the Community distributable until packages exist (milestone M4):
+no particular product, provider or source host; a test holds that the records, runtime and protocol
+assemblies reference none of the modules below. The command line, which hosts the modules, references all
+three. The modules ship inside the Community distributable until packages exist (milestone M4):
 
 | Module | Assembly | What it is |
 |---|---|---|
-| The git adapter (`vericairn.adapter.git`) | `Vericairn.Adapters.Git` | `GitCommandAdapter`: read-only observation of a repository over the git command |
+| The git adapter (`vericairn.adapter.git`) | `Vericairn.Adapters.Git` | `GitCommandAdapter`: read-only observation of a repository over the git command; also `GitFileSource`, the software pack's living-document source `vericairn.software/git-file` |
 | The GitHub provider | `Vericairn.Providers.GitHub` | `GitHubReleaseProvider`: releases built by a dispatched GitHub Actions workflow, observed as runs and drafts through the user's own GitHub CLI login |
 | The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence |
 
@@ -65,6 +66,10 @@ destination is the one named, else the location's value. Continuous integration 
 result is observed and recorded by the CLI, under the user's own login with the host; the logs are not
 inspected by this command and the record says so.
 
+In an estate at record format 2, `check run` records its verification as an observation by automation
+(`evidenceClass: observation`, `observer: automation`), and `check observe` records its verification as the
+provider's report (`evidenceClass: report`, `observer: provider`).
+
 ## Release providers and the product's release profile
 
 Contract `vericairn.provider.release/1` (`IReleaseProvider`): a release is built by a dispatched build on a
@@ -80,11 +85,11 @@ declares the same settings and simulates GitHub in memory for the conformance su
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently.
 
-A product declares how its releases are made on its own record, in an optional `release` object (read by
-release 0.4.0 and later; an estate records it only after upgrading): the `destination` (the provider id and
-the settings the product fixes), the `checksums` asset, and the `artifacts` a complete release carries, each
-a name with `{version}` and optionally `{platform}`, a role (distributable, sbom, notices, documentation or
-other) and the platforms it is built for:
+A product declares how its releases are made on its own record, in an optional `release` object (read from
+release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
+`destination` (the provider id and the settings the product fixes), the `checksums` asset, and the
+`artifacts` a complete release carries, each a name with `{version}` and optionally `{platform}`, a role
+(distributable, sbom, notices, documentation or other) and the platforms it is built for:
 
 ```json
 {"release": {"destination": {"provider": "github-releases", "settings": {"repository": "Example/gadget"}},
@@ -106,14 +111,16 @@ The release as intent, then observed effect:
    identity `<provider>:<destination>:vX` with every setting in its target; then it dispatches and writes
    the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
    identified, or `known-failure` when the provider refused before any effect. While an operation under
-   that identity is dispatched or uncertain, a second submit is refused; after a failure or a
-   cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled. While a
-   living document of the product is due at level `refuse`, the submission is refused before the
-   intent, naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)).
-   Where a clone of its repository is registered here, each cleared document of the product in another
-   repository is also read at the commit the release would build (the `ref` setting); bytes that differ
-   from its latest review refuse the submission with both commits and hashes, and the intent records
-   what was compared, or that a document could not be.
+   that identity is dispatched or uncertain, a second submit is refused, as it is after observed success (a
+   corrective release is a new version); after a failure or a cancellation, a retry needs `--reconciliation`
+   stating how the earlier outcome was settled. While a living document of the product is due at level
+   `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
+   naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). Where a
+   clone of its repository is registered here, each document of the product in another repository that
+   declares a `refuse` level and was cleared by a review is also read at the commit the `ref` setting names
+   in that clone. Nothing is fetched, so bring the clone to the commit the build will use. Bytes that differ
+   from its latest review refuse the submission with both commits and hashes, and the intent records what
+   was compared, or that a document could not be.
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that
@@ -122,11 +129,11 @@ The release as intent, then observed effect:
    draft is complete, the operation becomes `observed-success` and a `release` record with status
    `candidate` is written with every asset's platform and the bill of materials and notices taken from
    the profile, with the run as evidence. When the run failed, the operation becomes `known-failure`.
-   `--cancel <reason>` settles an intent that was never dispatched or an uncertain outcome reconciled as
-   having had no effect.
-3. The operator accepts the exact candidate (`vericairn records new acceptance --subject release:<id>:<hash>`)
-   and publishes by hand with the command the CLI printed (for GitHub, `gh release edit vX --draft=false --latest`).
-   Nothing in Vericairn publishes.
+   `--cancel <reason>` settles an intent that was never dispatched, an uncertain outcome reconciled as
+   having had no effect, or a known failure.
+3. The operator accepts the exact candidate (`vericairn records new acceptance --by <operator id> --subject release:<id>:<hash> --body <file>`,
+   whose body states `statement`, `basis` and `self`) and publishes by hand with the command the CLI printed
+   (for GitHub, `gh release edit vX -R <owner/name> --draft=false --latest`). Nothing in Vericairn publishes.
 4. `vericairn release observe` again records the observed publication as the `published` revision of the
    candidate; without the operator's acceptance the runtime rejects it with `release.unaccepted`.
 5. `vericairn estate upgrade --to X` pins the estate to the published release (for Vericairn itself; the
@@ -139,8 +146,10 @@ canceled needs attention.
 
 The move from record format 1 to 2 (`record-format-2`, [record-format-v2.md](record-format-v2.md)) stages nothing:
 no record is ever rewritten, so the step only moves the manifest's format, and the tests check that every record
-file is byte for byte what it was. The rest of the upgrade path is proven by a synthetic migration in the tests:
-a step from format 2 to a pretend format 3 stages a file through `MigrationContext`, the upgrade writes the staged
-files, the manifest and the migration record only once every step succeeded, a failing migration changes nothing,
-and a manifest beyond the formats this binary knows is refused rather than misread. Migrations never rewrite
-records; they stage other files.
+file is byte for byte what it was. When the estate holds admissions recorded without a signature, the move anchors
+them: the migration record lists them by id and hash, and the upgrade is refused unless the operator, or a
+principal with the `administer` scope, applies it with an admitted device held on this machine. The rest of the
+upgrade path is proven by a synthetic migration in the tests: a step from format 2 to a pretend format 3 stages a
+file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
+once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
+knows is refused rather than misread. Migrations never rewrite records; they stage other files.
