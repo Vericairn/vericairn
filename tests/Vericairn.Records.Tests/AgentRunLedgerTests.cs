@@ -73,6 +73,19 @@ public class AgentRunLedgerTests
         Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.stop-kept" && f.Location == changed.ExpectedPath);
     }
 
+    [Theory]
+    [InlineData("scope", "{\"changed\":1,\"outsideCount\":2,\"outside\":[\"outside.txt\"]}", "operation.scope")]
+    [InlineData("liveness", "{\"stallSeconds\":1,\"lastEventAt\":\"2026-10-13T12:00:20Z\",\"attentionAt\":\"2026-10-13T12:00:30Z\",\"stoppedAt\":\"2026-10-13T12:00:29Z\"}", "operation.liveness")]
+    public void WorkerObservationsValidateScopeCountsAndStallFactOrder(string field, string json, string code)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("observations", Small, Usage);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body[field] = System.Text.Json.Nodes.JsonNode.Parse(json);
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == changed.ExpectedPath && f.Code == code);
+    }
+
     [Fact]
     public void ARunIsChargedWhatItsUsageReportsAndItsCapForWhatWasNotReported()
     {

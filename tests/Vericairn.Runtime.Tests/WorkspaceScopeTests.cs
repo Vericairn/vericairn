@@ -10,6 +10,34 @@ namespace Vericairn.Runtime.Tests;
 public class WorkspaceScopeTests
 {
     [Fact]
+    public void CredentialShapedNamesAreHashedBeforeTheAuditCanEnterARecord()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces();
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/scope", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        string synthetic = "ghp_" + new string('x', 36) + ".txt";
+        File.WriteAllText(Path.Combine(workspace.Path, synthetic), "a stand-in name, never a credential");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Equal(1, scope.OutsideCount);
+        Assert.StartsWith("path with unportable name, sha256:", Assert.Single(scope.Outside), StringComparison.Ordinal);
+        Assert.DoesNotContain(synthetic, Assert.Single(scope.Outside), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AReplacementCharacterInTheInventoryNeverProducesASilentCleanAudit()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces();
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/scope", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, "\ufffd.txt"), "a possibly undecodable name");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["**"]);
+        Assert.NotNull(scope.Problem);
+        Assert.Contains("losslessly", scope.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ScopeUsesTheLaunchInventoryAndExactPathBoundaries()
     {
         using var run = new RunEstate();

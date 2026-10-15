@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -24,6 +25,11 @@ internal static class WorkspaceScopeAudit
             if (code != 0)
             {
                 return new WorkspaceSnapshot(files, "Git could not inventory the workspace; assignment scope is unverified.");
+            }
+
+            if (output.Contains('\ufffd', StringComparison.Ordinal))
+            {
+                problem = "An inventory name could not be decoded losslessly; assignment scope is incomplete.";
             }
 
             foreach (string name in output.Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
@@ -106,6 +112,7 @@ internal static class WorkspaceScopeAudit
         && !path.Any(char.IsControl) && path.Split('/').All(part => part is not ("." or ".."));
 
     private static string Display(string path) => path.Length <= 500 && Regex.IsMatch(path, @"\A[A-Za-z0-9_./ @()+,=\-]+\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
+        && !EstateChecks.Content("scope.txt", Encoding.UTF8.GetBytes(path)).HasErrors
         ? path : "path with unportable name, sha256:" + Hash(Encoding.UTF8.GetBytes(path));
 
     private static string Hash(byte[] bytes) => Convert.ToHexString(SHA256.HashData(bytes));
