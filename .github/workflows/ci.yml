@@ -37,7 +37,26 @@ jobs:
           swiftc -O -o artifacts/enclave/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
           artifacts/enclave/vericairn-enclave available || test $? -eq 3
           echo "VERICAIRN_ENCLAVE_HELPER=$PWD/artifacts/enclave/vericairn-enclave" >> "$GITHUB_ENV"
+      - name: Install a secret service
+        # Linux custody uses the secret service where one runs, and the runner has none: GNOME Keyring and secret-tool are
+        # installed, and the Linux tests run in a D-Bus session with a keyring unlocked by a throwaway password.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gnome-keyring libsecret-tools dbus-daemon
       - name: Test
+        if: runner.os != 'Linux'
         run: dotnet test --no-build --configuration Release
+      - name: Test, with a secret service
+        if: runner.os == 'Linux'
+        env:
+          VERICAIRN_EXPECT_SECRET_SERVICE: "1"
+        run: |
+          dbus-run-session -- bash -c '
+            set -eu
+            printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            printf probe | secret-tool store --label "Vericairn CI probe" application vericairn-ci probe 1
+            test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
+            dotnet test --no-build --configuration Release'
       - name: Smoke the CLI
         run: dotnet run --no-build --configuration Release --project src/Vericairn.Cli -- records describe

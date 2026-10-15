@@ -790,7 +790,7 @@ internal static class Commands
 
     public static int ObjectsVerify(string root, bool json) => WithApi(root, api => ReportFindings(api.ObjectsVerify(), json));
 
-    public static int DevicesCreate(string root, string principal, string name, string? custody, bool presence, string[] profiles, bool json) =>
+    public static int DevicesCreate(string root, string principal, string name, string? custody, bool? presence, string[] profiles, bool json) =>
         WithApi(root, api => ReportOutcome(api.DeviceCreate(new DeviceCreateRequest(principal, name, custody, profiles.Length == 0 ? null : profiles, presence)), json));
 
     public static int DevicesList(string root, bool json) => WithApi(root, api =>

@@ -44,6 +44,13 @@ public class FormatOneFixtureTests
             Assert.Contains("record format 2", rename.Problem!.Message, StringComparison.Ordinal);
             Assert.Contains("record format 2", rotate.Problem!.Message, StringComparison.Ordinal);
 
+            // Format 1 cannot name the Secure Enclave or presence, so its default custody is the strongest it can name.
+            WriteOutcome created = service.DeviceCreate(new DeviceCreateRequest(op, "Format 1 laptop"));
+            Assert.True(created.Ok, created.Problem?.Message);
+            RecordEnvelope device = service.Session.Load().ById[created.Written!.Id];
+            Assert.Contains(EstateModel.BodyString(device, "custody"), Records.Signing.DeviceKeyStores.Kinds);
+            Assert.Null(EstateModel.BodyString(device, "presence"));
+
             (UpgradeResponse? check, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
             Assert.Null(refused);
             Assert.Equal(["record-format-2"], check!.Migrations);
@@ -51,10 +58,11 @@ public class FormatOneFixtureTests
             Assert.Null(problem);
             Assert.True(applied!.Applied);
 
-            // Moved without a rewrite: the 0.4.2 records are byte for byte what they were, and the one new record is format 2.
+            // Moved without a rewrite: the 0.4.2 records are byte for byte what they were. The new records are the format-1 device
+            // made above and the migration, which is format 2.
             Dictionary<string, byte[]> after = Directory.EnumerateFiles(records, "*.json", SearchOption.AllDirectories).ToDictionary(f => f, File.ReadAllBytes);
             Assert.All(before, file => Assert.Equal(file.Value, after[file.Key]));
-            Assert.Equal(before.Count + 1, after.Count);
+            Assert.Equal(before.Count + 2, after.Count);
             EstateModel moved = service.Session.Load();
             Assert.Equal(2, moved.Manifest!.RecordFormat);
             Assert.DoesNotContain(moved.Findings, f => f.Severity == Severity.Error);
