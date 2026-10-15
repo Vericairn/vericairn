@@ -16,6 +16,15 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
 {
+    private readonly IReadOnlyList<string>? auditCommand;
+
+    /// <summary>Uses the installed Vericairn command as the isolated scope observer.</summary>
+    public GitWorktreeWorkspaces()
+    {
+    }
+
+    internal GitWorktreeWorkspaces(IReadOnlyList<string> auditCommand) => this.auditCommand = auditCommand;
+
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "git-worktree",
@@ -70,7 +79,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
     }
 
     /// <inheritdoc />
-    public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeAudit.Capture(workspace.Path);
+    public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand);
 
     /// <inheritdoc />
     public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline, Capture(workspace), permitted);

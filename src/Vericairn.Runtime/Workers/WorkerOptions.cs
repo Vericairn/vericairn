@@ -6,6 +6,8 @@ namespace Vericairn.Runtime.Workers;
 /// <summary>How the worker paces and places the runs it supervises on this machine.</summary>
 public sealed record WorkerOptions
 {
+    internal Action? BeforeTransmission { get; init; }
+
     internal Action<bool>? BeforeSignal { get; init; }
 
     internal Action? BeforeDispatchRecord { get; init; }

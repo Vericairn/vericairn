@@ -12,12 +12,17 @@ namespace Vericairn.Runtime.Workers;
 /// <summary>A harness launched inside a boundary before it can execute: a POSIX process group or a Windows Job Object.</summary>
 internal sealed class ContainedProcess
 {
-    private readonly nint job;
-    private readonly nint windowsProcess;
+    private readonly object lifecycle = new();
+    private readonly SafeFileHandle? job;
+    private readonly SafeProcessHandle? windowsProcess;
+    private volatile bool closed;
+    private int detached;
+
+    internal Func<int[], (int Count, int Error)>? ProcessInventory { get; set; }
     private bool exited;
     private int exitCode;
 
-    private ContainedProcess(int id, StreamReader output, StreamReader error, nint job = 0, nint windowsProcess = 0)
+    private ContainedProcess(int id, StreamReader output, StreamReader error, SafeFileHandle? job = null, SafeProcessHandle? windowsProcess = null)
     {
         Id = id;
         StandardOutput = output;
@@ -25,6 +30,8 @@ internal sealed class ContainedProcess
         this.job = job;
         this.windowsProcess = windowsProcess;
     }
+
+    internal bool IsClosed => closed && (job?.IsClosed ?? true) && (windowsProcess?.IsClosed ?? true);
 
     public int Id { get; }
 
@@ -56,7 +63,7 @@ internal sealed class ContainedProcess
     {
         if (OperatingSystem.IsWindows())
         {
-            if (!QueryInformationJobObject(job, 1, out JobAccounting accounting, Marshal.SizeOf<JobAccounting>(), out _))
+            if (!QueryInformationJobObject(job!, 1, out JobAccounting accounting, Marshal.SizeOf<JobAccounting>(), out _))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
@@ -79,20 +86,42 @@ internal sealed class ContainedProcess
         {
             int[] ids = new int[256];
             int count;
-            while ((count = proc_listpids(2, (uint)Id, ids, ids.Length * sizeof(int))) >= (ids.Length - 1) * sizeof(int))
+            while (true)
             {
-                ids = new int[checked(ids.Length * 2)];
-            }
+                int error;
+                if (ProcessInventory is not null)
+                {
+                    (count, error) = ProcessInventory(ids);
+                }
+                else
+                {
+                    Marshal.SetLastPInvokeError(0);
+                    count = proc_listpids(2, (uint)Id, ids, ids.Length * sizeof(int));
+                    error = Marshal.GetLastPInvokeError();
+                }
 
-            if (count < 0)
-            {
-                throw new Win32Exception(Marshal.GetLastPInvokeError());
+                // libproc returns zero on syscall failure, not minus one. Never turn a denied inventory into an empty group.
+                if (count < 0 || (count == 0 && error != 0))
+                {
+                    return false;
+                }
+
+                if (count < (ids.Length - 1) * sizeof(int))
+                {
+                    break;
+                }
+
+                ids = new int[checked(ids.Length * 2)];
             }
 
             byte[] info = new byte[256];
             foreach (int member in ids.Take(count / sizeof(int)).Where(p => p != 0))
             {
                 members.Add(member);
+                if (member == Id && exited)
+                {
+                    continue;
+                }
                 int read = proc_pidinfo(member, 3, 0, info, info.Length); // PROC_PIDTBSDINFO; pbi_status follows pbi_flags.
                 if (read < 8)
                 {
@@ -153,9 +182,18 @@ internal sealed class ContainedProcess
 
     public void Signal(bool force)
     {
+        lock (lifecycle)
+        {
+            SignalOwned(force);
+        }
+    }
+
+    private void SignalOwned(bool force)
+    {
+        ObjectDisposedException.ThrowIf(closed, this);
         if (OperatingSystem.IsWindows())
         {
-            if (force && !TerminateJobObject(job, 137))
+            if (force && !TerminateJobObject(job!, 137))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
@@ -166,15 +204,68 @@ internal sealed class ContainedProcess
         }
     }
 
+    // When record observation is abandoned, native ownership continues without settling or releasing any reservation.
+    public void Detach()
+    {
+        if (Interlocked.Exchange(ref detached, 1) != 0 || closed)
+        {
+            return;
+        }
+
+        var owner = new Thread(() =>
+        {
+            while (true)
+            {
+                try
+                {
+                    if (WaitForExit(TimeSpan.FromSeconds(1)) && BoundaryExited())
+                    {
+                        Close();
+                        return;
+                    }
+                }
+                catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException)
+                {
+                    // Inventory failures retain ownership and are retried.
+                }
+
+                Thread.Sleep(100);
+            }
+        }) { IsBackground = true, Name = "vericairn-native-owner" };
+        owner.Start();
+    }
+
     public void Close()
     {
+        lock (lifecycle)
+        {
+            CloseOwned();
+        }
+    }
+
+    private void CloseOwned()
+    {
+        if (closed)
+        {
+            return;
+        }
+
+        closed = true;
+        if (!OperatingSystem.IsWindows())
+        {
+            // WNOWAIT pins the leader's PID until no further group signal can be sent. Reap exactly once, here.
+            int result;
+            do
+            {
+                result = waitpid(Id, out _, 0);
+            }
+            while (result < 0 && Marshal.GetLastPInvokeError() == 4);
+        }
+
         StandardOutput.Dispose();
         StandardError.Dispose();
-        if (OperatingSystem.IsWindows())
-        {
-            CloseHandle(windowsProcess);
-            CloseHandle(job);
-        }
+        windowsProcess?.Dispose();
+        job?.Dispose();
     }
 
     private bool RootExited()
@@ -186,12 +277,12 @@ internal sealed class ContainedProcess
 
         if (OperatingSystem.IsWindows())
         {
-            if (WaitForSingleObject(windowsProcess, 0) != 0)
+            if (WaitForProcess(windowsProcess!, 0) != 0)
             {
                 return false;
             }
 
-            if (!GetExitCodeProcess(windowsProcess, out uint code))
+            if (!GetExitCodeProcess(windowsProcess!, out uint code))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
@@ -200,16 +291,14 @@ internal sealed class ContainedProcess
         }
         else
         {
-            int result = waitpid(Id, out int status, 1);
-            if (result == 0)
-            {
-                return false;
-            }
-
+            // siginfo_t is 128 bytes on Linux and smaller on Darwin. Both start with signo, errno, code;
+            // Linux aligns its union to eight bytes; Darwin puts pid immediately after code.
+            byte[] info = new byte[128];
+            int result = waitid(1, (uint)Id, info, 4 | 1 | (OperatingSystem.IsMacOS() ? 0x20 : 0x1000000)); // P_PID, WEXITED | WNOHANG | WNOWAIT
             if (result < 0)
             {
                 int error = Marshal.GetLastPInvokeError();
-                if (error == 4) // EINTR: no exit was observed yet.
+                if (error == 4)
                 {
                     return false;
                 }
@@ -217,7 +306,15 @@ internal sealed class ContainedProcess
                 throw new Win32Exception(error);
             }
 
-            exitCode = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f);
+            if (BitConverter.ToInt32(info, OperatingSystem.IsMacOS() ? 12 : 16) == 0)
+            {
+                return false;
+            }
+
+            int code = BitConverter.ToInt32(info, 8);
+            int status = BitConverter.ToInt32(info, OperatingSystem.IsMacOS() ? 20 : 24);
+            exitCode = code == 1 ? status : 128 + status; // CLD_EXITED or signal death
+
         }
 
         exited = true;
@@ -235,6 +332,7 @@ internal sealed class ContainedProcess
         bool attrReady = false;
         bool actionsReady = false;
         bool created = false;
+        int pid = 0;
         try
         {
             Check(posix_spawnattr_init(attributes));
@@ -251,7 +349,7 @@ internal sealed class ContainedProcess
             Redirect(error, 2);
             nint argv = Vector(new[] { info.FileName }.Concat(info.ArgumentList));
             nint env = Vector(info.Environment.Select(e => e.Key + "=" + e.Value));
-            Check(posix_spawnp(out int pid, info.FileName, actions, attributes, argv, env));
+            Check(posix_spawnp(out pid, info.FileName, actions, attributes, argv, env));
             created = true;
             _ = close(output[1]);
             descriptors.Remove(output[1]);
@@ -304,6 +402,7 @@ internal sealed class ContainedProcess
         }
         catch (Exception exception) when (created)
         {
+            new ContainedProcess(pid, StreamReader.Null, StreamReader.Null).Detach();
             throw new RunLaunchException(DateTimeOffset.UtcNow, exception);
         }
         finally
@@ -333,7 +432,9 @@ internal sealed class ContainedProcess
         }
     }
 
-    private static StreamReader Reader(nint handle) => new(new FileStream(new SafeFileHandle(handle, ownsHandle: true), FileAccess.Read), new UTF8Encoding(false));
+    private static StreamReader Reader(nint handle) => Reader(new SafeFileHandle(handle, ownsHandle: true));
+
+    private static StreamReader Reader(SafeFileHandle handle) => new(new FileStream(handle, FileAccess.Read), new UTF8Encoding(false));
 
     private static void Check(int error)
     {
@@ -345,19 +446,21 @@ internal sealed class ContainedProcess
 
     private static ContainedProcess StartWindows(ProcessStartInfo info)
     {
-        nint job = CreateJobObjectW(0, null);
-        if (job == 0)
+        SafeFileHandle job = CreateJobObjectW(0, null);
+        if (job.IsInvalid)
         {
+            job.Dispose();
             throw new Win32Exception(Marshal.GetLastPInvokeError());
         }
 
-        var handles = new List<nint>();
-        ProcessInformation process = default;
-        bool started = false;
+        var handles = new List<SafeFileHandle>();
+        SafeProcessHandle? processHandle = null;
+        SafeWaitHandle? thread = null;
         bool resumed = false;
+        bool transferred = false;
         try
         {
-            // No breakaway; closing the worker's last handle also terminates the job. Assignment happens while the root is suspended.
+            // No breakaway; closing the worker's last handle terminates the job. Assignment precedes resumption.
             var limits = new JobLimits { Basic = new BasicLimits { LimitFlags = 0x2000 } };
             if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf<JobLimits>()))
             {
@@ -365,10 +468,12 @@ internal sealed class ContainedProcess
             }
 
             var security = new SecurityAttributes { Length = Marshal.SizeOf<SecurityAttributes>(), Inherit = 1 };
-            (nint read, nint write) Output()
+            (SafeFileHandle Read, SafeFileHandle Write) Output()
             {
-                if (!CreatePipe(out nint read, out nint write, ref security, 0))
+                if (!CreatePipe(out SafeFileHandle read, out SafeFileHandle write, ref security, 0))
                 {
+                    read.Dispose();
+                    write.Dispose();
                     throw new Win32Exception(Marshal.GetLastPInvokeError());
                 }
 
@@ -381,31 +486,29 @@ internal sealed class ContainedProcess
                 return (read, write);
             }
 
-            (nint stdout, nint output) = Output();
-            (nint stderr, nint error) = Output();
-            (nint stdin, nint input) = Output();
-            // An already closed stdin pipe is inherited as a valid read handle.
+            (SafeFileHandle stdout, SafeFileHandle output) = Output();
+            (SafeFileHandle stderr, SafeFileHandle error) = Output();
+            (SafeFileHandle stdin, SafeFileHandle input) = Output();
             if (!SetHandleInformation(stdin, 1, 1))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
 
-            CloseHandle(input);
-            handles.Remove(input);
-            var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Flags = 0x100, Input = stdin, Output = output, Error = error };
+            input.Dispose();
+            var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Flags = 0x100, Input = stdin.DangerousGetHandle(), Output = output.DangerousGetHandle(), Error = error.DangerousGetHandle() };
             string command = string.Join(' ', new[] { info.FileName }.Concat(info.ArgumentList).Select(Quote));
             string environment = string.Join('\0', info.Environment.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).Select(e => e.Key + "=" + e.Value)) + "\0\0";
-            if (!CreateProcessW(null, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out process))
+            if (!CreateProcessW(null, (command + "\0").ToCharArray(), 0, 0, true, 0x4 | 0x400 | 0x08000000, environment, info.WorkingDirectory, ref startup, out ProcessInformation process))
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
 
-            started = true;
-            if (!AssignProcessToJobObject(job, process.Process) || ResumeThread(process.Thread) == uint.MaxValue)
+            processHandle = new SafeProcessHandle(process.Process, ownsHandle: true);
+            thread = new SafeWaitHandle(process.Thread, ownsHandle: true);
+            if (!AssignProcessToJobObject(job, processHandle) || ResumeThread(thread) == uint.MaxValue)
             {
-                // No harness instruction has executed if assignment fails. Terminate and observe before reporting prelaunch failure.
                 int failure = Marshal.GetLastPInvokeError();
-                if (!TerminateProcess(process.Process, 137) || WaitForSingleObject(process.Process, 5000) != 0)
+                if (!TerminateProcess(processHandle, 137) || WaitForProcess(processHandle, 5000) != 0)
                 {
                     throw new RunLaunchException(DateTimeOffset.UtcNow, new Win32Exception(failure));
                 }
@@ -414,43 +517,32 @@ internal sealed class ContainedProcess
             }
 
             resumed = true;
-            CloseHandle(process.Thread);
-            process.Thread = 0;
-            foreach (nint handle in new[] { stdin, output, error })
+            foreach (SafeFileHandle handle in new[] { stdin, output, error })
             {
-                CloseHandle(handle);
-                handles.Remove(handle);
+                handle.Dispose();
             }
 
-            var result = new ContainedProcess((int)process.Id, Reader(stdout), Reader(stderr), job, process.Process);
+            var result = new ContainedProcess((int)process.Id, Reader(stdout), Reader(stderr), job, processHandle);
             handles.Clear();
+            transferred = true;
             return result;
         }
-        catch (Exception exception)
+        catch (Exception exception) when (resumed)
         {
-            if (process.Thread != 0)
-            {
-                CloseHandle(process.Thread);
-            }
-
-            if (started)
-            {
-                CloseHandle(process.Process);
-            }
-
-            CloseHandle(job);
-            if (resumed)
-            {
-                throw new RunLaunchException(DateTimeOffset.UtcNow, exception);
-            }
-
-            throw;
+            throw new RunLaunchException(DateTimeOffset.UtcNow, exception);
         }
         finally
         {
-            foreach (nint handle in handles)
+            thread?.Dispose();
+            foreach (SafeFileHandle handle in handles)
             {
-                CloseHandle(handle);
+                handle.Dispose();
+            }
+
+            if (!transferred)
+            {
+                job.Dispose();
+                processHandle?.Dispose();
             }
         }
     }
@@ -479,6 +571,7 @@ internal sealed class ContainedProcess
     [DllImport("libproc.dylib", SetLastError = true)] private static extern int proc_listpids(uint kind, uint group, [Out] int[] buffer, int size);
     [DllImport("libproc.dylib", SetLastError = true)] private static extern int proc_pidinfo(int pid, int flavor, ulong argument, [Out] byte[] buffer, int size);
     [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int signal);
+    [DllImport("libc", SetLastError = true)] private static extern int waitid(int kind, uint pid, [Out] byte[] info, int options);
     [DllImport("libc", SetLastError = true)] private static extern int waitpid(int pid, out int status, int options);
     [DllImport("libc", SetLastError = true)] private static extern int pipe([Out] int[] pair);
     [DllImport("libc", SetLastError = true)] private static extern int fcntl(int descriptor, int command, int value);
@@ -494,19 +587,18 @@ internal sealed class ContainedProcess
     [DllImport("libc")] private static extern int posix_spawn_file_actions_addopen(nint actions, int descriptor, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, int mode);
     [DllImport("libc")] private static extern int posix_spawn_file_actions_addchdir_np(nint actions, [MarshalAs(UnmanagedType.LPUTF8Str)] string path);
     [DllImport("libc")] private static extern int posix_spawnp(out int pid, [MarshalAs(UnmanagedType.LPUTF8Str)] string executable, nint actions, nint attributes, nint arguments, nint environment);
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern nint CreateJobObjectW(nint security, string? name);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetInformationJobObject(nint job, int kind, ref JobLimits information, int size);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool QueryInformationJobObject(nint job, int kind, out JobAccounting information, int size, out int returned);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool AssignProcessToJobObject(nint job, nint process);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateJobObject(nint job, uint code);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CreatePipe(out nint read, out nint write, ref SecurityAttributes attributes, uint size);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(nint handle, uint mask, uint flags);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern SafeFileHandle CreateJobObjectW(nint security, string? name);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetInformationJobObject(SafeFileHandle job, int kind, ref JobLimits information, int size);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool QueryInformationJobObject(SafeFileHandle job, int kind, out JobAccounting information, int size, out int returned);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool AssignProcessToJobObject(SafeFileHandle job, SafeProcessHandle process);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateJobObject(SafeFileHandle job, uint code);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CreatePipe(out SafeFileHandle read, out SafeFileHandle write, ref SecurityAttributes attributes, uint size);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetHandleInformation(SafeFileHandle handle, uint mask, uint flags);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CreateProcessW(string? application, [In, Out] char[] command, nint processSecurity, nint threadSecurity, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint flags, string environment, string directory, ref StartupInfo startup, out ProcessInformation process);
-    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint ResumeThread(nint thread);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateProcess(nint process, uint code);
-    [DllImport("kernel32.dll")] private static extern uint WaitForSingleObject(nint handle, uint milliseconds);
-    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetExitCodeProcess(nint process, out uint code);
-    [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseHandle(nint handle);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint ResumeThread(SafeWaitHandle thread);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateProcess(SafeProcessHandle process, uint code);
+    [DllImport("kernel32.dll", EntryPoint = "WaitForSingleObject")] private static extern uint WaitForProcess(SafeProcessHandle handle, uint milliseconds);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
 #pragma warning restore CA2101
 #pragma warning restore SYSLIB1054
 

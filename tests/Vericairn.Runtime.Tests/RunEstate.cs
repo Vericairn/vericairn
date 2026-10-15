@@ -37,7 +37,7 @@ internal sealed class RunEstate : IDisposable
         registry.Register(new ClaudeCodeLauncher());
         registry.Register(new CodexLauncher());
         registry.Register(new GenericLauncher());
-        registry.Register(new GitWorktreeWorkspaces());
+        registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         Service.Providers = registry;
         Service.WorkerOptions = (options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) }) with
         {

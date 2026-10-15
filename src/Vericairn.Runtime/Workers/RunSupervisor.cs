@@ -94,6 +94,8 @@ public sealed class RunSupervisor
     /// <summary>The harness's process id.</summary>
     public int ProcessId => process.Id;
 
+    internal bool NativeResourcesClosed => process.IsClosed;
+
     /// <summary>
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
@@ -160,6 +162,7 @@ public sealed class RunSupervisor
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
         {
+            process.Detach();
             throw new RunLaunchException(launchedAt, exception);
         }
     }
@@ -170,10 +173,22 @@ public sealed class RunSupervisor
     /// </summary>
     public RunOutcome? Supervise(CancellationToken abandon)
     {
+        try
+        {
+            return Observe(abandon);
+        }
+        finally
+        {
+            process.Detach(); // Idempotent; Close makes this a no-op after observed containment.
+        }
+    }
+
+    private RunOutcome? Observe(CancellationToken abandon)
+    {
         while (true)
         {
             bool rootExited = process.WaitForExit(options.Heartbeat);
-            if (rootExited && process.BoundaryExited())
+            if (rootExited && BoundaryExited())
             {
                 break;
             }
@@ -185,6 +200,7 @@ public sealed class RunSupervisor
 
             if (abandon.IsCancellationRequested)
             {
+                process.Detach();
                 return null;
             }
 
@@ -285,11 +301,24 @@ public sealed class RunSupervisor
         }
     }
 
+    private bool BoundaryExited()
+    {
+        try
+        {
+            return process.BoundaryExited();
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     private void Begin(StopRequest request)
     {
         grace = request.GraceSeconds is int seconds and >= 0 ? TimeSpan.FromSeconds(seconds) : options.Grace;
         state.Stop = new RunStop(request.RequestedAt, request.RequestedBy, request.Reason);
         var transmission = new StringBuilder();
+        options.BeforeTransmission?.Invoke();
         try
         {
             File.WriteAllText(directory.StopFile, JsonSerializer.Serialize(request, ProtocolJson.Options));

@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Security.Cryptography;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Text;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
@@ -14,33 +17,66 @@ namespace Vericairn.Packs.Software;
 /// <summary>A scope observation, not a sandbox or an attribution of who made a concurrent edit.</summary>
 internal static class WorkspaceScopeAudit
 {
-    public static WorkspaceSnapshot Capture(string workspace)
+    internal static TimeSpan Deadline { get; } = TimeSpan.FromSeconds(30);
+
+    public static WorkspaceSnapshot Capture(string workspace) => WorkspaceScopeProbe.Capture(workspace, Deadline);
+
+    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
+        var watch = Stopwatch.StartNew();
+        long bytes = 0;
         try
         {
-            // No exclusions: ignoring a file must not hide a change outside the assignment. NUL delimiters preserve rename and odd names.
-            (int code, string output, _) = HarnessProcess.Run(["git", "-c", "core.fsmonitor=false", "-C", workspace, "ls-files", "--cached", "--others", "--deduplicate", "-z"], WorkerEnvironment.Current(), TimeSpan.FromMinutes(2));
-            if (code != 0)
+            if (!Path.Exists(Path.Combine(workspace, ".git")))
             {
-                return new WorkspaceSnapshot(files, "Git could not inventory the workspace; assignment scope is unverified.");
+                return new WorkspaceSnapshot(files, "The workspace repository identity is unavailable; assignment scope is unverified.");
             }
 
-            if (output.Contains('\ufffd', StringComparison.Ordinal))
-            {
-                problem = "An inventory name could not be decoded losslessly; assignment scope is incomplete.";
-            }
+            // Inventory the physical tree, including ignored and untracked files. Agent-modifiable Git configuration and
+            // GIT_DIR/GIT_WORK_TREE never decide which ordinary workspace files the audit can see.
+            Visit(workspace, "");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+        {
+            problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
+        }
 
-            foreach (string name in output.Split('\0', StringSplitOptions.RemoveEmptyEntries).Distinct(StringComparer.Ordinal))
+        return new WorkspaceSnapshot(files, problem);
+
+        void CheckDeadline()
+        {
+            if (watch.Elapsed >= deadline || files.Count >= 100_000 || bytes >= 1024L * 1024 * 1024)
             {
-                if (!Relative(name))
+                throw new IOException("The scope audit reached its work or time limit.");
+            }
+        }
+
+        void Visit(string directory, string prefix)
+        {
+            CheckDeadline();
+            foreach (string path in Directory.EnumerateFileSystemEntries(directory))
+            {
+                CheckDeadline();
+                string leaf = Path.GetFileName(path);
+                if (leaf == ".git")
                 {
-                    problem = "The inventory contained an unsafe path; assignment scope is incomplete.";
+                    if (prefix.Length > 0)
+                    {
+                        problem = "A submodule or nested repository needs a separate scope audit; assignment scope is incomplete.";
+                    }
+
                     continue;
                 }
 
-                string path = Path.Combine(workspace, name);
+                string name = prefix + leaf;
+                if (!Relative(name) || name.Contains('\ufffd', StringComparison.Ordinal))
+                {
+                    problem = "An inventory name could not be decoded losslessly or safely; assignment scope is incomplete.";
+                    continue;
+                }
+
                 try
                 {
                     FileAttributes attributes = File.GetAttributes(path);
@@ -50,33 +86,83 @@ internal static class WorkspaceScopeAudit
                     }
                     else if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        problem = "A submodule or nested repository needs a separate scope audit; assignment scope is incomplete.";
-                        files[name] = "directory";
+                        Visit(path, name + "/");
                     }
                     else
                     {
-                        using FileStream stream = File.OpenRead(path);
+                        using SafeFileHandle handle = OpenRegular(path);
+                        using var stream = new FileStream(handle, FileAccess.Read);
+                        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                        byte[] buffer = new byte[64 * 1024];
+                        int read;
+                        while ((read = stream.Read(buffer)) != 0)
+                        {
+                            bytes += read;
+                            CheckDeadline();
+                            hash.AppendData(buffer, 0, read);
+                        }
+
                         string mode = OperatingSystem.IsWindows() ? string.Empty : ((int)File.GetUnixFileMode(path)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                        files[name] = mode + ":" + Convert.ToHexString(SHA256.HashData(stream));
+                        files[name] = mode + ":" + Convert.ToHexString(hash.GetHashAndReset());
                     }
                 }
                 catch (FileNotFoundException)
                 {
-                    // A tracked deletion is represented by absence from this inventory.
+                    // Deletions are represented by absence.
                 }
                 catch (DirectoryNotFoundException)
                 {
-                    // A tracked deletion is represented by absence from this inventory.
+                    // Deletions are represented by absence.
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+    }
+
+    private static SafeFileHandle OpenRegular(string path)
+    {
+        if (OperatingSystem.IsWindows())
         {
-            problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
+            SafeFileHandle handle = CreateFileW(path, 0x80000000, 7, 0, 3, 0x00200000, 0); // OPEN_REPARSE_POINT
+            if (handle.IsInvalid || GetFileType(handle) != 1 || !GetFileInformationByHandleEx(handle, 9, out FileTag tag, 8)
+                || (tag.Attributes & (0x400u | 0x10u)) != 0)
+            {
+                handle.Dispose();
+                throw new IOException("The scope entry is not a regular file.");
+            }
+
+            return handle;
         }
 
-        return new WorkspaceSnapshot(files, problem);
+        byte[] stat = new byte[256];
+        int modeOffset = OperatingSystem.IsMacOS() ? 4 : RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16 : 24;
+        if (lstat(path, stat) != 0 || (BitConverter.ToUInt16(stat, modeOffset) & 0xf000) != 0x8000)
+        {
+            throw new IOException("The scope entry is not a regular file.");
+        }
+
+        // Classify before acquisition, then nonblocking/no-follow open and reclassify the acquired descriptor to close leaf swaps.
+        int descriptor = open(path, OperatingSystem.IsMacOS() ? 0x4 | 0x100 : 0x800 | 0x20000);
+        var result = new SafeFileHandle(descriptor, ownsHandle: true);
+        if (result.IsInvalid || fstat(result, stat) != 0 || (BitConverter.ToUInt16(stat, modeOffset) & 0xf000) != 0x8000)
+        {
+            result.Dispose();
+            throw new IOException("The scope entry is not a regular file.");
+        }
+
+        return result;
     }
+
+#pragma warning disable SYSLIB1054
+#pragma warning disable CA2101
+    [DllImport("libc", SetLastError = true)] private static extern int open([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags);
+    [DllImport("libc", SetLastError = true)] private static extern int lstat([MarshalAs(UnmanagedType.LPUTF8Str)] string path, [Out] byte[] stat);
+    [DllImport("libc", SetLastError = true)] private static extern int fstat(SafeFileHandle file, [Out] byte[] stat);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, nint security, uint creation, uint flags, nint template);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint GetFileType(SafeFileHandle handle);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int kind, out FileTag info, int size);
+#pragma warning restore CA2101
+#pragma warning restore SYSLIB1054
+    [StructLayout(LayoutKind.Sequential)] private struct FileTag { public uint Attributes, Tag; }
 
     public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted)
     {

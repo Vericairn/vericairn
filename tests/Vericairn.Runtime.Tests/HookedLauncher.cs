@@ -36,7 +36,7 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
         registry.Register(new HookedLauncher(new ClaudeCodeLauncher(), verify, command));
         registry.Register(new CodexLauncher());
         registry.Register(new GenericLauncher());
-        registry.Register(new GitWorktreeWorkspaces());
+        registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         run.Service.Providers = registry;
     }
 

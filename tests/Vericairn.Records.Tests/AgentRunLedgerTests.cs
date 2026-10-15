@@ -17,6 +17,27 @@ public class AgentRunLedgerTests
     [Theory]
     [InlineData("known-failure")]
     [InlineData("canceled")]
+    public void ASettledIdentityCannotReopenAsUncertainAndReserveTheBudgetTwice(string status)
+    {
+        var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("settled", """{"wallMinutes":10,"attemptsPerStep":10}""", """{"wallMinutes":1,"unreported":[]}""", status: status);
+        ledger.Intent("remaining", """{"wallMinutes":9,"attemptsPerStep":10}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = "uncertain";
+        body["reconciliation"] = "The earlier process exited; another launch is ambiguous.";
+        body["dispatchedAt"] = "2026-10-13T12:00:45Z";
+        body.Remove("observed");
+        body.Remove("usage");
+        RecordEnvelope reopened = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        var findings = ledger.Estate.Load().Findings.Where(f => f.Location == reopened.ExpectedPath).ToList();
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-relaunch");
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-dispatch-kept");
+        Assert.Contains(findings, f => f.Code == "operation.budget");
+    }
+
+    [Theory]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
     [InlineData("uncertain")]
     public void AnAgentRunIdentityCannotBeDispatchedAgainEvenWithReconciliation(string status)
     {

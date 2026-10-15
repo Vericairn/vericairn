@@ -38,6 +38,13 @@ internal static class FakeHarness
         return command;
     }
 
+    internal static List<string> ScopeCommand()
+    {
+        List<string> command = Command("unused", "unused");
+        command.RemoveRange(command.Count - 3, 3);
+        return command;
+    }
+
     /// <summary>The command setting a launcher takes to start the stand-in: a JSON array.</summary>
     public static string Setting(string scenario, string report) => JsonSerializer.Serialize(Command(scenario, report));
 
@@ -92,6 +99,28 @@ internal static class FakeHarness
         };
         using PosixSignalRegistration? terminate = scenario is "codex-spender" or "ignore-stop" or "ack-stop" ? HoldTerminate() : null;
         File.AppendAllText(report, line.ToJsonString() + "\n");
+        if (arguments.Contains("mcp") && arguments.Contains("list"))
+        {
+            var configuration = JsonNode.Parse(File.ReadAllText(Environment.GetEnvironmentVariable("VERICAIRN_MCP_CONFIG")!))!.AsObject();
+            JsonNode server = configuration["mcpServers"]!["vericairn"]!;
+            var listed = new JsonArray(new JsonObject
+            {
+                ["name"] = "vericairn", ["enabled"] = true,
+                ["transport"] = new JsonObject
+                {
+                    ["type"] = "stdio", ["command"] = server["command"]!.DeepClone(), ["args"] = server["args"]!.DeepClone(),
+                    ["env"] = server["env"]!.DeepClone(), ["env_vars"] = new JsonArray(), ["cwd"] = null,
+                },
+            });
+            if (scenario == "codex-ambient")
+            {
+                listed.Add(new JsonObject { ["name"] = "ambient", ["enabled"] = true });
+            }
+
+            Emit(listed.ToJsonString());
+            return 0;
+        }
+
         bool listing = arguments.Contains("features") && arguments.Contains("list");
         switch (scenario)
         {
@@ -107,7 +136,7 @@ internal static class FakeHarness
             case "claude-fails":
                 Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}}""");
                 return 1;
-            case "codex" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" or "codex-headroom" when listing:
+            case "codex" or "codex-ambient" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" or "codex-headroom" when listing:
                 Emit("apps                                     stable             true");
                 Emit("goals                                    stable             true");
                 Emit("hooks                                    stable             true");
@@ -195,6 +224,9 @@ internal static class FakeHarness
                 return Linger(acknowledge: false);
             case "ack-stop":
                 return Linger(acknowledge: true);
+            case "scope-hang":
+                Thread.Sleep(TimeSpan.FromMinutes(2));
+                return 0;
             case "close-output":
                 Emit("Closing my output and working on.");
                 Console.Out.Close();

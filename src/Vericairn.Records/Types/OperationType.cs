@@ -137,7 +137,11 @@ public sealed class OperationType : IRecordType
         }
 
         // The intent of a run that names its goal: the goal active, and the cap within its budget, judged from the records before it.
-        if (context.Record.Supersedes is null && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
+        bool reserves = status is "not-started" or "dispatched" or "uncertain";
+        RecordEnvelope? predecessor = context.Record.Supersedes is string previousId ? context.Find(previousId) : null;
+        bool alreadyReserved = predecessor is not null && EstateModel.BodyString(predecessor, "action") == AgentRun
+            && EstateModel.BodyString(predecessor, "status") is "not-started" or "dispatched" or "uncertain";
+        if (reserves && !alreadyReserved && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
         {
             RecordEnvelope? goal = AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record);
             if (goal is null)
@@ -410,9 +414,17 @@ public sealed class OperationType : IRecordType
             string previousStatus = EstateModel.BodyString(previous, "status") ?? "?";
             if (EstateModel.BodyString(previous, "action") == AgentRun
                 && (EstateModel.BodyString(context.Record, "action") != AgentRun
-                    || (status == "dispatched" && previousStatus != "not-started")))
+                    || (status == "dispatched" && previousStatus != "not-started")
+                    || (previousStatus is "known-failure" or "canceled" or "observed-success" && status is "not-started" or "dispatched" or "uncertain")))
             {
                 context.Error("operation.agent-run-relaunch", "Every physical agent launch needs a new agent-run intent and budget admission; an existing run identity is never dispatched again.");
+            }
+
+            if (EstateModel.BodyString(previous, "action") == AgentRun
+                && (EstateModel.BodyString(previous, "dispatchedAt") is not null || previousStatus is "known-failure" or "canceled" or "observed-success")
+                && dispatchedAt != EstateModel.BodyString(previous, "dispatchedAt"))
+            {
+                context.Error("operation.agent-run-dispatch-kept", "An agent run keeps its original dispatch timestamp; a retry requires a new admitted intent.");
             }
 
             if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider") || EstateModel.BodyString(previous, "action") != EstateModel.BodyString(context.Record, "action"))

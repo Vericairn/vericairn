@@ -57,19 +57,16 @@ public class WorkerTests
     }
 
     [Fact]
-    public void TransmissionIsTimestampedAfterItsActualSignalAttemptRatherThanTheEarlierHeartbeat()
+    public void TransmissionIsTimestampedAfterItsActualTransportAttemptOnEveryPlatform()
     {
         using var run = new RunEstate();
         string? attemptedAt = null;
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
-            BeforeSignal = force =>
+            BeforeTransmission = () =>
             {
-                if (!force)
-                {
-                    Thread.Sleep(1100);
-                    attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-                }
+                Thread.Sleep(1100);
+                attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
             },
         };
         RunResponse started = run.Start("generic", "ack-stop", run.Report("transmission-time"));
@@ -78,6 +75,9 @@ public class WorkerTests
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Observe transmission after the attempt.", 5));
         Assert.Equal("contained", stopped.State);
         Assert.NotNull(attemptedAt);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        Assert.True(File.Exists(files.StopFile));
+        Assert.True(string.CompareOrdinal(stopped.Stop!.TransmittedAt, RecordParser.FormatTimestamp(File.GetLastWriteTimeUtc(files.StopFile))) >= 0);
         Assert.True(string.CompareOrdinal(stopped.Stop!.TransmittedAt, attemptedAt) >= 0);
         Assert.True(string.CompareOrdinal(stopped.Stop.AcknowledgedAt, stopped.Stop.TransmittedAt) >= 0);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
@@ -212,10 +212,50 @@ public class WorkerTests
         Assert.Equal(1000, row.Cap.GetProperty("tokens").GetInt64());
         Assert.Equal(950, row.Charged.GetProperty("tokens").GetInt64());
         Assert.Contains("threshold of 900", row.Stop!.Reason, StringComparison.Ordinal);
-        List<string> args = FakeHarness.Reports(report)[1]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        List<string> args = FakeHarness.Reports(report)[2]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         Assert.Contains("features.rollout_budget.enabled=true", args);
         Assert.Contains("features.rollout_budget.limit_tokens=900", args);
         Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void ClaudeGetsFreshLoginOnlyConfigurationAndExcludesEveryOrdinarySettingsSource()
+    {
+        using var run = new RunEstate();
+        string original = Path.Combine(run.Scratch, "claude-user");
+        Directory.CreateDirectory(original);
+        File.WriteAllText(Path.Combine(original, "settings.json"), """{"env":{"ANTHROPIC_API_KEY":"synthetic-filtered-value"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"nonexistent-hook-sentinel"}]}]},"enabledPlugins":{"ambient":true}}""");
+        File.WriteAllText(Path.Combine(original, ".credentials.json"), "{\"claudeAiOauth\":{\"synthetic-login\":true},\"mcpOAuth\":{\"ambient\":true}}");
+        var source = new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CLAUDE_CONFIG_DIR"] = original };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = source };
+        string report = run.Report("isolated-claude");
+        RunResponse started = run.Start("claude-code", "claude", report);
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        string home = given["environment"]!["CLAUDE_CONFIG_DIR"]!.GetValue<string>();
+        Assert.NotEqual(original, home);
+        Assert.False(File.Exists(Path.Combine(home, "settings.json")));
+        string login = File.ReadAllText(Path.Combine(home, ".credentials.json"));
+        Assert.Contains("claudeAiOauth", login, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcpOAuth", login, StringComparison.Ordinal);
+        Assert.Null(given["environment"]!["ANTHROPIC_API_KEY"]);
+        List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
+        Assert.Equal("{\"disableAllHooks\":true,\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
+    }
+
+    [Fact]
+    public void CodexRefusesAnEffectiveAmbientServerBeforeStartingAnyAgent()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("ambient-codex");
+        RunResponse started = run.Start("codex", "codex-ambient", report);
+        Assert.False(started.Ok);
+        Assert.Contains("effective MCP configuration", started.Message, StringComparison.Ordinal);
+        Assert.Equal("known-failure", run.Row(started.Run).Status);
+        Assert.All(FakeHarness.Reports(report), given => Assert.DoesNotContain("exec", given["arguments"]!.AsArray().Select(a => a!.GetValue<string>())));
+        Assert.False(run.Row(started.Run).Charged.TryGetProperty("wallMinutes", out _));
     }
 
     [Fact]
@@ -233,7 +273,7 @@ public class WorkerTests
         RunResponse started = run.Start("codex", "codex", report);
         Assert.True(started.Ok, started.Message);
         Assert.Equal("observed-success", run.Settled(started.Run).Status);
-        JsonObject given = FakeHarness.Reports(report)[1];
+        JsonObject given = FakeHarness.Reports(report)[2];
         string home = given["environment"]!["CODEX_HOME"]!.GetValue<string>();
         Assert.NotEqual(original, home);
         string configuration = File.ReadAllText(Path.Combine(home, "config.toml"));
@@ -387,8 +427,8 @@ public class WorkerTests
         JsonObject given = Assert.Single(FakeHarness.Reports(report));
         List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         string workspace = given["directory"]!.GetValue<string>();
-        string mcp = arguments[^2];
-        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config"], arguments);
+        string mcp = arguments[arguments.IndexOf("--mcp-config") + 1];
+        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], arguments);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
@@ -407,7 +447,7 @@ public class WorkerTests
             Assert.False(env.ContainsKey(credential), credential + " reached the harness.");
         }
 
-        Assert.Equal(environment["CLAUDE_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"]!.GetValue<string>());
+        Assert.NotEqual(environment["CLAUDE_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"]!.GetValue<string>());
         Assert.Equal(environment[VericairnHome.EnvironmentVariable], env[VericairnHome.EnvironmentVariable]!.GetValue<string>());
         Assert.Equal(started.Run, env["VERICAIRN_RUN"]!.GetValue<string>());
         Assert.True(env.ContainsKey("PATH") || env.ContainsKey("Path"));
@@ -447,10 +487,10 @@ public class WorkerTests
         Assert.Equal("observed-success", row.Status);
         Assert.Equal(1400, row.Usage!.Value.GetProperty("tokens").GetInt64());
         List<JsonObject> given = FakeHarness.Reports(report);
-        Assert.Equal(2, given.Count);
+        Assert.Equal(3, given.Count);
         Assert.Equal(["features", "list"], given[0]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
-        List<string> arguments = given[1]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
-        string workspace = given[1]["directory"]!.GetValue<string>();
+        List<string> arguments = given[2]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        string workspace = given[2]["directory"]!.GetValue<string>();
         string home = WorkerEnvironment.Current()[VericairnHome.EnvironmentVariable];
         string cd = arguments[3];
         Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), cd, StringComparison.Ordinal);
@@ -458,7 +498,7 @@ public class WorkerTests
         Assert.Equal(["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c"], arguments.Take(7));
         Assert.StartsWith("mcp_servers={vericairn={command=\"vericairn-under-test\"", arguments[7], StringComparison.Ordinal);
         Assert.Contains($"\"VERICAIRN_HOME\"={Toml(home)}", arguments[7], StringComparison.Ordinal);
-        Assert.Equal("projects." + Toml(workspace) + ".trust_level=\"untrusted\"", arguments[9]);
+        Assert.Equal("projects={" + Toml(workspace) + "={trust_level=\"untrusted\"}}", arguments[9]);
         Assert.StartsWith("/goal Does the widget build and pass its tests? Checks: the tests pass;", arguments[^1], StringComparison.Ordinal);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
     }

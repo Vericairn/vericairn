@@ -39,11 +39,11 @@ public sealed class CodexLauncher : IAgentLauncher
         "implemented",
         ["verify-goals", "launch", "observe-usage"],
         [
-            "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a complete vericairn-only MCP table override \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
+            "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Needs Codex's goals feature: before a run is recorded it reads codex features list, and refuses, saying why, when goals is not enabled or its state cannot be read.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
-            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; the complete MCP table is overridden to vericairn only.",
+            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
             "Implemented against codex --help, codex exec --help and a stand-in process that speaks its events; not yet qualified against a live Codex.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
@@ -92,6 +92,7 @@ public sealed class CodexLauncher : IAgentLauncher
     public LaunchContext Prepare(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        context = context with { Workspace = HarnessWorkspace.Canonical(context.Workspace) };
         string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "codex");
         Directory.CreateDirectory(home);
         if (!OperatingSystem.IsWindows())
@@ -99,7 +100,7 @@ public sealed class CodexLauncher : IAgentLauncher
             File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        File.WriteAllText(Path.Combine(home, "config.toml"), "mcp_servers=" + Mcp(context) + "\n[features]\ngoals = true\n");
+        File.WriteAllText(Path.Combine(home, "config.toml"), "mcp_servers=" + Mcp(context) + "\nprojects=" + Projects(context) + "\n[features]\ngoals = true\n");
         string? original = context.Environment.GetValueOrDefault("CODEX_HOME");
         if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
         {
@@ -118,7 +119,9 @@ public sealed class CodexLauncher : IAgentLauncher
         }
 
         var environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CODEX_HOME"] = home };
-        return context with { Environment = environment };
+        LaunchContext prepared = context with { Environment = environment };
+        VerifyMcp(prepared);
+        return prepared;
     }
 
     /// <inheritdoc />
@@ -133,8 +136,46 @@ public sealed class CodexLauncher : IAgentLauncher
 
         return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
             "-c", "mcp_servers=" + Mcp(context),
-            "-c", "projects." + Toml(context.Workspace) + ".trust_level=\"untrusted\"",
+            "-c", "projects=" + Projects(context),
             .. limits, "/goal " + context.Condition];
+    }
+
+    // Override one whole projects value: CLI dotted-key parsing does not interpret TOML quotes in a path segment.
+    internal static string Projects(LaunchContext context) => "{" + Toml(context.Workspace) + "={trust_level=\"untrusted\"}}";
+
+    internal static void VerifyMcp(LaunchContext context)
+    {
+        (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, "codex"),
+            "-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context), "mcp", "list", "--json"], context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(output);
+            JsonElement root = document.RootElement;
+            if (code != 0 || root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 1)
+            {
+                throw new ProviderRefusedException("Codex's effective MCP configuration is not the run's approved server table; ambient or incompatible managed configuration must be removed before launch.");
+            }
+
+            JsonElement server = root[0];
+            JsonElement transport = server.GetProperty("transport");
+            bool approved = server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
+                && transport.GetProperty("type").GetString() == "stdio" && transport.GetProperty("command").GetString() == context.McpServer[0]
+                && transport.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))
+                && transport.GetProperty("env_vars").GetArrayLength() == 0
+                && (!transport.TryGetProperty("cwd", out JsonElement cwd) || cwd.ValueKind == JsonValueKind.Null);
+            JsonElement env = transport.GetProperty("env");
+            approved &= context.McpEnvironment.Count == 0 && env.ValueKind == JsonValueKind.Null
+                || env.ValueKind == JsonValueKind.Object && env.EnumerateObject().Count() == context.McpEnvironment.Count
+                    && env.EnumerateObject().All(p => context.McpEnvironment.TryGetValue(p.Name, out string? value) && p.Value.GetString() == value);
+            if (!approved)
+            {
+                throw new ProviderRefusedException("Codex's effective MCP transport differs from the run's approved configuration; launch was refused.");
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw new ProviderRefusedException("Codex's effective MCP configuration could not be verified; launch was refused.", exception);
+        }
     }
 
     private static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";

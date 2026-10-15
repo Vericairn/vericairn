@@ -20,6 +20,63 @@ public class LauncherTests
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
+    [Fact]
+    public void RealCodexProbesRejectMergedServersAndAddressCanonicalProjectTrustWithoutStartingServers()
+    {
+        string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CODEX");
+        Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CODEX to run read-only mcp list probes with synthetic configuration.");
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-config-" + Ulid.NewUlid().Value);
+        string workspace = Path.Combine(root, "workspace.with.dots");
+        string home = Path.Combine(root, "home");
+        Directory.CreateDirectory(workspace);
+        Directory.CreateDirectory(home);
+        try
+        {
+            Git(workspace, "init", "-q");
+            workspace = HarnessWorkspace.Canonical(workspace);
+            Directory.CreateDirectory(Path.Combine(workspace, ".codex"));
+            File.WriteAllText(Path.Combine(workspace, ".codex", "config.toml"), "[mcp_servers.project_ambient]\ncommand=\"nonexistent-project-sentinel\"\n");
+            var environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), []);
+            environment["CODEX_HOME"] = home;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = executable };
+            LaunchContext context = Context(settings) with
+            {
+                Workspace = workspace, Environment = environment, McpServer = ["nonexistent-approved-sentinel"],
+                McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
+            };
+            string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\n");
+            (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), workspace);
+            Assert.Equal(0, code);
+            Assert.Contains("project_ambient", baseline, StringComparison.Ordinal);
+            Assert.Contains("ambient", baseline, StringComparison.Ordinal);
+            Assert.Throws<ProviderRefusedException>(() => CodexLauncher.VerifyMcp(context)); // Extra lower-layer server is refused.
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust);
+            CodexLauncher.VerifyMcp(context); // Whole projects value suppresses the project layer, even with dots in its canonical key.
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.vericairn.env]\nAMBIENT=\"synthetic\"\n");
+            Assert.Throws<ProviderRefusedException>(() => CodexLauncher.VerifyMcp(context)); // Merged fields of the approved name are refused too.
+
+            string runDirectory = Path.Combine(root, "run");
+            Directory.CreateDirectory(runDirectory);
+            string alias = Path.Combine(root, "workspace-alias");
+            if (!OperatingSystem.IsWindows())
+            {
+                Directory.CreateSymbolicLink(alias, workspace);
+            }
+
+            context = context with { Workspace = OperatingSystem.IsWindows() ? workspace : alias, McpConfiguration = Path.Combine(runDirectory, "mcp.json") };
+            LaunchContext prepared = new CodexLauncher().Prepare(context);
+            Assert.Equal(workspace, prepared.Workspace);
+            string configuration = File.ReadAllText(Path.Combine(prepared.Environment["CODEX_HOME"], "config.toml"));
+            Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
+            Assert.DoesNotContain("workspace-alias", configuration, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("{\"input_tokens\":1}")]
@@ -93,7 +150,7 @@ public class LauncherTests
     {
         var launcher = new ClaudeCodeLauncher();
         LaunchContext context = Context(NoSettings);
-        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config"], launcher.Command(context));
+        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], launcher.Command(context));
         Assert.Equal(["/opt/claude/bin/claude", "--debug", "-p"], launcher.Command(Context(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = """["/opt/claude/bin/claude","--debug"]""" })).Take(3));
         Assert.Null(launcher.Verify(NoSettings, NoSettings));
         Assert.Contains("JSON array of one or more non-empty strings", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = "[]" }, NoSettings), StringComparison.Ordinal);
@@ -113,7 +170,7 @@ public class LauncherTests
         Assert.Equal(["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c"], command.Take(8));
         Assert.StartsWith("mcp_servers={vericairn={command=", command[8], StringComparison.Ordinal);
         Assert.Contains("env={\"VERICAIRN_HOME\"=\"/home/me/.config/vericairn\"}", command[8], StringComparison.Ordinal);
-        Assert.Equal("projects.\"/work/widget\".trust_level=\"untrusted\"", command[10]);
+        Assert.Equal("projects={\"/work/widget\"={trust_level=\"untrusted\"}}", command[10]);
         Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
         Assert.True(launcher.Read("""{"type":"turn.started"}""")!.UsageStarted);
