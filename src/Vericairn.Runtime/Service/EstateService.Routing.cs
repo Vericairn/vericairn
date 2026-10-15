@@ -56,6 +56,7 @@ public sealed partial class EstateService
         string key;
         NextEligible.Route route;
         string goalId;
+        string agentName;
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -89,6 +90,7 @@ public sealed partial class EstateService
             }
 
             // An agent's step: refused before anything is recorded when the run could not start here.
+            agentName = Routing.NameOf(model, route.Principal);
             var refusals = new List<string>();
             if (request.Repository is null)
             {
@@ -103,7 +105,7 @@ public sealed partial class EstateService
             refusals.AddRange(route.Budget);
             if (refusals.Count > 0)
             {
-                return StepProblem(goalId, "refused", $"{key} is routed to {Routing.NameOf(model, route.Principal)} through {route.Launcher}, and its run cannot start: {string.Join(" ", refusals)} Nothing was recorded.", key, route);
+                return StepProblem(goalId, "refused", $"{key} is routed to {agentName} through {route.Launcher}, and its run cannot start: {string.Join(" ", refusals)} Nothing was recorded.", key, route);
             }
 
             // Routing produces the assignment to the chosen agent when none holds the step; a step its assignment holds goes on with it.
@@ -127,7 +129,7 @@ public sealed partial class EstateService
         // The run starts through the worker, which judges the custody precondition and the budget again before it records anything.
         RunResponse started = RunStart(run);
         string assigned = assignment is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}). ";
-        return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {route.Principal} through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
+        return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
     }
 
     /// <inheritdoc />

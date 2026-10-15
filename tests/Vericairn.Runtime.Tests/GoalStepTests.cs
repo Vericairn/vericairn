@@ -31,6 +31,7 @@ public class GoalStepTests
         GoalStepResponse first = Step(run, "first");
         Assert.True(first.Ok, first.Message);
         Assert.Equal(("run", "W-1", "agent", builder), (first.Outcome, first.Step, first.Route, first.Principal));
+        Assert.StartsWith($"W-1 is routed to the agent Test Builder [principal {builder}] through claude-code: ", first.Message, StringComparison.Ordinal);
         Assert.Null(first.Assignment);
         Assert.Equal("observed-success", run.Settled(first.Run!.Run).Status);
         Assert.Equal(run.Assignment, AgentRuns.Find(run.Estate.Load(), first.Run.Run)!.Assignment);
