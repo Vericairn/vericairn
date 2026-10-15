@@ -449,6 +449,45 @@ public class WorkerTests
         Assert.Equal("observed-success", run.Settled(started.Run).Status);
     }
 
+    [Fact]
+    public void TheSponsorsCustodyExceptionLetsARunLaunchUnattendedAndTheRunNamesIt()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        RunResponse refused = run.Start("claude-code", "claude", run.Report("refused"));
+        Assert.False(refused.Ok);
+        Assert.Contains($"Or the goal's sponsor records a custody exception for the goal, with its reason and its expiry: vericairn goal custody-exception {run.Goal} --by <sponsor> --reason <why> --expires <time>.", refused.Message, StringComparison.Ordinal);
+        JsonElement custody = Route(run, "W-1").GetProperty("custody");
+        Assert.False(custody.GetProperty("allows").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, custody.GetProperty("exception").ValueKind);
+
+        // An agent never excepts its own runs.
+        string hash = run.Service.Goal(run.Goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
+        string expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1));
+        WriteOutcome byAgent = run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.BuilderId, RunEstate.Json($$"""{"reason":"I may.","expires":"{{expires}}"}"""), $"goal:{run.Goal}:{hash}"));
+        Assert.Equal("rejected", byAgent.Problem!.Code);
+        Assert.Contains(byAgent.Problem.Findings, f => f.Code == "custody-exception.sponsor");
+
+        // The sponsor's exception in force lifts the refusal: the view shows it, and the run launches unattended, names it and says what it lifted.
+        string exception = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"The build loop runs overnight on this machine.","expires":"{{expires}}"}"""), $"goal:{run.Goal}:{hash}"))).Id;
+        custody = Route(run, "W-1").GetProperty("custody");
+        Assert.True(custody.GetProperty("allows").GetBoolean());
+        Assert.Equal(exception, custody.GetProperty("exception").GetProperty("id").GetString());
+        Assert.Contains($"custody here: an unattended run is allowed under the custody exception {exception} that Test Operator recorded for the goal, in force until {expires}: The build loop runs overnight on this machine.; without it: Device {run.OperatorDevice}", run.Service.GoalNext(run.Goal)!.Text, StringComparison.Ordinal);
+        RunResponse started = run.Start("claude-code", "claude", run.Report("excepted"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Contains($"It was launched under the custody exception {exception} that Test Operator recorded for the goal, in force until {expires}", started.Message, StringComparison.Ordinal);
+        Assert.Contains($"without it the worker would refuse: Device {run.OperatorDevice}", started.Message, StringComparison.Ordinal);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(exception, recorded.Target("custodyException"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.StartsWith($"Launched unattended under the sponsor's custody exception {exception}, in force until {expires}, while device {run.OperatorDevice} of an operator", StringComparison.Ordinal));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    private static JsonElement Route(RunEstate run, string key) =>
+        Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key).GetProperty("route");
+
     private static void WaitUntil(Func<bool> condition, int seconds = 30)
     {
         DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(seconds);

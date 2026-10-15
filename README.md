@@ -55,7 +55,8 @@ release and pins the one it runs on.
   `vericairn.worker/1`): through Claude Code's or Codex's own `/goal`, or a generic launch, in a git worktree on
   a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
   after, unknown usage charged at the cap, a stop's facts kept apart, and nothing launched while an operator's
-  or the sponsor's key on the machine signs without presence. `vericairn goal next` routes a goal's eligible steps by
+  or the sponsor's key on the machine signs without presence, unless the sponsor recorded a custody exception for
+  the goal, with its reason and its expiry. `vericairn goal next` routes a goal's eligible steps by
   its roster from the machine it runs on: each reaches the first available principal of its role, an agent where a
   launcher for its harness, its admitted key and the goal's budget allow and a person where needed, while a reserved
   action reaches only a person who holds it or an agent under a grant in force; when none is available the sponsor is

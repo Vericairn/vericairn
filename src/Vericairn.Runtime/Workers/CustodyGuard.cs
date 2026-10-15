@@ -16,8 +16,9 @@ namespace Vericairn.Runtime.Workers;
 /// and an agent could sign as the operator or the sponsor. A key whose custody enforces its owner's presence (the Secure Enclave with
 /// presence required) signs nothing unattended, and a device whose key this machine does not hold signs nothing here. Every device
 /// of those principals counts, admitted, revoked or not yet admitted, since a revoked key still signs records dated before its
-/// revocation. The agent the run launches is never one of them: its own key is what its MCP server signs with. Recorded exceptions
-/// and dispatch are GOAL-04's; this is only the guard.
+/// revocation. The agent the run launches is never one of them: its own key is what its MCP server signs with. The guard holds for
+/// every run, whether a person starts it with the worker or the one-step conductor dispatches it, unless the goal's sponsor recorded
+/// an exception in force for the goal (<see cref="CustodyExceptions"/>), which the run then names.
 /// </summary>
 public static class CustodyGuard
 {
@@ -25,12 +26,19 @@ public static class CustodyGuard
     /// Why the worker may not launch, one reason per device: each device of the principals named (an operator, or the goal's sponsor)
     /// whose key a store here holds and can sign without its owner's presence. Empty when none can.
     /// </summary>
-    public static IReadOnlyList<string> Refusals(EstateModel model, IEnumerable<(string Principal, string Role)> principals, IReadOnlyList<IDeviceKeyStore> stores, string user)
+    public static IReadOnlyList<string> Refusals(EstateModel model, IEnumerable<(string Principal, string Role)> principals, IReadOnlyList<IDeviceKeyStore> stores, string user) =>
+        Exposed(model, principals, stores, user).Select(e => e.Reason).ToList();
+
+    /// <summary>
+    /// The devices the guard finds exposed here, each by its identity with the reason in words: every device of the principals named
+    /// whose key a store here holds and can sign without its owner's presence.
+    /// </summary>
+    public static IReadOnlyList<(string Device, string Reason)> Exposed(EstateModel model, IEnumerable<(string Principal, string Role)> principals, IReadOnlyList<IDeviceKeyStore> stores, string user)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(principals);
         ArgumentNullException.ThrowIfNull(stores);
-        var refusals = new List<string>();
+        var refusals = new List<(string Device, string Reason)>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
         foreach ((string principal, string role) in principals)
         {
@@ -60,7 +68,7 @@ public static class CustodyGuard
                 string custody = EstateModel.BodyString(device, "presence") == "required"
                     ? $"its record requires its owner's presence, but this machine holds its key in {store.Kind} custody, which cannot enforce it"
                     : $"this machine holds its key in {store.Kind} custody without its owner's presence";
-                refusals.Add($"Device {identity} ({EstateModel.BodyString(device, "name") ?? "unnamed"}, {admitted}) of {name} ({principal}), {role}: {custody}, so any process of the operating-system user {user}, the user the worker runs as, can sign with it, and the agent the worker would launch could sign as {name}. Rotate the key into custody that requires its owner's presence (vericairn devices rotate {identity} --custody secure-enclave --presence), or run the worker as an operating-system user that cannot read the key.");
+                refusals.Add((identity, $"Device {identity} ({EstateModel.BodyString(device, "name") ?? "unnamed"}, {admitted}) of {name} ({principal}), {role}: {custody}, so any process of the operating-system user {user}, the user the worker runs as, can sign with it, and the agent the worker would launch could sign as {name}. Rotate the key into custody that requires its owner's presence (vericairn devices rotate {identity} --custody secure-enclave --presence), or run the worker as an operating-system user that cannot read the key."));
             }
         }
 

@@ -229,8 +229,13 @@ its owner's presence: a file, keychain, secret-service or CNG key, or a key whos
 where presence cannot be enforced. Every such device counts, admitted, revoked or not yet admitted, since a revoked key
 still signs records dated before its revocation, and the refusal names each device, its custody and the user. The agent's
 own key is not one of them. Rotate the key into the Secure Enclave with presence (`vericairn devices rotate <device>
---custody secure-enclave --presence`), or run the worker as an operating-system user that cannot read it. Recorded
-exceptions, and dispatch, are GOAL-04's.
+--custody secure-enclave --presence`), or run the worker as an operating-system user that cannot read it. Or the goal's
+sponsor records an exception for the goal: `vericairn goal custody-exception <goal> --by <sponsor> --reason <why>
+--expires <time>` writes a `custody-exception` record, with its reason and its expiry, about the goal's current revision,
+which only the sponsor, or an operator for a goal an agent sponsors, may record. While it is in force the guard lets the
+run launch unattended: the run's intent names the exception in its target and its evidence names the devices it lifted,
+the response says so, and `vericairn goal next` shows it on every agent's route where the refusal would be. A revised goal
+needs a fresh exception.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed

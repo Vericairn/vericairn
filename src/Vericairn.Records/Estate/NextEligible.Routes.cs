@@ -47,13 +47,17 @@ public static partial class NextEligible
     /// <param name="Budget">Why the goal's budget does not allow the step now (for an agent, a run of it); empty when it does.</param>
     /// <param name="Custody">For an agent, the custody guard here: why an unattended run of the goal may not launch; empty when nothing stands in the way.</param>
     /// <param name="Reason">Why it takes this route, or what it waits for, in words.</param>
-    public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason)
+    /// <param name="Exception">For an agent the custody guard refuses here, the sponsor's custody exception in force for the goal, which lifts the refusal.</param>
+    public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception = null)
     {
         /// <summary>True when the one-step operation acts on it.</summary>
         public bool Dispatches => Array.IndexOf(Dispatching, State) >= 0;
 
         /// <summary>True when the goal's budget allows it now.</summary>
         public bool BudgetAllows => Budget.Count == 0;
+
+        /// <summary>True when the custody precondition allows an unattended run of it here: nothing stands in the way, or the sponsor's exception lifts it.</summary>
+        public bool CustodyAllows => Custody.Count == 0 || Exception is not null;
     }
 
     /// <summary>One step of a goal: a work order of its work.</summary>
@@ -188,7 +192,9 @@ public static partial class NextEligible
         Route Agent(Routing.Candidate agent, RecordEnvelope? assignment, IReadOnlyList<Routing.Candidate> evaluated, string reason)
         {
             IReadOnlyList<string> budget = AgentRuns.StartRefusals(model, goal, assignment?.Id, Element(AgentRuns.CapFor(ledger))).Select(r => r.Message).ToList();
-            return new Route(role, reserved, source, evaluated, "agent", agent.Principal, agent.Launcher, assignment, latestAsk, null, budget, machine.Custody(goal, agent.Principal), reason);
+            IReadOnlyList<string> custody = machine.Custody(goal, agent.Principal);
+            RecordEnvelope? exception = custody.Count == 0 ? null : CustodyExceptions.InForce(model, goal, machine.Now);
+            return new Route(role, reserved, source, evaluated, "agent", agent.Principal, agent.Launcher, assignment, latestAsk, null, budget, custody, reason, exception);
         }
 
         Route Unavailable(IReadOnlyList<Routing.Candidate> evaluated, string reason)
@@ -234,7 +240,11 @@ public static partial class NextEligible
             text.Append("      budget: ").Append(route.BudgetAllows ? "allows it" : "does not allow it now: " + string.Join(" ", route.Budget)).Append('\n');
             if (route.State == "agent")
             {
-                text.Append("      custody here: ").Append(route.Custody.Count == 0 ? "no device of an operator or of the sponsor signs here without its owner's presence" : "an unattended run is refused: " + string.Join(" ", route.Custody)).Append('\n');
+                text.Append("      custody here: ").Append(route.Custody.Count == 0
+                    ? "no device of an operator or of the sponsor signs here without its owner's presence"
+                    : route.Exception is RecordEnvelope exception
+                        ? $"an unattended run is allowed under {CustodyExceptions.Describe(model, exception)}; without it: {string.Join(" ", route.Custody)}"
+                        : "an unattended run is refused: " + string.Join(" ", route.Custody)).Append('\n');
             }
 
             foreach (Routing.Candidate candidate in route.Candidates)
@@ -328,7 +338,12 @@ public static partial class NextEligible
                 ["ask"] = route.Ask?.Id,
                 ["run"] = route.Run?.Id,
                 ["budget"] = new JsonObject { ["allows"] = route.BudgetAllows, ["reasons"] = Strings(route.Budget) },
-                ["custody"] = route.State == "agent" ? new JsonObject { ["refusals"] = Strings(route.Custody) } : null,
+                ["custody"] = route.State == "agent" ? new JsonObject
+                {
+                    ["allows"] = route.CustodyAllows,
+                    ["refusals"] = Strings(route.Custody),
+                    ["exception"] = route.Exception is RecordEnvelope exception ? new JsonObject { ["id"] = exception.Id, ["by"] = exception.By, ["expires"] = EstateModel.BodyString(exception, "expires"), ["reason"] = EstateModel.BodyString(exception, "reason") } : null,
+                } : null,
                 ["candidates"] = new JsonArray(route.Candidates.Select(c => (JsonNode)new JsonObject { ["principal"] = c.Principal, ["name"] = c.Name, ["kind"] = c.Kind, ["available"] = c.Available, ["launcher"] = c.Launcher, ["reasons"] = Strings(c.Reasons) }).ToArray()),
             },
         };

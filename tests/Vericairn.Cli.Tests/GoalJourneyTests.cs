@@ -285,6 +285,37 @@ public class GoalJourneyTests
         }
     }
 
+    [Fact]
+    public void ACustodyExceptionIsRecordedForTheGoalsCurrentRevisionByItsSponsorAlone()
+    {
+        string root = CliHarness.TempDirectory("custody-exception");
+        string scratch = CliHarness.TempDirectory("custody-exception-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Custody.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = Principal(root, scratch, op, "Builder", "builder");
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "A widget.", "--done", """{"evidence":"It ships.","check":"Read it."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2").Id;
+            string expires = Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddDays(1));
+            CliHarness.Outcome byAgent = CliHarness.Run("--estate", root, "--json", "goal", "custody-exception", goal, "--by", builder, "--reason", "My own runs.", "--expires", expires);
+            Assert.Equal(1, byAgent.Code);
+            Assert.Contains("custody-exception.sponsor", byAgent.Out, StringComparison.Ordinal);
+            Refused(root, "--expires is a time such as", "goal", "custody-exception", goal, "--by", op, "--reason", "Overnight.", "--expires", "tomorrow");
+            string exception = CliHarness.Ok("--estate", root, "--json", "goal", "custody-exception", goal, "--by", op, "--reason", "The build loop runs overnight.", "--expires", expires).Id;
+            JsonElement shown = CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("goal");
+            using (Vericairn.Runtime.Service.EstateService service = Vericairn.Runtime.Service.EstateService.Open(root))
+            {
+                JsonElement subject = service.Record(exception)!.Envelope.GetProperty("subject");
+                Assert.Equal((goal, shown.GetProperty("hash").GetString()), (subject.GetProperty("id").GetString(), subject.GetProperty("hash").GetString()));
+            }
+
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static string Principal(string root, string scratch, string op, string name, string role) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, name + ".json", $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
 

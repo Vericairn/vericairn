@@ -156,6 +156,11 @@ public sealed partial class EstateService
                 ["workOrder"] = plan.Key,
                 ["worker"] = AgentRuns.WorkerContract,
             };
+            if (plan.Exception is Excepted excepted)
+            {
+                target["custodyException"] = excepted.Id;
+            }
+
             var body = new JsonObject
             {
                 ["provider"] = launcher.Launcher,
@@ -166,6 +171,11 @@ public sealed partial class EstateService
                 ["evidence"] = new JsonArray(new JsonObject { ["summary"] = $"The brief of work order {plan.Key}, exported into the workspace as .vericairn/brief.md.", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(plan.Brief)) }),
                 ["cap"] = plan.Cap.DeepClone(),
             };
+            if (plan.Exception is Excepted under)
+            {
+                ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = $"Launched unattended under the sponsor's custody exception {under.Id}, in force until {under.Expires}, while {(under.Exposed.Count == 1 ? "device" : "devices")} {string.Join(", ", under.Exposed.Select(e => e.Device))} of an operator or of the goal's sponsor {(under.Exposed.Count == 1 ? "signs" : "sign")} without {(under.Exposed.Count == 1 ? "its" : "their")} owner's presence on the machine that ran the worker." });
+            }
+
             DateTimeOffset now = DateTimeOffset.UtcNow;
             run = Ulid.NewUlid(now).Value;
             body["identity"] = "agent-run:" + run;
@@ -228,6 +238,11 @@ public sealed partial class EstateService
         var abandon = new CancellationTokenSource();
         supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, abandon.Token)), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
+        if (plan.Exception is Excepted lifted)
+        {
+            generic += $" It was launched under {lifted.Description}; without it the worker would refuse: {string.Join(" ", lifted.Exposed.Select(e => e.Reason))}";
+        }
+
         string recorded = dispatched.Ok ? string.Empty : $" Its dispatch could not be recorded ({dispatched.Problem?.Message}); the worker records what it observes when the run ends.";
         return new RunResponse(run, dispatched.Ok ? "dispatched" : "not-started", $"Run {run}: the intent was recorded with its cap before {launcher.Launcher} started as {plan.AgentName} in {where}; the worker observes it until it exits and records its usage. Its result is a claim another principal reviews; nothing is accepted.{generic}{recorded}", true, dispatched.Written ?? intent, Element(plan.Cap), where);
     }
@@ -480,11 +495,13 @@ public sealed partial class EstateService
             }
         }
 
-        // The custody precondition: no operator's or sponsor's key on this machine that signs without its owner's presence.
-        IReadOnlyList<string> custody = CustodyGuard.Refusals(model, CustodyGuard.Guarded(model, goal, request.Agent), stores, Environment.UserName);
-        if (custody.Count > 0)
+        // The custody precondition: no operator's or sponsor's key on this machine that signs without its owner's presence, unless the
+        // goal's sponsor recorded an exception in force for the goal, which the run then names.
+        IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, request.Agent), stores, Environment.UserName);
+        RecordEnvelope? exception = exposed.Count == 0 ? null : CustodyExceptions.InForce(model, goal, DateTimeOffset.UtcNow);
+        if (exposed.Count > 0 && exception is null)
         {
-            return (null, "The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine (design/goals.md § 10): " + string.Join(" ", custody), null);
+            return (null, "The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine (design/goals.md § 10): " + string.Join(" ", exposed.Select(e => e.Reason)) + $" Or the goal's sponsor records a custody exception for the goal, with its reason and its expiry: vericairn goal custody-exception {goal.Id} --by <sponsor> --reason <why> --expires <time>.", null);
         }
 
         AgentRuns.Ledger ledger = AgentRuns.Of(model, goal);
@@ -519,7 +536,8 @@ public sealed partial class EstateService
             return (null, $"Run {busy.Id} works on branch {branch} of {repository} and is in flight; one run works in a workspace at a time, so name another branch or wait for it to settle.", null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal)), null, null);
+        Excepted? excepted = exception is null ? null : new Excepted(exception.Id, CustodyExceptions.Describe(model, exception), EstateModel.BodyString(exception, "expires") ?? "?", exposed);
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), excepted), null, null);
     }
 
     /// <summary>The units in which the goal's settled runs alone reached its budget: a cap crossed, not one held by runs in flight.</summary>
@@ -789,5 +807,8 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, Excepted? Exception);
+
+    /// <summary>The sponsor's custody exception a run is launched under, and the devices that would otherwise refuse it here.</summary>
+    private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);
 }

@@ -328,6 +328,25 @@ internal static class Commands
         return WithApi(root, api => ReportOutcome(api.GoalEvaluate(goal, new GoalEvaluateRequest(by, summary, list)), json));
     }
 
+    /// <summary>Records the sponsor's custody exception for a goal's current revision, with its reason and its expiry.</summary>
+    public static int GoalCustodyException(string root, string goal, string by, string reason, string expires, bool json) => WithApi(root, api =>
+    {
+        if (!RecordParser.IsTimestamp(expires))
+        {
+            return Fail($"--expires is a time such as 2026-10-20T00:00:00Z, not '{expires}'.");
+        }
+
+        GoalResponse? shown = api.Goal(goal);
+        if (shown is null)
+        {
+            return Fail($"No goal has id {goal}.");
+        }
+
+        JsonElement current = shown.Json.GetProperty("goal");
+        var body = new Json.JsonObject { ["reason"] = reason, ["expires"] = expires };
+        return ReportOutcome(api.NewRecord(new NewRecordRequest("custody-exception", by, Element(body), $"goal:{current.GetProperty("id").GetString()}:{current.GetProperty("hash").GetString()}")), json);
+    });
+
     /// <summary>Accepts a goal at its current revision, relying on its current evaluation.</summary>
     public static int GoalAccept(string root, string goal, string by, string statement, bool json) =>
         WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));

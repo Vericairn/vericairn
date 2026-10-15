@@ -687,6 +687,16 @@ internal static class CliApp
             goal.Subcommands.Add(command);
         }
 
+        var reasonOption = new Option<string>("--reason") { Description = "Why unattended runs of the goal may launch while such a key signs where they run.", Required = true };
+        var expiresOption = new Option<string>("--expires") { Description = "When the exception stops being in force, for example 2026-10-20T00:00:00Z.", Required = true };
+        var exception = new Command("custody-exception", "Record the sponsor's exception to the custody precondition for a goal's current revision: until it expires, a coding agent's run of the goal may launch unattended on a machine where a key of an operator or of the sponsor signs without its owner's presence, and the run names the exception. Recorded only by the goal's sponsor, or by an operator when an agent sponsors it; a revised goal needs a fresh one.");
+        exception.Arguments.Add(goalArgument);
+        exception.Options.Add(byOption);
+        exception.Options.Add(reasonOption);
+        exception.Options.Add(expiresOption);
+        exception.SetAction(parseResult => Commands.GoalCustodyException(parseResult.GetValue(estateOption)!, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(expiresOption)!, parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(exception);
+
         var summaryOption = new Option<string>("--summary") { Description = "What was reviewed and how.", Required = true };
         var verdictOption = new Option<string[]>("--verdict") { Description = "A condition's verdict, n:verdict:reason with n from 1 and the verdict met, not-yet or impossible; repeatable. Every evidence statement needs one; a record predicate gets the runtime's, unless the evaluator judges one the runtime does not find met impossible." };
         var readOption = new Option<string[]>("--read") { Description = "A record the evaluator read for a condition, n:record-id; repeatable. An evidence statement found met names at least one." };
@@ -728,7 +738,7 @@ internal static class CliApp
         var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
         var settingOption = new Option<string[]>("--setting") { Description = "A launcher setting as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
         var detachOption = new Option<bool>("--detach") { Description = "Return once the harness is launched, leaving the run to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
-        var run = new Command("run", "Run a coding agent on an assignment: refused while the goal is not active or its budget is spent, while a device of an operator or the goal's sponsor signs here without presence, or when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, the harness launched with the brief and the MCP server, observed, and its usage recorded once it exits.");
+        var run = new Command("run", "Run a coding agent on an assignment: refused while the goal is not active or its budget is spent, while a device of an operator or the goal's sponsor signs here without presence and the sponsor recorded no custody exception in force for the goal, or when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, the harness launched with the brief and the MCP server, observed, and its usage recorded once it exits.");
         run.Arguments.Add(assignmentArgument);
         run.Options.Add(launcherOption);
         run.Options.Add(agentOption);

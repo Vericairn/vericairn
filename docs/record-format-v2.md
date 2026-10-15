@@ -86,6 +86,14 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   `recommendation` first, the `consequence` of leaving it unanswered, optional `options` and `goal`, and its `state`.
   It starts `open`; the asker alone revises it, to `notified` (delivery stays unknown) or `withdrawn`, never changing
   the question or whom it is put to. A decision that names it in `answers` answers it; waiting never does.
+- **`custody-exception`**, from 0.6.0: the sponsor's exception to the custody precondition for one goal (the estate's
+  `design/goals.md` § 10), about the goal's exact revision: the `reason` and the time it `expires`, later than the record.
+  While it is in force, a coding agent's run of the goal may launch unattended on a machine where a key of an operator or
+  of the sponsor signs without its owner's presence, and the run names it (see [An agent run and its goal's
+  ledger](#an-agent-run-and-its-goals-ledger)). It is recorded only by who decides for the goal, its sponsor when the
+  sponsor is a person and an operator when an agent sponsors it (`custody-exception.sponsor`); a revision is its author's,
+  about the same goal revision (`custody-exception.revision`), and can bring the expiry forward; a revised goal needs a
+  fresh one.
 - **`possibility`**: an idea captured with its disposition, explicitly not an approval: the `idea`, its `origin`, and
   its `disposition` (open, parked, adopted or declined, with the `reason` unless it is open). An adopted idea names
   what it became in `adoptedAs`: a work order, a decision or a goal. Nothing is authorized by a possibility.
@@ -391,8 +399,10 @@ A coding agent's run is an operation of action `agent-run` (the estate's `design
 01M4YBR5PGCPQD94BVNC547EBA). The worker, `vericairn worker run` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)),
 records its intent before anything starts: its identity is `agent-run:` and the intent's id, which is the run's id; its
 `provider` the launcher; its `target` the `assignment`, the agent `principal`, the `workspace` as a repository and branch
-(never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key and the
-worker contract (`worker`: `vericairn.worker/1`); and its `cap`, taken from the goal's budget. The intent is the
+(never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key, the
+worker contract (`worker`: `vericairn.worker/1`) and, for a run launched under it, the sponsor's `custodyException`, which
+must have covered the goal's revision when the intent was recorded (`operation.custody`); and its `cap`, taken from the
+goal's budget. The intent is the
 `not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
 (`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
 operation never records that the work is done: the agent's result is a claim another principal reviews.
