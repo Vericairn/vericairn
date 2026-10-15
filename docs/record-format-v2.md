@@ -163,6 +163,17 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   bytes without granting access to them.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.
 
+## What holds a work order
+
+A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
+`design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any
+revision) holds it until it is accepted. A record in its `blockedBy` holds it while it is open: an ask while it is
+`open` or `notified`, until a decision answers it or its asker withdraws it; a work order until it is accepted or
+retired; an operation until its effect is observed (`observed-success`) or it is canceled; a decision while one of the
+obligations it leaves has no discharge. A record the estate does not hold holds it, since nothing shows it free. The
+view reads the records alone, so every machine derives the same one. `vericairn progress` lists the eligible work and,
+for each work order held, every relation with its state; routing by roster and budget is not part of the view yet.
+
 ## Living documents due
 
 `vericairn status` lists every declared living document that is due, and why: each trigger newer than the document's

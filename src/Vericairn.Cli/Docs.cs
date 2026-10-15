@@ -67,10 +67,7 @@ internal static partial class Docs
                 ? new JsonObject { ["format"] = ManifestFormat, ["version"] = toVersion }
                 : JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject ?? throw new InvalidOperationException($"{manifestPath} is not a JSON object; the window of the notes is recorded in it.");
             string upper = to?.At ?? RecordParser.FormatTimestamp(reading.AddSeconds(-1));
-            List<RecordEnvelope> window = model.Records
-                .Where(r => string.CompareOrdinal(r.At, beginning.At) > 0 && string.CompareOrdinal(r.At, upper) <= 0)
-                .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
-                .ToList();
+            IReadOnlyList<RecordEnvelope> window = ReleaseContents.Window(model, beginning.At, upper);
             Directory.CreateDirectory(output);
             Write(output, "release-notes.md", ReleaseNotes(model, fromVersion, beginning, to, toVersion, window, upper));
             manifest[NotesWindow] = new JsonObject { ["from"] = beginning.At, ["to"] = upper };
@@ -258,7 +255,7 @@ internal static partial class Docs
     private static RecordEnvelope? Published(EstateModel model, string version) =>
         model.Current("release").FirstOrDefault(r => Str(r.Body, "version") == version && Str(r.Body, "status") == "published");
 
-    private static string ReleaseNotes(EstateModel model, string fromVersion, Beginning beginning, RecordEnvelope? to, string toVersion, List<RecordEnvelope> window, string upper)
+    private static string ReleaseNotes(EstateModel model, string fromVersion, Beginning beginning, RecordEnvelope? to, string toVersion, IReadOnlyList<RecordEnvelope> window, string upper)
     {
         var lines = new List<string>
         {
@@ -288,11 +285,8 @@ internal static partial class Docs
         }
 
         // A result is listed as accepted only when an acceptance of its exact revision is on record; any other result of the
-        // period is a claim to inspect, never part of what the release is known to contain.
-        List<RecordEnvelope> results = window.Where(r => r.Type == "result").ToList();
-        var accepted = model.Current("acceptance").Where(a => a.Subject is { Type: "result" }).Select(a => (a.Subject!.Id, a.Subject.Hash)).ToHashSet();
-        List<RecordEnvelope> acceptedResults = results.Where(r => accepted.Contains((r.Id, r.ComputedHash))).ToList();
-        List<RecordEnvelope> openResults = results.Where(r => !accepted.Contains((r.Id, r.ComputedHash))).ToList();
+        // period is a claim to inspect, never part of what the release is known to contain. The progress report reads the same.
+        (IReadOnlyList<ReleaseContents.Accepted> acceptedResults, IReadOnlyList<RecordEnvelope> openResults) = ReleaseContents.Results(model, window);
         lines.Add(string.Empty);
         lines.Add("## Work accepted");
         lines.Add(string.Empty);
@@ -302,9 +296,9 @@ internal static partial class Docs
             lines.Add(string.Empty);
         }
 
-        foreach (RecordEnvelope result in acceptedResults)
+        foreach (ReleaseContents.Accepted result in acceptedResults)
         {
-            Result(lines, model, result);
+            Result(lines, result.Result, result.Order);
         }
 
         if (openResults.Count > 0)
@@ -315,7 +309,7 @@ internal static partial class Docs
             lines.Add(string.Empty);
             foreach (RecordEnvelope result in openResults)
             {
-                Result(lines, model, result);
+                Result(lines, result, ReleaseContents.OrderOf(model, result));
             }
         }
 
@@ -368,9 +362,8 @@ internal static partial class Docs
         lines.Add(string.Empty);
     }
 
-    private static void Result(List<string> lines, EstateModel model, RecordEnvelope result)
+    private static void Result(List<string> lines, RecordEnvelope result, RecordEnvelope? order)
     {
-        RecordEnvelope? order = OrderOf(model, result);
         lines.Add("### " + (order is null ? "Result " + result.Id : Str(order.Body, "key") + ": " + Str(order.Body, "title")));
         lines.Add(string.Empty);
         lines.Add($"Result {result.Id} ({Str(result.Body, "outcome")}), recorded {When(result.At)}. {Str(result.Body, "summary")}");
@@ -383,13 +376,6 @@ internal static partial class Docs
         }
 
         lines.Add(string.Empty);
-    }
-
-    private static RecordEnvelope? OrderOf(EstateModel model, RecordEnvelope result)
-    {
-        RecordEnvelope? attempt = result.Subject is null ? null : model.ById.GetValueOrDefault(result.Subject.Id);
-        RecordEnvelope? assignment = attempt?.Subject is null ? null : model.ById.GetValueOrDefault(attempt.Subject.Id);
-        return assignment?.Subject is null ? null : model.ById.GetValueOrDefault(assignment.Subject.Id);
     }
 
     private static string When(string at) => at.Length >= 16 ? at[..10] + " " + at[11..16] + " UTC" : at;
