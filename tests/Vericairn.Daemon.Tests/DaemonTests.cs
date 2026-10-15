@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
+using System.Globalization;
 using System.Net;
+using System.Net.Security;
+using System.Numerics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Sdk;
@@ -199,6 +205,42 @@ public class DaemonTests
     }
 
     [Fact]
+    public async Task EveryFormOfAnAcceptedLoopbackSignatureIsRefusedAsARepeatAndAFreshSignatureIsNot()
+    {
+        using var estate = new TestEstate();
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        DaemonEndpoint endpoint = DaemonHost.Discover(estate.Root)!;
+        using var socket = new VericairnClient(endpoint);
+        WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.BuilderId, "Test device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        WriteOutcome admission = socket.DeviceAdmit(new AdmitRequest(device.Written!.Id, estate.OperatorId, "Replay test."));
+        Assert.True(admission.Ok, admission.Problem?.Message);
+        DeviceRequestSigner signer = DeviceRequestSigner.Find(device.Written.Id)!;
+        string publicKey = EstateModel.BodyString(estate.Load().ById[device.Written.Id], "publicKey")!;
+
+        // One request, signed once and accepted.
+        string signedAt = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+        byte[] digest = RequestSigning.Digest("GET", "/v1/health", signedAt, []);
+        byte[] signature = signer.Sign(digest);
+        using HttpClient http = PinnedLoopback(endpoint);
+        Assert.Equal(HttpStatusCode.OK, (await SendSigned(http, signer.DeviceId, signedAt, Base64Url.EncodeToString(signature))).Status);
+
+        // ECDSA signatures are malleable: (r, n - s) verifies over the same request as (r, s) does. A copy carrying that twin, one
+        // carrying the same bytes spelled with base64 padding, and the exact copy are all the signature already used.
+        byte[] twin = Malleate(signature);
+        Assert.True(RecordSigning.Verify(publicKey, digest, Base64Url.EncodeToString(twin)));
+        foreach (string copy in new[] { Base64Url.EncodeToString(twin), Base64Url.EncodeToString(signature) + "==", Base64Url.EncodeToString(signature) })
+        {
+            (HttpStatusCode status, string body) = await SendSigned(http, signer.DeviceId, signedAt, copy);
+            Assert.Equal(HttpStatusCode.Unauthorized, status);
+            Assert.Contains("already used", body, StringComparison.Ordinal);
+        }
+
+        // The device signing the same request again is a new signature, and is accepted: a client may send one request twice in a second.
+        Assert.Equal(HttpStatusCode.OK, (await SendSigned(http, signer.DeviceId, signedAt, Base64Url.EncodeToString(signer.Sign(digest)))).Status);
+    }
+
+    [Fact]
     public void TheContractNamesEveryProblemCodeAClientCanReceiveAndMarksConflictReserved()
     {
         using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
@@ -337,6 +379,42 @@ public class DaemonTests
 
         Assert.Throws<PlatformNotSupportedException>(() => ServiceInstaller.Plan("other", root, "01ESTATE", launcher, "/home/someone", "/home/someone/.config/vericairn", null));
         Assert.NotEmpty(ServiceInstaller.CurrentLauncher());
+    }
+
+    /// <summary>A client of the daemon's loopback TLS, pinned to the runtime certificate as the SDK pins it, that signs nothing itself.</summary>
+    private static HttpClient PinnedLoopback(DaemonEndpoint endpoint)
+    {
+        LoopbackEndpoint loopback = endpoint.Loopback!;
+        var handler = new SocketsHttpHandler
+        {
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is not null && "sha256:" + Convert.ToHexStringLower(SHA256.HashData(certificate.GetRawCertData())) == loopback.Certificate,
+            },
+        };
+        return new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/") };
+    }
+
+    /// <summary>Sends GET /v1/health with the three request-signing headers as given.</summary>
+    private static async Task<(HttpStatusCode Status, string Body)> SendSigned(HttpClient http, string device, string signedAt, string signature)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("/v1/health", UriKind.Relative));
+        request.Headers.TryAddWithoutValidation(RequestSigning.DeviceHeader, device);
+        request.Headers.TryAddWithoutValidation(RequestSigning.SignedAtHeader, signedAt);
+        request.Headers.TryAddWithoutValidation(RequestSigning.SignatureHeader, signature);
+        using HttpResponseMessage response = await http.SendAsync(request, TestContext.Current.CancellationToken);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+    }
+
+    /// <summary>The twin of an IEEE P1363 ECDSA P-256 signature (r, s): (r, n - s), which verifies wherever the signature does.</summary>
+    private static byte[] Malleate(byte[] signature)
+    {
+        BigInteger order = BigInteger.Parse("0FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
+        BigInteger twin = order - new BigInteger(signature.AsSpan(32), isUnsigned: true, isBigEndian: true);
+        byte[] copy = (byte[])signature.Clone();
+        Array.Clear(copy, 32, 32);
+        twin.TryWriteBytes(copy.AsSpan(64 - twin.GetByteCount(isUnsigned: true)), out _, isUnsigned: true, isBigEndian: true);
+        return copy;
     }
 
     /// <summary>Signs requests in a device's name with a key held under another id: the key a rotation replaced.</summary>

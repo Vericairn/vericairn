@@ -47,11 +47,14 @@ SHA-256 of the line-feed-joined string `vericairn-request/1`, the upper-case met
 and query exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty for no body).
 The daemon accepts a signature only from a device that is current and admitted now in the estate it serves,
 within five minutes of its own clock, and once (a repeat is refused while the signature is among the last
-4,096 the daemon accepted). Anything else is answered with `401` and a problem with code `denied`; revoking
-the device ends access from the next request on, with no restart. The SDK signs with `DeviceRequestSigner`,
-which uses the device key in this machine's custody, so a copied request is refused, as stale after five
-minutes and as a repeat before then while it is among the last 4,096, and a copied key file is useless where
-platform custody holds the key.
+4,096 the daemon accepted). It remembers a signature by its 64 bytes with `s` replaced by the smaller of `s`
+and `n - s`, `n` being the order of the P-256 group, so neither another base64url spelling of the same bytes
+nor the malleated twin `(r, n - s)`, which verifies just as well, passes for a new signature; the device
+signing the same request again makes a new one, which is accepted. Anything else is answered with `401` and a
+problem with code `denied`; revoking the device ends access from the next request on, with no restart. The SDK
+signs with `DeviceRequestSigner`, which uses the device key in this machine's custody, so a copied request is
+refused, as stale after five minutes and as a repeat before then while it is among the last 4,096, and a
+copied key file is useless where platform custody holds the key.
 
 ## Operations
 
