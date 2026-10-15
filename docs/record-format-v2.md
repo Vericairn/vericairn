@@ -39,7 +39,7 @@ recorded step.
 ## Moving an estate to format 2
 
 `vericairn estate upgrade --to <release> --by <principal>` with a published release that writes format 2 moves the
-estate in one reviewable commit: the manifest's `recordFormat` becomes 2 and its pin the release, and the migration
+estate as one change to commit: the manifest's `recordFormat` becomes 2 and its pin the release, and the migration
 record, itself the first format-2 record, names the step `record-format-2`. No existing record is rewritten, so every
 record's bytes and hash before and after are equal; `--check` shows the same without writing. The release must read
 every format the estate's records use; an upgrade to a release that does not is refused, as is one to a release writing

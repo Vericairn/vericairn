@@ -33,7 +33,7 @@ Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attent
 vericairn-workbench --estate <estate root> [--as <principal id>]
 ```
 
-`--as` names the principal Workbench writes as. The selector in the target bar then shows that principal's admitted device held on this machine, the one the runtime signs its records with, and choosing another device in the selector makes that device's principal the acting principal. When the named principal has no device held here, the target bar says so: its writes are refused where the estate requires signatures, and written unsigned where it does not. (Release 0.3.1 showed such a principal under its first revision's name beside the first device held on the machine, whoever's it was; the records were still authored and signed correctly.)
+`--as` names the principal Workbench writes as. The selector in the target bar then shows that principal's admitted device held on this machine, the one the runtime signs its records with, and choosing another device in the selector makes that device's principal the acting principal. When the named principal has no device held here, the target bar says so: its writes are refused where the estate requires signatures, and written unsigned where it does not, except an admission, which an estate at record format 2 refuses without a signature. (Release 0.3.1 showed such a principal under its first revision's name beside the first device held on the machine, whoever's it was; the records were still authored and signed correctly.)
 
 The command line is found beside the executable, through `VERICAIRN_CLI`, or on the path; Workbench uses it to start and stop the daemon. The accessibility probe measures every focusable target of the shell at compact density and writes an observation for the platform obligations:
 
@@ -41,7 +41,7 @@ The command line is found beside the executable, through `VERICAIRN_CLI`, or on 
 vericairn-workbench --probe <file.json> --cell "macOS native" [--virtual] [--estate <root> --open products|inbox|release|runtime|<work-order key>]
 ```
 
-With `--estate` and `--open`, the named workspace is open when the measurement is taken, so each screen's targets are measured on the native desktop, not only the shell's.
+With `--estate` and `--open`, and a daemon already serving the estate, the named workspace is open when the measurement is taken, so each screen's targets are measured on the native desktop, not only the shell's.
 
 ## Limitations
 

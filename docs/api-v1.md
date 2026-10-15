@@ -42,15 +42,16 @@ fingerprint is published in the endpoint file; a client accepts that certificate
 consults no trust store.
 
 A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At`
-(RFC 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over
-the SHA-256 of the line-feed-joined string `vericairn-request/1`, the upper-case method, the request target
-(path and query exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty
-for no body). The daemon accepts a signature only from a device that is current and admitted now in the
-estate it serves, within five minutes of its own clock, and once (a repeat is refused while the signature
-is among the last 4,096 the daemon accepted). Anything else is answered with `401` and a problem with code
-`denied`; revoking the device ends access from the next request on, with no restart. The SDK signs with
-`DeviceRequestSigner`, which uses the device key in this machine's custody, so a copied request grants
-nothing and a copied key file is useless where platform custody holds the key.
+(RFC 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the
+SHA-256 of the line-feed-joined string `vericairn-request/1`, the upper-case method, the request target (path
+and query exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty for no body).
+The daemon accepts a signature only from a device that is current and admitted now in the estate it serves,
+within five minutes of its own clock, and once (a repeat is refused while the signature is among the last
+4,096 the daemon accepted). Anything else is answered with `401` and a problem with code `denied`; revoking
+the device ends access from the next request on, with no restart. The SDK signs with `DeviceRequestSigner`,
+which uses the device key in this machine's custody, so a copied request is refused, as stale after five
+minutes and as a repeat before then while it is among the last 4,096, and a copied key file is useless where
+platform custody holds the key.
 
 ## Operations
 
@@ -101,8 +102,9 @@ they handle with 200 and a `ReleaseResponse`: `ok` says whether the request adva
 is nothing to record yet, and a refusal is its `problem`, not an HTTP status. A read of a missing
 subject answers 404 with an empty body.
 
-Exit status and HTTP status report whether the operation itself completed; the observed state is in
-the body, and partial, pending and changed-target states are never flattened into success.
+Exit status and HTTP status report whether the operation itself completed, except on the release routes, which
+answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family
 
