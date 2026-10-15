@@ -539,4 +539,30 @@ public class SecondReviewTests
             await again.StopAsync();
         }
     }
+
+    [Fact]
+    public async Task Renegotiation_NoClientRenegotiatesToPresentACertificateInsideTheEncryptedChannel()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        await using AddressListener addresses = AddressListener.Start();
+        (X509Certificate2 addressed, X509Certificate2 plain) = AddressListener.Presentable(addresses.Port, "CN=" + harness.OperatorDevice, client: true);
+        using X509Certificate2 named = addressed;
+        using X509Certificate2 nameless = plain;
+        Assert.True(RuntimeConnection.TryParseAddress(harness.Address, out string host, out int port));
+
+        // A first handshake with no certificate, which the screen lets through, held to the server's verified Finished.
+        using Tls12Probe probe = await Tls12Probe.ConnectAsync(host, port);
+        Say($"handshake held; the runtime offered secure renegotiation: {probe.SecureRenegotiation}");
+
+        // Inside the encrypted channel a renegotiating ClientHello: the runtime starts no new handshake, and closes the connection.
+        IReadOnlyList<byte> answered = await probe.RenegotiateAsync(TimeSpan.FromSeconds(5));
+        Say($"records answered to the renegotiating hello: [{string.Join(", ", answered)}]");
+        Assert.DoesNotContain((byte)22, answered);
+
+        // A certificate sent sealed as if the renegotiation went on is never read as one: nothing it names is fetched.
+        bool sent = await probe.TrySendSealedAsync(22, Tls12Probe.CertificateMessage(named.RawData));
+        Say($"the sealed certificate could be sent: {sent}");
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a certificate sent in a renegotiation named: {string.Join(", ", addresses.Requests)}");
+    }
 }

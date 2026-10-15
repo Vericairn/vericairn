@@ -275,6 +275,8 @@ public sealed class DaemonHost : IAsyncDisposable
                         CheckCertificateRevocation = false,
                         OnAuthenticate = (_, tls) =>
                         {
+                            // A renegotiation would carry a new certificate inside the encrypted channel, out of the screen's sight.
+                            tls.AllowRenegotiation = false;
                             tls.AllowTlsResume = false;
                             tls.CipherSuitesPolicy = TlsScreenStream.CipherSuites;
                             tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };

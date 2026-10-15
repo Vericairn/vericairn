@@ -268,12 +268,20 @@ public sealed class TlsScreenStream : Stream
 
         using (certificate)
         {
-            foreach (X509Extension extension in certificate.Extensions)
+            // An extension that does not decode is a certificate that does not parse: refused as the screen refuses, never thrown past it.
+            bool addressed;
+            try
             {
-                if (Array.IndexOf(AddressExtensions, extension.Oid?.Value) >= 0)
-                {
-                    throw Refused("presents a certificate that names an address to fetch");
-                }
+                addressed = certificate.Extensions.Any(e => Array.IndexOf(AddressExtensions, e.Oid?.Value) >= 0);
+            }
+            catch (CryptographicException)
+            {
+                throw Refused("presents a certificate that does not parse");
+            }
+
+            if (addressed)
+            {
+                throw Refused("presents a certificate that names an address to fetch");
             }
         }
     }

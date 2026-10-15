@@ -174,6 +174,72 @@ public class TlsScreenStreamTests
         Assert.Contains("does not parse", list?.Message, StringComparison.Ordinal);
     }
 
+    /// <summary>A certificate that loads but whose one extension, given raw, does not decode; its signature is no signature, which the screen never reads.</summary>
+    private static byte[] WithExtension(byte[] extension)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var writer = new System.Formats.Asn1.AsnWriter(System.Formats.Asn1.AsnEncodingRules.BER);
+        using (writer.PushSequence())
+        {
+            using (writer.PushSequence())
+            {
+                using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(System.Formats.Asn1.TagClass.ContextSpecific, 0)))
+                {
+                    writer.WriteInteger(2);
+                }
+
+                writer.WriteInteger(12345);
+                using (writer.PushSequence())
+                {
+                    writer.WriteObjectIdentifier("1.2.840.10045.4.3.2");
+                }
+
+                writer.WriteEncodedValue(new X500DistinguishedName("CN=stranger").RawData);
+                using (writer.PushSequence())
+                {
+                    writer.WriteUtcTime(DateTimeOffset.UtcNow.AddHours(-1));
+                    writer.WriteUtcTime(DateTimeOffset.UtcNow.AddDays(1));
+                }
+
+                writer.WriteEncodedValue(new X500DistinguishedName("CN=stranger").RawData);
+                writer.WriteEncodedValue(key.ExportSubjectPublicKeyInfo());
+                using (writer.PushSequence(new System.Formats.Asn1.Asn1Tag(System.Formats.Asn1.TagClass.ContextSpecific, 3)))
+                using (writer.PushSequence())
+                {
+                    writer.WriteEncodedValue(extension);
+                }
+            }
+
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier("1.2.840.10045.4.3.2");
+            }
+
+            writer.WriteBitString([0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x01]);
+        }
+
+        return writer.Encode();
+    }
+
+    [Fact]
+    public async Task ACertificateWhoseExtensionsDoNotDecodeIsRefusedAsTheScreenRefuses()
+    {
+        // An extension whose identifier is not minimally encoded, and one with an empty identifier: a platform may load such a
+        // certificate and fail only when its extensions are read; either way the screen refuses it as its own, never with a
+        // cryptographic exception thrown past it.
+        byte[][] extensions =
+        [
+            [0x30, 0x0D, 0x06, 0x04, 0x55, 0x80, 0x1D, 0x13, 0x04, 0x05, 0x30, 0x03, 0x01, 0x01, 0xFF],
+            [0x30, 0x09, 0x06, 0x00, 0x04, 0x05, 0x30, 0x03, 0x01, 0x01, 0xFF],
+        ];
+        foreach (byte[] extension in extensions)
+        {
+            (_, IOException? refusal) = await ScreenAsync([.. ClientHello(), .. Record(Handshake, CertificateMessage(WithExtension(extension)))], 512);
+            Assert.NotNull(refusal);
+            Assert.Contains("does not parse", refusal.Message, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public async Task AddressesToFetchCertificatesFromAreRefused()
     {
