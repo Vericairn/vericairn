@@ -76,6 +76,24 @@ jobs:
           swiftc -O -target arm64-apple-macos13.0 -o enclave/osx-arm64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
           swiftc -O -target x86_64-apple-macos13.0 -o enclave/osx-x64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
           file enclave/osx-arm64/vericairn-enclave enclave/osx-x64/vericairn-enclave
+      - name: Run the arm64 helper that ships
+        # The verify job tests a helper it compiles for itself; this runs the binary the package job ships for Apple silicon: a key
+        # made in the runner's Secure Enclave without presence, its public key read back, a digest signed, then the key discarded.
+        run: |
+          set -eu
+          helper=enclave/osx-arm64/vericairn-enclave
+          set +e; "$helper" available; code=$?; set -e
+          if [ "$code" -eq 3 ]; then echo "no Secure Enclave on this runner: the shipped helper reports it (exit 3)"; exit 0; fi
+          test "$code" -eq 0
+          dir=$(mktemp -d)
+          "$helper" create "$dir/key.blob" > "$dir/public.txt"
+          test -s "$dir/public.txt"
+          test "$(cat "$dir/public.txt")" = "$("$helper" public "$dir/key.blob")"
+          digest=$(printf 'vericairn release smoke' | shasum -a 256 | cut -d' ' -f1)
+          "$helper" sign "$dir/key.blob" "$digest" > "$dir/signature.txt"
+          test -s "$dir/signature.txt"
+          rm -rf "$dir"
+          echo "the shipped helper made a Secure Enclave key, read its public key back and signed a digest with it"
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: enclave-helper
