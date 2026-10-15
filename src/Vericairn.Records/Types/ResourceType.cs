@@ -49,7 +49,8 @@ public sealed class ResourceType : IRecordType
                 location.Error("body.missing", "github", "A location needs 'github', 'url' or 'rootCommit'.");
             }
 
-            if (url is not null && !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri?.Scheme != "https")
+            // Any other scheme is refused too: http, and file, which a rooted path on Linux and macOS parses as.
+            if (url is not null && (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri.Scheme != Uri.UriSchemeHttps))
             {
                 location.Error("body.pattern", "url", "'url' must be an absolute https URL.");
             }

@@ -24,6 +24,21 @@ public class SoftwareRecordsTests
     }
 
     [Fact]
+    public void AResourcesUrlIsAnAbsoluteHttpsUrl()
+    {
+        using var estate = new TestEstate();
+        estate.Add("resource", estate.OperatorId, """{"kind":"service","name":"Site","role":"the public site","location":{"url":"https://example.invalid/site"},"visibility":"public"}""");
+        Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error);
+
+        // Plain http, another scheme, a machine path (an absolute file URL on Linux and macOS) and a relative reference are refused.
+        foreach (string url in new[] { "http://example.invalid/site", "ftp://example.invalid/site", "/srv/repositories/widget", "example.invalid/site" })
+        {
+            RecordEnvelope resource = estate.Add("resource", estate.OperatorId, $$"""{"kind":"service","name":"Site","role":"the public site","location":{"url":"{{url}}"},"visibility":"public"}""");
+            Assert.Contains(estate.Load().Findings, f => f.Code == "body.pattern" && f.Location == resource.ExpectedPath + "#body.location.url");
+        }
+    }
+
+    [Fact]
     public void AVerificationNamesTheCommitTheMethodTheEnvironmentAndTheObservedResult()
     {
         using var estate = new TestEstate();
