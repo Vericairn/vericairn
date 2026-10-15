@@ -84,7 +84,11 @@ copied key file is useless where platform custody holds the key.
 | `POST /v1/goals/{id}/activate`, `pause`, `resume`, `stop` | A goal's lifecycle (`GoalActionRequest`: by, an optional note): activate a proposed goal, or resume a paused, budget-limited or blocked one, which grants its budget; pause an active goal; stop a goal that has not ended, which records it abandoned. Each is by who decides for the goal: its sponsor, a person, who to activate or resume holds the operator role or a grant of the `spending` scope, or an operator when an agent sponsors it; an agent never activates a goal. Each is refused out of order, and after the goal ended or was achieved. Returns a `WriteOutcome` |
 | `POST /v1/goals/{id}/evaluate` | Record the evaluation of a goal's current revision (`GoalEvaluateRequest`: by, summary, `verdicts`, each a `GoalVerdict` of the condition's position from 1, the verdict `met`, `not-yet` or `impossible`, the reason and the ids of the records read). The runtime gives each record predicate its own verdict with the records it read and refuses an evaluator's verdict that contradicts it, except `impossible` for one it does not find met; each evidence statement needs the evaluator's verdict, and one found met names the records read. Refused for a principal that authored one of the goal's steps. Returns a `WriteOutcome` |
 | `POST /v1/goals/{id}/accept` | Accept a goal's current revision, relying on its current evaluation (`GoalAcceptRequest`: by, statement). Refused, with every reason at once and before anything is written, unless the principal is the one who accepts it (decision 01M507XV4VBFYWMRN8WCXMXHX4: its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to while it holds the `accept-work` scope; an operator, only an operator, when an agent sponsors it), the goal was activated and has not ended, its current evaluation finds every condition met and is not the principal's, the principal authored none of its steps, and every record predicate holds now. Returns a `WriteOutcome` |
-| `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
+| `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, and from 0.6.0 launcher or workspace, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
+| `GET /v1/launchers` | The coding-agent launchers available to the runtime on its machine, providers of `vericairn.launcher.agent/1`, as `ProviderRow`s of kind launcher; the generic launcher's first limitation says that generic process launch is not complete agent support. From 0.6.0 |
+| `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator nor holds `local-engineering`, when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
+| `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, and whether its launcher is generic), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
+| `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. From 0.6.0 |
 | `POST /v1/releases/submit` | Submit a release as intent before effect: the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it |
@@ -109,18 +113,20 @@ record was rejected:
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now | 401 |
-| `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded | 200, inside the `ReleaseResponse` |
+| `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
 
 `conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
 and it stays named so that no client that knows it breaks.
 
 The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
 they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there
-is nothing to record yet, and a refusal is its `problem`, not an HTTP status. A read of a missing
-subject answers 404 with an empty body.
+is nothing to record yet, and a refusal is its `problem`, not an HTTP status. The run routes (`POST
+/v1/runs` and `POST /v1/runs/{id}/stop`, from 0.6.0) answer the same way, with a `RunResponse` or a
+`RunStopResponse`; a run that is not found is a `problem` with code `not-found` inside. A read of a
+missing subject answers 404 with an empty body.
 
-Exit status and HTTP status report whether the operation itself completed, except on the release routes, which
-answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+Exit status and HTTP status report whether the operation itself completed, except on the release and run routes,
+which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
 in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family
@@ -143,7 +149,9 @@ manager needs them; nothing of it enters a repository.
 connects over pinned loopback TLS and signs every request with the signer, which `DeviceRequestSigner.Find`
 builds from a device key held on this machine. `VericairnClient.IsAlive(endpoint)` says whether a daemon
 answers. The client implements `IEstateApi`, so code written against the interface runs unchanged against
-the embedded `EstateService`.
+the embedded `EstateService`. From 0.6.0 it also has `Launchers()`, `RunStart(request)`, `Runs()` and
+`RunStop(run, request)`, the worker's operations; with the daemon, a run started through it goes on after
+the request returns, and a client's absence never stops it.
 
 ## Changes visible to scripts
 

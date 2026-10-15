@@ -111,6 +111,21 @@ public interface IEstateApi
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
     IReadOnlyList<ProviderRow> Providers();
 
+    /// <summary>The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, listed as the release providers are.</summary>
+    IReadOnlyList<ProviderRow> Launchers();
+
+    /// <summary>
+    /// Start a coding agent's run on an assignment (vericairn.worker/1): the workspace prepared, the intent recorded with the run's cap
+    /// from its goal's budget before anything starts, the harness launched; the runtime observes and settles it after this returns.
+    /// </summary>
+    RunResponse RunStart(RunStartRequest request);
+
+    /// <summary>The agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
+    RunsResponse Runs();
+
+    /// <summary>Ask a run to stop, and report what was observed: requested, transmitted, acknowledged, escalated and contained, each only once observed.</summary>
+    RunStopResponse RunStop(string run, RunStopRequest request);
+
     /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
     ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
 

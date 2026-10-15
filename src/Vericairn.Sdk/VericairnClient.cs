@@ -209,6 +209,18 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
 
     /// <inheritdoc />
+    public IReadOnlyList<ProviderRow> Launchers() => Get<List<ProviderRow>>("/v1/launchers")!;
+
+    /// <inheritdoc />
+    public RunResponse RunStart(RunStartRequest request) => Post<RunStartRequest, RunResponse>("/v1/runs", request)!;
+
+    /// <inheritdoc />
+    public RunsResponse Runs() => Get<RunsResponse>("/v1/runs")!;
+
+    /// <inheritdoc />
+    public RunStopResponse RunStop(string run, RunStopRequest request) => Post<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request)!;
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
 
     /// <inheritdoc />

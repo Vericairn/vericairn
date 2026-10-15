@@ -1,0 +1,448 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Vericairn.Protocol;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
+using Vericairn.Runtime.Workers;
+
+namespace Vericairn.Runtime.Tests;
+
+/// <summary>
+/// The worker contract, vericairn.worker/1 (the estate's design/goals.md § 7), through each launcher with the stand-in harness: the
+/// workspace prepared on a work branch, never the shared clone; the brief exported into it; the MCP server configured for the agent;
+/// an environment with no ambient credential; the cap recorded before the run and the observed usage after; nothing accepted.
+/// </summary>
+[Collection("home")]
+public class WorkerTests
+{
+    [Fact]
+    public void ClaudeCodeCarriesTheAssignmentWithItsCapRecordedBeforeItStartsAndItsUsageAfter()
+    {
+        using var run = new RunEstate();
+        IReadOnlyDictionary<string, string> current = WorkerEnvironment.Current();
+        var environment = new Dictionary<string, string>(current, WorkerEnvironment.Names)
+        {
+            ["GITHUB_TOKEN"] = "ambient",
+            ["GH_TOKEN"] = "ambient",
+            ["AWS_SECRET_ACCESS_KEY"] = "ambient",
+            ["NPM_TOKEN"] = "ambient",
+            ["ANTHROPIC_API_KEY"] = "ambient",
+            ["OPENAI_API_KEY"] = "ambient",
+            ["CLAUDE_CONFIG_DIR"] = Path.Combine(run.Scratch, "claude"),
+        };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = environment, Vericairn = ["vericairn-under-test"] };
+        string report = run.Report("claude");
+
+        RunResponse started = run.Start("claude-code", "claude", report);
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("dispatched", started.Status);
+        Assert.Equal("widget, branch work/w-1", started.Workspace);
+        RunRow row = run.Settled(started.Run);
+
+        // The cap was recorded before the run started, from the goal's budget, and kept; the usage the stand-in reported came after.
+        EstateModel model = run.Estate.Load();
+        AgentRuns.Run recorded = AgentRuns.Find(model, started.Run)!;
+        Assert.Equal(["not-started", "dispatched", "observed-success"], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.All(recorded.Revisions, r => Assert.Equal("""{"attemptsPerStep":3,"wallMinutes":60}""", Records.Canonical.CanonicalJson.Serialize(r.Body.GetProperty("cap"))));
+        JsonElement target = recorded.Intent.Body.GetProperty("target");
+        Assert.Equal(run.Assignment, target.GetProperty("assignment").GetString());
+        Assert.Equal(run.Estate.BuilderId, target.GetProperty("principal").GetString());
+        Assert.Equal("widget, branch work/w-1", target.GetProperty("workspace").GetString());
+        Assert.Equal(run.Goal, target.GetProperty("goal").GetString());
+        Assert.Equal("vericairn.worker/1", target.GetProperty("worker").GetString());
+        Assert.Equal("claude-code", EstateModel.BodyString(recorded.Intent, "provider"));
+        Assert.Equal("agent-run", EstateModel.BodyString(recorded.Intent, "action"));
+        Assert.Equal(1734, row.Usage!.Value.GetProperty("tokens").GetInt64());
+        Assert.Empty(row.Usage.Value.GetProperty("unreported").EnumerateArray());
+        Assert.True(row.Usage.Value.GetProperty("wallMinutes").GetInt64() >= 1);
+        Assert.Equal(row.Usage.Value.GetProperty("wallMinutes").GetInt64(), row.Charged.GetProperty("wallMinutes").GetInt64());
+        Assert.DoesNotContain(run.Scratch, File.ReadAllText(Path.Combine(run.Estate.Root, recorded.Latest.ExpectedPath)), StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+
+        // The harness was Claude Code's own /goal, in the workspace, with the brief there and the MCP server for the agent.
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        string workspace = given["directory"]!.GetValue<string>();
+        string mcp = arguments[^2];
+        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config"], arguments);
+        Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
+        Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
+        Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
+        Assert.Equal(run.Service.Brief("W-1")!.Markdown, File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md")));
+        Assert.Equal("*\n", File.ReadAllText(Path.Combine(workspace, ".vericairn", ".gitignore")));
+        Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
+        JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();
+        Assert.Equal("vericairn-under-test", server["command"]!.GetValue<string>());
+        Assert.Equal(["--estate", run.Service.Root, "mcp", "serve", "--as", run.Estate.BuilderId], server["args"]!.AsArray().Select(a => a!.GetValue<string>()));
+        Assert.False(mcp.StartsWith(workspace, StringComparison.Ordinal));
+
+        // Its environment came from the allowlist: no ambient credential, the harness's own configuration, and the run's files.
+        JsonObject env = given["environment"]!.AsObject();
+        foreach (string credential in new[] { "GITHUB_TOKEN", "GH_TOKEN", "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN", "ANTHROPIC_API_KEY", "OPENAI_API_KEY" })
+        {
+            Assert.False(env.ContainsKey(credential), credential + " reached the harness.");
+        }
+
+        Assert.Equal(environment["CLAUDE_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"]!.GetValue<string>());
+        Assert.Equal(environment[VericairnHome.EnvironmentVariable], env[VericairnHome.EnvironmentVariable]!.GetValue<string>());
+        Assert.Equal(started.Run, env["VERICAIRN_RUN"]!.GetValue<string>());
+        Assert.True(env.ContainsKey("PATH") || env.ContainsKey("Path"));
+
+        // The worker accepted nothing: the goal is active, and nothing was accepted or reviewed.
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+        Assert.Empty(run.Service.Records("acceptance"));
+        Assert.Empty(run.Service.Records("review"));
+    }
+
+    [Fact]
+    public void CodexVerifiesItsGoalsFeatureBeforeTheRunIsRecordedAndAddsUpEachTurnsTokens()
+    {
+        using var run = new RunEstate();
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Vericairn = ["vericairn-under-test"] };
+        foreach ((string scenario, string because) in new[]
+        {
+            ("codex-goals-off", "Codex's goals feature is not enabled here (codex features list shows goals false); enable it with codex features enable goals"),
+            ("codex-no-goals", "Codex lists no goals feature in codex features list"),
+            ("codex-broken", "Codex's goals feature could not be verified: codex features list exited 2: error: unrecognized subcommand 'features'"),
+        })
+        {
+            RunResponse refused = run.Start("codex", scenario, run.Report(scenario));
+            Assert.False(refused.Ok);
+            Assert.Equal("refused", refused.Problem!.Code);
+            Assert.Contains(because, refused.Message, StringComparison.Ordinal);
+            Assert.EndsWith("Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(["features", "list"], Assert.Single(FakeHarness.Reports(run.Report(scenario)))["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
+        }
+
+        Assert.Empty(run.Service.Records("operation"));
+
+        string report = run.Report("codex");
+        RunResponse started = run.Start("codex", "codex", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("observed-success", row.Status);
+        Assert.Equal(1400, row.Usage!.Value.GetProperty("tokens").GetInt64());
+        List<JsonObject> given = FakeHarness.Reports(report);
+        Assert.Equal(2, given.Count);
+        Assert.Equal(["features", "list"], given[0]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
+        List<string> arguments = given[1]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        string workspace = given[1]["directory"]!.GetValue<string>();
+        string home = WorkerEnvironment.Current()[VericairnHome.EnvironmentVariable];
+        string cd = arguments[3];
+        Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), cd, StringComparison.Ordinal);
+        Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), workspace, StringComparison.Ordinal);
+        Assert.Equal(
+            ["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c", "mcp_servers.vericairn.command=\"vericairn-under-test\"", "-c", $"mcp_servers.vericairn.args=[\"--estate\", {Toml(run.Service.Root)}, \"mcp\", \"serve\", \"--as\", \"{run.Estate.BuilderId}\"]"],
+            arguments.Take(10));
+        Assert.Contains("-c", arguments);
+        Assert.Contains($"mcp_servers.vericairn.env.VERICAIRN_HOME={Toml(home)}", arguments);
+        Assert.StartsWith("/goal Does the widget build and pass its tests? Checks: the tests pass;", arguments[^1], StringComparison.Ordinal);
+        Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
+    }
+
+    [Fact]
+    public void TheGenericLauncherIsLabeledAndUsageItCannotReadIsChargedAtTheCap()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000}""");
+        ProviderRow listed = Assert.Single(run.Service.Launchers(), l => l.Provider == "generic");
+        Assert.StartsWith("Generic process launch is not complete agent support", listed.Limitations[0], StringComparison.Ordinal);
+        Assert.Equal(["claude-code", "codex", "generic"], run.Service.Launchers().Select(l => l.Provider));
+        Assert.All(run.Service.Launchers(), l => Assert.Equal(IAgentLauncher.Contract, l.Contract));
+        Assert.Contains(run.Service.ProviderRows(), p => p.Kind == "workspace" && p.Contract == IWorkspaceProvider.Contract);
+
+        string report = run.Report("generic");
+        RunResponse started = run.Start("generic", "generic", report, settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["arguments"] = """["--goal","{condition}","--brief","{brief}","--mcp","{mcp-config}"]""" });
+        Assert.True(started.Ok, started.Message);
+        Assert.Contains("labeled: generic process launch is not complete agent support", started.Message, StringComparison.Ordinal);
+        RunRow row = run.Settled(started.Run);
+        Assert.True(row.Generic);
+        Assert.Equal(["tokens"], row.Usage!.Value.GetProperty("unreported").EnumerateArray().Select(u => u.GetString()));
+        Assert.Equal(5000, row.Cap.GetProperty("tokens").GetInt64());
+        Assert.Equal(5000, row.Charged.GetProperty("tokens").GetInt64());
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal("--goal", arguments[0]);
+        Assert.StartsWith("Does the widget build", arguments[1], StringComparison.Ordinal);
+        Assert.Equal(given["environment"]!["VERICAIRN_BRIEF"]!.GetValue<string>(), arguments[3]);
+        Assert.Equal(given["environment"]!["VERICAIRN_MCP_CONFIG"]!.GetValue<string>(), arguments[5]);
+
+        // Unknown usage is never zero: the whole token cap was charged, so the goal is budget-limited and no further run starts.
+        Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+        LedgerRow ledger = Assert.Single(run.Service.Runs().Goals);
+        Assert.Equal(0, Assert.Single(ledger.Units, u => u.Unit == "tokens").Remaining);
+        Assert.NotEmpty(ledger.Fenced);
+        RunResponse fenced = run.Start("generic", "generic", run.Report("again"));
+        Assert.False(fenced.Ok);
+        Assert.Contains("is budget-limited", fenced.Message, StringComparison.Ordinal);
+        Assert.Single(run.Service.Records("operation"));
+    }
+
+    [Fact]
+    public void AStopToAHarnessThatIgnoresItIsEscalatedAfterTheGracePeriodAndEachFactIsKept()
+    {
+        using var run = new RunEstate();
+        RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("ignore"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("ignore")) && run.Row(started.Run).Observed);
+
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The widget is cancelled.", 1));
+        Assert.True(stopped.Ok, stopped.Message);
+        Assert.Equal("contained", stopped.State);
+        RunStop stop = stopped.Stop!;
+        Assert.Equal(run.Estate.OperatorId, stop.RequestedBy);
+        Assert.NotNull(stop.TransmittedAt);
+        Assert.Contains("VERICAIRN_STOP_FILE", stop.Transmission, StringComparison.Ordinal);
+        Assert.Null(stop.AcknowledgedAt);
+        Assert.NotNull(stop.EscalatedAt);
+        Assert.Contains("process tree was killed", stop.Escalation, StringComparison.Ordinal);
+        Assert.NotNull(stop.ContainedAt);
+        Assert.True(string.CompareOrdinal(stop.RequestedAt, stop.ContainedAt) <= 0);
+
+        // The settlement records the same facts as observed, the run a known failure charged for the time it ran.
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("known-failure", row.Status);
+        Assert.Equal(stop with { }, row.Stop);
+        JsonElement recorded = Assert.Single(run.Service.Records("operation")).Envelope.GetProperty("body");
+        Assert.Equal(stop.EscalatedAt, recorded.GetProperty("stop").GetProperty("escalatedAt").GetString());
+        Assert.False(recorded.GetProperty("stop").TryGetProperty("acknowledgedAt", out _));
+        Assert.Contains("not acknowledged", recorded.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AStopTheHarnessAcknowledgesIsContainedWithoutEscalation()
+    {
+        using var run = new RunEstate();
+        RunResponse started = run.Start("generic", "ack-stop", run.Report("ack"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("ack")) && run.Row(started.Run).Observed);
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, null, 5));
+        Assert.Equal("contained", stopped.State);
+        Assert.NotNull(stopped.Stop!.TransmittedAt);
+        Assert.NotNull(stopped.Stop.AcknowledgedAt);
+        Assert.Contains("acknowledgment", stopped.Stop.Acknowledgment, StringComparison.Ordinal);
+        Assert.Null(stopped.Stop.EscalatedAt);
+        Assert.NotNull(stopped.Stop.ContainedAt);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+        RunStopResponse again = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId));
+        Assert.False(again.Ok);
+        Assert.Contains("there is nothing to stop", again.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AStopNoWorkerObservesIsReportedAsRequestedAndALostWorkerIsNotAStoppedRun()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("lingering");
+        RunResponse started = run.Start("generic", "ack-stop", report);
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(report));
+        int harness = Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>();
+        try
+        {
+            // The worker that supervised the run lets go of it; the harness runs on, and nothing calls it stopped.
+            run.Reopen();
+            WaitUntil(() => !run.Row(started.Run).Observed);
+            RunRow lost = run.Row(started.Run);
+            Assert.Equal("dispatched", lost.Status);
+            Assert.Null(lost.Usage);
+            Assert.Equal(60, lost.Charged.GetProperty("wallMinutes").GetInt64());
+
+            RunStopResponse asked = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Nobody watches it."));
+            Assert.True(asked.Ok);
+            Assert.Equal("requested", asked.State);
+            Assert.Null(asked.Stop!.TransmittedAt);
+            Assert.Contains("no worker on this machine transmitted it: none observes the run", asked.Message, StringComparison.Ordinal);
+            Assert.Contains("A stop that is not observed stays requested", asked.Message, StringComparison.Ordinal);
+            Assert.Equal("requested", run.Row(started.Run).Stop!.State);
+            Assert.Equal("dispatched", run.Row(started.Run).Status);
+        }
+        finally
+        {
+            try
+            {
+                System.Diagnostics.Process.GetProcessById(harness).Kill(entireProcessTree: true);
+            }
+            catch (ArgumentException)
+            {
+                // It ended already.
+            }
+        }
+    }
+
+    [Fact]
+    public void OutputThatClosesIsNotAnEndOnlyTheExitSettlesTheRun()
+    {
+        using var run = new RunEstate();
+        RunResponse started = run.Start("claude-code", "close-output", run.Report("closing"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("closing")));
+        Thread.Sleep(1000);
+        Assert.Equal("dispatched", run.Row(started.Run).Status);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("observed-success", row.Status);
+        Assert.Empty(row.Usage!.Value.GetProperty("unreported").EnumerateArray());
+        Assert.False(row.Usage.Value.TryGetProperty("tokens", out _));
+    }
+
+    [Fact]
+    public void TheWallMinutesCapStopsARunAndCrossingItMarksTheGoalBudgetLimited()
+    {
+        var options = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
+        using var run = new RunEstate("""{"wallMinutes":3,"attemptsPerStep":3}""", options: options);
+        RunResponse started = run.Start("generic", "ack-stop", run.Report("capped"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal(3, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("known-failure", row.Status);
+        Assert.Equal("worker", row.Stop!.RequestedBy);
+        Assert.Contains("reached its cap of 3 wall minutes", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.NotNull(row.Stop.ContainedAt);
+        Assert.True(row.Usage!.Value.GetProperty("wallMinutes").GetInt64() >= 3);
+
+        // The cap crossed fences new runs: the goal is budget-limited, an ask to its sponsor to raise the budget or stop.
+        JsonElement goal = run.Service.Goal(run.Goal)!.Json;
+        Assert.Equal("budget-limited", goal.GetProperty("status").GetString());
+        RecordResponse status = run.Service.Records("goal-status").OrderBy(s => s.Id, StringComparer.Ordinal).Last();
+        Assert.Equal(run.Estate.OperatorId, status.Envelope.GetProperty("by").GetString());
+        Assert.Contains("wallMinutes", status.Envelope.GetProperty("body").GetProperty("note").GetString(), StringComparison.Ordinal);
+        RunResponse fenced = run.Start("generic", "ack-stop", run.Report("fenced"));
+        Assert.Contains("is budget-limited", fenced.Message, StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARunWhoseReportedTokensCrossItsCapIsStoppedAndChargedWhatItReported()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":1000}""");
+        RunResponse started = run.Start("codex", "codex-spender", run.Report("spender"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal(1000, started.Cap!.Value.GetProperty("tokens").GetInt64());
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("known-failure", row.Status);
+        Assert.Equal("worker", row.Stop!.RequestedBy);
+        Assert.Contains("crossed the run's cap of 1000", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.NotNull(row.Stop.AcknowledgedAt);
+        Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
+        Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());
+        Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void ConcurrentRunsNeverSpendTheSameAllowanceTwice()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""");
+        RunResponse first = run.Start("generic", "ack-stop", run.Report("first"), wallMinutes: 40);
+        Assert.True(first.Ok, first.Message);
+        Assert.Equal(40, first.Cap!.Value.GetProperty("wallMinutes").GetInt64());
+
+        // One run works in a workspace at a time; the second run, on its own branch, takes only what the first does not hold.
+        Assert.Contains($"Run {first.Run} works on branch work/w-1 of widget and is in flight", run.Start("generic", "ack-stop", run.Report("shared")).Message, StringComparison.Ordinal);
+        RunResponse second = run.Start("generic", "ack-stop", run.Report("second"), wallMinutes: 40, branch: "work/w-1-second");
+        Assert.True(second.Ok, second.Message);
+        Assert.Equal(20, second.Cap!.Value.GetProperty("wallMinutes").GetInt64());
+        Assert.Equal("widget, branch work/w-1-second", second.Workspace);
+        RunResponse third = run.Start("generic", "ack-stop", run.Report("third"), branch: "work/w-1-third");
+        Assert.False(third.Ok);
+        Assert.Contains("The goal's budget is spent: wallMinutes 60 of 60 charged to its runs", third.Message, StringComparison.Ordinal);
+        Assert.Contains("2 of the goal's runs are in flight, and its budget allows 2 at a time", third.Message, StringComparison.Ordinal);
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+
+        foreach (RunResponse started in new[] { first, second })
+        {
+            WaitUntil(() => run.Row(started.Run).Observed);
+            Assert.Equal("contained", run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).State);
+        }
+
+        // Settled, each is charged what it used, and the allowance they held is free again.
+        LedgerRow ledger = Assert.Single(run.Service.Runs().Goals);
+        LedgerUnit wall = Assert.Single(ledger.Units);
+        Assert.Equal(wall.Spent, run.Service.Runs().Runs.Sum(r => r.Charged.GetProperty("wallMinutes").GetInt64()));
+        Assert.True(wall.Remaining > 0);
+        Assert.Equal(0, ledger.InFlight);
+    }
+
+    [Fact]
+    public void AHarnessThatCannotStartIsAKnownFailureThatSpentNothing()
+    {
+        using var run = new RunEstate();
+        string missing = Path.Combine(run.Scratch, "no-such-harness");
+        RunResponse failed = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = missing }));
+        Assert.False(failed.Ok);
+        Assert.Equal("provider", failed.Problem!.Code);
+        Assert.Equal("known-failure", failed.Status);
+        RunRow row = run.Row(failed.Run);
+        Assert.Equal("known-failure", row.Status);
+        Assert.Empty(row.Charged.EnumerateObject());
+        string recorded = File.ReadAllText(Path.Combine(run.Estate.Root, run.Estate.Load().ById[failed.Operation!.Id].ExpectedPath));
+        Assert.DoesNotContain(run.Scratch, recorded, StringComparison.Ordinal);
+        Assert.Contains("could not be started on the machine that ran the worker, so nothing ran and nothing is charged", recorded, StringComparison.Ordinal);
+        Assert.Equal(60, Assert.Single(Assert.Single(run.Service.Runs().Goals).Units).Remaining);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARunIsRefusedBeforeAnythingIsRecordedWhenAPreconditionFails()
+    {
+        using var run = new RunEstate();
+        string setting = FakeHarness.Setting("claude", run.Report("never"));
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = setting };
+        (RunStartRequest Request, string Because)[] cases =
+        [
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.OperatorId, run.Estate.OperatorId, run.Resource, Settings: settings), "a run carries an assignment as its contributor"),
+            (new RunStartRequest(run.Assignment, "gemini", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "The launcher 'gemini' has no implementation"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["model"] = "x" }), "it takes no model"),
+            (new RunStartRequest(run.Assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "this run names no command"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.BuilderId, run.Resource, Settings: settings), "holds neither"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Goal, Settings: settings), "No repository resource"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, WallMinutes: 0, Settings: settings), "at least one wall minute"),
+        ];
+        foreach ((RunStartRequest request, string because) in cases)
+        {
+            RunResponse refused = run.Service.RunStart(request);
+            Assert.False(refused.Ok, because);
+            Assert.Contains(because, refused.Message, StringComparison.Ordinal);
+        }
+
+        // A goal that is paused fences its runs; resumed, a run starts.
+        RunEstate.Ok(run.Service.GoalPause(run.Goal, new GoalActionRequest(run.Estate.OperatorId)));
+        Assert.Contains("is paused: a run starts only while its goal is active", run.Start("claude-code", "claude", run.Report("paused")).Message, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.False(File.Exists(run.Report("never")));
+        Assert.False(File.Exists(run.Report("paused")));
+    }
+
+    [Fact]
+    public void TheWorkerLaunchesNothingWhileTheOperatorsKeySignsHereWithoutPresence()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RunResponse refused = run.Start("claude-code", "claude", run.Report("guarded"));
+        Assert.False(refused.Ok);
+        Assert.Contains("The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence", refused.Message, StringComparison.Ordinal);
+        Assert.Contains($"Device {run.OperatorDevice} (Operator's laptop, admitted) of Test Operator ({run.Estate.OperatorId}), an operator: this machine holds its key in file-owner-only custody without its owner's presence", refused.Message, StringComparison.Ordinal);
+        Assert.Contains($"the operating-system user {Environment.UserName}", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.False(File.Exists(run.Report("guarded")));
+
+        new FileKeyStore(VericairnHome.Path()).Remove(run.OperatorDevice);
+        RunResponse started = run.Start("claude-code", "claude", run.Report("unguarded"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+    }
+
+    private static void WaitUntil(Func<bool> condition, int seconds = 30)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(seconds);
+        while (!condition())
+        {
+            Assert.True(DateTimeOffset.UtcNow < until, "The condition did not hold in time.");
+            Thread.Sleep(50);
+        }
+    }
+
+    private static string Toml(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+}

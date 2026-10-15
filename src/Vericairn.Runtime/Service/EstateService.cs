@@ -21,6 +21,7 @@ using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Service;
 
@@ -29,7 +30,7 @@ namespace Vericairn.Runtime.Service;
 /// the estate. Every operation loads the current records first, evaluates authority through the record validators, and signs new
 /// records with the author's admitted device held on this machine.
 /// </summary>
-public sealed class EstateService : IEstateApi, IDisposable
+public sealed partial class EstateService : IEstateApi, IDisposable
 {
     private readonly object gate = new();
     private readonly EstateSession session;
@@ -1262,6 +1263,16 @@ public sealed class EstateService : IEstateApi, IDisposable
             rows.Add(Row(adapter.Kind, "source", adapter.Descriptor));
         }
 
+        foreach (IAgentLauncher launcher in Providers.Launchers)
+        {
+            rows.Add(Row(launcher.Launcher, "launcher", launcher.Descriptor));
+        }
+
+        foreach (IWorkspaceProvider workspaces in Providers.Workspaces)
+        {
+            rows.Add(Row(workspaces.Kind, "workspace", workspaces.Descriptor));
+        }
+
         return rows;
     }
 
@@ -2150,6 +2161,13 @@ public sealed class EstateService : IEstateApi, IDisposable
     private static FindingsResponse ToFindings(FindingList findings, string summary) =>
         new(summary, findings.Errors, findings.Warnings, findings.Sorted().Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message)).ToList());
 
-    /// <inheritdoc />
-    public void Dispose() => session.Dispose();
+    /// <summary>
+    /// Closes the estate. The runs this service supervises are left running, unobserved: a supervision that ends is not a stopped run,
+    /// and each stays in flight, charged at its cap, until a worker observes its end.
+    /// </summary>
+    public void Dispose()
+    {
+        AbandonRuns();
+        session.Dispose();
+    }
 }
