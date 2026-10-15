@@ -2112,7 +2112,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         BatchJournal journal;
         try
         {
-            journal = BatchJournal.Begin(session.Manifest.Estate, purpose, workOrder, records);
+            journal = BatchJournal.Begin(session, purpose, workOrder, records);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -2148,7 +2148,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
     private void JudgeInterruptedBatches()
     {
-        if (BatchJournal.All(session.Manifest.Estate).Count == 0)
+        if (BatchJournal.All(session).Count == 0)
         {
             return;
         }
@@ -2180,7 +2180,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private FindingList InterruptedBatches(EstateModel model)
     {
         var findings = new FindingList();
-        foreach (BatchJournal journal in BatchJournal.All(session.Manifest.Estate))
+        foreach (BatchJournal journal in BatchJournal.All(session))
         {
             List<BatchJournal.Entry> stored = [.. journal.Records.Where(r => model.ById.ContainsKey(r.Id))];
             List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];

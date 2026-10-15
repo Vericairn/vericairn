@@ -6,7 +6,6 @@ using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
-using Vericairn.Records.Signing;
 
 namespace Vericairn.Runtime.Store;
 
@@ -14,8 +13,8 @@ namespace Vericairn.Runtime.Store;
 /// This machine's account of records it stores together, such as routing's assignment of a step and the run intent or the ask that
 /// carries it. Storing several records is not atomic, so the journal is written before the first record and removed after the last:
 /// a failure or a crash between them leaves it behind, naming every record of the batch, and the runtime reports the batch as a
-/// reconcile task until it no longer matters. The journal lives under the Vericairn home, never in the estate, and nothing it names
-/// is ever removed from the estate.
+/// reconcile task until it no longer matters. The journal lives beside the owning session's live store, under the Vericairn home,
+/// never in the estate. Only that storage identity judges it, and nothing it names is ever removed from the estate.
 /// </summary>
 internal sealed class BatchJournal
 {
@@ -46,15 +45,15 @@ internal sealed class BatchJournal
     /// <summary>The batch's records, in the order they are stored.</summary>
     public IReadOnlyList<Entry> Records { get; }
 
-    /// <summary>Where an estate's journals live on this machine.</summary>
-    public static string Directory(string estate) => Path.Combine(VericairnHome.Path(), "estates", estate, "batches");
+    /// <summary>Where this session's journals live: per clone for repository-synced estates, shared for local-only estates.</summary>
+    public static string Directory(EstateSession session) => Path.Combine(Path.GetDirectoryName(session.Live.Path)!, "batches");
 
     /// <summary>Writes the journal of a batch before any of its records is stored.</summary>
-    public static BatchJournal Begin(string estate, string purpose, string? workOrder, IReadOnlyList<AuthoredRecord> records)
+    public static BatchJournal Begin(EstateSession session, string purpose, string? workOrder, IReadOnlyList<AuthoredRecord> records)
     {
         ArgumentNullException.ThrowIfNull(records);
         string id = Ulid.NewUlid().Value;
-        string directory = Directory(estate);
+        string directory = Directory(session);
         System.IO.Directory.CreateDirectory(directory);
         string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
         List<Entry> entries = [.. records.Select(r => new Entry(r.Envelope.Id, r.Envelope.Type, r.RelativePath))];
@@ -73,10 +72,10 @@ internal sealed class BatchJournal
         return new BatchJournal(file, id, purpose, workOrder, startedAt, entries);
     }
 
-    /// <summary>Every journal of an estate left on this machine, oldest first; one that cannot be read is left alone.</summary>
-    public static IReadOnlyList<BatchJournal> All(string estate)
+    /// <summary>Every journal of this session left on this machine, oldest first; one that cannot be read is left alone.</summary>
+    public static IReadOnlyList<BatchJournal> All(EstateSession session)
     {
-        string directory = Directory(estate);
+        string directory = Directory(session);
         if (!System.IO.Directory.Exists(directory))
         {
             return [];

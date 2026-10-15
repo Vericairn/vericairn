@@ -6,6 +6,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -360,6 +361,65 @@ public class GoalStepTests
         Assert.Equal(0, run.Service.Check().Errors);
         Assert.Empty(Directory.EnumerateFiles(Path.Combine(run.Estate.Root, "records"), "*.tmp", SearchOption.AllDirectories));
         GoalStepResponse retried = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "recovered")));
+        Assert.True(retried.Ok, retried.Message);
+        Assert.Equal("observed-success", run.Settled(retried.Run!.Run).Status);
+        Assert.True(run.Estate.Load().ById.ContainsKey(stranded));
+        Assert.Empty(run.Service.Reconcile());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnOlderCloneCannotSettleTheWritingClonesBatch(bool beforeFirstWrite)
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        Done(run, run.Assignment);
+        string older = Path.Combine(run.Scratch, "older-estate");
+        foreach (string directory in new[] { "estate", "records" })
+        {
+            foreach (string file in Directory.EnumerateFiles(Path.Combine(run.Estate.Root, directory), "*", SearchOption.AllDirectories))
+            {
+                string target = Path.Combine(older, Path.GetRelativePath(run.Estate.Root, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.Copy(file, target);
+            }
+        }
+
+        bool opened = false;
+        run.Service.BeforeStoringTogether = record =>
+        {
+            if (record.Envelope.Type == (beforeFirstWrite ? "assignment" : "operation"))
+            {
+                // B is a snapshot of A before the batch: opening and reading B must not close A's journal.
+                using EstateService other = EstateService.Open(older);
+                Assert.Empty(other.Reconcile());
+                Assert.Equal(0, other.Check().Errors);
+                opened = true;
+            }
+
+            if (record.Envelope.Type == "operation")
+            {
+                throw new IOException("Interrupted before the intent.");
+            }
+        };
+        GoalStepResponse stopped = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "stopped")));
+        Assert.False(stopped.Ok, stopped.Message);
+        Assert.True(opened);
+        string stranded = stopped.Assignment!.Id;
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+        run.Reopen();
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+
+        // B still cannot settle A's interrupted batch after A reopens.
+        using (EstateService other = EstateService.Open(older))
+        {
+            Assert.Empty(other.Reconcile());
+        }
+
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+        GoalStepResponse retried = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "retried")));
         Assert.True(retried.Ok, retried.Message);
         Assert.Equal("observed-success", run.Settled(retried.Run!.Run).Status);
         Assert.True(run.Estate.Load().ById.ContainsKey(stranded));

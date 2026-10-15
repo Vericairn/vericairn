@@ -325,7 +325,8 @@ public class GoalJourneyTests
             var stored = new AuthoredRecord(assignment.ExpectedPath, File.ReadAllBytes(Path.Combine(root, assignment.ExpectedPath)), assignment);
             using JsonDocument nothing = JsonDocument.Parse("{}");
             AuthoredRecord intent = RecordAuthor.Create(new RecordDraft("operation", op, nothing.RootElement));
-            BatchJournal journal = BatchJournal.Begin(model.Manifest!.Estate, "routing's assignment of work order W-1 to Builder and the intent of its run", order.Id, [stored, intent]);
+            using EstateSession session = EstateSession.Open(root);
+            BatchJournal journal = BatchJournal.Begin(session, "routing's assignment of work order W-1 to Builder and the intent of its run", order.Id, [stored, intent]);
 
             CliHarness.Outcome tasks = CliHarness.Run("--estate", root, "estate", "reconcile");
             Assert.NotEqual(0, tasks.Code);
