@@ -156,6 +156,8 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept unchanged in every revision; `wallMinutes` is required, and a run charged to a goal states exactly the units its budget grants (see [An agent run and its goal's ledger](#an-agent-run-and-its-goals-ledger)) |
 | `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it: for each of `wallMinutes`, `tokens` and `currency` its cap states, the amount spent or the unit listed in `unreported`, which is charged at the cap |
 | `operation` | `stop` | object, optional, `agent-run` only | A stop's facts, each recorded only once observed: `requestedAt` and `requestedBy` (a principal, or `worker` for a cap the run reached) with an optional `reason`, then `transmittedAt` with `transmission`, `acknowledgedAt` with `acknowledgment`, `escalatedAt` with `escalation`, and `containedAt`, which only a settled revision records; from 0.6.0 |
+| `operation` | `liveness` | object, optional, `agent-run` only | Worker-observed `stallSeconds`, `lastEventAt`, optional `attentionAt`, `attention` (ask id), and `stoppedAt` |
+| `operation` | `scope` | object, optional, settled `agent-run` only | Workspace audit: `changed`, `outsideCount`, `outside` (at most 1000 relative names), optional `problem` when incomplete |
 | `review` | `conditions` | object list, required for a review of a goal and refused for any other | The goal's evaluation: one verdict per completion condition, in the goal's order, each with its `verdict` (`met`, `not-yet` or `impossible`), its `reason` and the records it `read`, each `{type, id, hash}` |
 
 ## Rules enforced in format 2
@@ -470,6 +472,66 @@ the run reached), when and how it was transmitted, when and how the harness ackn
 the grace period and what the escalation did, and when containment was observed. Each is present only once observed, never
 before the request, and containment only in a settled revision; a stop that was not observed stays requested.
 
+### Run identity, observed usage and stops
+
+A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state
+writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
+
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run
+revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
+
+Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns).
+Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and
+output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the
+whole token unit unreported, even if another turn reported valid usage. Settlement charges that unit at its reserved
+cap; complete explicit zero counts remain known zero.
+
+Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may
+precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously
+recorded stop property, including the request and explanatory text, is immutable across revisions
+(`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
+
+New worker intents state `target.capMode: "soft"` and evidence describing each operational threshold and the
+launcher's native controls. The ledger reserves the full cap. The worker subtracts grace plus one heartbeat from wall
+time, and ten percent (rounded up) from tokens and currency, to leave headroom for shutdown and usage in flight. It
+refuses an allowance too small to leave any active token or currency unit. Claude Code receives `--max-budget-usd` for
+USD at the reduced currency threshold; other currencies and total tokens have no native cap. Codex receives
+`features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this
+is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain
+explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation.
+Unknown units are still charged at their full cap.
+
+Containment means the worker observed the whole launch boundary exited, including descendants after root exit. Failed
+escalation attempts remain evidence and are retried, never described as a successful kill. A dispatch write lost after
+launch must be recovered before settlement; until then the intent holds its full reservation. See [the
+worker](software.md#coding-agents-the-worker-and-its-launchers) for platform boundaries and configuration isolation.
+
+### Worker liveness and assignment scope
+
+The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not
+certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
+that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit in
+`target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
+principal, about the run (no notification is sent). At twice the limit it transmits a stop and contains the whole
+launch boundary. New stdout events reset the silence timer but never erase an earlier attention fact. A failed
+attention write is retried and does not prevent containment. Settlement records `liveness`: `stallSeconds`,
+`lastEventAt`, optional `attentionAt`, `attention` (the ask id), and `stoppedAt`; run-list responses expose the same
+`liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
+nor containment.
+
+At settlement the worker compares a file inventory captured after brief export and before launch with the workspace
+after the whole process boundary exits. Content, symlink targets (without reading through the link), and Unix modes
+are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
+unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
+repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
+`path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
+and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
+`changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
+the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
+audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
+as clean. This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent
+change. Git administration and changes outside the workspace are not inventoried.
+
 ## A device keeps its identity
 
 From format 2 a device is its first record: that record's id is the device's identity, and a rename or a new key is a
@@ -520,23 +582,3 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said
   as such, never a silent self-admission.
-
-A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
-
-Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
-
-Harnesses enter a containment boundary before executing: a Windows Job Object (no breakaway), or a new POSIX process group on Linux and macOS. Stops signal the group; escalation terminates the whole boundary. Root exit alone does not establish containment. The worker observes every remaining member exited (including kernel zombie exit state) before settling. A failed escalation is retained in local state and settlement evidence and retried, without claiming a kill. Failure to observe the boundary leaves the allowance reserved. A POSIX process that deliberately creates another session can escape this same-user boundary; use OS isolation for hostile code.
-
-Codex runs with a fresh per-run `CODEX_HOME`: only its provisioned harness `auth.json` login is imported, with owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The run configuration and a complete `mcp_servers` command-line override name only `vericairn`; project configuration is untrusted. Claude Code continues to use `--strict-mcp-config`. These are configuration boundaries, not filesystem isolation: the harness still runs as the worker user and can read that user's files or keychain. Use a dedicated OS identity with only the approved harness login for credential isolation. See the [Codex configuration documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
-
-Workspace export refuses symbolic links and Windows reparse points anywhere in `.vericairn`, including dangling links and nested entries, before recording a run. Unix writes use directory-relative no-follow opens and exclusive temporary files; Windows holds non-reparse directory handles against replacement and creates files exclusively. Replacing a regular exported file never writes through its old inode or a link. A refused export records no intent and launches nothing.
-
-Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns). Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the whole token unit unreported, even if another turn reported valid usage. Settlement charges that unit at its reserved cap; complete explicit zero counts remain known zero.
-
-Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously recorded stop property, including the request and explanatory text, is immutable across revisions (`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
-
-New worker intents state `target.capMode: "soft"` and evidence describing each operational threshold and the launcher's native controls. The ledger reserves the full cap. The worker subtracts grace plus one heartbeat from wall time, and ten percent (rounded up) from tokens and currency, to leave headroom for shutdown and usage in flight. It refuses an allowance too small to leave any active token or currency unit. Claude Code receives `--max-budget-usd` for USD at the reduced currency threshold; other currencies and total tokens have no native cap. Codex receives `features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation. Unknown units are still charged at their full cap.
-
-The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable principal, about the run (no notification is sent). At twice the limit it transmits a stop and contains the whole launch boundary. New stdout events reset the silence timer but never erase an earlier attention fact. A failed attention write is retried and does not prevent containment. Settlement records `liveness`: `stallSeconds`, `lastEventAt`, optional `attentionAt`, `attention` (the ask id), and `stoppedAt`; run-list responses expose the same `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness nor containment.
-
-At settlement the worker compares a file inventory captured after brief export and before launch with the workspace after the whole process boundary exits. Content, symlink targets (without reading through the link), and Unix modes are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional `path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing, and directory matching respects path boundaries. The settling operation and run-list response expose `scope`: `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit as clean. This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent change. Git administration and changes outside the workspace are not inventoried.

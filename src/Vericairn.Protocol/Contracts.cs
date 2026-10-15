@@ -463,7 +463,7 @@ public sealed record RunStopRequest(string By, string? Reason = null, int? Grace
 /// <param name="Acknowledgment">How it acknowledged it.</param>
 /// <param name="EscalatedAt">When the worker escalated it, the harness not having stopped within the grace period.</param>
 /// <param name="Escalation">What the escalation did.</param>
-/// <param name="ContainedAt">When the worker observed the harness gone.</param>
+/// <param name="ContainedAt">When the worker observed the whole launch boundary exited.</param>
 public sealed record RunStop(string RequestedAt, string RequestedBy, string? Reason = null, string? TransmittedAt = null, string? Transmission = null, string? AcknowledgedAt = null, string? Acknowledgment = null, string? EscalatedAt = null, string? Escalation = null, string? ContainedAt = null)
 {
     /// <summary>The furthest fact observed: contained, escalated, acknowledged, transmitted or requested.</summary>
@@ -471,15 +471,15 @@ public sealed record RunStop(string RequestedAt, string RequestedBy, string? Rea
     public string State => ContainedAt is not null ? "contained" : EscalatedAt is not null ? "escalated" : AcknowledgedAt is not null ? "acknowledged" : TransmittedAt is not null ? "transmitted" : "requested";
 }
 
-/// <summary>What starting a run did: what was recorded and launched, never more. A problem means nothing was launched.</summary>
+/// <summary>What starting a run observed and recorded. An uncertain launch retains its reservation even without established supervision.</summary>
 /// <param name="Run">The run's id: its intent's record id, once recorded.</param>
 /// <param name="Status">The run's operation status after this call: dispatched when launched.</param>
 /// <param name="Message">What happened and what follows, in words.</param>
-/// <param name="Ok">Whether the harness was launched.</param>
+/// <param name="Ok">Whether launch was observed and supervision established.</param>
 /// <param name="Operation">The latest operation revision written.</param>
 /// <param name="Cap">The run's cap, as its intent records it.</param>
 /// <param name="Workspace">The workspace, a repository and branch.</param>
-/// <param name="Problem">Why nothing was launched.</param>
+/// <param name="Problem">Why start was refused or failed, when reported.</param>
 public sealed record RunResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, JsonElement? Cap = null, string? Workspace = null, Problem? Problem = null);
 
 /// <summary>What asking a run to stop observed: the stop's facts, the furthest one its state.</summary>

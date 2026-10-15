@@ -39,7 +39,7 @@ public sealed class CodexLauncher : IAgentLauncher
         "implemented",
         ["verify-goals", "launch", "observe-usage"],
         [
-            "Runs codex exec --json --cd <workspace> --sandbox workspace-write -c mcp_servers.vericairn.command=... -c mcp_servers.vericairn.args=[...] \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
+            "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a complete vericairn-only MCP table override \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Needs Codex's goals feature: before a run is recorded it reads codex features list, and refuses, saying why, when goals is not enabled or its state cannot be read.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",

@@ -28,10 +28,11 @@ public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTim
 /// <summary>
 /// The worker's supervision of one harness process (the estate's design/goals.md § 7, steps 4 and 6). It observes the process at
 /// every heartbeat, reads its output through its launcher for usage and for an acknowledged stop, and settles nothing itself: only
-/// the process's exit ends the supervision, so output that closes or a connection that is lost is not a stopped run. A stop asked of
+/// the whole boundary's observed exit ends supervision, so output that closes or a connection lost is not a stopped run. A stop asked of
 /// the run is transmitted once (the stop file the harness is told of, and SIGTERM on Linux and macOS); if the harness has not
-/// stopped within the grace period, the stop is escalated by killing its process tree; containment is the exit observed. The run's
-/// cap of wall minutes, and of tokens when the harness reports them, is enforced the same way, with the worker as the stop's author.
+/// stopped within the grace period, escalation terminates its launch boundary and is retried after failure. Containment requires
+/// observing the whole boundary exited. Operational wall, token and currency thresholds leave headroom below the reserved soft
+/// accounting caps, with the worker as the stop's author; stdout silence raises attention at one stall limit and stops at two.
 /// </summary>
 public sealed class RunSupervisor
 {
@@ -440,7 +441,7 @@ public sealed class RunSupervisor
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            // The output closed; only the process's exit ends the run.
+            // Output closure proves no exit; the whole launch boundary must be observed exited.
         }
     }
 
