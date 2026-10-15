@@ -42,7 +42,7 @@ release and pins the one it runs on.
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `release`, `sources`, `check`,
-  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `decisions`, `doctor`, `version`; a client of
+  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `doctor`, `version`; a client of
   the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records alone, the same on every machine: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
@@ -55,16 +55,28 @@ release and pins the one it runs on.
   `vericairn.worker/1`): through Claude Code's or Codex's own `/goal`, or a generic launch, in a git worktree on
   a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
   after, unknown usage charged at the cap, a stop's facts kept apart, and nothing launched while an operator's
-  or the sponsor's key on the machine signs without presence. There is no conductor yet: people choose a
-  goal's next step, and the worker or a person carries it.
+  or the sponsor's key on the machine signs without presence, unless the sponsor recorded a custody exception for
+  the goal, with its reason and its expiry. `vericairn goal next` routes a goal's eligible steps by
+  its roster from the machine it runs on: each reaches the first available principal of its role, an agent where a
+  launcher for its harness, its admitted key and the goal's budget allow and a person where needed, while a reserved
+  action reaches only a person who holds it or an agent under a grant in force; when none is available the sponsor is
+  asked, never another contributor. `vericairn ask` shows what waits on a principal: its open asks, at most three
+  at a time with the recommendation first and the consequence of leaving each unanswered, which a decision of the
+  principal asked answers and waiting never does. `vericairn goal step` takes a goal's next step, one at a time, the
+  smallest form of Community's conductor, for an operator, the goal's sponsor or a principal holding
+  `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
+  a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
+  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Pro's
+  program plans and schedules many steps.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over
   the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
   `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
-  the runtime: home with attention and the progress report, products, work orders, assignments, results, review and decisions,
-  releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
+  the runtime: home with attention, the asks waiting among it, and the progress report, products, work orders, assignments,
+  results, review and decisions, goals, releases, living documents and the runtime, documented in
+  [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record
   references and its manifest from the build, and refuses a set that disagrees with the build. The release

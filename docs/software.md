@@ -229,8 +229,19 @@ its owner's presence: a file, keychain, secret-service or CNG key, or a key whos
 where presence cannot be enforced. Every such device counts, admitted, revoked or not yet admitted, since a revoked key
 still signs records dated before its revocation, and the refusal names each device, its custody and the user. The agent's
 own key is not one of them. Rotate the key into the Secure Enclave with presence (`vericairn devices rotate <device>
---custody secure-enclave --presence`), or run the worker as an operating-system user that cannot read it. Recorded
-exceptions, and dispatch, are GOAL-04's.
+--custody secure-enclave --presence`), or run the worker as an operating-system user that cannot read it. Or the goal's
+sponsor records an exception for the goal: `vericairn goal custody-exception <goal> --by <sponsor> --reason <why>
+--expires <time>` writes a `custody-exception` record, with its reason and its expiry, about the goal's current revision,
+which only the sponsor, or an operator for a goal an agent sponsors, may record. While it is in force the guard lets the
+run launch unattended: the run's intent names the exception in its target and its evidence names the devices it lifted,
+the response says so, and `vericairn goal next` shows it on every agent's route where the refusal would be. A revised goal
+needs a fresh exception. The guard judges the run before its workspace is prepared and again, against the records and
+the keys as they are then, when its intent is recorded: an exception revised or expired meanwhile lifts nothing, and the
+intent names the one in force at that moment. The records judge that name as of the intent, so a run stays valid when its
+exception is revised or expires afterwards, and one naming an exception already revised before it is refused. The guard
+judges once more immediately before the launch, under the runtime's gate, so nothing changes between that judgment and
+the start: an exception that lapsed after the intent, or a key of an operator or of the sponsor that arrived here, launches
+nothing, and the run is recorded `canceled` before dispatch, naming the devices and the exception, never charged.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
@@ -240,6 +251,43 @@ file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to the harn
 named) has passed, the worker kills its process tree; containment is its exit, observed. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
 and the run stays in flight.
+
+**One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
+([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
+none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts
+nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>] [--setting name=value]...
+[--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
+Community's conductor, one step in sequence; Pro's program plans and schedules many. The goal must be active, and the
+principal an operator, the goal's sponsor when the sponsor is a person, or a principal holding `local-engineering`, which
+is how the builder dispatches agents under the operator's authority; an agent that sponsors a goal takes its steps only
+under `local-engineering`, like any agent, since an operator decides for that goal. A person who sponsors a goal assigns
+its steps and records its agents' runs under the goal's activation, without `local-engineering`. An agent's step goes on
+with the assignment that holds it; when none does, routing signs an assignment to the agent, with a brief made from the
+work order and the goal (its scope, deliverables and exit question, the goal's constraints, and every reserved action
+prohibited unless a grant in force covers it, with the grant that lets the agent carry a reserved step named apart), and
+stores it only with the run's intent, after the worker's whole preflight, the two judged together, their content checks
+included, before either is stored. The store is not atomic, so the runtime writes a journal of the pair on its machine
+first, and routing marks the assignment `routedWith: run`: an assignment whose run's intent was never stored holds nothing
+of its step, a step is never held by half a pair, and `vericairn reconcile` reports the pair as `batch.incomplete`, naming
+what was stored, until the step is held again or is no longer planned; nothing stored is removed. The run starts through
+the worker with the launcher routing chose and the settings given, all as `worker run` does, the custody precondition
+included; without `--detach` the command follows the run until it settles. Every refusal before the intent records
+nothing, routing's assignment included: no repository or an unknown one, a cap under one wall minute, a setting the
+launcher does not take, the custody guard with no exception in force, the budget, the launcher's verification, or the
+workspace's preparation. A harness that cannot start once the intent is recorded leaves the assignment and the run,
+recorded as a known failure that spent nothing. A person's step is assigned to the person and asked of them, the two
+judged and stored together in the same way, the ask naming the assignment, which is marked `routedWith: ask` and holds
+nothing without it; a reserved action routed to a person who holds it likewise; and a step no principal is available for
+is asked of who decides for the goal, with the recommendation that fits why, and assigned to no one. With every eligible
+step held, the command says what holds each and records nothing. It activates, funds, accepts and answers nothing.
+
+**A hand-over.** `vericairn work takeover <assignment> --by <principal> [--contributor <person>] [--note <text>]` hands a
+step an agent holds over to a person: a new assignment of the work order to the person, the hand-over record, carries the
+agent's brief and names the agent's assignment among its sources, and from then on holds the step. Every run of the
+agent's assignment still in flight is asked to stop. A step the agent no longer holds, or whose work order is accepted or
+retired, is not taken over, and a step goes over to a person only. The hand-over is recorded by a person too: the one
+taking the step over, the sponsor of a goal the step belongs to, or an operator. An agent never records one, whatever
+scope it holds, and the records refuse an assignment that takes a step over from an agent when anyone else wrote it.
 
 `vericairn worker runs` lists every run with its cap, its usage once settled, what it is charged and its stop's facts, and
 the ledger of every goal with a run or active now: each unit's budget, spend and remainder, the runs in flight, and why a

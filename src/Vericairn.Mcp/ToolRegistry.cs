@@ -127,6 +127,13 @@ public sealed class ToolRegistry
                 (api, a) => OptionalArg(a, "goal") is string id ? api.Goal(id) is GoalResponse goal ? new ToolCallResult(goal.Json.GetRawText(), false) : NotFound("goal", id) : Json(api.Goals())),
             Read("goal_progress", "A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records.", Arguments(("goal", "Goal record id (ULID), any revision.")), "goal",
                 (api, a) => api.Goal(Arg(a, "goal")) is GoalResponse goal ? new ToolCallResult(goal.Text, false) : NotFound("goal", Arg(a, "goal"))),
+            Read("asks_list", "What waits on a principal, or on every principal when none is named: the asks still open or notified, oldest first, at most three in one delivery to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order. As text, or as the canonical JSON when form is json. Reading them answers nothing: an ask is answered by a decision of the principal it is put to, which no tool records.", Arguments(("to", "The principal asked (ULID); omitted, every principal."), ("form", "text (the default) or json.")),
+                (api, a) => OptionalArg(a, "form") switch
+                {
+                    null or "text" => new ToolCallResult(api.Asks(OptionalArg(a, "to")).Text, false),
+                    "json" => new ToolCallResult(api.Asks(OptionalArg(a, "to")).Json.GetRawText(), false),
+                    string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                }),
             Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 (api, a) => Outcome(api.Attempt(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note"))))),

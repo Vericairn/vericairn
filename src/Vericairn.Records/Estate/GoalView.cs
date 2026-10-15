@@ -231,6 +231,15 @@ public static class GoalView
                 ["outcome"] = EstateModel.BodyString(view.Evaluation, "outcome"),
                 ["summary"] = EstateModel.BodyString(view.Evaluation, "summary"),
             },
+            ["evaluations"] = new JsonArray(GoalRules.Evaluations(model, goal).Select(e => (JsonNode)new JsonObject
+            {
+                ["id"] = e.Id,
+                ["by"] = e.By,
+                ["byName"] = PrincipalName(model, e.By),
+                ["at"] = e.At,
+                ["outcome"] = EstateModel.BodyString(e, "outcome"),
+                ["summary"] = EstateModel.BodyString(e, "summary"),
+            }).ToArray()),
             ["steps"] = new JsonArray(view.Steps.Select(s => (JsonNode)new JsonObject
             {
                 ["key"] = s.Key,

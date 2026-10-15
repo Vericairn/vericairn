@@ -48,6 +48,7 @@ public sealed class ShellViewModel : Observable
         [
             new("Home", "What needs me? What changed?"),
             new("Work", "Who is doing what, with what permission?"),
+            new("Goals", "What are we carrying out, and what waits on whom?"),
             new("Products", "What are we building and why?"),
             new("Releases", "What is ready, delivered, running or still owed?"),
             new("Runtime", "Is the daemon serving this estate, and how do I start or stop it?"),
@@ -254,7 +255,10 @@ public sealed class ShellViewModel : Observable
             string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
             estate = EstateView.From(response, now);
             Freshness = $"current as of {now}";
-            Replace(Attention, estate.Attention);
+
+            // The asks a delivery carries come first among the decisions needed: each with its recommendation, at most three a principal.
+            AsksResponse? asks = Try(() => connection.Api.Asks());
+            Replace(Attention, [.. AskAttention.From(asks?.Json ?? default, now), .. estate.Attention]);
             FillProgress(Try(() => connection.Api.Progress()));
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
@@ -272,6 +276,11 @@ public sealed class ShellViewModel : Observable
             foreach (RuntimeDocument page in Documents.OfType<RuntimeDocument>().ToList())
             {
                 FillRuntime(page);
+            }
+
+            foreach (GoalsWorkspace page in Documents.OfType<GoalsWorkspace>().ToList())
+            {
+                page.Fill();
             }
             IReadOnlyList<DeviceRow> devices = connection.Api.Devices();
             List<DeviceRow> held = devices.Where(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -294,7 +303,7 @@ public sealed class ShellViewModel : Observable
             }
 
             DescribeActing();
-            Status = $"{estate.Name}: {estate.Records} records, {estate.Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
+            Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
             ShowRegion(SelectedRegion);
@@ -521,6 +530,20 @@ public sealed class ShellViewModel : Observable
         }
     }
 
+    /// <summary>
+    /// Opens or refreshes the Goals workspace, showing the goal named or the one shown before: its objective, its conditions with their
+    /// verdicts, its plan and steps with the principal each reaches, spend against its budget, its asks and its evaluations. It shows;
+    /// it activates, accepts, funds and answers nothing.
+    /// </summary>
+    public GoalsWorkspace OpenGoals(string? goal = null)
+    {
+        GoalsWorkspace page = Documents.OfType<GoalsWorkspace>().FirstOrDefault() ?? new GoalsWorkspace(() => connection?.Api);
+        page.Fill(goal);
+        Open(page);
+        Inspector = "The Goals workspace: each goal's objective, conditions, steps and the principal each reaches from the runtime's machine, spend, asks and evaluations. Activation, acceptance, funding and answers are the sponsor's or an operator's, through the command line. F5 refreshes it.";
+        return page;
+    }
+
     /// <summary>Opens or refreshes the Documents page: the declared living documents with their state and a review of one.</summary>
     public LivingDocumentsWorkspace OpenLivingDocuments()
     {
@@ -628,6 +651,21 @@ public sealed class ShellViewModel : Observable
         if (item.SubjectType == "work-order" && item.SubjectId is not null)
         {
             OpenWorkOrder(item.SubjectId);
+        }
+        else if (item.SubjectType == "ask" && item.SubjectId is not null)
+        {
+            // An ask opens in the Goals workspace of its goal, where its recommendation sits beside the steps it holds; one with no goal opens as its record.
+            IReadOnlyList<RecordResponse> asks = Try(() => connection?.Api?.Record(item.SubjectId) is RecordResponse record ? [record] : (IReadOnlyList<RecordResponse>)[]) ?? [];
+            string? goal = asks.Count == 1 && asks[0].Envelope.TryGetProperty("body", out JsonElement body) ? Str(body, "goal") : null;
+            if (goal is not null)
+            {
+                OpenGoals(goal);
+                Inspect(item);
+            }
+            else
+            {
+                OpenRecord(item.SubjectId);
+            }
         }
         else if (item.SubjectType == "result" && item.SubjectId is not null)
         {
@@ -913,6 +951,9 @@ public sealed class ShellViewModel : Observable
                 break;
             case "Work":
                 Open(new TextDocument("Work", WorkOrders.Count == 0 ? "No work orders." : string.Join("\n", WorkOrders.Select(w => $"{w.Key,-14} {w.StatusLabel,-48} {w.Kind,-10} {w.Title}")) + "\n\nAssignments:\n" + string.Join("\n", Assignments.Select(a => $"{a.Key,-14} {a.ContributorName ?? a.Contributor,-20} attempts {a.Attempts}  {a.Outcome}, {a.StateLabel}")) + "\n\nOpen a work order by its key with Ctrl+G; the result inbox is Ctrl+I.", "work"));
+                break;
+            case "Goals":
+                OpenGoals();
                 break;
             case "Products":
                 OpenProducts();

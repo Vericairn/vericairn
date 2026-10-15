@@ -325,7 +325,7 @@ public static class ProgressReport
         List<Planned> eligible = report.Planned.Where(p => p.Item.Eligible).ToList();
         List<Planned> held = report.Planned.Where(p => !p.Item.Eligible).ToList();
         text.Append("\nThe next eligible work: ").Append(eligible.Count.ToString(CultureInfo.InvariantCulture)).Append(" of ").Append(Count(report.Planned.Count, "planned work order")).Append('\n');
-        text.Append("  Planned work orders whose after work orders are all accepted and whose blockedBy holds nothing open; routing by roster and budget is GOAL-04's.\n");
+        text.Append("  Planned work orders whose after work orders are all accepted and whose blockedBy holds nothing open; vericairn goal next routes a goal's eligible steps by its roster and budget, from the machine it runs on.\n");
         int width = KeyWidth(report.Planned.Select(p => p.Line));
         foreach (Planned planned in eligible)
         {

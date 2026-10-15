@@ -81,11 +81,34 @@ public interface IEstateApi
     /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
     WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
 
+    /// <summary>
+    /// What waits on a principal, or on every principal when none is named: the asks still open or notified, at most three in one
+    /// delivery to each with the recommendation first, the rest waiting in order. Reading it answers nothing; an ask is answered by a
+    /// decision of the principal it is put to.
+    /// </summary>
+    AsksResponse Asks(string? principal = null);
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 
     /// <summary>A goal by the id of any of its revisions, with each condition's verdict, its evaluation and its steps; null when no goal has that id.</summary>
     GoalResponse? Goal(string id);
+
+    /// <summary>
+    /// A goal's steps routed from the runtime's machine, by the id of any of the goal's revisions: each eligible step with the principal
+    /// its roster reaches, or why none is available, and whether the goal's budget allows it; null when no goal has that id. Read-only.
+    /// </summary>
+    NextResponse? GoalNext(string goal);
+
+    /// <summary>
+    /// Takes a goal's next step, one at a time: its first eligible step whose route acts, routed from the runtime's machine. An agent's
+    /// step starts its run through the worker, within the custody precondition; a person's is assigned and asked; one no principal is
+    /// available for is asked of the sponsor. It activates, funds, accepts and answers nothing.
+    /// </summary>
+    GoalStepResponse GoalStep(string goal, GoalStepRequest request);
+
+    /// <summary>Hands a step an agent holds over to a person: a new assignment carrying the agent's brief and naming its assignment, and a stop asked of the agent's runs in flight.</summary>
+    TakeoverResponse WorkTakeover(TakeoverRequest request);
 
     /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);

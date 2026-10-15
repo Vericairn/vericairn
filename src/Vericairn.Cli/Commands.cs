@@ -70,6 +70,19 @@ internal static class Commands
         return progress.HasErrors ? HasErrors : Clean;
     });
 
+    /// <summary>What waits on a principal, or on every principal, through the API: at most three asks in one delivery to each, the recommendation first.</summary>
+    public static int Ask(string root, string? to, bool json) => WithApi(root, api =>
+    {
+        if (to is not null && !Records.Identity.Ulid.IsValid(to))
+        {
+            return Fail($"--to names a principal by its ULID, not '{to}'.");
+        }
+
+        AsksResponse asks = api.Asks(to);
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(asks.Json) : asks.Text);
+        return Clean;
+    });
+
     public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
         WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
 
@@ -112,28 +125,10 @@ internal static class Commands
     /// <summary>The current goal condition by condition: the one named, or the one goal neither achieved nor ended; with none or several, the list.</summary>
     public static int Goal(string root, string? id, bool json) => WithApi(root, api =>
     {
+        id ??= OpenGoal(api, json);
         if (id is null)
         {
-            IReadOnlyList<GoalRow> rows = api.Goals();
-            List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
-            if (open.Count != 1)
-            {
-                if (json)
-                {
-                    Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-                    return Clean;
-                }
-
-                Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
-                foreach (GoalRow row in rows)
-                {
-                    Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
-                }
-
-                return Clean;
-            }
-
-            id = open[0].Id;
+            return Clean;
         }
 
         GoalResponse? goal = api.Goal(id);
@@ -145,6 +140,53 @@ internal static class Commands
         Console.Out.Write(json ? CanonicalJson.SerializePretty(goal.Json) : goal.Text);
         return Clean;
     });
+
+    /// <summary>
+    /// A goal's next steps routed from the runtime's machine: the one named, or the one goal neither achieved nor ended; with none or
+    /// several, the list. It records and starts nothing.
+    /// </summary>
+    public static int GoalNext(string root, string? id, bool json) => WithApi(root, api =>
+    {
+        id ??= OpenGoal(api, json);
+        if (id is null)
+        {
+            return Clean;
+        }
+
+        NextResponse? next = api.GoalNext(id);
+        if (next is null)
+        {
+            return Fail($"No goal has id {id}.");
+        }
+
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(next.Json) : next.Text);
+        return Clean;
+    });
+
+    /// <summary>The one goal neither achieved nor ended; with none or several, prints the goals and returns null.</summary>
+    private static string? OpenGoal(IEstateApi api, bool json)
+    {
+        IReadOnlyList<GoalRow> rows = api.Goals();
+        List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
+        if (open.Count == 1)
+        {
+            return open[0].Id;
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+            return null;
+        }
+
+        Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
+        foreach (GoalRow row in rows)
+        {
+            Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
+        }
+
+        return null;
+    }
 
     /// <summary>What <c>vericairn goal propose</c> was given.</summary>
     internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string? Delegate, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);
@@ -286,6 +328,25 @@ internal static class Commands
         return WithApi(root, api => ReportOutcome(api.GoalEvaluate(goal, new GoalEvaluateRequest(by, summary, list)), json));
     }
 
+    /// <summary>Records the sponsor's custody exception for a goal's current revision, with its reason and its expiry.</summary>
+    public static int GoalCustodyException(string root, string goal, string by, string reason, string expires, bool json) => WithApi(root, api =>
+    {
+        if (!RecordParser.IsTimestamp(expires))
+        {
+            return Fail($"--expires is a time such as 2026-10-20T00:00:00Z, not '{expires}'.");
+        }
+
+        GoalResponse? shown = api.Goal(goal);
+        if (shown is null)
+        {
+            return Fail($"No goal has id {goal}.");
+        }
+
+        JsonElement current = shown.Json.GetProperty("goal");
+        var body = new Json.JsonObject { ["reason"] = reason, ["expires"] = expires };
+        return ReportOutcome(api.NewRecord(new NewRecordRequest("custody-exception", by, Element(body), $"goal:{current.GetProperty("id").GetString()}:{current.GetProperty("hash").GetString()}")), json);
+    });
+
     /// <summary>Accepts a goal at its current revision, relying on its current evaluation.</summary>
     public static int GoalAccept(string root, string goal, string by, string statement, bool json) =>
         WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
@@ -369,55 +430,146 @@ internal static class Commands
                 return Clean;
             }
 
-            // The run is observed by the runtime; this waits for its settlement, and a Ctrl+C asks for its stop rather than abandoning it.
-            int stopping = 0;
-            void Interrupt(object? sender, ConsoleCancelEventArgs e)
+            RunRow? row = Follow(api, started.Run, options.By);
+            if (json)
             {
-                e.Cancel = true;
-                if (Interlocked.Exchange(ref stopping, 1) == 0)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => api.RunStop(started.Run, new RunStopRequest(options.By, "interrupted at the command line")));
-                }
+                Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
+            }
+            else
+            {
+                PrintSettled(row);
             }
 
-            Console.CancelKeyPress += Interrupt;
-            try
-            {
-                RunRow? row = null;
-                int unobserved = 0;
-                while (unobserved < 5)
-                {
-                    Thread.Sleep(1000);
-                    row = api.Runs().Runs.FirstOrDefault(r => r.Run == started.Run);
-                    if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
-                    {
-                        break;
-                    }
-
-                    unobserved = row.Observed ? 0 : unobserved + 1;
-                }
-
-                if (json)
-                {
-                    Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
-                }
-                else if (row is not null)
-                {
-                    PrintRun(row);
-                    if (row.Status is "dispatched" or "not-started" or "uncertain")
-                    {
-                        Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
-                    }
-                }
-
-                return row?.Status == "observed-success" ? Clean : HasErrors;
-            }
-            finally
-            {
-                Console.CancelKeyPress -= Interrupt;
-            }
+            return row?.Status == "observed-success" ? Clean : HasErrors;
         });
     }
+
+    /// <summary>
+    /// Waits in the foreground until a run settles, or no worker observes it any longer, and returns its row; a Ctrl+C asks for its stop
+    /// rather than abandoning it. The run is observed by the runtime, never by this wait.
+    /// </summary>
+    private static RunRow? Follow(IEstateApi api, string run, string by)
+    {
+        int stopping = 0;
+        void Interrupt(object? sender, ConsoleCancelEventArgs e)
+        {
+            e.Cancel = true;
+            if (Interlocked.Exchange(ref stopping, 1) == 0)
+            {
+                ThreadPool.QueueUserWorkItem(_ => api.RunStop(run, new RunStopRequest(by, "interrupted at the command line")));
+            }
+        }
+
+        Console.CancelKeyPress += Interrupt;
+        try
+        {
+            RunRow? row = null;
+            int unobserved = 0;
+            while (unobserved < 5)
+            {
+                Thread.Sleep(1000);
+                row = api.Runs().Runs.FirstOrDefault(r => r.Run == run);
+                if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
+                {
+                    break;
+                }
+
+                unobserved = row.Observed ? 0 : unobserved + 1;
+            }
+
+            return row;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= Interrupt;
+        }
+    }
+
+    /// <summary>Prints a followed run as it ended, or as it was last observed.</summary>
+    private static void PrintSettled(RunRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        PrintRun(row);
+        if (row.Status is "dispatched" or "not-started" or "uncertain")
+        {
+            Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
+        }
+    }
+
+    /// <summary>What <c>vericairn goal step</c> was given.</summary>
+    internal sealed record GoalStepOptions(string? Goal, string By, string? Repository, string[] Settings, long? WallMinutes, string? Branch, string? Base, bool Detach);
+
+    /// <summary>
+    /// Takes a goal's next step, one at a time: an agent's run starts and, without --detach, is followed until it settles; a person's step
+    /// is assigned and asked; a step no principal is available for is asked of the sponsor.
+    /// </summary>
+    public static int GoalStep(string root, GoalStepOptions options, bool json)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
+        if (settings is null)
+        {
+            return Fail(problem!);
+        }
+
+        return WithApi(root, api =>
+        {
+            if (options.Detach && api is not VericairnClient)
+            {
+                return Fail("--detach leaves an agent's run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or take the step in the foreground.");
+            }
+
+            string? goal = options.Goal ?? OpenGoal(api, json);
+            if (goal is null)
+            {
+                return Clean;
+            }
+
+            GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base));
+            if (!step.Ok)
+            {
+                return step.Run?.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(step.Message);
+            }
+
+            RunRow? row = step.Outcome == "run" && !options.Detach ? Follow(api, step.Run!.Run, options.By) : null;
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { step, settled = row }, ProtocolJson.Options));
+            }
+            else
+            {
+                Console.Out.WriteLine(step.Step is null ? $"goal {step.Goal}  {step.Outcome}" : $"step {step.Step}  {step.Route}  {step.Outcome}{(step.Principal is null ? string.Empty : "  " + step.Principal)}");
+                Console.Out.WriteLine("  " + step.Message);
+                PrintSettled(row);
+            }
+
+            return step.Outcome != "run" || options.Detach || row?.Status == "observed-success" ? Clean : HasErrors;
+        });
+    }
+
+    /// <summary>Hands a step an agent holds over to a person, and prints the stops asked of the agent's runs in flight.</summary>
+    public static int WorkTakeover(string root, string assignment, string by, string? contributor, string? note, bool json) => WithApi(root, api =>
+    {
+        TakeoverResponse taken = api.WorkTakeover(new TakeoverRequest(assignment, by, contributor, note));
+        if (!taken.Ok)
+        {
+            return taken.Problem is { Code: "rejected", Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(taken.Message);
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(taken, ProtocolJson.Options));
+            return Clean;
+        }
+
+        Console.Out.WriteLine($"{taken.Assignment!.Path}  {taken.Assignment.Id}  {taken.Assignment.Hash}");
+        Console.Out.WriteLine("  " + taken.Message);
+        return Clean;
+    });
 
     /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
     public static int WorkerStop(string root, string run, string by, string? reason, int? grace, bool json) => WithApi(root, api =>
@@ -1172,7 +1324,11 @@ internal static class Commands
                 Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
             }
 
-            Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+            // A batch stopped part-way says in its own words what settles it; divergent revisions are settled by a reconciliation.
+            if (tasks.Any(t => t.Code != "batch.incomplete"))
+            {
+                Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+            }
         }
 
         return tasks.Count == 0 ? Clean : HasErrors;

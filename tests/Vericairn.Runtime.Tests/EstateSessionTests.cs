@@ -45,7 +45,7 @@ public class EstateSessionTests
         Assert.False(File.Exists(Path.Combine(estate.Root, status.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
         Assert.False(session.Live.Has(status.RelativePath));
         Assert.Equal("file", session.Objects.Kind);
-        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(estate.Root), e => Path.GetFileName(e) == ".vericairn" || e.EndsWith(".db", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(estate.Root), e => e.EndsWith(".db", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -72,6 +72,24 @@ public class EstateSessionTests
             Assert.Throws<IOException>(() => session.Write(prepared.Estate));
             Assert.Equal(["estate"], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName).ToArray());
             Assert.False(EstateChecks.Run(model).HasErrors);
+
+            // Local-only roots refer to one canonical store, so they also share its batch journals.
+            string alias = root + "-alias";
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(alias, "estate"));
+                File.WriteAllBytes(Path.Combine(alias, EstateLayout.ManifestPath), prepared.ManifestBytes);
+                using EstateSession other = EstateSession.Open(alias);
+                Assert.Equal(BatchJournal.Directory(session), BatchJournal.Directory(other));
+                BatchJournal journal = BatchJournal.Begin(session, "Local-only storage identity", null, [prepared.Operator]);
+                Assert.Equal(journal.Id, Assert.Single(BatchJournal.All(other)).Id);
+                journal.Close();
+                Assert.Empty(BatchJournal.All(session));
+            }
+            finally
+            {
+                Directory.Delete(alias, recursive: true);
+            }
         }
         finally
         {

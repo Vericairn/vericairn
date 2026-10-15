@@ -113,10 +113,13 @@ public static class RecordAuthor
     }
 
     /// <summary>Writes a new record file; never overwrites.</summary>
-    public static string Write(string root, AuthoredRecord record)
+    public static string Write(string root, AuthoredRecord record) => Write(root, record, File.WriteAllBytes);
+
+    internal static string Write(string root, AuthoredRecord record, Action<string, byte[]> writeTemporary)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(record);
+        ArgumentNullException.ThrowIfNull(writeTemporary);
         string full = Path.Combine(root, record.RelativePath.Replace('/', Path.DirectorySeparatorChar));
         if (File.Exists(full))
         {
@@ -124,9 +127,33 @@ public static class RecordAuthor
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        string temporary = full + ".tmp";
-        File.WriteAllBytes(temporary, record.Bytes);
-        File.Move(temporary, full, overwrite: false);
-        return full;
+        // Keep unpublished bytes on the same filesystem for rename, outside the records the loader and checks read.
+        // The directory ignores itself even in estates whose root .gitignore does not yet name .vericairn/.
+        string staging = Path.Combine(root, ".vericairn", "record-staging");
+        Directory.CreateDirectory(staging);
+        string ignore = Path.Combine(staging, ".gitignore");
+        if (!File.Exists(ignore))
+        {
+            File.WriteAllText(ignore, "*\n");
+        }
+
+        string temporary = Path.Combine(staging, Ulid.NewUlid().Value + ".tmp");
+        try
+        {
+            writeTemporary(temporary, record.Bytes);
+            File.Move(temporary, full, overwrite: false);
+            return full;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Residue after a failed cleanup or process termination stays ignored, never a published record.
+            }
+        }
     }
 }
