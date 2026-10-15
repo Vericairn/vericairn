@@ -144,6 +144,8 @@ internal static class FakeHarness
                 return 0;
             case not null when scenario.StartsWith("mcp:", StringComparison.Ordinal):
                 return Mcp(scenario["mcp:".Length..], arguments);
+            case "mcp":
+                return Mcp(null, arguments);
             default:
                 Console.Error.WriteLine($"stand-in harness: no scenario {scenario} for {string.Join(' ', arguments)}");
                 return 64;
@@ -152,12 +154,22 @@ internal static class FakeHarness
 
     /// <summary>
     /// Does what a coding agent does with the worker's MCP configuration: starts the server it names, records an attempt on the
-    /// assignment and then its result through the server's tools, and reports done the way Claude Code's stream does.
+    /// assignment and then its result through the server's tools, and reports done the way Claude Code's stream does. Without an
+    /// assignment named, it takes the latest one of its own principal from the brief the worker exported, as an agent reads its brief.
     /// </summary>
-    private static int Mcp(string assignment, string[] arguments)
+    private static int Mcp(string? assignment, string[] arguments)
     {
         string configuration = arguments[Array.IndexOf(arguments, "--mcp-config") + 1];
         JsonObject server = JsonNode.Parse(File.ReadAllText(configuration))!["mcpServers"]!["vericairn"]!.AsObject();
+        if (assignment is null)
+        {
+            List<string> args = server["args"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+            string agent = args[args.IndexOf("--as") + 1];
+            string brief = File.ReadAllText(Environment.GetEnvironmentVariable("VERICAIRN_BRIEF") ?? throw new IOException("No brief was exported."));
+            assignment = System.Text.RegularExpressions.Regex.Matches(brief, @"^## Assignment (?<id>[0-9A-Z]{26}) to .* \((?<to>[0-9A-Z]{26})\)$", System.Text.RegularExpressions.RegexOptions.Multiline)
+                .Where(m => m.Groups["to"].Value == agent).Select(m => m.Groups["id"].Value).LastOrDefault() ?? throw new IOException("The brief names no assignment of " + agent + ".");
+        }
+
         var info = new ProcessStartInfo(server["command"]!.GetValue<string>()) { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (JsonNode? argument in server["args"]!.AsArray())
         {
