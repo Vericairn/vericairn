@@ -317,7 +317,8 @@ public sealed class EstateService : IEstateApi, IDisposable
                     admission is null ? "not admitted" : EstateModel.BodyString(admission, "status") ?? "?",
                     stores.Any(s => s.Has(identity)),
                     EstateModel.BodyString(device, "presence"),
-                    EstateModel.BodyString(device, "purpose"));
+                    EstateModel.BodyString(device, "purpose"),
+                    ProfilesOf(device));
             }).ToList();
         }
     }
@@ -378,22 +379,7 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
 
             IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles : ["embedded"];
-            var body = new JsonObject
-            {
-                ["principal"] = request.Principal,
-                ["name"] = request.Name,
-                ["platform"] = VericairnHome.Platform(),
-                ["custody"] = store.Kind,
-                ["algorithm"] = RecordSigning.Algorithm,
-                ["publicKey"] = RecordSigning.EncodePublicKey(publicKey),
-                ["profiles"] = new JsonArray(profiles.Select(p => (JsonNode)p).ToArray()),
-            };
-            if (format >= 2)
-            {
-                body["presence"] = presence ? "required" : "none";
-                body["purpose"] = "signing";
-            }
-
+            JsonObject body = DeviceRecords.Body(request.Principal, request.Name, VericairnHome.Platform(), store.Kind, RecordSigning.EncodePublicKey(publicKey), profiles, format, presence ? "required" : "none");
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), model, [new StoreSigner(store, id)]);
             if (!outcome.Ok)
@@ -1854,6 +1840,153 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>
+    /// A device as request authentication sees it now, by the id of any of its records: its identity, principal, current key,
+    /// permitted profiles and admission (admitted, revoked or not admitted); null when the id names no device. Read afresh from
+    /// the records on every call, so a revocation counts from the next request on.
+    /// </summary>
+    public DeviceStanding? Standing(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (!model.ById.TryGetValue(deviceId, out RecordEnvelope? record) || record.Type != "device")
+            {
+                return null;
+            }
+
+            RecordEnvelope device = model.Latest(record);
+            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+            string state = model.IsCurrent(device) && SignatureChecks.IsAdmitted(model, device) ? "admitted" : admission is not null && EstateModel.BodyString(admission, "status") == "revoked" ? "revoked" : "not admitted";
+            return new DeviceStanding(model.Chain(device)[0], EstateModel.BodyString(device, "principal") ?? string.Empty, EstateModel.BodyString(device, "publicKey") ?? string.Empty, ProfilesOf(device), state);
+        }
+    }
+
+    /// <summary>
+    /// Why a device cannot be paired for a principal under an administrator here, or null when it can: the principal exists, the
+    /// profiles are known, the administrator is the operator or holds the 'administer' scope, and the admission a pairing ends
+    /// with can be signed on this machine as 'devices admit' signs it.
+    /// </summary>
+    public string? PairingRefusal(string principal, string by, IReadOnlyList<string> profiles)
+    {
+        ArgumentNullException.ThrowIfNull(profiles);
+        if (!Ulid.IsValid(principal) || !Ulid.IsValid(by))
+        {
+            return "The principal and the administrator are named by their ids (ULIDs).";
+        }
+
+        if (profiles.Count == 0)
+        {
+            return "A paired device is permitted at least one connectivity profile.";
+        }
+
+        if (profiles.FirstOrDefault(p => Array.IndexOf(DeviceType.Profiles, p) < 0) is string unknown)
+        {
+            return $"Unknown profile '{unknown}'. Known: {string.Join(", ", DeviceType.Profiles)}.";
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (model.CurrentPrincipal(principal) is null)
+            {
+                return $"No principal {principal} in this estate.";
+            }
+
+            if (model.CurrentPrincipal(by) is null)
+            {
+                return $"No principal {by} in this estate.";
+            }
+
+            if (!model.HasRole(by, Roles.Operator) && !model.HasScope(by, Scopes.Administer, DateTimeOffset.UtcNow))
+            {
+                return $"Principal {by} is neither an operator nor holds the 'administer' scope; a device is paired under an administrator's authority.";
+            }
+
+            var admission = new RecordDraft("admission", by, default, new RecordReference("device", Ulid.NewUlid().Value, null));
+            return ResolveSigner(model, admission, out _);
+        }
+    }
+
+    /// <summary>What a pairing for a principal will record, decided when the runtime answers the device: the device record's id and time, its format, and who the principal is.</summary>
+    public PairingPlan PairingPlan(string principal)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            RecordEnvelope? owner = model.CurrentPrincipal(principal);
+            long format = Math.Min(model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat, RecordFormats.Current);
+            return new PairingPlan(
+                Ulid.NewUlid(now).Value,
+                RecordParser.FormatTimestamp(now),
+                format,
+                session.Manifest.Estate,
+                model.CurrentEstate is RecordEnvelope estate ? EstateModel.BodyString(estate, "name") : null,
+                principal,
+                owner is null ? null : EstateModel.BodyString(owner, "name"),
+                owner is null ? "unknown" : EstateModel.BodyString(owner, "kind") ?? "unknown");
+        }
+    }
+
+    /// <summary>
+    /// Records a paired device: its device record exactly as the device signed it, its own key proving possession, and then its
+    /// admission under the administrator, signed by the administrator's admitted device on this machine. When the admission is
+    /// refused the device record is removed again, so a pairing records both or neither.
+    /// </summary>
+    public (WriteOutcome Device, WriteOutcome? Admission) PairDevice(PairingPlan plan, IReadOnlyList<string> profiles, PairingDevice device, string signature, string by, string note)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(profiles);
+        ArgumentNullException.ThrowIfNull(device);
+        if (!RecordSigning.IsPublicKey(device.PublicKey))
+        {
+            return (Refuse("The device presented no usable P-256 public key."), null);
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordDraft draft;
+            string hash;
+            try
+            {
+                JsonObject body = DeviceRecords.Body(plan.Principal, device.Name, device.Platform, device.Custody, device.PublicKey, profiles, plan.Format, device.Presence);
+                draft = DeviceRecords.Draft(plan.Principal, plan.Record, ParseAt(plan.At) ?? DateTimeOffset.UtcNow, plan.Format, body);
+                hash = DeviceRecords.Hash(draft);
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or CanonicalJsonException)
+            {
+                return (Refuse(exception.Message), null);
+            }
+
+            if (!RecordSigning.Verify(device.PublicKey, RecordSigning.Digest(hash), signature))
+            {
+                return (Refuse("The device's signature of its record does not verify with the key it presented; nothing was recorded."), null);
+            }
+
+            var signer = new PresignedSigner(plan.Record, hash, signature);
+            WriteOutcome written = WriteLocked(draft, model, [signer]);
+            if (!written.Ok)
+            {
+                return (written, null);
+            }
+
+            var admission = new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = note };
+            using JsonDocument document = JsonDocument.Parse(admission.ToJsonString());
+            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", by, document.RootElement, new RecordReference("device", plan.Record, written.Written!.Hash)), session.Load());
+            if (!admitted.Ok)
+            {
+                session.Discard(RecordAuthor.Create(draft, [signer]));
+                return (WriteOutcome.Fail(new Problem(admitted.Problem!.Code, $"Nothing was recorded: the device's admission was refused. {admitted.Problem.Message}", admitted.Problem.Findings)), admitted);
+            }
+
+            return (written, admitted);
+        }
+    }
+
     /// <inheritdoc />
     public IReadOnlyList<ReconcileTask> Reconcile()
     {
@@ -2131,6 +2264,41 @@ public sealed class EstateService : IEstateApi, IDisposable
     private static FindingsResponse ToFindings(FindingList findings, string summary) =>
         new(summary, findings.Errors, findings.Warnings, findings.Sorted().Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message)).ToList());
 
+    private static List<string> ProfilesOf(RecordEnvelope device) =>
+        device.Body.TryGetProperty("profiles", out JsonElement profiles) && profiles.ValueKind == JsonValueKind.Array
+            ? profiles.EnumerateArray().Where(p => p.ValueKind == JsonValueKind.String).Select(p => p.GetString()!).ToList()
+            : [];
+
     /// <inheritdoc />
     public void Dispose() => session.Dispose();
+
+    /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>
+    private sealed class PresignedSigner(string deviceId, string hash, string signature) : IRecordSigner
+    {
+        public string DeviceId => deviceId;
+
+        public RecordSignature Sign(ReadOnlySpan<byte> digest) =>
+            digest.SequenceEqual(RecordSigning.Digest(hash))
+                ? new RecordSignature(RecordSigning.Algorithm, deviceId, signature)
+                : throw new InvalidOperationException("The record differs from the one its device signed.");
+    }
 }
+
+/// <summary>A device as request authentication sees it now.</summary>
+/// <param name="Identity">The device's identity: the id of its first record.</param>
+/// <param name="Principal">The principal it acts for.</param>
+/// <param name="PublicKey">Its current public key, base64url SubjectPublicKeyInfo.</param>
+/// <param name="Profiles">The connectivity profiles it is permitted.</param>
+/// <param name="Admission">admitted, revoked or not admitted.</param>
+public sealed record DeviceStanding(string Identity, string Principal, string PublicKey, IReadOnlyList<string> Profiles, string Admission);
+
+/// <summary>What a pairing records for its device, decided when the runtime answers the device's hello.</summary>
+/// <param name="Record">The device record's id, which becomes the device's identity.</param>
+/// <param name="At">The device record's time.</param>
+/// <param name="Format">The record format it is written in.</param>
+/// <param name="Estate">The estate's id.</param>
+/// <param name="EstateName">The estate's name.</param>
+/// <param name="Principal">The principal the device acts for.</param>
+/// <param name="PrincipalName">Its name.</param>
+/// <param name="PrincipalKind">human, agent, service, or unknown.</param>
+public sealed record PairingPlan(string Record, string At, long Format, string Estate, string? EstateName, string Principal, string? PrincipalName, string PrincipalKind);

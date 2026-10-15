@@ -37,6 +37,15 @@ public class PresentationTests
     }
 
     [Fact]
+    public void TheSdksConnectionStatesAreTheStateLanguages()
+    {
+        // A client says what its connection to a runtime is in exactly the words the cohesion contract gives, in their order.
+        List<string> connection = StateLanguage.Vocabularies.Single(v => v.Subject == "connection").States.Select(s => s.Value).ToList();
+        Assert.Equal(connection, Vericairn.Sdk.ConnectionStates.All);
+        Assert.Equal("cached; freshness shown", StateLanguage.Label("connection", Vericairn.Sdk.ConnectionStates.Cached));
+    }
+
+    [Fact]
     public void AttentionIsDerivedFromTheStatusDocumentOnly()
     {
         const string status = """

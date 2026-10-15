@@ -16,12 +16,14 @@ namespace Vericairn.Sdk;
 
 /// <summary>
 /// The typed client of the Vericairn API. Over the local socket (a Unix domain socket or a named pipe) the operating system
-/// identifies the caller; over loopback TLS the client pins the runtime certificate and signs every request with a device key.
-/// It presents, requests and observes; it never evaluates authority.
+/// identifies the caller; over loopback TLS the client pins the runtime certificate and signs every request with a device key; over
+/// the local network a paired device presents a certificate its key issued, has the runtime identity it pinned prove each
+/// connection, and signs every request. It presents, requests and observes; it never evaluates authority.
 /// </summary>
 public sealed class VericairnClient : IEstateApi, IDisposable
 {
     private readonly HttpClient http;
+    private readonly LocalNetworkCredential? credential;
 
     /// <summary>Connects over the local socket of a published endpoint.</summary>
     public VericairnClient(DaemonEndpoint endpoint)
@@ -71,10 +73,26 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = TimeSpan.FromMinutes(5) };
     }
 
+    private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout)
+    {
+        Endpoint = new DaemonEndpoint("local-network", connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
+        Transport = "local-network";
+        credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
+        LocalNetworkCredential own = credential;
+        var handler = new SocketsHttpHandler
+        {
+            ConnectTimeout = timeout ?? TimeSpan.FromSeconds(30),
+            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken),
+        };
+
+        // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP.
+        http = new HttpClient(new SigningHandler(signer, handler), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
+    }
+
     /// <summary>The endpoint this client talks to.</summary>
     public DaemonEndpoint Endpoint { get; }
 
-    /// <summary>unix, pipe or loopback.</summary>
+    /// <summary>unix, pipe, loopback or local-network.</summary>
     public string Transport { get; }
 
     /// <summary>Connects over loopback TLS pinned to the runtime certificate; every request is signed by the device, and an unsigned client is denied.</summary>
@@ -83,6 +101,24 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         ArgumentNullException.ThrowIfNull(endpoint);
         LoopbackEndpoint loopback = endpoint.Loopback ?? throw new InvalidOperationException("The daemon publishes no loopback endpoint.");
         return new VericairnClient(endpoint, loopback, signer);
+    }
+
+    /// <summary>
+    /// Connects to a paired runtime over the local network, from 0.6.0: mutual TLS with a certificate the device's key issued, the
+    /// runtime identity pinned at pairing proving each connection before anything else is sent, and every request device-signed. A
+    /// refusal before any request surfaces as an <see cref="HttpRequestException"/> whose inner <see cref="RuntimeConnectionException"/>
+    /// says denied or unavailable.
+    /// </summary>
+    public static VericairnClient LocalNetwork(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout = null)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        ArgumentNullException.ThrowIfNull(signer);
+        if (!RuntimeConnection.TryParseAddress(connection.Address, out _, out _))
+        {
+            throw new ArgumentException($"'{connection.Address}' is not an address and port.", nameof(connection));
+        }
+
+        return new VericairnClient(connection, signer, timeout);
     }
 
     /// <summary>True when a daemon answers at the endpoint's local socket.</summary>
@@ -258,6 +294,19 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         response.EnsureSuccessStatusCode();
     }
 
+    /// <summary>
+    /// Asks the daemon for a pairing code under an administrator's authority, from 0.6.0: on the runtime's own machine, over the local
+    /// socket or loopback. The code is shown once; a problem when it cannot be issued.
+    /// </summary>
+    public (PairingIssued? Issued, Problem? Problem) IssuePairing(PairingIssueRequest request) => PostOrProblem<PairingIssueRequest, PairingIssued>("/v1/pairings", request);
+
+    /// <summary>The runtime identity's proof for a nonce over this connection's certificate, from 0.6.0; null when the runtime has no identity.</summary>
+    public RuntimeIdentityProof? RuntimeIdentity(string nonce)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(nonce);
+        return Get<RuntimeIdentityProof>(RuntimeIdentityScheme.Path + "?nonce=" + Uri.EscapeDataString(nonce), allowNotFound: true);
+    }
+
     /// <summary>The OpenAPI document the daemon serves.</summary>
     public string OpenApi()
     {
@@ -266,7 +315,11 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public void Dispose() => http.Dispose();
+    public void Dispose()
+    {
+        http.Dispose();
+        credential?.Dispose();
+    }
 
     private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;
 

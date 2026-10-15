@@ -1,0 +1,149 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Vericairn.Protocol;
+using Vericairn.Records.Model;
+using Vericairn.Runtime.Service;
+
+namespace Vericairn.Daemon;
+
+/// <summary>
+/// The routes only a running daemon can serve, from 0.6.0: pairing codes and the pairing exchange, and the runtime identity's
+/// proof. They need the daemon's listeners and memory, so the embedded runtime has none of them.
+/// </summary>
+internal static class DaemonRoutes
+{
+    /// <summary>Maps the daemon's own routes.</summary>
+    public static void Map(WebApplication app, DaemonHost host)
+    {
+        string v = ApiVersion.Prefix;
+        app.MapPost($"{v}/pairings", (PairingIssueRequest request) => Issue(host, request));
+        app.MapPost($"{v}/pairing/hello", (HttpContext context, PairingHello hello) => Hello(host, context, hello));
+        app.MapPost($"{v}/pairing/confirm", (HttpContext context, PairingConfirm confirm) => Confirm(host, context, confirm));
+        app.MapGet(RuntimeIdentityScheme.Path, (HttpContext context, string? nonce) => Prove(host, context, nonce));
+    }
+
+    /// <summary>Issues a pairing code under an administrator's authority, for a principal and the profiles it will be permitted.</summary>
+    private static IResult Issue(DaemonHost host, PairingIssueRequest request)
+    {
+        if (host.Identity is null || host.Endpoint.LocalNetwork is not LocalNetworkEndpoint served)
+        {
+            return Problem(StatusCodes.Status409Conflict, "refused", "This runtime serves no local-network profile, so no device can pair with it: configure an address with 'vericairn runtime configure --local-network <address:port>' and start the runtime again.");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.Principal) || string.IsNullOrWhiteSpace(request.By))
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A pairing code is issued for a principal (principal) by an administrator (by).");
+        }
+
+        IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles.Distinct(StringComparer.Ordinal).ToList() : [RequestAuthenticator.LocalNetworkProfile];
+        if (host.Service.PairingRefusal(request.Principal, request.By, profiles) is string refusal)
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", refusal);
+        }
+
+        (string? code, PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Issue(request.Principal, request.By, profiles);
+        if (code is null || pairing is null)
+        {
+            return Problem(StatusCodes.Status409Conflict, "refused", problem ?? "No pairing code was issued.");
+        }
+
+        string? name = host.Service.PairingPlan(request.Principal).PrincipalName;
+        string address = new IPEndPoint(IPAddress.Parse(served.Host), served.Port).ToString();
+        host.Log($"pairing code {pairing.Handle} issued by {request.By} for {request.Principal} ({string.Join(", ", profiles)}), until {RecordParser.FormatTimestamp(pairing.ExpiresAt)}");
+        return Results.Json(new PairingIssued(PairingProtocol.Display(code), request.Principal, name, profiles, RecordParser.FormatTimestamp(pairing.ExpiresAt), PairingRegistry.Attempts, address, host.Service.Session.Manifest.Estate, host.Identity.Fingerprint), ProtocolJson.Options);
+    }
+
+    /// <summary>Answers a device's hello: who the runtime is, the certificate on this connection and what will be recorded, with the runtime's MAC.</summary>
+    private static IResult Hello(DaemonHost host, HttpContext context, PairingHello hello)
+    {
+        if (!DaemonHost.OnLocalNetwork(context) || host.Identity is null)
+        {
+            return Problem(StatusCodes.Status401Unauthorized, "denied", "Pairing runs over the local-network profile, at the address the administrator gave with the code.");
+        }
+
+        if (hello is null || string.IsNullOrWhiteSpace(hello.Handle) || !PairingProtocol.IsNonce(hello.Nonce))
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A hello names the pairing code's handle and carries a nonce of 32 random bytes in base64url.");
+        }
+
+        (PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Hello(hello);
+        if (pairing is null)
+        {
+            return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
+        }
+
+        PairingPlan plan = host.Service.PairingPlan(pairing.Principal);
+        var challenge = new PairingChallenge(pairing.Handle, hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, host.CertificateOf(context), plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty);
+        challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, challenge) };
+        host.Pairings.Open(pairing, challenge, plan);
+        return Results.Json(challenge, ProtocolJson.Options);
+    }
+
+    /// <summary>Records the device a confirmation presents, when its MAC matches the code and its key signed its record: the device record, then its admission.</summary>
+    private static IResult Confirm(DaemonHost host, HttpContext context, PairingConfirm confirm)
+    {
+        if (!DaemonHost.OnLocalNetwork(context))
+        {
+            return Problem(StatusCodes.Status401Unauthorized, "denied", "Pairing runs over the local-network profile, at the address the administrator gave with the code.");
+        }
+
+        if (confirm is null)
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A confirmation carries the device, its signature of its record and its MAC.");
+        }
+
+        (PairingRegistry.Pairing? pairing, PairingRegistry.Exchange? exchange, string? problem) = host.Pairings.Confirm(confirm);
+        if (pairing is null || exchange is null)
+        {
+            return Problem(StatusCodes.Status401Unauthorized, "denied", problem!);
+        }
+
+        string? device = null;
+        try
+        {
+            string note = $"Paired over the local network with a pairing code {pairing.By} issued at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record.";
+            (WriteOutcome written, WriteOutcome? admitted) = host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.By, note);
+            if (!written.Ok || admitted?.Written is null)
+            {
+                return Results.Json(written.Problem ?? admitted?.Problem, ProtocolJson.Options, statusCode: StatusCodes.Status422UnprocessableEntity);
+            }
+
+            device = written.Written!.Id;
+            var completed = new PairingCompleted(device, admitted.Written.Id, written.Written.Hash, string.Empty);
+            completed = completed with { Mac = PairingProtocol.CompletedMac(pairing.RuntimeKey, exchange.Challenge, confirm, completed) };
+            host.Log($"device {device} ({confirm.Device.Name}, {confirm.Device.Platform}) paired for {pairing.Principal} under {pairing.By} with code {pairing.Handle}");
+            return Results.Json(completed, ProtocolJson.Options);
+        }
+        finally
+        {
+            host.Pairings.Finish(pairing, device);
+        }
+    }
+
+    /// <summary>The runtime identity's proof for a nonce, over the certificate this connection presented; written with its length, for a client that reads it before any other request.</summary>
+    private static IResult Prove(DaemonHost host, HttpContext context, string? nonce)
+    {
+        if (host.Identity is null)
+        {
+            return Problem(StatusCodes.Status404NotFound, "not-found", "This runtime has no identity to prove: it serves no local-network profile.");
+        }
+
+        if (!PairingProtocol.IsNonce(nonce))
+        {
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A proof answers a nonce of 32 random bytes in base64url.");
+        }
+
+        RuntimeIdentityProof proof = host.Identity.Prove(host.Service.Session.Manifest.Estate, host.CertificateOf(context), nonce!);
+        return Results.Content(JsonSerializer.Serialize(proof, ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status200OK);
+    }
+
+    /// <summary>A problem with its length stated.</summary>
+    private static IResult Problem(int status, string code, string message) =>
+        Results.Content(JsonSerializer.Serialize(new Problem(code, message, []), ProtocolJson.Options), "application/json", Encoding.UTF8, status);
+}

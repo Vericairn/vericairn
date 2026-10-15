@@ -7,52 +7,96 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Connections.Features;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Vericairn.Protocol;
-using Vericairn.Sdk;
-using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
-using Vericairn.Runtime.Store;
+using Vericairn.Sdk;
 
 namespace Vericairn.Daemon;
 
+/// <summary>How a daemon is started beyond its estate: the local-network profile, the custody of the runtime identity, the clock and the log.</summary>
+public sealed record DaemonOptions
+{
+    /// <summary>
+    /// The address the local-network profile listens on. When null, the runtime settings beside the live store say, and the profile
+    /// is off unless the operator configured an address there with 'vericairn runtime configure'.
+    /// </summary>
+    public IPEndPoint? LocalNetwork { get; init; }
+
+    /// <summary>Where the runtime identity's key is made and held; the strongest custody this machine offers when null.</summary>
+    public IDeviceKeyStore? IdentityStore { get; init; }
+
+    /// <summary>The clock that pairing codes are judged by; the system's when null.</summary>
+    public TimeProvider? Time { get; init; }
+
+    /// <summary>Where the daemon says what it did (pairings); nowhere when null.</summary>
+    public Action<string>? Log { get; init; }
+}
+
 /// <summary>
 /// The daemon: one process owns one open estate and serves the versioned API over a local socket (a Unix domain socket, or a named
-/// pipe on Windows) and over loopback TLS pinned to the runtime certificate. Clients never open the live store; they call this. The
-/// endpoints are published in a small file beside the live store so that the CLI and the SDK on the same machine can find them.
+/// pipe on Windows), over loopback TLS pinned to the runtime certificate, and, when the operator configured an address, over the
+/// local network with mutual TLS to paired devices. Clients never open the live store; they call this. The endpoints are published
+/// in a small file beside the live store so that the CLI and the SDK on the same machine can find them.
 /// </summary>
 public sealed class DaemonHost : IAsyncDisposable
 {
     private static readonly object LoopbackMarker = new();
-    private readonly WebApplication app;
-    private readonly string endpointFile;
-    private readonly X509Certificate2? certificate;
-    private readonly object gate = new();
-    private Task? stopping;
+    private static readonly object LocalNetworkMarker = new();
+    private static readonly object CertificateMarker = new();
 
-    private DaemonHost(WebApplication app, EstateService service, DaemonEndpoint endpoint, string endpointFile, X509Certificate2? certificate)
+    private readonly string endpointFile;
+    private readonly DaemonOptions options;
+    private readonly object gate = new();
+    private WebApplication? app;
+    private Task? stopping;
+    private ListenOptions? loopbackListener;
+    private ListenOptions? localNetworkListener;
+
+    private DaemonHost(EstateService service, string endpointFile, DaemonOptions options, RuntimeCertificates? certificates, RuntimeIdentity? identity)
     {
-        this.app = app;
         Service = service;
-        Endpoint = endpoint;
         this.endpointFile = endpointFile;
-        this.certificate = certificate;
+        this.options = options;
+        Certificates = certificates;
+        Identity = identity;
+        Time = options.Time ?? TimeProvider.System;
+        Pairings = new PairingRegistry(Time);
+        Authenticator = new RequestAuthenticator(service);
+        Endpoint = new DaemonEndpoint(string.Empty, string.Empty, Environment.ProcessId, string.Empty, service.Root, ApiVersion.Current);
     }
 
     /// <summary>The service this daemon owns.</summary>
     public EstateService Service { get; }
 
     /// <summary>Where clients connect.</summary>
-    public DaemonEndpoint Endpoint { get; }
+    public DaemonEndpoint Endpoint { get; private set; }
+
+    /// <summary>The runtime identity's public key (base64url SubjectPublicKeyInfo) that paired devices pin; null without the local-network profile.</summary>
+    public string? IdentityPublicKey => Identity?.PublicKey;
+
+    internal RuntimeCertificates? Certificates { get; }
+
+    internal RuntimeIdentity? Identity { get; }
+
+    internal PairingRegistry Pairings { get; }
+
+    internal RequestAuthenticator Authenticator { get; }
+
+    internal TimeProvider Time { get; }
 
     /// <summary>The endpoint file of an estate on this machine, beside its live store.</summary>
     public static string EndpointFilePath(string root) => DaemonDiscovery.EndpointFilePath(root);
@@ -102,13 +146,18 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>Reads the endpoint file of an estate, or null when no daemon has published one.</summary>
     public static DaemonEndpoint? Discover(string root) => DaemonDiscovery.Discover(root);
 
-    /// <summary>Starts a daemon for the estate at a root, publishes the endpoint file, and serves loopback TLS unless told not to.</summary>
-    public static async Task<DaemonHost> StartAsync(string root, string? endpoint = null, bool loopback = true, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Starts a daemon for the estate at a root, publishes the endpoint file, and serves loopback TLS unless told not to. The
+    /// local-network profile is served only at an address the options or the operator's runtime settings name; by default nothing
+    /// listens beyond the local socket and loopback.
+    /// </summary>
+    public static async Task<DaemonHost> StartAsync(string root, string? endpoint = null, bool loopback = true, DaemonOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         root = Path.GetFullPath(root);
+        options ??= new DaemonOptions();
         DaemonEndpoint? existing = Discover(root);
-        if (existing is not null && Sdk.VericairnClient.IsAlive(existing))
+        if (existing is not null && VericairnClient.IsAlive(existing))
         {
             throw new InvalidOperationException($"Daemon {existing.ProcessId} already serves {root}; one process owns an estate's live state. Stop it with 'vericairn runtime stop' first.");
         }
@@ -124,14 +173,29 @@ public sealed class DaemonHost : IAsyncDisposable
             File.Delete(address);
         }
 
-        X509Certificate2? certificate = loopback ? RuntimeCertificate.Load(directory) : null;
-        var authenticator = new RequestAuthenticator(service);
+        RuntimeCertificates? certificates = null;
+        RuntimeIdentity? identity = null;
+        IPEndPoint? localNetwork;
+        try
+        {
+            localNetwork = options.LocalNetwork ?? RuntimeSettings.Load(directory).LocalNetworkEndPoint();
+            certificates = loopback || localNetwork is not null ? new RuntimeCertificates(directory) : null;
+            identity = localNetwork is null ? null : RuntimeIdentity.LoadOrCreate(directory, options.IdentityStore, options.Log);
+        }
+        catch
+        {
+            certificates?.Dispose();
+            service.Dispose();
+            throw;
+        }
+
+        var host = new DaemonHost(service, file, options, certificates, identity);
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd" });
         builder.Logging.ClearProviders();
-        builder.Services.ConfigureHttpJsonOptions(options =>
+        builder.Services.ConfigureHttpJsonOptions(json =>
         {
-            options.SerializerOptions.PropertyNamingPolicy = ProtocolJson.Options.PropertyNamingPolicy;
-            options.SerializerOptions.PropertyNameCaseInsensitive = true;
+            json.SerializerOptions.PropertyNamingPolicy = ProtocolJson.Options.PropertyNamingPolicy;
+            json.SerializerOptions.PropertyNameCaseInsensitive = true;
         });
         builder.WebHost.UseKestrelHttpsConfiguration();
         builder.WebHost.ConfigureKestrel(kestrel =>
@@ -148,44 +212,41 @@ public sealed class DaemonHost : IAsyncDisposable
                 kestrel.ListenUnixSocket(address);
             }
 
-            if (certificate is not null)
+            if (certificates is not null && loopback)
             {
-                kestrel.Listen(IPAddress.Loopback, 0, options =>
+                kestrel.Listen(IPAddress.Loopback, 0, listen =>
                 {
-                    options.UseHttps(certificate);
-                    options.Use(next => connection =>
+                    host.loopbackListener = listen;
+                    listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
+                    listen.Use(Mark(LoopbackMarker));
+                });
+            }
+
+            if (localNetwork is not null)
+            {
+                // Mutual TLS: the runtime presents its certificate, and a client may present one; the request pipeline then requires
+                // a certificate its device's key issued for everything but the pairing exchange. Sessions are never resumed, so each
+                // connection shows its certificates afresh.
+                kestrel.Listen(localNetwork, listen =>
+                {
+                    host.localNetworkListener = listen;
+                    listen.Protocols = HttpProtocols.Http1;
+                    listen.UseHttps(new HttpsConnectionAdapterOptions
                     {
-                        connection.Items[LoopbackMarker] = true;
-                        return next(connection);
+                        ServerCertificateSelector = host.SelectCertificate,
+                        ClientCertificateMode = ClientCertificateMode.AllowCertificate,
+                        ClientCertificateValidation = (_, _, _) => true,
+                        OnAuthenticate = (_, tls) => tls.AllowTlsResume = false,
                     });
+                    listen.Use(Mark(LocalNetworkMarker));
                 });
             }
         });
         WebApplication app = builder.Build();
-        app.Use(async (context, next) =>
-        {
-            bool viaLoopback = context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(LoopbackMarker) == true || context.Connection.LocalIpAddress is not null;
-            if (viaLoopback)
-            {
-                Problem? denied = await authenticator.VerifyAsync(context).ConfigureAwait(false);
-                if (denied is not null)
-                {
-                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                    await context.Response.WriteAsJsonAsync(denied, ProtocolJson.Options).ConfigureAwait(false);
-                    return;
-                }
-            }
-
-            await next(context).ConfigureAwait(false);
-        });
-        DaemonHost? host = null;
-        ApiRoutes.Map(app, service, () =>
-        {
-            if (host is not null)
-            {
-                _ = Task.Run(host.StopAsync);
-            }
-        });
+        host.app = app;
+        app.Use(host.AuthenticateAsync);
+        ApiRoutes.Map(app, service, () => _ = Task.Run(host.StopAsync));
+        DaemonRoutes.Map(app, host);
         try
         {
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -193,7 +254,7 @@ public sealed class DaemonHost : IAsyncDisposable
         catch
         {
             await app.DisposeAsync().ConfigureAwait(false);
-            certificate?.Dispose();
+            certificates?.Dispose();
             service.Dispose();
             throw;
         }
@@ -203,19 +264,13 @@ public sealed class DaemonHost : IAsyncDisposable
             File.SetUnixFileMode(address, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
 
-        LoopbackEndpoint? loopbackEndpoint = null;
-        if (certificate is not null)
-        {
-            string? url = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault(a => a.StartsWith("https://", StringComparison.Ordinal));
-            if (url is not null)
-            {
-                loopbackEndpoint = new LoopbackEndpoint(IPAddress.Loopback.ToString(), new Uri(url).Port, RuntimeCertificate.Fingerprint(certificate));
-            }
-        }
-
-        var published = new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint);
-        await File.WriteAllBytesAsync(file, JsonSerializer.SerializeToUtf8Bytes(published, ProtocolJson.Options), cancellationToken).ConfigureAwait(false);
-        host = new DaemonHost(app, service, published, file, certificate);
+        LoopbackEndpoint? loopbackEndpoint = host.loopbackListener?.IPEndPoint is IPEndPoint bound
+            ? new LoopbackEndpoint(IPAddress.Loopback.ToString(), bound.Port, certificates!.Fingerprint)
+            : null;
+        LocalNetworkEndpoint? localNetworkEndpoint = host.localNetworkListener?.IPEndPoint is IPEndPoint served
+            ? new LocalNetworkEndpoint(served.Address.ToString(), served.Port, identity!.Fingerprint)
+            : null;
+        host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint));
         return host;
     }
 
@@ -223,7 +278,7 @@ public sealed class DaemonHost : IAsyncDisposable
     public IReadOnlyList<(string Method, string Path)> MappedRoutes()
     {
         var routes = new List<(string Method, string Path)>();
-        foreach (RouteEndpoint endpoint in app.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>())
+        foreach (RouteEndpoint endpoint in App.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>())
         {
             string path = "/" + (endpoint.RoutePattern.RawText ?? string.Empty).TrimStart('/');
             foreach (string method in endpoint.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods ?? [])
@@ -235,15 +290,19 @@ public sealed class DaemonHost : IAsyncDisposable
         return routes;
     }
 
+    /// <summary>Every address the daemon listens on, as the server reports them: the local socket, loopback, and the local network when configured.</summary>
+    public IReadOnlyList<string> Addresses() =>
+        App.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.ToList() ?? [];
+
     /// <summary>Waits until the daemon is asked to stop.</summary>
-    public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => app.WaitForShutdownAsync(cancellationToken);
+    public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => App.WaitForShutdownAsync(cancellationToken);
 
     /// <summary>Stops serving, removes the endpoint file and the socket, and closes the estate; safe to call more than once.</summary>
     public Task StopAsync()
     {
         lock (gate)
         {
-            stopping ??= StopCoreAsync();
+            stopping ??= Task.Run(StopCoreAsync);
             return stopping;
         }
     }
@@ -252,15 +311,93 @@ public sealed class DaemonHost : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await StopAsync().ConfigureAwait(false);
-        await app.DisposeAsync().ConfigureAwait(false);
-        certificate?.Dispose();
+        await App.DisposeAsync().ConfigureAwait(false);
+        Certificates?.Dispose();
+    }
+
+    /// <summary>Whether a request came over the local-network profile.</summary>
+    internal static bool OnLocalNetwork(HttpContext context) => context.Features.Get<IConnectionItemsFeature>()?.Items.ContainsKey(LocalNetworkMarker) == true;
+
+    /// <summary>The fingerprint of the certificate the runtime presented on a request's connection; the current one for a connection without TLS.</summary>
+    internal string CertificateOf(HttpContext context) =>
+        context.Features.Get<IConnectionItemsFeature>()?.Items.TryGetValue(CertificateMarker, out object? presented) == true && presented is X509Certificate2 certificate
+            ? RuntimeCertificate.Fingerprint(certificate)
+            : Certificates?.Fingerprint ?? string.Empty;
+
+    internal void Log(string message) => options.Log?.Invoke(message);
+
+    /// <summary>Answers with a problem whose length is stated, so a client reading the raw exchange knows where it ends.</summary>
+    internal static async Task WriteProblemAsync(HttpContext context, int status, Problem problem, bool close = false)
+    {
+        byte[] payload = JsonSerializer.SerializeToUtf8Bytes(problem, ProtocolJson.Options);
+        context.Response.StatusCode = status;
+        context.Response.ContentType = "application/json; charset=utf-8";
+        context.Response.ContentLength = payload.Length;
+        if (close)
+        {
+            context.Response.Headers.Connection = "close";
+        }
+
+        await context.Response.Body.WriteAsync(payload).ConfigureAwait(false);
+    }
+
+    private WebApplication App => app ?? throw new InvalidOperationException("The daemon has not started.");
+
+    /// <summary>Authenticates every request by the profile it came over: device-signed on loopback; on the local network a paired device by its certificate and its signature; the local socket by operating-system identity.</summary>
+    private async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
+    {
+        IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
+        bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
+        Problem? denied = localNetwork
+            ? await Authenticator.VerifyLocalNetworkAsync(context).ConfigureAwait(false)
+            : items?.ContainsKey(LoopbackMarker) == true || context.Connection.LocalIpAddress is not null
+                ? await Authenticator.VerifyAsync(context).ConfigureAwait(false)
+                : null;
+        if (denied is not null)
+        {
+            await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: localNetwork).ConfigureAwait(false);
+            return;
+        }
+
+        await next(context).ConfigureAwait(false);
+    }
+
+    /// <summary>Presents the current certificate to a new TLS connection and remembers which one it was.</summary>
+    private X509Certificate2? SelectCertificate(ConnectionContext? connection, string? name)
+    {
+        X509Certificate2? current = Certificates?.Current;
+        if (connection is not null && current is not null)
+        {
+            connection.Items[CertificateMarker] = current;
+        }
+
+        return current;
+    }
+
+    /// <summary>Marks a TLS connection with the profile it came over.</summary>
+    private static Func<ConnectionDelegate, ConnectionDelegate> Mark(object marker) => next => connection =>
+    {
+        connection.Items[marker] = true;
+        return next(connection);
+    };
+
+    private void Publish(DaemonEndpoint endpoint)
+    {
+        lock (gate)
+        {
+            Endpoint = endpoint;
+            if (stopping is null)
+            {
+                File.WriteAllBytes(endpointFile, JsonSerializer.SerializeToUtf8Bytes(endpoint, ProtocolJson.Options));
+            }
+        }
     }
 
     private async Task StopCoreAsync()
     {
         try
         {
-            await app.StopAsync().ConfigureAwait(false);
+            await App.StopAsync().ConfigureAwait(false);
         }
         finally
         {

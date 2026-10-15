@@ -58,6 +58,10 @@ public static class OpenApiDocument
         ("GET", "/v1/objects/verify"),
         ("GET", "/v1/objects/{hash}"),
         ("POST", "/v1/shutdown"),
+        ("POST", "/v1/pairings"),
+        ("POST", "/v1/pairing/hello"),
+        ("POST", "/v1/pairing/confirm"),
+        ("GET", "/v1/runtime/identity"),
     ];
 
     /// <summary>The path of the document itself.</summary>
@@ -86,6 +90,11 @@ public static class OpenApiDocument
             if (method == "GET" && path == "/v1/records")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
+            }
+
+            if (method == "GET" && path == RuntimeIdentityScheme.Path)
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
             }
 
             if (path.Contains('{', StringComparison.Ordinal))
@@ -125,7 +134,11 @@ public static class OpenApiDocument
                     + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider; conflict is reserved and nothing answers with it yet), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
-                    + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1).",
+                    + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1). "
+                    + "From 0.6.0, when the operator configures an address, the local network: mutual TLS, where a paired device presents a certificate its device key issued, has the runtime identity "
+                    + "it pinned at pairing sign the runtime certificate's fingerprint for each connection (GET /v1/runtime/identity, scheme vericairn-runtime-identity/1), and signs every request; "
+                    + "the device must be admitted now and permitted the local-network profile, and acts for its own principal. A device pairs with a code an administrator issues "
+                    + "(POST /v1/pairings), over POST /v1/pairing/hello and POST /v1/pairing/confirm (scheme vericairn-pairing/1).",
             },
             ["paths"] = paths,
             ["components"] = new JsonObject
@@ -138,7 +151,7 @@ public static class OpenApiDocument
                         ["type"] = "apiKey",
                         ["in"] = "header",
                         ["name"] = RequestSigning.SignatureHeader,
-                        ["description"] = "Required on loopback: an ECDSA P-256 signature by an admitted device over the request (scheme vericairn-request/1), with Vericairn-Device and Vericairn-Signed-At.",
+                        ["description"] = "Required on loopback and the local network: an ECDSA P-256 signature by an admitted device over the request (scheme vericairn-request/1), with Vericairn-Device and Vericairn-Signed-At.",
                     },
                 },
             },
@@ -154,7 +167,11 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
+        if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity")
+        {
+            DaemonResponses(path, responses);
+        }
+        else if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
         }
@@ -179,8 +196,36 @@ public static class OpenApiDocument
             responses["202"] = new JsonObject { ["description"] = "The daemon will stop." };
         }
 
-        responses["401"] = new JsonObject { ["description"] = "On loopback: the request is not signed by a device admitted now (Problem with code denied)." };
+        responses["401"] ??= new JsonObject { ["description"] = "On loopback: the request is not signed by a device admitted now. On the local network: also when the device is not permitted that profile, the connection's client certificate is not one its key issued, the request names another principal, or it acts on the runtime's own machine (Problem with code denied)." };
         return responses;
+    }
+
+    /// <summary>The answers of the routes only a running daemon serves, from 0.6.0.</summary>
+    private static void DaemonResponses(string path, JsonObject responses)
+    {
+        switch (path)
+        {
+            case "/v1/pairings":
+                responses["200"] = new JsonObject { ["description"] = "PairingIssued: the code, shown once, with the principal, the profiles, the expiry, the attempts, the address and the runtime identity's fingerprint." };
+                responses["409"] = new JsonObject { ["description"] = "No local-network profile is served, or too many codes wait (Problem)." };
+                responses["422"] = new JsonObject { ["description"] = "Refused: an unknown principal or profile, no administrator's authority, or no admitted device of the administrator here to sign the admission (Problem)." };
+                break;
+            case "/v1/pairing/hello":
+                responses["200"] = new JsonObject { ["description"] = "PairingChallenge: the runtime's identity, the certificate on this connection and the device record to sign, with the runtime's MAC; uses one of the code's attempts." };
+                responses["401"] = new JsonObject { ["description"] = "The code is unknown, expired, used or out of attempts, or the request did not come over the local network (Problem with code denied)." };
+                responses["422"] = new JsonObject { ["description"] = "A hello without a handle or a nonce (Problem)." };
+                break;
+            case "/v1/pairing/confirm":
+                responses["200"] = new JsonObject { ["description"] = "PairingCompleted: the device record and the admission, with the runtime's MAC over the exchange." };
+                responses["401"] = new JsonObject { ["description"] = "No such exchange is open, the code expired or was used, or the confirmation does not match the code (Problem with code denied); nothing is recorded." };
+                responses["422"] = new JsonObject { ["description"] = "The device's signature does not verify, or the estate refused its records (Problem, with findings when rejected); nothing is recorded." };
+                break;
+            default:
+                responses["200"] = new JsonObject { ["description"] = "RuntimeIdentityProof: the identity key's signature over the estate, the certificate on this connection and the nonce." };
+                responses["404"] = new JsonObject { ["description"] = "The runtime has no identity: it serves no local-network profile (Problem)." };
+                responses["422"] = new JsonObject { ["description"] = "No nonce of 16 to 64 bytes (Problem)." };
+                break;
+        }
     }
 
     private static JsonObject Schemas()
@@ -221,6 +266,9 @@ public static class OpenApiDocument
             ["ReleaseResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object")),
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
+            ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
+            ["PairingHello"] = Object(("handle", "string"), ("nonce", "string")),
+            ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
             ["WriteOutcome"] = Object(("written", "object"), ("problem", "object")),
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
@@ -250,6 +298,9 @@ public static class OpenApiDocument
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
+        "/v1/pairings" => "PairingIssueRequest",
+        "/v1/pairing/hello" => "PairingHello",
+        "/v1/pairing/confirm" => "PairingConfirm",
         _ => "Problem",
     };
 
@@ -304,6 +355,10 @@ public static class OpenApiDocument
         ("GET", "/v1/objects/verify") => "Verify every object against its name.",
         ("GET", "/v1/objects/{hash}") => "An object's verified bytes.",
         ("POST", "/v1/shutdown") => "Ask the daemon to stop; closing a client never stops it.",
+        ("POST", "/v1/pairings") => "Issue a pairing code under an administrator's authority (the operator, or a principal with the administer scope whose admitted device here signs the admission) for a principal and the connectivity profiles its device will be permitted: 20 characters, 80 secret bits, for ten minutes, five attempts and one device. On the runtime's own machine only.",
+        ("POST", "/v1/pairing/hello") => "Start a pairing over the local network with a code's handle and a nonce: the runtime answers with its identity, the certificate on this connection, the device record it will write, and its MAC with the code's runtime key.",
+        ("POST", "/v1/pairing/confirm") => "Complete a pairing: the device's key, descriptive identity and signature of its record, with its MAC with the code's device key; the runtime records the device and its admission, and answers with its MAC over the whole exchange.",
+        ("GET", "/v1/runtime/identity") => "The runtime identity's proof for a nonce: its signature over the estate, the certificate this connection presented and the nonce, which a paired device checks before any other request.",
         _ => string.Empty,
     };
 }

@@ -8,9 +8,9 @@ using System.Security.Cryptography.X509Certificates;
 namespace Vericairn.Daemon;
 
 /// <summary>
-/// The runtime's own certificate for the loopback profile: self-signed, ECDSA P-256, kept owner-only beside the estate's live
-/// state on this machine, renewed before it expires. Clients pin its SHA-256 fingerprint from the endpoint file; no trust store is
-/// consulted and no other certificate is accepted.
+/// The runtime's own certificate for its TLS profiles: self-signed, ECDSA P-256, kept owner-only beside the estate's live state on
+/// this machine, renewed before it expires. Loopback clients pin its SHA-256 fingerprint from the endpoint file; paired devices
+/// accept it when the runtime identity signs its fingerprint. No trust store is consulted.
 /// </summary>
 public static class RuntimeCertificate
 {
@@ -93,4 +93,23 @@ public static class RuntimeCertificate
             CryptographicOperations.ZeroMemory(pkcs12);
         }
     }
+}
+
+/// <summary>The certificate a running daemon presents to its TLS connections.</summary>
+internal sealed class RuntimeCertificates : IDisposable
+{
+    private readonly X509Certificate2 current;
+
+    public RuntimeCertificates(string directory)
+    {
+        current = RuntimeCertificate.Load(directory);
+    }
+
+    /// <summary>The certificate presented to new connections.</summary>
+    public X509Certificate2 Current => current;
+
+    /// <summary>Its fingerprint.</summary>
+    public string Fingerprint => RuntimeCertificate.Fingerprint(Current);
+
+    public void Dispose() => current.Dispose();
 }

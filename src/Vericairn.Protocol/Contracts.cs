@@ -24,7 +24,7 @@ public static class ApiVersion
 public sealed record FindingDto(string Severity, string Code, string Location, string Message);
 
 /// <summary>Why a request was not carried out: a reason and, for rejected records, the findings.</summary>
-/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback request not signed by a device admitted now) or provider (a release provider's refusal, inside a release response); conflict is reserved and nothing answers with it yet.</param>
+/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict is reserved and nothing answers with it yet.</param>
 /// <param name="Message">Explanation with the permitted next action.</param>
 /// <param name="Findings">Findings behind a rejection; may be empty.</param>
 public sealed record Problem(string Code, string Message, IReadOnlyList<FindingDto> Findings);
@@ -143,7 +143,8 @@ public sealed record AmendRequest(string Assignment, string By, JsonElement Body
 /// <param name="HeldHere">Whether this machine holds its key.</param>
 /// <param name="Presence">required or none: whether each signature needs the owner's presence (record format 2).</param>
 /// <param name="Purpose">signing or recovery (record format 2).</param>
-public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null);
+/// <param name="Profiles">The connectivity profiles the device is permitted, from 0.6.0.</param>
+public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null, IReadOnlyList<string>? Profiles = null);
 
 /// <summary>Create a device for a principal on the runtime's machine.</summary>
 /// <param name="Principal">Principal id.</param>
