@@ -45,7 +45,7 @@ release and pins the one it runs on.
   when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress report from
   the records alone, the same on every machine: where the estate stands, the work orders by state, each published
   release and what it contained, what comes next by release, the next eligible work and what waits on the operator,
-  every line naming the records it rests on; the API and an MCP tool carry the same report. `vericairn goal` carries an objective: a goal is
+  every line naming the records it rests on; the API, an MCP tool and Workbench's home carry the same report. `vericairn goal` carries an objective: a goal is
   proposed and activated, record predicates and an evaluator who did none of its work judge it condition by
   condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
   given can activate, fund or accept one. There is no conductor yet: people and agents do a goal's steps.
@@ -55,7 +55,7 @@ release and pins the one it runs on.
   the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
   `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
-  the runtime: home and attention, products, work orders, assignments, results, review and decisions,
+  the runtime: home with attention and the progress report, products, work orders, assignments, results, review and decisions,
   releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record

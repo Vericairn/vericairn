@@ -30,6 +30,11 @@ public class PresentationTests
         Assert.Equal(OperationType.Statuses.Order(StringComparer.Ordinal), operations.Order(StringComparer.Ordinal));
         List<string> releases = StateLanguage.Vocabularies.Single(v => v.Subject == "release").States.Select(s => s.Value).ToList();
         Assert.Equal(ReleaseType.Statuses.Order(StringComparer.Ordinal), releases.Order(StringComparer.Ordinal));
+        List<string> asks = StateLanguage.Vocabularies.Single(v => v.Subject == "ask").States.Select(s => s.Value).ToList();
+        Assert.Equal(Vericairn.Records.Estate.GoalPredicates.States["ask"], asks);
+        Assert.Equal(AskType.States.Append("answered"), asks);
+        Assert.True(StateLanguage.NeedsPerson("ask", "notified"));
+        Assert.False(StateLanguage.NeedsPerson("ask", "answered"));
         Assert.Equal("submitted, awaiting acceptance", StateLanguage.Label("work-order", "submitted"));
         Assert.Equal("made-up", StateLanguage.Label("work-order", "made-up"));
         Assert.True(StateLanguage.NeedsPerson("operation", "uncertain"));

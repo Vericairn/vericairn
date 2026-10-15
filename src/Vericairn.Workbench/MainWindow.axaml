@@ -24,6 +24,7 @@
         <MenuItem Header="Result _inbox" InputGesture="Ctrl+I" Click="OnOpenInbox" />
         <MenuItem Header="_Products" Click="OnOpenProducts" />
         <MenuItem Header="Living _documents" InputGesture="Ctrl+Shift+D" Click="OnOpenLivingDocuments" />
+        <MenuItem Header="Progress _report" InputGesture="Ctrl+Shift+P" Click="OnOpenProgress" />
         <MenuItem Header="_Assign the open work order" InputGesture="Ctrl+Shift+A" Click="OnOpenComposer" />
         <MenuItem Header="_Compare the open record with its earlier revision" Click="OnCompareOpen" />
         <Separator />
@@ -120,6 +121,18 @@
                   </DataTemplate>
                 </ListBox.ItemTemplate>
               </ListBox>
+              <TextBlock Text="Progress, from the records (Enter opens the report)" FontWeight="SemiBold" Margin="0,8,0,0" />
+              <ListBox Name="ProgressList" Focusable="True" ItemsSource="{Binding Progress}" MaxHeight="280" AutomationProperties.Name="Progress summary" DoubleTapped="OnOpenProgress">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="pres:ProgressRow">
+                    <Grid ColumnDefinitions="180,*" MinHeight="32">
+                      <TextBlock Grid.Column="0" Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                      <TextBlock Grid.Column="1" Text="{Binding Detail}" TextWrapping="Wrap" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+              <Button Name="ProgressButton" Content="Open the progress report" MinHeight="28" HorizontalAlignment="Left" Click="OnOpenProgress" />
             </StackPanel>
           </Border>
           <TabControl Grid.Row="1" Name="DocumentTabs" Focusable="True" ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDocument}" AutomationProperties.Name="Documents">
@@ -431,6 +444,11 @@
               <DataTemplate x:DataType="local:TextDocument">
                 <ScrollViewer>
                   <SelectableTextBlock MinHeight="24" Text="{Binding Text}" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" Margin="8" TextWrapping="Wrap" />
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:ProgressDocument">
+                <ScrollViewer>
+                  <SelectableTextBlock MinHeight="24" Text="{Binding Text}" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" Margin="8" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Progress report" />
                 </ScrollViewer>
               </DataTemplate>
             </TabControl.DataTemplates>
