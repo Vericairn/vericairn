@@ -325,17 +325,19 @@ public sealed partial class EstateService
 
         var directory = new RunDirectory(estate, found.Id);
         StopRequest asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
-        RunObservedState? observed = directory.Read();
+        RunObservedState? observed = ReadSteadily(directory);
         bool supervised = Fresh(observed);
         if (supervised)
         {
             // The supervising worker transmits the stop at its next heartbeat and escalates it after the grace period; this waits for what it observes.
             TimeSpan grace = asked.GraceSeconds is int seconds ? TimeSpan.FromSeconds(seconds) : WorkerOptions.Grace;
             DateTimeOffset until = DateTimeOffset.UtcNow + grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
+            // A state being replaced as it is read reads as nothing for a moment, which is no news: the last state read stands.
             while (DateTimeOffset.UtcNow < until)
             {
-                observed = directory.Read();
-                if (observed?.Stop?.ContainedAt is not null || observed?.ExitedAt is not null || !Fresh(observed))
+                RunObservedState? read = directory.Read();
+                observed = read ?? observed;
+                if (observed?.Stop?.ContainedAt is not null || observed?.ExitedAt is not null || (read is not null && !Fresh(read)))
                 {
                     break;
                 }
@@ -348,7 +350,7 @@ public sealed partial class EstateService
             while (observed?.ExitedAt is not null && observed.Settled is null && observed.Problem is null && DateTimeOffset.UtcNow < settling)
             {
                 Thread.Sleep(100);
-                observed = directory.Read();
+                observed = directory.Read() ?? observed;
             }
         }
 
@@ -368,6 +370,24 @@ public sealed partial class EstateService
             _ => $"Run {found.Id}: the stop requested at {stop.RequestedAt} is {stop.State}{(stop.TransmittedAt is null ? string.Empty : $" (transmitted at {stop.TransmittedAt}: {stop.Transmission})")}; its containment was not observed in time, so it is reported as {stop.State}, never as stopped.",
         };
         return new RunStopResponse(found.Id, stop.State, message, true, stop);
+    }
+
+    /// <summary>
+    /// What the worker observing a run wrote, read through a moment in which it is being replaced: a state that is there and cannot be
+    /// read yet is read again for up to a second before it counts as nothing.
+    /// </summary>
+    private static RunObservedState? ReadSteadily(RunDirectory directory)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            RunObservedState? state = directory.Read();
+            if (state is not null || attempt >= 20 || !File.Exists(directory.StateFile))
+            {
+                return state;
+            }
+
+            Thread.Sleep(50);
+        }
     }
 
     /// <summary>A stop asked of a run that no worker has transmitted: reported as requested, never as stopped.</summary>

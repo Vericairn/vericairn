@@ -214,6 +214,21 @@ public class WorkerTests
     }
 
     [Fact]
+    public void AStopIsTransmittedThoughTheRunsStateIsBeingReplacedWhenItIsAsked()
+    {
+        using var run = new RunEstate();
+        RunResponse started = run.Start("generic", "ack-stop", run.Report("replaced"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("replaced")) && run.Row(started.Run).Observed);
+
+        // A state file caught half written reads as nothing for a moment; the worker writes it whole again at its next heartbeat.
+        File.WriteAllText(new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).StateFile, "{");
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Replaced.", 5));
+        Assert.Equal("contained", stopped.State);
+        Assert.NotNull(stopped.Stop!.TransmittedAt);
+    }
+
+    [Fact]
     public void AStopTheHarnessAcknowledgesIsContainedWithoutEscalation()
     {
         using var run = new RunEstate();
