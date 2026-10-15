@@ -29,6 +29,12 @@ public static partial class Patterns
     /// <summary>A currency unit: three upper-case letters, as ISO 4217 writes them.</summary>
     public static Regex CurrencyUnit => CurrencyUnitRegex();
 
+    /// <summary>A normalized repository-relative path: forward slashes, no leading slash, no empty or parent segment.</summary>
+    public static Regex RelativePath => RelativePathRegex();
+
+    /// <summary>A pack's or the foundation's contribution: a namespace, a slash and a name, such as vericairn.software/git-file.</summary>
+    public static Regex Contribution => ContributionRegex();
+
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex SlugRegex();
 
@@ -46,6 +52,12 @@ public static partial class Patterns
 
     [GeneratedRegex("^[A-Z]{3}$")]
     private static partial Regex CurrencyUnitRegex();
+
+    [GeneratedRegex(@"^(?!.*(^|/)\.\.?(/|$))[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")]
+    private static partial Regex RelativePathRegex();
+
+    [GeneratedRegex(@"^[a-z0-9]+(\.[a-z0-9-]+)*/[a-z0-9]+(-[a-z0-9]+)*$")]
+    private static partial Regex ContributionRegex();
 
     [GeneratedRegex("^[0-9a-f]{40}$")]
     private static partial Regex CommitRegex();

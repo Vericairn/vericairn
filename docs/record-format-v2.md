@@ -3,8 +3,8 @@
 Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written
 from now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and
 the rules it was written under. A record states the format it was written in, and an estate at format 2 holds both.
-Format 2 carries the records goals need, the additions milestone M3 adopted and, with DOCS-03, the living-document
-records; this document grows with them until release 0.5.0 ships the format.
+Format 2 carries the records goals need, the additions milestone M3 adopted, and the living-document records; this
+document grows with them until release 0.5.0 ships the format.
 
 ## Why a new format number
 
@@ -78,6 +78,23 @@ build cannot read.
   `evidence` it rests on (verifications, reviews and observations; a qualified or partly measured profile needs at
   least one, a non-claim needs none), a `summary` and its `limitations`. Qualification is derived from observations,
   never asserted beside them.
+- **`living-document`**: the declaration of a living document, a document whose claims follow facts that change (the
+  estate's `design/living-documents.md`). It names the document's `path` and, for a document outside the estate's own
+  repository, the `repository` resource; whether it is `authored` or `generated` (a generated one names its
+  `generator`); the `source` its content is read through (`estate-file`, or a pack's, such as
+  `vericairn.software/git-file`); its `triggers`, each with a `level` (`remind`, `warn` or `refuse`); its generated
+  `regions`; who may clear it (`clearedBy`: `any`, `independent` or `operator`); and the `checks` run when it is
+  cleared. The foundation's triggers are `covers` with `paths`, `release` with a `product`, `upgrade`, `decision`, and
+  `accepted` with work-order `keys`; its checks are `names-version`, `matches-generator` and `links-resolve`. A pack's
+  trigger, check, source or generator is named `namespace/name`. One current declaration per document: a revision
+  supersedes it and keeps its path and repository.
+- **`document-review`**: the clearance of a living document, or the finding that it is stale, about the declaration
+  at its exact hash. It records the `outcome` (`current`, `revised` or `needs-change`, which leaves it due), the
+  reviewed `content` by hash and size (and `commit` for a document of another repository, never for an estate file),
+  the `covered` paths' identity (required to clear a `covers` trigger), the triggers it `answers` (each one the
+  declaration names), the reviewer's `independence` of the content, and the `checks` that ran. A failed check refuses
+  a clearance. The reviewer is `self` when the review revises the content, or when the reviewer recorded the latest
+  revision of the estate file or the latest revising review; a clearance meets the declaration's `clearedBy`.
 
 ## Fields new in format 2
 
@@ -87,6 +104,7 @@ build cannot read.
 | `decision` | `notAuthorized` | string list, required, may be empty | What this answer does not authorize, so no one reads more into it |
 | `decision` | `answers` | ULID list, optional | The asks the decision answers; an ask is answered by the principal it was put to, and a withdrawn ask is not answered |
 | `decision` | `obligations` | object list, optional | What the answer leaves owed: each with a `key`, a `summary`, its `owner`, how it is resolved (`action`, `evidence`, `review` or `decision`), what `discharge`s it and optionally what it `gates`; keys are unique within the decision |
+| `decision` | `documents` | list of paths or declaration ids, optional | The living documents the decision changes; a declaration with a `decision` trigger becomes due when a newer decision names it |
 | `verification` | `evidenceClass` | `observation`, `report`, `attestation` or `inference`, optional | How the evidence was obtained: `vericairn check run` records an observation, `vericairn check observe` a host's report |
 | `verification` | `observer` | `person`, `agent`, `automation` or `provider`, optional | What kind of observer made the claim |
 | `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
