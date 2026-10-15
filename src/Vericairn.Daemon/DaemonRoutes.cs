@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
 using System.Globalization;
 using System.Net;
 using System.Text;
@@ -73,14 +74,16 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status401Unauthorized, "denied", "Pairing runs over the local-network profile, at the address the administrator gave with the code.");
         }
 
-        if (hello is null || !PairingProtocol.IsNonce(hello.Nonce) || string.IsNullOrEmpty(hello.Mac))
+        // The MAC is exactly 32 bytes of base64url, checked before anything is decoded or any code tried.
+        if (hello is null || !PairingProtocol.IsNonce(hello.Nonce) || !PairingProtocol.IsMac(hello.Mac))
         {
             context.Response.Headers.Connection = "close";
             return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A hello carries a nonce of 32 random bytes and its MAC, both base64url.");
         }
 
         string certificate = host.CertificateOf(context);
-        (PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Hello(hello, certificate, context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+        byte[] mac = Base64Url.DecodeFromChars(hello.Mac);
+        (PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Hello(hello, mac, certificate, context.Connection.RemoteIpAddress?.ToString() ?? "unknown");
         if (pairing is null)
         {
             context.Response.Headers.Connection = "close";
@@ -90,7 +93,12 @@ internal static class DaemonRoutes
         PairingPlan plan = host.Service.PairingPlan(pairing.Principal);
         var challenge = new PairingChallenge(hello.Nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, host.Identity.PublicKey, certificate, plan.Principal, plan.PrincipalName, plan.PrincipalKind, pairing.Profiles, plan.Record, plan.At, plan.Format, RecordParser.FormatTimestamp(pairing.ExpiresAt), string.Empty);
         challenge = challenge with { Mac = PairingProtocol.ChallengeMac(pairing.RuntimeKey, hello, challenge) };
-        host.Pairings.Open(pairing, hello, challenge, plan);
+        if (host.Pairings.Open(pairing, hello, challenge, plan) is string closed)
+        {
+            context.Response.Headers.Connection = "close";
+            return Problem(StatusCodes.Status401Unauthorized, "denied", closed);
+        }
+
         return Results.Json(challenge, ProtocolJson.Options);
     }
 

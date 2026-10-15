@@ -42,6 +42,9 @@ internal sealed class RequestAuthenticator
     /// <summary>The profile name a device must be permitted to use the local network.</summary>
     internal const string LocalNetworkProfile = "local-network";
 
+    /// <summary>The most a pairing message's body may hold: what reaches the runtime without a credential is read only this far.</summary>
+    internal const long PairingBodyLimit = 16 * 1024;
+
     /// <summary>The route of the runtime identity's proof, whose request is signed as on loopback.</summary>
     internal const string ProofRoute = "GET " + RuntimeIdentityScheme.Path;
 
@@ -161,6 +164,12 @@ internal sealed class RequestAuthenticator
         string operation = Operation(context);
         if (PairingRoutes.Contains(operation))
         {
+            // Reached without a credential: the exchange's messages are small, and nothing larger is read.
+            if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+            {
+                limit.MaxRequestBodySize = PairingBodyLimit;
+            }
+
             return null;
         }
 

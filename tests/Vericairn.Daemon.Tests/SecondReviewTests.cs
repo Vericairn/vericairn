@@ -3,9 +3,14 @@
 
 using System.Buffers.Text;
 using System.Globalization;
+using System.Net;
+using System.Net.Http.Json;
+using System.Net.Security;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Vericairn.Protocol;
+using Vericairn.Runtime.Service;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
@@ -128,5 +133,180 @@ public class SecondReviewTests
         Assert.StartsWith("HTTP/1.1 200", stored, StringComparison.Ordinal);
         string hash = Records.Hashing.ContentHash.Sha256(bytes);
         Assert.Contains(harness.Socket.Objects(), o => o.Hash == hash);
+    }
+
+    /// <summary>An HTTP client of the local-network profile without a client certificate, pinned to the runtime's certificate, as a stranger is.</summary>
+    private static HttpClient Stranger(LocalNetworkHarness harness)
+    {
+        string pinned = harness.Host.Endpoint.Loopback!.Certificate;
+        var handler = new SocketsHttpHandler
+        {
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                TargetHost = "vericairn-runtime",
+                RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == pinned,
+            },
+        };
+        return new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri($"https://{harness.Address}/") };
+    }
+
+    private static PairingHello Guess() => new(PairingProtocol.NewNonce(), Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32)));
+
+    private static (PairingRegistry.Pairing? Pairing, string? Problem) Try(PairingRegistry registry, PairingHello hello, string address) =>
+        registry.Hello(hello, Base64Url.DecodeFromChars(hello.Mac), "sha256:runtime", address);
+
+    [Fact]
+    public void C2_AMacOfAnySizeIsWeighedByItsLengthBeforeAnythingIsDecoded()
+    {
+        string expected = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        string huge = new('A', 24 * 1024 * 1024);
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        bool matched = PairingProtocol.Matches(expected, huge);
+        bool mac = PairingProtocol.IsMac(huge);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Assert.False(matched);
+        Assert.False(mac);
+        Assert.True(allocated < 64 * 1024, $"{allocated} bytes allocated to weigh a MAC");
+        Assert.True(PairingProtocol.IsMac(expected));
+        Assert.False(PairingProtocol.IsMac(expected + "A"));
+    }
+
+    [Fact]
+    public async Task C2_APairingMessageIsReadOnlyAsFarAsItsLimitAndAMacOfTheWrongLengthIsRefusedUnread()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        using HttpClient stranger = Stranger(harness);
+
+        // A hello far beyond what any pairing message holds is refused before it is read; one whose MAC is not 32 bytes, unread.
+        var oversized = new PairingHello(PairingProtocol.NewNonce(), new string('A', 256 * 1024));
+        using HttpResponseMessage large = await stranger.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), oversized, ProtocolJson.Options, TestContext.Current.CancellationToken);
+        Say($"{(int)large.StatusCode} {await large.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, large.StatusCode);
+
+        using HttpResponseMessage wrong = await stranger.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), new PairingHello(PairingProtocol.NewNonce(), Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(33))), ProtocolJson.Options, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, wrong.StatusCode);
+
+        // Neither counts against the address: a genuine device there pairs.
+        PairingIssued issued = harness.Issue(harness.Estate.BuilderId);
+        Assert.Equal(harness.Estate.BuilderId, harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone")).Principal);
+    }
+
+    [Fact]
+    public void C5_AnAddressStillCountedIsNeverForgottenANewOneWaitsAndAllFailuresHaveABudget()
+    {
+        var time = new ManualTime(DateTimeOffset.UtcNow);
+        var registry = new PairingRegistry(time);
+
+        // An address that sent too many failed hellos is refused for its minute.
+        for (int i = 0; i < PairingRegistry.MaxFailures; i++)
+        {
+            Assert.Contains("No pairing here matches", Try(registry, Guess(), "203.0.113.1").Problem, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Too many pairing attempts", Try(registry, Guess(), "203.0.113.1").Problem, StringComparison.Ordinal);
+
+        // As many addresses as are counted fill the count; a new one then waits, and the first is still refused, never forgotten.
+        for (int i = 1; i < PairingRegistry.MaxAddresses; i++)
+        {
+            Assert.Contains("No pairing here matches", Try(registry, Guess(), $"198.51.{i / 256}.{i % 256}").Problem, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("too many addresses", Try(registry, Guess(), "192.0.2.77").Problem, StringComparison.Ordinal);
+        Assert.Contains("Too many pairing attempts", Try(registry, Guess(), "203.0.113.1").Problem, StringComparison.Ordinal);
+
+        // Once the minute ends, both are heard again.
+        time.Advance(PairingRegistry.FailureWindow);
+        Assert.Contains("No pairing here matches", Try(registry, Guess(), "192.0.2.77").Problem, StringComparison.Ordinal);
+        Assert.Contains("No pairing here matches", Try(registry, Guess(), "203.0.113.1").Problem, StringComparison.Ordinal);
+
+        // In a later minute, failures in all have a budget: past it, every hello waits, from an address that sent few as well.
+        time.Advance(PairingRegistry.FailureWindow);
+        int perAddress = (PairingRegistry.MaxFailuresInAll / PairingRegistry.MaxAddresses) + 1;
+        int sent = 0;
+        for (int i = 0; sent < PairingRegistry.MaxFailuresInAll; i++)
+        {
+            for (int j = 0; j < perAddress && sent < PairingRegistry.MaxFailuresInAll; j++, sent++)
+            {
+                Assert.Contains("No pairing here matches", Try(registry, Guess(), $"10.0.{i / 256}.{i % 256}").Problem, StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Contains("in all this minute", Try(registry, Guess(), "10.0.0.0").Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task N5_HellosThatMatchNoCodeFromOneAddressRefuseNoGenuineDeviceThere()
+    {
+        // The re-review's probe: ten hellos that match no code from one address (a NAT, a proxy, a container's gateway), then the
+        // genuine device there with the genuine code. A failed hello closes its connection.
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        PairingIssued issued = harness.Issue(harness.Estate.BuilderId);
+        using HttpClient stranger = Stranger(harness);
+        for (int i = 0; i < 10; i++)
+        {
+            using HttpResponseMessage miss = await stranger.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), Guess(), ProtocolJson.Options, TestContext.Current.CancellationToken);
+            Assert.Equal(HttpStatusCode.Unauthorized, miss.StatusCode);
+            Assert.True(miss.Headers.ConnectionClose == true);
+        }
+
+        RuntimeConnection connection = harness.Connections.Add(harness.Address, issued.Code, new PairingOptions("Phone"));
+        Assert.Equal(harness.Estate.BuilderId, connection.Principal);
+    }
+
+    [Fact]
+    public void C6_TheLastFailedConfirmationClosesEveryExchangeOfTheCodeAndTheCapHoldsAsExchangesOpen()
+    {
+        var time = new ManualTime(DateTimeOffset.UtcNow);
+        var registry = new PairingRegistry(time);
+        (string? code, PairingRegistry.Pairing? issued, _) = registry.Issue(Records.Identity.Ulid.NewUlid().Value, Records.Identity.Ulid.NewUlid().Value, ["local-network"]);
+        Assert.True(PairingProtocol.TryParse(code, out string secret));
+        (byte[] runtimeKey, byte[] deviceKey) = PairingProtocol.Keys(secret);
+        var plan = new PairingPlan(Records.Identity.Ulid.NewUlid().Value, "2026-10-15T12:00:00Z", 2, Records.Identity.Ulid.NewUlid().Value, "Estate", issued!.Principal, "Agent", "agent");
+        var device = new PairingDevice("Phone", "linux", "file", Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(91)), "none");
+
+        (PairingHello Hello, PairingChallenge Challenge) Open()
+        {
+            string nonce = PairingProtocol.NewNonce();
+            var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, "sha256:runtime"));
+            (PairingRegistry.Pairing? found, string? problem) = Try(registry, hello, "192.0.2.1");
+            Assert.True(found is not null, problem);
+            var challenge = new PairingChallenge(nonce, PairingProtocol.NewNonce(), plan.Estate, plan.EstateName, "identity", "sha256:runtime", plan.Principal, plan.PrincipalName, plan.PrincipalKind, found.Profiles, plan.Record, plan.At, plan.Format, "2026-10-15T12:10:00Z", string.Empty);
+            challenge = challenge with { Mac = PairingProtocol.ChallengeMac(runtimeKey, hello, challenge) };
+            Assert.Null(registry.Open(found, hello, challenge, plan));
+            return (hello, challenge);
+        }
+
+        PairingConfirm Confirm((PairingHello Hello, PairingChallenge Challenge) exchange, bool genuine)
+        {
+            var confirm = new PairingConfirm(exchange.Challenge.RuntimeNonce, device, "signature", string.Empty);
+            return confirm with { Mac = genuine ? PairingProtocol.ConfirmMac(deviceKey, exchange.Hello, exchange.Challenge, confirm) : Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32)) };
+        }
+
+        // At most four exchanges of a code are open: opening six closes the two oldest.
+        List<(PairingHello, PairingChallenge)> opened = [.. Enumerable.Range(0, 6).Select(_ => Open())];
+        Assert.Contains("No exchange", registry.Confirm(Confirm(opened[0], genuine: true)).Problem, StringComparison.Ordinal);
+        Assert.Contains("No exchange", registry.Confirm(Confirm(opened[1], genuine: true)).Problem, StringComparison.Ordinal);
+
+        // Four confirmations that do not match use four attempts; the fifth, on another exchange, uses the last and closes the rest.
+        foreach ((PairingHello, PairingChallenge) exchange in opened[2..])
+        {
+            Assert.Contains("does not match", registry.Confirm(Confirm(exchange, genuine: false)).Problem, StringComparison.Ordinal);
+        }
+
+        List<(PairingHello, PairingChallenge)> more = [.. Enumerable.Range(0, 4).Select(_ => Open())];
+        Assert.Contains("does not match", registry.Confirm(Confirm(more[0], genuine: false)).Problem, StringComparison.Ordinal);
+        Assert.Equal(0, issued.AttemptsLeft);
+
+        // Nothing is open any more, not even for the genuine device, and nothing opens again.
+        foreach ((PairingHello, PairingChallenge) exchange in more[1..])
+        {
+            (PairingRegistry.Pairing? pairing, _, string? problem) = registry.Confirm(Confirm(exchange, genuine: true));
+            Assert.Null(pairing);
+            Assert.Contains("No exchange", problem, StringComparison.Ordinal);
+        }
+
+        string nonce = PairingProtocol.NewNonce();
+        Assert.Contains("confirmations that did not match", Try(registry, new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, "sha256:runtime")), "192.0.2.1").Problem, StringComparison.Ordinal);
+        Assert.Equal(0, issued.AttemptsLeft);
     }
 }

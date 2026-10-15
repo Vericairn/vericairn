@@ -11,10 +11,12 @@ namespace Vericairn.Daemon;
 
 /// <summary>
 /// The pairing codes a daemon has issued, held in its memory only: a code lives ten minutes, pairs one device, and survives five
-/// confirmations that do not match it; a daemon that restarts forgets every code. Only the keys a code gives are kept, never the
-/// code. A hello names no code: the registry tries the codes it holds against its MAC, so nothing about a code is learnt, and none of
-/// its attempts used, by anyone who does not hold it; a hello that matches none is refused alike, and an address that sends too many
-/// of them is refused for a minute.
+/// confirmations that do not match it, after which none of its exchanges is open; a daemon that restarts forgets every code. Only
+/// the keys a code gives are kept, never the code. A hello names no code: the registry tries the codes it holds against its MAC, so
+/// nothing about a code is learnt, and none of its attempts used, by anyone who does not hold it; a hello that matches none is
+/// refused alike. Failed hellos are counted for a minute: an address that sends too many is refused until its minute ends, an
+/// address is never forgotten while it is counted (when the count of addresses is full, a new one waits instead), and all of them
+/// together have a budget, which bounds the work of trying codes.
 /// </summary>
 internal sealed class PairingRegistry
 {
@@ -27,8 +29,17 @@ internal sealed class PairingRegistry
     /// <summary>How many exchanges of one code may be open at once; a further hello closes the oldest.</summary>
     internal const int MaxExchanges = 4;
 
-    /// <summary>How many hellos matching no code one address may send in a window before it is refused until the window ends.</summary>
-    internal const int MaxFailures = 10;
+    /// <summary>
+    /// How many hellos matching no code one address may send in a window before it is refused until the window ends: enough that a
+    /// mistyped code, or a few, from behind a shared address (a NAT, a proxy, a container's gateway) refuses no other device there.
+    /// </summary>
+    internal const int MaxFailures = 50;
+
+    /// <summary>How many hellos matching no code all addresses together may send in a window before every hello waits for the next.</summary>
+    internal const int MaxFailuresInAll = 4096;
+
+    /// <summary>The most addresses whose failures are counted at once; while that many are, a hello from another waits.</summary>
+    internal const int MaxAddresses = 1024;
 
     /// <summary>How long a code works.</summary>
     internal static readonly TimeSpan Lifetime = PairingProtocol.Lifetime;
@@ -42,13 +53,12 @@ internal sealed class PairingRegistry
     /// <summary>The most codes remembered at once, waiting, used or expired; the oldest ended ones go first.</summary>
     private const int MaxRemembered = 64;
 
-    /// <summary>The most addresses whose failures are counted at once.</summary>
-    private const int MaxAddresses = 1024;
-
     private readonly TimeProvider time;
     private readonly object gate = new();
     private readonly List<Pairing> pairings = [];
     private readonly Dictionary<string, (DateTimeOffset Since, int Count)> failures = new(StringComparer.Ordinal);
+    private (DateTimeOffset Since, int Count) failuresInAll;
+    private long opened;
 
     internal PairingRegistry(TimeProvider time)
     {
@@ -89,26 +99,40 @@ internal sealed class PairingRegistry
     }
 
     /// <summary>
-    /// The pairing whose code a hello proves, over the certificate the runtime presented on the hello's connection; refused alike when
-    /// no code it holds matches, and for an address that sent too many such hellos in the last minute.
+    /// The pairing whose code a hello proves with its MAC (32 bytes, decoded once by the caller), over the certificate the runtime
+    /// presented on the hello's connection; refused alike when no code it holds matches. Before any code is tried, a hello is refused
+    /// from an address that sent too many failed hellos this minute, from a new address while as many addresses as are counted are,
+    /// and from anywhere once failed hellos in all have used this minute's budget.
     /// </summary>
-    internal (Pairing? Pairing, string? Problem) Hello(PairingHello hello, string certificate, string address)
+    internal (Pairing? Pairing, string? Problem) Hello(PairingHello hello, ReadOnlySpan<byte> mac, string certificate, string address)
     {
         ArgumentNullException.ThrowIfNull(hello);
         lock (gate)
         {
             DateTimeOffset now = time.GetUtcNow();
             Sweep(now);
-            if (failures.TryGetValue(address, out (DateTimeOffset Since, int Count) failed) && now < failed.Since + FailureWindow && failed.Count >= MaxFailures)
+            bool counted = failures.TryGetValue(address, out (DateTimeOffset Since, int Count) failed);
+            if (counted && failed.Count >= MaxFailures)
             {
                 return (null, $"Too many pairing attempts that matched no code came from this address; it is refused until {RecordParser.FormatTimestamp(failed.Since + FailureWindow)}.");
+            }
+
+            if (!counted && failures.Count >= MaxAddresses)
+            {
+                DateTimeOffset first = failures.Values.Min(f => f.Since) + FailureWindow;
+                return (null, $"Pairing attempts that matched no code came from too many addresses this minute; a new address is refused until {RecordParser.FormatTimestamp(first)}.");
+            }
+
+            if (now < failuresInAll.Since + FailureWindow && failuresInAll.Count >= MaxFailuresInAll)
+            {
+                return (null, $"Too many pairing attempts that matched no code came in all this minute; every hello is refused until {RecordParser.FormatTimestamp(failuresInAll.Since + FailureWindow)}.");
             }
 
             // Every code is tried, so the time taken says nothing about which one, if any, was close.
             Pairing? found = null;
             foreach (Pairing pairing in pairings)
             {
-                if (PairingProtocol.Matches(PairingProtocol.HelloMac(pairing.DeviceKey, hello.Nonce, certificate), hello.Mac) && found is null)
+                if (CryptographicOperations.FixedTimeEquals(PairingProtocol.HelloMacBytes(pairing.DeviceKey, hello.Nonce, certificate), mac) && found is null)
                 {
                     found = pairing;
                 }
@@ -116,35 +140,39 @@ internal sealed class PairingRegistry
 
             if (found is null)
             {
-                failures[address] = now < failed.Since + FailureWindow ? (failed.Since, failed.Count + 1) : (now, 1);
+                failures[address] = counted ? (failed.Since, failed.Count + 1) : (now, 1);
+                failuresInAll = now < failuresInAll.Since + FailureWindow ? (failuresInAll.Since, failuresInAll.Count + 1) : (now, 1);
                 return (null, "No pairing here matches this code over this connection: it is mistyped, it was never issued here, or something between this device and the runtime answered. Nothing was recorded.");
             }
 
-            if (Refusal(found, now) is string refusal)
-            {
-                return (null, refusal);
-            }
-
-            if (found.AttemptsLeft <= 0)
-            {
-                return (null, $"This pairing code has had {Attempts} confirmations that did not match it; ask the administrator for a new one.");
-            }
-
-            while (found.Exchanges.Count >= MaxExchanges)
-            {
-                found.Exchanges.Remove(found.Exchanges.MinBy(e => e.Value.Opened).Key);
-            }
-
-            return (found, null);
+            return Refusal(found, now) is string refusal ? (null, refusal) : (found, null);
         }
     }
 
-    /// <summary>Remembers the challenge an answer sent, under its runtime nonce, for the device's confirmation.</summary>
-    internal void Open(Pairing pairing, PairingHello hello, PairingChallenge challenge, PairingPlan plan)
+    /// <summary>
+    /// Remembers the challenge an answer sent, under its runtime nonce, for the device's confirmation: at most
+    /// <see cref="MaxExchanges"/> of a code at once, the oldest closed for a new one, and none once the code cannot go on. The problem
+    /// to answer with instead, when it cannot.
+    /// </summary>
+    internal string? Open(Pairing pairing, PairingHello hello, PairingChallenge challenge, PairingPlan plan)
     {
+        ArgumentNullException.ThrowIfNull(pairing);
+        ArgumentNullException.ThrowIfNull(challenge);
         lock (gate)
         {
-            pairing.Exchanges[challenge.RuntimeNonce] = new Exchange(hello, challenge, plan, time.GetUtcNow());
+            DateTimeOffset now = time.GetUtcNow();
+            if (Refusal(pairing, now) is string refusal)
+            {
+                return refusal;
+            }
+
+            while (pairing.Exchanges.Count >= MaxExchanges)
+            {
+                pairing.Exchanges.Remove(pairing.Exchanges.MinBy(e => e.Value.Order).Key);
+            }
+
+            pairing.Exchanges[challenge.RuntimeNonce] = new Exchange(hello, challenge, plan, now, ++opened);
+            return null;
         }
     }
 
@@ -172,7 +200,13 @@ internal sealed class PairingRegistry
 
             if (confirm.Device is null || !PairingProtocol.Matches(PairingProtocol.ConfirmMac(pairing.DeviceKey, exchange.Hello, exchange.Challenge, confirm), confirm.Mac))
             {
+                // The code's last attempt closes every exchange of it still open, so nothing more is tried against it.
                 pairing.AttemptsLeft--;
+                if (pairing.AttemptsLeft <= 0)
+                {
+                    pairing.Exchanges.Clear();
+                }
+
                 return (null, null, "The confirmation does not match this pairing code: the message was changed on its way. Nothing was recorded.");
             }
 
@@ -204,6 +238,7 @@ internal sealed class PairingRegistry
         Stage.Used => "This pairing code was used already; a code pairs one device. Ask the administrator for a new one.",
         Stage.Completing => "Another device is completing this pairing code right now.",
         _ when now >= pairing.ExpiresAt => $"This pairing code expired at {RecordParser.FormatTimestamp(pairing.ExpiresAt)}; ask the administrator for a new one.",
+        _ when pairing.AttemptsLeft <= 0 => $"This pairing code has had {Attempts} confirmations that did not match it; ask the administrator for a new one.",
         _ => null,
     };
 
@@ -219,17 +254,10 @@ internal sealed class PairingRegistry
             pairings.Remove(old);
         }
 
-        if (failures.Count > MaxAddresses)
+        // A count is forgotten only once its minute has ended: a full table makes new addresses wait, it never forgives an old one.
+        foreach (string ended in failures.Where(f => now >= f.Value.Since + FailureWindow).Select(f => f.Key).ToList())
         {
-            foreach (string stale in failures.Where(f => now >= f.Value.Since + FailureWindow).Select(f => f.Key).ToList())
-            {
-                failures.Remove(stale);
-            }
-
-            if (failures.Count > MaxAddresses)
-            {
-                failures.Clear();
-            }
+            failures.Remove(ended);
         }
     }
 
@@ -260,6 +288,6 @@ internal sealed class PairingRegistry
         public Dictionary<string, Exchange> Exchanges { get; } = new(StringComparer.Ordinal);
     }
 
-    /// <summary>An answered hello: the hello, the challenge sent, the records it promised and when it was opened.</summary>
-    internal sealed record Exchange(PairingHello Hello, PairingChallenge Challenge, PairingPlan Plan, DateTimeOffset Opened);
+    /// <summary>An answered hello: the hello, the challenge sent, the records it promised, when it was opened and in what order.</summary>
+    internal sealed record Exchange(PairingHello Hello, PairingChallenge Challenge, PairingPlan Plan, DateTimeOffset Opened, long Order);
 }

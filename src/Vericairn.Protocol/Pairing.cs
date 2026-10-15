@@ -175,6 +175,19 @@ public static class PairingProtocol
     /// <summary>A fresh nonce: 32 random bytes, base64url.</summary>
     public static string NewNonce() => Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
 
+    /// <summary>The length of a MAC in base64url: 32 bytes of HMAC-SHA256, 43 characters.</summary>
+    public const int MacLength = 43;
+
+    /// <summary>True when the text is a MAC in base64url: exactly <see cref="MacLength"/> characters, so nothing longer is ever decoded.</summary>
+    public static bool IsMac(string? text) => text is { Length: MacLength } && Base64Url.IsValid(text);
+
+    /// <summary>The device's MAC over its nonce and the fingerprint of the certificate its connection showed it, as bytes.</summary>
+    public static byte[] HelloMacBytes(byte[] deviceKey, string nonce, string certificate)
+    {
+        ArgumentNullException.ThrowIfNull(deviceKey);
+        return HMACSHA256.HashData(deviceKey, HelloTranscript(nonce, certificate));
+    }
+
     /// <summary>True when the text is a nonce of 16 to 64 bytes in base64url.</summary>
     public static bool IsNonce(string? text) =>
         !string.IsNullOrEmpty(text) && text.Length <= 88 && Base64Url.IsValid(text) && Base64Url.DecodeFromChars(text).Length is >= 16 and <= 64;
@@ -201,11 +214,14 @@ public static class PairingProtocol
         return Mac(runtimeKey, transcript.ToArray());
     }
 
-    /// <summary>Compares a MAC with the expected one in constant time; anything that is not base64url of the right length does not match.</summary>
+    /// <summary>
+    /// Compares a MAC with the expected one in constant time; anything that is not base64url of the expected length does not match, and
+    /// is refused before it is decoded, whatever its size.
+    /// </summary>
     public static bool Matches(string expected, string? actual)
     {
         ArgumentNullException.ThrowIfNull(expected);
-        if (string.IsNullOrEmpty(actual) || !Base64Url.IsValid(actual))
+        if (string.IsNullOrEmpty(actual) || actual.Length != expected.Length || !Base64Url.IsValid(actual))
         {
             return false;
         }
