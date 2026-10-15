@@ -110,9 +110,10 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status401Unauthorized, "denied", "Pairing runs over the local-network profile, at the address the administrator gave with the code.");
         }
 
-        if (confirm is null)
+        if (confirm is null || !PairingProtocol.IsMac(confirm.Mac))
         {
-            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A confirmation carries the device, its signature of its record and its MAC.");
+            context.Response.Headers.Connection = "close";
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A confirmation carries the device, its signature of its record and a 32-byte MAC in base64url.");
         }
 
         (PairingRegistry.Pairing? pairing, PairingRegistry.Exchange? exchange, string? problem) = host.Pairings.Confirm(confirm);

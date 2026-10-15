@@ -20,7 +20,8 @@ public class RefusedBodyTests
         var response = new CompletedResponse();
         var context = new DefaultHttpContext();
         context.Features.Set<IHttpResponseBodyFeature>(response);
-        Task refused = DaemonHost.RefuseAuthenticationAsync(context, body.Reader, new Problem("denied", "Sign it afresh.", []));
+        await DaemonHost.WriteProblemAsync(context, StatusCodes.Status401Unauthorized, new Problem("denied", "Sign it afresh.", []), close: true);
+        Task refused = DaemonHost.CompleteRefusalAsync(context, body.Reader);
         await response.Completed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
         Assert.Equal("close", context.Response.Headers.Connection);

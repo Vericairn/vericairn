@@ -167,12 +167,7 @@ internal sealed class RequestAuthenticator
         string operation = Operation(context);
         if (PairingRoutes.Contains(operation))
         {
-            // Reached without a credential: the exchange's messages are small, and nothing larger is read.
-            if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
-            {
-                limit.MaxRequestBodySize = PairingBodyLimit;
-            }
-
+            // The host bounds the exchange before binding, while preserving the original reader for refusal cleanup.
             return null;
         }
 
@@ -413,6 +408,13 @@ internal sealed class RequestAuthenticator
         }
 
         request.Body = new MemoryStream(body, writable: false);
+        // Binding must read the verified replay, not the limited transport reader now at EOF. The host retains the original
+        // reader separately for cleanup; the default body-pipe feature will follow this replacement stream.
+        if (context.Features.Get<IRequestBodyPipeFeature>() is LimitedBodyReader)
+        {
+            context.Features.Set<IRequestBodyPipeFeature>(null);
+        }
+
         context.Response.RegisterForDispose(request.Body);
         string target = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.ToString() + request.QueryString;
         byte[] digest = binding is { } bound

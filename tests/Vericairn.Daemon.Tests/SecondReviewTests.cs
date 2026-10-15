@@ -189,8 +189,10 @@ public class SecondReviewTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         using HttpClient stranger = Stranger(harness);
 
-        // A hello far beyond what any pairing message holds is refused before it is read; one whose MAC is not 32 bytes, unread.
-        var oversized = new PairingHello(PairingProtocol.NewNonce(), new string('A', 256 * 1024));
+        // An oversized hello is refused without parsing beyond the limit. Its entire payload also fits the refusal drain bound;
+        // a peer sending more than that bound cannot require delivery after a bounded close. A wrong-length MAC is never decoded.
+        var oversized = new PairingHello(PairingProtocol.NewNonce(), new string('A', 32 * 1024));
+        Assert.True(JsonSerializer.SerializeToUtf8Bytes(oversized, ProtocolJson.Options).Length <= DaemonHost.RefusedBodyLimit);
         using HttpResponseMessage large = await stranger.PostAsJsonAsync(new Uri("/v1/pairing/hello", UriKind.Relative), oversized, ProtocolJson.Options, TestContext.Current.CancellationToken);
         Say($"{(int)large.StatusCode} {await large.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)}");
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, large.StatusCode);

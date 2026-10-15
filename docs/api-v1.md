@@ -77,12 +77,22 @@ with no restart. The SDK signs with `DeviceRequestSigner`, which uses the device
 a copied request is refused, as stale after five minutes and as a repeat before then, and a copied key file is
 useless where platform custody holds the key.
 
-An authentication refusal completes its `401` response with its length and `Connection: close` before cleanup.
-The daemon then discards at most 64 KiB of the unread body for at most ten seconds, on loopback as on the local
-network, before returning to close the connection. Those bytes never reach an operation or extend the signature's
-validity. Cleanup stops by cancelling only a pending pipe read, preserving the TLS transport and the completed
-response. This lets a late body finish without closing a Windows TCP connection with unread data, whose reset
-could otherwise discard the response before the client reads it.
+Every HTTP refusal (status 400 or above) completes its response before cleanup: authentication, pairing,
+request-size limits, binding and endpoint refusals all share this path. A refusal with an unread body sends
+`Connection: close`; a fully read refusal retains its existing connection policy, including a runtime identity
+proof refused after an ordinary certificate rotation. On the local socket, loopback and the local network,
+the daemon discards at most 64 KiB of the unread body for at most ten seconds before returning. Connections
+marked close then close. Discarded body bytes are never parsed as API content, bound, decoded or acted on,
+and never extend a signature's validity. Cleanup cancels only a pending pipe read, preserving the transport and
+the completed response. Closing Windows TCP with unread data can otherwise reset it and discard the response.
+A peer that sends more than the discard bound, or keeps sending beyond its deadline, cannot require delivery
+after that bounded close.
+
+The HTTP body limit remains Kestrel's configured limit (30,000,000 bytes by default); pairing hello and confirm
+are limited to 16 KiB. A declared length above the limit is refused before reading; a streaming body is offered
+to authentication or binding only within its limit. The original body reader remains available for discard
+instead of becoming unreadable after a size-limit failure. Size refusals are `413`; cleanup does not raise the
+parsing limit.
 
 From 0.6.0 a device-signed request acts for its device's principal, on loopback as on the local network. When the
 request an operation receives names the principal acting, in its `by` or `principal`, as records, assignments,
@@ -141,7 +151,10 @@ certificate would be encrypted, out of reach. So the runtime and the SDK read ea
 clear and refuse, before this machine's TLS sees it, a certificate that names an address to fetch (authority or
 subject information access, CRL distribution points, a freshest CRL), one that does not parse, a list of more than
 one, and an offer to fetch certificates from addresses (`certificate_url`). The policy that downloads nothing
-stays as well, and the listener refuses a client's renegotiation, which would carry a new certificate inside the
+stays as well. When the server's screen refuses before TLS is established, it flushes a fatal TLS 1.2
+`handshake_failure` alert before discarding at most 64 KiB of raw transport bytes for at most ten seconds.
+That remainder bypasses both the certificate screen and the TLS engine; there is no HTTP request or response
+at this stage. The listener also refuses a client's renegotiation, which would carry a new certificate inside the
 encrypted channel, out of the screen's sight. What TLS 1.2 gives up against 1.3 is certificates hidden from whoever
 watches the network, and one round trip on each new connection. The constant subject answers the first in part
 only: the client certificate names no device, but its signature is the device key's and travels in clear too, so
@@ -224,7 +237,9 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    over the nonce and the fingerprint of the certificate its own handshake showed.
 4. The runtime tries every code it holds against that MAC, with the certificate it presented on this
    connection; its MAC is exactly 32 bytes, refused unread otherwise, and a pairing message's body is read only
-   as far as 16 KiB (`413` beyond). A hello that proves none is refused alike, whatever was tried, and its
+   as far as 16 KiB for parsing (`413` beyond), for hello and confirm alike. A MAC of the wrong length in
+   either message is `422` before decoding it or processing its device. Refusals complete before bounded discard
+   of any remainder, as above. A hello that proves none is refused alike, whatever was tried, and its
    connection is closed. An address that sends 50 such hellos within a minute is refused until its minute ends;
    an address is never forgotten while its minute runs, so while 1,024 addresses are counted a new one waits;
    and once 4,096 such hellos have come in all within a minute, every hello waits for the next, which bounds
@@ -378,7 +393,7 @@ record was rejected:
 | Code | Meaning | HTTP |
 |---|---|---|
 | `rejected` | The estate would be invalid with this record; the findings say why; nothing was written | 422 |
-| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit and a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept) |
+| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit, a request above the HTTP body limit or a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a body that arrives after its signature is stale, or after its device was revoked; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |

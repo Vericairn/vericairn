@@ -213,13 +213,20 @@ public sealed class TlsScreenStream : Stream
 
     private static int Length24(ReadOnlySpan<byte> bytes) => (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];
 
-    private static IOException Refused(string reason) => new($"Vericairn refused the TLS handshake: the other end {reason}.");
+    /// <summary>Whether this screen refused the peer before TLS was established; the server may send a fatal plaintext TLS alert.</summary>
+    public bool RefusedPeer { get; private set; }
+
+    private IOException Refused(string reason)
+    {
+        RefusedPeer = true;
+        return new IOException($"Vericairn refused the TLS handshake: the other end {reason}.");
+    }
 
     /// <summary>
     /// Refuses the certificates of one TLS 1.2 Certificate message (RFC 5246 § 7.4.2) unless there is at most one, it parses, and
     /// it names no address to fetch.
     /// </summary>
-    private static void Certificates(ReadOnlySpan<byte> message)
+    private void Certificates(ReadOnlySpan<byte> message)
     {
         if (message.Length < 3 || Length24(message) != message.Length - 3)
         {
@@ -246,7 +253,7 @@ public sealed class TlsScreenStream : Stream
         }
     }
 
-    private static void Certificate(ReadOnlySpan<byte> der)
+    private void Certificate(ReadOnlySpan<byte> der)
     {
         foreach (byte[] encoding in AddressEncodings)
         {

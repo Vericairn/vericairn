@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
@@ -287,7 +288,7 @@ public sealed class DaemonHost : IAsyncDisposable
         });
         WebApplication app = builder.Build();
         host.app = app;
-        app.Use(host.AuthenticateAsync);
+        app.Use(host.HandleRequestAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
         routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log));
@@ -464,11 +465,65 @@ public sealed class DaemonHost : IAsyncDisposable
 
     private WebApplication App => app ?? throw new InvalidOperationException("The daemon has not started.");
 
+    /// <summary>
+    /// Holds every HTTP refusal to one completion and bounded discard, including binding errors and size limits. Kestrel's own
+    /// body limit poisons its reader on overflow, so enforce the same limit through a non-owning wrapper and keep its reader for
+    /// cleanup. Authentication and JSON binding never receive bytes beyond the limit.
+    /// </summary>
+    internal async Task HandleRequestAsync(HttpContext context, RequestDelegate next)
+    {
+        PipeReader body = context.Request.BodyReader;
+        IHttpMaxRequestBodySizeFeature? size = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        long? maximum = size?.MaxRequestBodySize;
+        if (RequestAuthenticator.PairingRoutes.Contains(RequestAuthenticator.Operation(context)))
+        {
+            maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.PairingBodyLimit);
+        }
+
+        if (size is { IsReadOnly: false })
+        {
+            size.MaxRequestBodySize = null;
+        }
+
+        var limited = new LimitedBodyReader(body, maximum ?? long.MaxValue);
+        bool hasBody = context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody ?? true;
+        context.Request.Body = limited.AsStream(leaveOpen: true);
+        context.Features.Set<IRequestBodyPipeFeature>(limited);
+
+        context.Response.OnStarting(() =>
+        {
+            if (context.Response.StatusCode >= 400 && hasBody && !limited.IsFullyRead)
+            {
+                context.Response.Headers.Connection = "close";
+            }
+
+            return Task.CompletedTask;
+        });
+        try
+        {
+            if (context.Request.ContentLength is long length && maximum is long bound && length > bound)
+            {
+                await WriteProblemAsync(context, StatusCodes.Status413PayloadTooLarge, new Problem("refused", $"The request body exceeds its limit of {bound} bytes.", []), close: true).ConfigureAwait(false);
+            }
+            else
+            {
+                await AuthenticateAsync(context, next).ConfigureAwait(false);
+            }
+        }
+        catch (Microsoft.AspNetCore.Http.BadHttpRequestException exception) when (!context.Response.HasStarted)
+        {
+            await WriteProblemAsync(context, exception.StatusCode, new Problem("refused", exception.Message, []), close: true).ConfigureAwait(false);
+        }
+
+        if (context.Response.StatusCode >= 400)
+        {
+            await CompleteRefusalAsync(context, body).ConfigureAwait(false);
+        }
+    }
+
     /// <summary>Authenticates every request by the profile it came over: device-signed on loopback; on the local network a paired device by its certificate and its signature; the local socket by operating-system identity.</summary>
     private async Task AuthenticateAsync(HttpContext context, RequestDelegate next)
     {
-        // Keep the transport's reader: authentication may replace Request.Body with the bytes it verified for binding.
-        PipeReader body = context.Request.BodyReader;
         IDictionary<object, object?>? items = context.Features.Get<IConnectionItemsFeature>()?.Items;
         bool localNetwork = items?.ContainsKey(LocalNetworkMarker) == true;
         Problem? denied = localNetwork
@@ -478,25 +533,22 @@ public sealed class DaemonHost : IAsyncDisposable
                 : null;
         if (denied is not null)
         {
-            await RefuseAuthenticationAsync(context, body, denied).ConfigureAwait(false);
+            await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
             return;
         }
 
         await next(context).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Completes the refusal before discarding the remaining body. Returning with unread TCP data can reset the connection on
-    /// Windows and discard the 401 before the peer reads it, particularly through the local-network TLS screen. Completing the
-    /// response alone does not consume that data, and a Connection: close request need not get Kestrel's keep-alive body drain.
-    /// Cleanup reads no more than 64 KiB for ten seconds, never dispatches the request, and never cancels the transport to stop a read.
-    /// </summary>
-    internal static async Task RefuseAuthenticationAsync(HttpContext context, PipeReader body, Problem denied)
+    /// <summary>Completes any HTTP refusal before discarding its unread transport bytes, without parsing or binding them.</summary>
+    internal static async Task CompleteRefusalAsync(HttpContext context, PipeReader body)
     {
-        await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
         await context.Response.CompleteAsync().ConfigureAwait(false);
-        await DrainRefusedBodyAsync(body, 64 * 1024, TimeSpan.FromSeconds(10), context.RequestAborted).ConfigureAwait(false);
+        await DrainRefusedBodyAsync(body, RefusedBodyLimit, TimeSpan.FromSeconds(10), context.RequestAborted).ConfigureAwait(false);
     }
+
+    /// <summary>The most unread bytes discarded after a refusal, independently of its parsing or request-size limit.</summary>
+    internal const long RefusedBodyLimit = 64 * 1024;
 
     /// <summary>Discards a refused body's remainder within byte and time limits, leaving the response and transport live.</summary>
     internal static async Task<long> DrainRefusedBodyAsync(PipeReader reader, long maximum, TimeSpan limit, CancellationToken aborted)
@@ -561,6 +613,13 @@ public sealed class DaemonHost : IAsyncDisposable
             await reader.CompleteAsync().ConfigureAwait(false);
             await writer.CompleteAsync().ConfigureAwait(false);
             await screen.DisposeAsync().ConfigureAwait(false);
+            if (screen.RefusedPeer)
+            {
+                // No HTTP or established TLS exists at this point. Complete a fatal TLS handshake_failure alert first, then
+                // discard raw transport bytes: never run rejected certificates or their remainder through the screen again.
+                await transport.Output.WriteAsync(new byte[] { 21, 3, 3, 0, 2, 2, 40 }, connection.ConnectionClosed).ConfigureAwait(false);
+                await DrainRefusedBodyAsync(transport.Input, RefusedBodyLimit, TimeSpan.FromSeconds(10), connection.ConnectionClosed).ConfigureAwait(false);
+            }
         }
     };
 
