@@ -278,7 +278,7 @@ public static partial class NextEligible
         }
 
         text.Append(routes.Next is GoalStep next
-            ? $"  Next: {EstateModel.BodyString(next.Order, "key")}, {next.Route!.State}\n"
+            ? $"  Next: {EstateModel.BodyString(next.Order, "key")}, {next.Route!.State}; vericairn goal step {goal.Id} takes it\n"
             : "  Next: nothing to dispatch; every eligible step is held, or none is eligible\n");
         return text.ToString();
     }

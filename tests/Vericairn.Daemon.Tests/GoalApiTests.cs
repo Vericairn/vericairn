@@ -60,6 +60,12 @@ public class GoalApiTests
         Assert.Equal(JsonValueKind.Null, next.Json.GetProperty("next").ValueKind);
         Assert.Equal(host.Service.GoalNext(goal)!.Text, next.Text);
         Assert.Null(api.GoalNext("01M4TRNE1GYEK4P8MXQAB3C8Q4"));
+        GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(op));
+        Assert.Equal((true, "none"), (step.Ok, step.Outcome));
+        Assert.Equal("not-found", api.GoalStep("01M4TRNE1GYEK4P8MXQAB3C8Q4", new GoalStepRequest(op)).Problem!.Code);
+        TakeoverResponse takeover = api.WorkTakeover(new TakeoverRequest(assignment, op));
+        Assert.Equal("refused", takeover.Problem!.Code);
+        Assert.Contains("Work order W-1 is accepted: no step of it is left to take over.", takeover.Message, StringComparison.Ordinal);
 
         // What waits on a principal, through the API: the same delivery the runtime renders, for one principal or every one.
         string ask = Ok(api.NewRecord(new NewRecordRequest("ask", builder, Json($$"""{"to":"{{op}}","question":"Accept the goal?","recommendation":"Accept it on the reviewer's evaluation.","consequence":"The goal stays active.","goal":"{{goal}}","state":"open"}""")))).Id;

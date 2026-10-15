@@ -233,7 +233,7 @@ public class GoalJourneyTests
             Assert.StartsWith($"Next steps of goal Build the widget [goal {goal}], active, routed from this machine\n", text, StringComparison.Ordinal);
             Assert.Contains($"  W-1  Build the widget [work-order {order}]\n    builder: unavailable, Operator [principal {op}]\n", text, StringComparison.Ordinal);
             Assert.Contains("      candidate Builder (agent): not available: it has no admitted device, so it could sign no attempt and no result\n", text, StringComparison.Ordinal);
-            Assert.Contains("  Next: W-1, unavailable\n", text, StringComparison.Ordinal);
+            Assert.Contains($"  Next: W-1, unavailable; vericairn goal step {goal} takes it\n", text, StringComparison.Ordinal);
             JsonElement json = CliHarness.Ok("--estate", root, "--json", "goal", "next", goal).Json;
             Assert.Equal("vericairn.next/1", json.GetProperty("format").GetString());
             Assert.Equal("unavailable", Assert.Single(json.GetProperty("steps").EnumerateArray()).GetProperty("route").GetProperty("state").GetString());
@@ -308,6 +308,45 @@ public class GoalJourneyTests
                 Assert.Equal((goal, shown.GetProperty("hash").GetString()), (subject.GetProperty("id").GetString(), subject.GetProperty("hash").GetString()));
             }
 
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void AGoalsStepsAreTakenOneAtATimeAndAPersonTakesOverAnAgentsStep()
+    {
+        string root = CliHarness.TempDirectory("goal-step");
+        string scratch = CliHarness.TempDirectory("goal-step-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Steps.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"builder","principals":["{{builder}}"]},{"role":"publisher","principals":["{{op}}"]},{"role":"decider","principals":["{{op}}"]}]}"""));
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Release the guide", "--objective", "A published guide.", "--done", """{"evidence":"It is published.","check":"Read it."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2").Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            foreach ((string key, string role) in new[] { ("W-1", "builder"), ("W-2", "publisher") })
+            {
+                CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Order {{key}}","intent":"Work.","scope":["guide"],"exitQuestion":"Done?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["guide"],"role":"{{role}}"}"""));
+            }
+
+            // The builder has no device here, so W-1 is asked of the sponsor; W-2, a reserved action, is assigned to the operator and asked.
+            Assert.StartsWith($"step W-1  unavailable  ask  {op}\n  No principal is available for W-1: Operator is asked to assign someone or change the roster", CliHarness.Ok("--estate", root, "goal", "step", "--by", op).Out, StringComparison.Ordinal);
+            JsonElement reserved = CliHarness.Ok("--estate", root, "--json", "goal", "step", goal, "--by", op).Json.GetProperty("step");
+            Assert.Equal(("W-2", "reserved", "ask"), (reserved.GetProperty("step").GetString(), reserved.GetProperty("route").GetString(), reserved.GetProperty("outcome").GetString()));
+            Assert.Contains("Nothing to dispatch: every eligible step of goal", CliHarness.Ok("--estate", root, "goal", "step", "--by", op).Out, StringComparison.Ordinal);
+            Assert.StartsWith($"What waits on Operator [principal {op}]: 2 asks\n  1. Recommendation: Make Builder available: it has no admitted device", CliHarness.Ok("--estate", root, "ask").Out, StringComparison.Ordinal);
+
+            // A person takes over the step the builder holds: the hand-over is the operator's assignment, which then holds W-1.
+            string held = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"The guide.","sources":[],"permittedChanges":["the guide"],"prohibitedEffects":[],"workspace":["example repository"],"limits":[],"expectedOutputs":["guide"],"reviewCriteria":["it reads well"],"recovery":"Record a result."}""")).Id;
+            CliHarness.Outcome taken = CliHarness.Ok("--estate", root, "work", "takeover", held, "--by", op);
+            Assert.Contains($"Operator takes the step over by assignment", taken.Out, StringComparison.Ordinal);
+            Assert.Contains("No run of the agent's assignment was in flight.", taken.Out, StringComparison.Ordinal);
+            Assert.Contains("    builder: assigned, Operator [principal " + op + "]\n      assigned to Operator by assignment ", CliHarness.Ok("--estate", root, "goal", "next").Out, StringComparison.Ordinal);
+            Refused(root, "no longer holds work order W-1", "work", "takeover", held, "--by", op);
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
         }
         finally

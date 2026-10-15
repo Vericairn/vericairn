@@ -141,7 +141,7 @@ public sealed class RoutingTests : IDisposable
         string text = NextEligible.RenderText(Loaded(estate), routes);
         Assert.Contains($"  W-1  Order W-1 [work-order {build.Id}]\n    builder: agent, Test Builder [principal {estate.BuilderId}] through stand-in\n", text, StringComparison.Ordinal);
         Assert.Contains($"    answered, to Test Operator: Name a planner for W-4? [ask {ask.Id}]\n", text, StringComparison.Ordinal);
-        Assert.Contains("  Next: W-1, agent\n", text, StringComparison.Ordinal);
+        Assert.Contains($"  Next: W-1, agent; vericairn goal step {fixture.Goal} takes it\n", text, StringComparison.Ordinal);
         using JsonDocument json = JsonDocument.Parse(NextEligible.RenderJson(Loaded(estate), routes));
         Assert.Equal("vericairn.next/1", json.RootElement.GetProperty("format").GetString());
         Assert.Equal("W-1", json.RootElement.GetProperty("next").GetString());

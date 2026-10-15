@@ -430,55 +430,146 @@ internal static class Commands
                 return Clean;
             }
 
-            // The run is observed by the runtime; this waits for its settlement, and a Ctrl+C asks for its stop rather than abandoning it.
-            int stopping = 0;
-            void Interrupt(object? sender, ConsoleCancelEventArgs e)
+            RunRow? row = Follow(api, started.Run, options.By);
+            if (json)
             {
-                e.Cancel = true;
-                if (Interlocked.Exchange(ref stopping, 1) == 0)
-                {
-                    ThreadPool.QueueUserWorkItem(_ => api.RunStop(started.Run, new RunStopRequest(options.By, "interrupted at the command line")));
-                }
+                Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
+            }
+            else
+            {
+                PrintSettled(row);
             }
 
-            Console.CancelKeyPress += Interrupt;
-            try
-            {
-                RunRow? row = null;
-                int unobserved = 0;
-                while (unobserved < 5)
-                {
-                    Thread.Sleep(1000);
-                    row = api.Runs().Runs.FirstOrDefault(r => r.Run == started.Run);
-                    if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
-                    {
-                        break;
-                    }
-
-                    unobserved = row.Observed ? 0 : unobserved + 1;
-                }
-
-                if (json)
-                {
-                    Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
-                }
-                else if (row is not null)
-                {
-                    PrintRun(row);
-                    if (row.Status is "dispatched" or "not-started" or "uncertain")
-                    {
-                        Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
-                    }
-                }
-
-                return row?.Status == "observed-success" ? Clean : HasErrors;
-            }
-            finally
-            {
-                Console.CancelKeyPress -= Interrupt;
-            }
+            return row?.Status == "observed-success" ? Clean : HasErrors;
         });
     }
+
+    /// <summary>
+    /// Waits in the foreground until a run settles, or no worker observes it any longer, and returns its row; a Ctrl+C asks for its stop
+    /// rather than abandoning it. The run is observed by the runtime, never by this wait.
+    /// </summary>
+    private static RunRow? Follow(IEstateApi api, string run, string by)
+    {
+        int stopping = 0;
+        void Interrupt(object? sender, ConsoleCancelEventArgs e)
+        {
+            e.Cancel = true;
+            if (Interlocked.Exchange(ref stopping, 1) == 0)
+            {
+                ThreadPool.QueueUserWorkItem(_ => api.RunStop(run, new RunStopRequest(by, "interrupted at the command line")));
+            }
+        }
+
+        Console.CancelKeyPress += Interrupt;
+        try
+        {
+            RunRow? row = null;
+            int unobserved = 0;
+            while (unobserved < 5)
+            {
+                Thread.Sleep(1000);
+                row = api.Runs().Runs.FirstOrDefault(r => r.Run == run);
+                if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
+                {
+                    break;
+                }
+
+                unobserved = row.Observed ? 0 : unobserved + 1;
+            }
+
+            return row;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= Interrupt;
+        }
+    }
+
+    /// <summary>Prints a followed run as it ended, or as it was last observed.</summary>
+    private static void PrintSettled(RunRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        PrintRun(row);
+        if (row.Status is "dispatched" or "not-started" or "uncertain")
+        {
+            Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
+        }
+    }
+
+    /// <summary>What <c>vericairn goal step</c> was given.</summary>
+    internal sealed record GoalStepOptions(string? Goal, string By, string? Repository, string[] Settings, long? WallMinutes, string? Branch, string? Base, bool Detach);
+
+    /// <summary>
+    /// Takes a goal's next step, one at a time: an agent's run starts and, without --detach, is followed until it settles; a person's step
+    /// is assigned and asked; a step no principal is available for is asked of the sponsor.
+    /// </summary>
+    public static int GoalStep(string root, GoalStepOptions options, bool json)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
+        if (settings is null)
+        {
+            return Fail(problem!);
+        }
+
+        return WithApi(root, api =>
+        {
+            if (options.Detach && api is not VericairnClient)
+            {
+                return Fail("--detach leaves an agent's run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or take the step in the foreground.");
+            }
+
+            string? goal = options.Goal ?? OpenGoal(api, json);
+            if (goal is null)
+            {
+                return Clean;
+            }
+
+            GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base));
+            if (!step.Ok)
+            {
+                return step.Run?.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(step.Message);
+            }
+
+            RunRow? row = step.Outcome == "run" && !options.Detach ? Follow(api, step.Run!.Run, options.By) : null;
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { step, settled = row }, ProtocolJson.Options));
+            }
+            else
+            {
+                Console.Out.WriteLine(step.Step is null ? $"goal {step.Goal}  {step.Outcome}" : $"step {step.Step}  {step.Route}  {step.Outcome}{(step.Principal is null ? string.Empty : "  " + step.Principal)}");
+                Console.Out.WriteLine("  " + step.Message);
+                PrintSettled(row);
+            }
+
+            return step.Outcome != "run" || options.Detach || row?.Status == "observed-success" ? Clean : HasErrors;
+        });
+    }
+
+    /// <summary>Hands a step an agent holds over to a person, and prints the stops asked of the agent's runs in flight.</summary>
+    public static int WorkTakeover(string root, string assignment, string by, string? contributor, string? note, bool json) => WithApi(root, api =>
+    {
+        TakeoverResponse taken = api.WorkTakeover(new TakeoverRequest(assignment, by, contributor, note));
+        if (!taken.Ok)
+        {
+            return taken.Problem is { Code: "rejected", Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(taken.Message);
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(taken, ProtocolJson.Options));
+            return Clean;
+        }
+
+        Console.Out.WriteLine($"{taken.Assignment!.Path}  {taken.Assignment.Id}  {taken.Assignment.Hash}");
+        Console.Out.WriteLine("  " + taken.Message);
+        return Clean;
+    });
 
     /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
     public static int WorkerStop(string root, string run, string by, string? reason, int? grace, bool json) => WithApi(root, api =>

@@ -100,6 +100,16 @@ public interface IEstateApi
     /// </summary>
     NextResponse? GoalNext(string goal);
 
+    /// <summary>
+    /// Takes a goal's next step, one at a time: its first eligible step whose route acts, routed from the runtime's machine. An agent's
+    /// step starts its run through the worker, within the custody precondition; a person's is assigned and asked; one no principal is
+    /// available for is asked of the sponsor. It activates, funds, accepts and answers nothing.
+    /// </summary>
+    GoalStepResponse GoalStep(string goal, GoalStepRequest request);
+
+    /// <summary>Hands a step an agent holds over to a person: a new assignment carrying the agent's brief and naming its assignment, and a stop asked of the agent's runs in flight.</summary>
+    TakeoverResponse WorkTakeover(TakeoverRequest request);
+
     /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);
 

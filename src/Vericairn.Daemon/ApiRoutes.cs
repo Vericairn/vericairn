@@ -34,6 +34,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
         app.MapPost($"{v}/work/result", (ResultRequest request) => Outcome(service.Result(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
+        app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));
         app.MapPost($"{v}/devices", (DeviceCreateRequest request) => Outcome(service.DeviceCreate(request)));
         app.MapPost($"{v}/devices/admit", (AdmitRequest request) => Outcome(service.DeviceAdmit(request)));
@@ -49,6 +50,7 @@ public static class ApiRoutes
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/goals/{{id}}/next", (string id) => service.GoalNext(id) is NextResponse next ? Results.Json(next, ProtocolJson.Options) : Results.NotFound());
+        app.MapPost($"{v}/goals/{{id}}/step", (string id, GoalStepRequest request) => Results.Json(service.GoalStep(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/goals/{{id}}/activate", (string id, GoalActionRequest request) => Outcome(service.GoalActivate(id, request)));
         app.MapPost($"{v}/goals/{{id}}/pause", (string id, GoalActionRequest request) => Outcome(service.GoalPause(id, request)));
         app.MapPost($"{v}/goals/{{id}}/resume", (string id, GoalActionRequest request) => Outcome(service.GoalResume(id, request)));

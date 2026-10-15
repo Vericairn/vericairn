@@ -614,7 +614,7 @@ internal static class CliApp
         show.Arguments.Add(shownArgument);
         show.SetAction(parseResult => Commands.Goal(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(show);
-        var next = new Command("next", "Show a goal's next steps routed from this machine: each eligible step with the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, whether the goal's budget allows it, and what holds the others. It records and starts nothing.");
+        var next = new Command("next", "Show a goal's next steps routed from this machine: each eligible step with the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, whether the goal's budget allows it, and what holds the others. It records and starts nothing; vericairn goal step takes the next one.");
         next.Arguments.Add(shownArgument);
         next.SetAction(parseResult => Commands.GoalNext(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(next);
@@ -696,6 +696,35 @@ internal static class CliApp
         exception.Options.Add(expiresOption);
         exception.SetAction(parseResult => Commands.GoalCustodyException(parseResult.GetValue(estateOption)!, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(expiresOption)!, parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(exception);
+
+        var repositoryOption = new Option<string?>("--repository") { Description = "For an agent's step, the repository resource whose clone, registered on this machine (vericairn sources clone), its workspace is made from." };
+        var settingOption = new Option<string[]>("--setting") { Description = "For an agent's step, a setting of the launcher routing chose, as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
+        var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "For an agent's step, the run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
+        var branchOption = new Option<string?>("--branch") { Description = "For an agent's step, the work branch; work/ and the work order's key when omitted." };
+        var baseOption = new Option<string?>("--base") { Description = "For an agent's step, what a new work branch starts from; the clone's HEAD when omitted." };
+        var detachOption = new Option<bool>("--detach") { Description = "Return once an agent's run is launched, leaving it to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
+        var step = new Command("step", "Take a goal's next step, one at a time: its first eligible step whose route acts, routed from this machine by the goal's roster. An agent's step is assigned to the agent when nothing holds it and its run starts through the worker, refused before anything is recorded while a key of an operator or of the sponsor signs here without presence and no custody exception is in force; a person's step is assigned to the person and asked of them; a step no principal is available for is asked of the sponsor, never given to another contributor. It activates, funds, accepts and answers nothing.");
+        step.Arguments.Add(shownArgument);
+        step.Options.Add(byOption);
+        step.Options.Add(repositoryOption);
+        step.Options.Add(settingOption);
+        step.Options.Add(wallMinutesOption);
+        step.Options.Add(branchOption);
+        step.Options.Add(baseOption);
+        step.Options.Add(detachOption);
+        step.SetAction(parseResult => Commands.GoalStep(
+            parseResult.GetValue(estateOption)!,
+            new Commands.GoalStepOptions(
+                parseResult.GetValue(shownArgument),
+                parseResult.GetValue(byOption)!,
+                parseResult.GetValue(repositoryOption),
+                parseResult.GetValue(settingOption) ?? [],
+                parseResult.GetValue(wallMinutesOption),
+                parseResult.GetValue(branchOption),
+                parseResult.GetValue(baseOption),
+                parseResult.GetValue(detachOption)),
+            parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(step);
 
         var summaryOption = new Option<string>("--summary") { Description = "What was reviewed and how.", Required = true };
         var verdictOption = new Option<string[]>("--verdict") { Description = "A condition's verdict, n:verdict:reason with n from 1 and the verdict met, not-yet or impossible; repeatable. Every evidence statement needs one; a record predicate gets the runtime's, unless the evaluator judges one the runtime does not find met impossible." };
@@ -860,6 +889,16 @@ internal static class CliApp
             parseResult.GetValue(bodyOption)!,
             parseResult.GetValue(jsonOption)));
         work.Subcommands.Add(amend);
+
+        var takenOption = new Option<string?>("--contributor") { Description = "The person who takes the step over; the recording principal when omitted." };
+        var takeoverNoteOption = new Option<string?>("--note") { Description = "Why; a sentence naming the hand-over when omitted." };
+        var takeover = new Command("takeover", "Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming the agent's assignment, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop.");
+        takeover.Arguments.Add(assignmentArgument);
+        takeover.Options.Add(byOption);
+        takeover.Options.Add(takenOption);
+        takeover.Options.Add(takeoverNoteOption);
+        takeover.SetAction(parseResult => Commands.WorkTakeover(parseResult.GetValue(estateOption)!, parseResult.GetValue(assignmentArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(takenOption), parseResult.GetValue(takeoverNoteOption), parseResult.GetValue(jsonOption)));
+        work.Subcommands.Add(takeover);
 
         var observe = new Command("observe", "Show a work order's assignments, attempts, results, amendments, reviews and acceptances.");
         observe.Arguments.Add(keyArgument);

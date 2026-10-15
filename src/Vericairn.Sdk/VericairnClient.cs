@@ -191,6 +191,12 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
 
     /// <inheritdoc />
+    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request)!;
+
+    /// <inheritdoc />
+    public TakeoverResponse WorkTakeover(TakeoverRequest request) => Post<TakeoverRequest, TakeoverResponse>("/v1/work/takeover", request)!;
+
+    /// <inheritdoc />
     public WriteOutcome GoalPropose(GoalProposeRequest request) => Post<GoalProposeRequest, WriteOutcome>("/v1/goals", request)!;
 
     /// <inheritdoc />

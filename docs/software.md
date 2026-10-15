@@ -246,6 +246,28 @@ named) has passed, the worker kills its process tree; containment is its exit, o
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
 and the run stays in flight.
 
+**One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
+([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
+none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts
+nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>] [--setting name=value]...
+[--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
+Community's conductor, one step in sequence; Pro's program plans and schedules many. The goal must be active. An agent's
+step is assigned to the agent when no assignment holds it, with a brief made from the work order and the goal (its scope,
+deliverables and exit question, the goal's constraints, and nothing reserved without a grant in force), and its run starts
+through the worker with the launcher routing chose and the settings given, all as `worker run` does, the custody
+precondition included; without `--detach` the command follows the run until it settles. It is refused before anything is
+recorded without a repository, while the custody guard refuses and the sponsor's exception is not in force, or while the
+budget does not allow the run. A person's step is assigned to the person and asked of them; a reserved action routed to a
+person who holds it likewise; and a step no principal is available for is asked of who decides for the goal, with the
+recommendation that fits why, and assigned to no one. With every eligible step held, the command says what holds each and
+records nothing. It activates, funds, accepts and answers nothing.
+
+**A hand-over.** `vericairn work takeover <assignment> --by <principal> [--contributor <person>] [--note <text>]` hands a
+step an agent holds over to a person: a new assignment of the work order to the person, the hand-over record, carries the
+agent's brief and names the agent's assignment among its sources, and from then on holds the step. Every run of the
+agent's assignment still in flight is asked to stop. A step the agent no longer holds, or whose work order is accepted or
+retired, is not taken over, and a step goes over to a person only.
+
 `vericairn worker runs` lists every run with its cap, its usage once settled, what it is charged and its stop's facts, and
 the ledger of every goal with a run or active now: each unit's budget, spend and remainder, the runs in flight, and why a
 new run would be fenced. The runs' own files, their state, output and MCP configuration, stay under the Vericairn home on
