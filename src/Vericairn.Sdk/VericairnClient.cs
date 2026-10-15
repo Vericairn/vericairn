@@ -170,6 +170,12 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public IReadOnlyList<ReleaseRow> Releases() => Get<List<ReleaseRow>>("/v1/releases")!;
 
     /// <inheritdoc />
+    public IReadOnlyList<DocumentRow> Documents() => Get<List<DocumentRow>>("/v1/documents")!;
+
+    /// <inheritdoc />
+    public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
 
     /// <inheritdoc />

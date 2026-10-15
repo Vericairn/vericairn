@@ -120,6 +120,42 @@ public class McpTests
     }
 
     [Fact]
+    public void TheDocumentToolsShowWhatIsDueAndRecordTheActingPrincipalsReview()
+    {
+        string root = CliHarness.TempDirectory("mcp-documents");
+        string scratch = CliHarness.TempDirectory("mcp-documents-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "MCP documents.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", builder, "--name", "Builder device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Test.");
+            Directory.CreateDirectory(Path.Combine(root, "docs"));
+            File.WriteAllText(Path.Combine(root, "docs", "guide.md"), "# Guide\n");
+            CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "declaration.json", """{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"upgrade","level":"remind"},{"on":"decision","level":"warn"}],"summary":"x"}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Change","stake":"low","notAuthorized":[],"statement":"Change the guide.","summary":"Change.","synthesis":"The operator changes the guide.","effects":["change"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z","documents":["docs/guide.md"]}"""));
+
+            using EstateService api = EstateService.Open(root);
+            JsonObject due = Drive(api, null, """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"documents_due","arguments":{}}}""")[0];
+            string listed = due["result"]!["content"]![0]!["text"]!.GetValue<string>();
+            Assert.Contains("docs/guide.md", listed, StringComparison.Ordinal);
+            Assert.Contains("\"warn\"", listed, StringComparison.Ordinal);
+
+            // The acting principal's review, signed by its device; the runtime states the content and what it answers.
+            JsonObject reviewed = Drive(api, builder, """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"document_review","arguments":{"path":"docs/guide.md","outcome":"current","summary":"The guide holds after the decision."}}}""")[0];
+            Assert.False(reviewed["result"]!["isError"]!.GetValue<bool>(), reviewed.ToJsonString());
+            JsonObject after = Drive(api, null, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"documents_due","arguments":{}}}""")[0];
+            Assert.Equal("[]", after["result"]!["content"]![0]!["text"]!.GetValue<string>());
+            JsonObject unknown = Drive(api, builder, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"document_review","arguments":{"path":"docs/absent.md","outcome":"current","summary":"x"}}}""")[0];
+            Assert.True(unknown["result"]!["isError"]!.GetValue<bool>());
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void OrientationFilesComeFromTheRecordsAndStateNonClaims()
     {
         string root = CliHarness.TempDirectory("mcp-orientation");

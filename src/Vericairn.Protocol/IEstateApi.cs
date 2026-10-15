@@ -72,6 +72,12 @@ public interface IEstateApi
     /// <summary>Current release records.</summary>
     IReadOnlyList<ReleaseRow> Releases();
 
+    /// <summary>The declared living documents, each with its derived state: current, due with its reasons, or unavailable.</summary>
+    IReadOnlyList<DocumentRow> Documents();
+
+    /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
+    WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
+
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>
     IReadOnlyList<ProviderRow> Providers();
 

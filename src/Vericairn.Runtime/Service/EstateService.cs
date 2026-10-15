@@ -707,6 +707,105 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    public IReadOnlyList<DocumentRow> Documents()
+    {
+        lock (gate)
+        {
+            return LivingDocuments.Derive(session.Load()).Select(d => new DocumentRow(
+                d.Path,
+                d.Repository,
+                d.Declaration.Id,
+                EstateModel.BodyString(d.Declaration, "title"),
+                d.Unavailable.Count > 0 ? "unavailable" : d.Due ? "due" : "current",
+                d.Level,
+                d.Reasons.Select(r => new DocumentReason(r.On, r.Level, r.Summary, r.Record)).ToList(),
+                d.Clearance?.Id,
+                d.Unavailable,
+                d.Notes)).ToList();
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The reviewing principal must be a ULID.");
+        }
+
+        if (Array.IndexOf(DocumentReviewType.Outcomes, request.Outcome) < 0)
+        {
+            return Refuse($"A document review's outcome is {string.Join(", ", DocumentReviewType.Outcomes)}.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? declared = Latest(model, declaration, "living-document");
+            if (declared is null)
+            {
+                return NotFound($"No living-document declaration has id {declaration}.");
+            }
+
+            if (EstateModel.BodyString(declared, "repository") is not null)
+            {
+                return Refuse("A document of another repository is reviewed at a commit through its source; that source is the software pack's git-file, which reads it from a registered clone.");
+            }
+
+            string path = EstateModel.BodyString(declared, "path")!;
+            string file = Path.Combine(session.Root, path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(file))
+            {
+                return Refuse($"{path} is not in the estate's working tree; a review reads the document it clears.");
+            }
+
+            // The runtime, not the reviewer, states what was reviewed: the exact bytes, the covered paths' identity and the triggers
+            // the review answers; and it runs the declared checks, so a failed one refuses the clearance before anything is written.
+            byte[] bytes = File.ReadAllBytes(file);
+            string text = System.Text.Encoding.UTF8.GetString(bytes);
+            LivingDocuments.State state = LivingDocuments.Derive(model).First(d => d.Declaration.Id == declared.Id);
+            List<RecordEnvelope> answered = state.Reasons.Where(r => r.Record is not null).Select(r => model.ById[r.Record!]).ToList();
+            IReadOnlyList<DocumentChecks.Outcome> checks = DocumentChecks.Run(model, declared, text, path, session.Root, answered);
+            var body = new JsonObject
+            {
+                ["outcome"] = request.Outcome,
+                ["content"] = new JsonObject { ["hash"] = ContentHash.Sha256(bytes), ["bytes"] = bytes.Length },
+                ["answers"] = new JsonArray(state.Reasons.Select(r => (JsonNode)(r.Record is null
+                    ? new JsonObject { ["on"] = r.On }
+                    : new JsonObject { ["on"] = r.On, ["record"] = new JsonObject { ["type"] = model.ById[r.Record].Type, ["id"] = r.Record, ["hash"] = model.ById[r.Record].ComputedHash } })).ToArray()),
+                ["independence"] = DocumentIndependence(model, declared, request.By, request.Outcome),
+                ["summary"] = request.Summary,
+                ["findings"] = new JsonArray((request.Findings ?? []).Select(f => (JsonNode)(f.Location is null
+                    ? new JsonObject { ["severity"] = f.Severity, ["summary"] = f.Summary }
+                    : new JsonObject { ["severity"] = f.Severity, ["summary"] = f.Summary, ["location"] = f.Location })).ToArray()),
+                ["checks"] = new JsonArray(checks.Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["outcome"] = c.Result, ["summary"] = c.Summary }).ToArray()),
+            };
+            if (LivingDocuments.CoveredPaths(declared) is { Count: > 0 } covered)
+            {
+                body["covered"] = LivingDocuments.CoveredIdentity(session.Root, covered);
+            }
+
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteLocked(new RecordDraft("document-review", request.By, document.RootElement, declared.Reference), model);
+        }
+    }
+
+    /// <summary>The reviewer's independence of the content, as the record's rules judge it: self when it revised the content, else operator or independent agent.</summary>
+    private static string DocumentIndependence(EstateModel model, RecordEnvelope declaration, string by, string outcome)
+    {
+        string? path = EstateModel.BodyString(declaration, "path");
+        RecordEnvelope? revision = model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path)
+            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        if (outcome == "revised" || revision?.By == by)
+        {
+            return "self";
+        }
+
+        return model.HasRole(by, Roles.Operator) ? "operator" : "independent-agent";
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<ReleaseRow> Releases()
     {
         lock (gate)

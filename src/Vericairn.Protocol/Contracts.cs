@@ -179,6 +179,40 @@ public sealed record DeviceRenameRequest(string Device, string Name);
 /// <param name="Presence">Whether every signature with the new key needs the owner's presence, Secure Enclave custody only; when omitted, the device keeps its presence where the new custody enforces it.</param>
 public sealed record DeviceRotateRequest(string Device, string? Custody = null, bool? Presence = null);
 
+/// <summary>A declared living document and its derived state.</summary>
+/// <param name="Path">The document's repository-relative path.</param>
+/// <param name="Repository">The resource record of the repository that holds it; null for the estate's own repository.</param>
+/// <param name="Declaration">The current declaration's id.</param>
+/// <param name="Title">The document's title.</param>
+/// <param name="State">current, due or unavailable.</param>
+/// <param name="Level">The level it is due at: remind, warn or refuse; null when it is current.</param>
+/// <param name="Reasons">Every trigger newer than its latest clearance.</param>
+/// <param name="Clearance">The latest clearance's record id, or null.</param>
+/// <param name="Unavailable">The pack contributions it names that no installed pack provides.</param>
+/// <param name="Notes">What could not be evaluated here, and why.</param>
+public sealed record DocumentRow(string Path, string? Repository, string Declaration, string? Title, string State, string? Level, IReadOnlyList<DocumentReason> Reasons, string? Clearance, IReadOnlyList<string> Unavailable, IReadOnlyList<string> Notes);
+
+/// <summary>Why a living document is due.</summary>
+/// <param name="On">The trigger.</param>
+/// <param name="Level">remind, warn or refuse.</param>
+/// <param name="Summary">What fired it.</param>
+/// <param name="Record">The record that fired it; null for covered paths.</param>
+public sealed record DocumentReason(string On, string Level, string Summary, string? Record);
+
+/// <summary>Review a living document: the runtime reads its content, records the covered paths' identity and the triggers it answers, and runs its declared checks.</summary>
+/// <param name="By">The reviewing principal.</param>
+/// <param name="Outcome">current, revised or needs-change.</param>
+/// <param name="Summary">What was checked.</param>
+/// <param name="Findings">What was found: severity (error, warning or info), summary and optional location.</param>
+/// <param name="Commit">For a document of another repository, the commit reviewed.</param>
+public sealed record DocumentReviewRequest(string By, string Outcome, string Summary, IReadOnlyList<DocumentFinding>? Findings = null, string? Commit = null);
+
+/// <summary>A finding of a document review.</summary>
+/// <param name="Severity">error, warning or info.</param>
+/// <param name="Summary">What was found.</param>
+/// <param name="Location">Where, optionally.</param>
+public sealed record DocumentFinding(string Severity, string Summary, string? Location = null);
+
 /// <summary>Revoke a device's admission.</summary>
 /// <param name="Device">Device id.</param>
 /// <param name="By">Revoking principal.</param>
