@@ -66,6 +66,9 @@ public interface IEstateApi
     /// <summary>Revoke a device's admission.</summary>
     WriteOutcome DeviceRevoke(RevokeRequest request);
 
+    /// <summary>Makes the operator's recovery device, its key written once for offline keeping, and admits it with an admitted device of the operator.</summary>
+    WriteOutcome DeviceRecovery(DeviceRecoveryRequest request);
+
     /// <summary>Current release records.</summary>
     IReadOnlyList<ReleaseRow> Releases();
 

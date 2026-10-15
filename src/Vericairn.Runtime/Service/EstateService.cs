@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -529,7 +530,8 @@ public sealed class EstateService : IEstateApi, IDisposable
 
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "admitted", ["note"] = request.Note };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("admission", request.By, document.RootElement, device.Reference), model);
+            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference);
+            return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
         }
     }
 
@@ -559,7 +561,135 @@ public sealed class EstateService : IEstateApi, IDisposable
 
             var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            return WriteLocked(new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id), model);
+            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id);
+            return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome DeviceRecovery(DeviceRecoveryRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.Principal))
+        {
+            return Refuse("The principal must be a ULID.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Refuse("A recovery device has a descriptive name.");
+        }
+
+        if (request.Passphrase is null || request.Passphrase.Length < RecoveryKey.MinimumPassphrase)
+        {
+            return Refuse($"A recovery key is encrypted with a passphrase of at least {RecoveryKey.MinimumPassphrase} characters.");
+        }
+
+        // The key file never enters the estate's repository, where a commit would publish it.
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(session.Root)) + Path.DirectorySeparatorChar;
+        if (string.IsNullOrWhiteSpace(request.Output) || !Path.IsPathFullyQualified(request.Output) || Path.GetFullPath(request.Output).StartsWith(root, OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase))
+        {
+            return Refuse("A recovery key is written to an absolute path the operator names, outside the estate's repository.");
+        }
+
+        if (File.Exists(request.Output) || Directory.Exists(request.Output))
+        {
+            return Refuse($"{request.Output} exists, and a recovery key never overwrites anything.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if ((model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat) < 2)
+            {
+                return Refuse("A recovery device is recorded in record format 2; upgrade the estate to a release that writes format 2 first.");
+            }
+
+            if (!model.HasRole(request.Principal, Roles.Operator))
+            {
+                return Refuse("A recovery device belongs to an operator.");
+            }
+
+            // An admitted device of the operator held here admits the recovery device, so nothing is made without one.
+            IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
+            if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Principal && SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))))
+            {
+                return Refuse("A recovery device is made on a machine that holds an admitted device of the operator, which admits it.");
+            }
+
+            // The key exists in memory and in the encrypted file only; no key store ever holds it.
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            string id = Ulid.NewUlid(now).Value;
+            using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            try
+            {
+                RecoveryKey.Write(request.Output, key, request.Passphrase, id, EstateModel.BodyString(model.CurrentEstate!, "slug") ?? "?");
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return Refuse(exception.Message);
+            }
+
+            var body = new JsonObject
+            {
+                ["principal"] = request.Principal,
+                ["name"] = request.Name,
+                ["platform"] = VericairnHome.Platform(),
+                ["custody"] = DeviceKeyStores.OfflineKind,
+                ["algorithm"] = RecordSigning.Algorithm,
+                ["publicKey"] = RecordSigning.EncodePublicKey(key.ExportSubjectPublicKeyInfo()),
+                ["profiles"] = new JsonArray("embedded"),
+                ["presence"] = "none",
+                ["purpose"] = "recovery",
+            };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            WriteOutcome device = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), model, [new KeySigner(key, id)]);
+            if (!device.Ok)
+            {
+                File.Delete(request.Output);
+                return device;
+            }
+
+            var admission = new JsonObject { ["principal"] = request.Principal, ["status"] = "admitted", ["note"] = "The operator's recovery device; its key is kept offline." };
+            using JsonDocument admissionDocument = JsonDocument.Parse(admission.ToJsonString());
+            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", request.Principal, admissionDocument.RootElement, new RecordReference("device", id, device.Written!.Hash)), session.Load());
+            return admitted.Ok ? device : WriteOutcome.Fail(new Problem("refused", $"Recovery device {id} is recorded, but its admission was refused: {admitted.Problem?.Message} Its key is at {request.Output}; admit it with vericairn devices admit.", admitted.Problem?.Findings ?? []));
+        }
+    }
+
+    /// <summary>Writes a record signed by the operator's recovery device, its key opened in memory from its file with its passphrase.</summary>
+    private WriteOutcome WriteWithRecovery(RecordDraft draft, EstateModel model, string path, string? passphrase)
+    {
+        if (string.IsNullOrEmpty(passphrase))
+        {
+            return Refuse("A recovery key opens with its passphrase.");
+        }
+
+        if (!Path.IsPathFullyQualified(path) || !File.Exists(path))
+        {
+            return Refuse($"No recovery key at {path}.");
+        }
+
+        ECDsa key;
+        try
+        {
+            key = RecoveryKey.Open(path, passphrase);
+        }
+        catch (Exception exception) when (exception is CryptographicException or ArgumentException or IOException or UnauthorizedAccessException)
+        {
+            return Refuse($"The recovery key at {path} does not open with this passphrase, or the file holds no recovery key.");
+        }
+
+        using (key)
+        {
+            string publicKey = RecordSigning.EncodePublicKey(key.ExportSubjectPublicKeyInfo());
+            RecordEnvelope? device = model.Current("device").FirstOrDefault(d => EstateModel.BodyString(d, "publicKey") == publicKey && EstateModel.BodyString(d, "purpose") == "recovery");
+            if (device is null || EstateModel.BodyString(device, "principal") != draft.By || !SignatureChecks.IsAdmitted(model, device))
+            {
+                return Refuse($"The key at {path} is not the key of an admitted recovery device of {draft.By}.");
+            }
+
+            return WriteLocked(draft, model, [new KeySigner(key, model.Chain(device)[0])]);
         }
     }
 

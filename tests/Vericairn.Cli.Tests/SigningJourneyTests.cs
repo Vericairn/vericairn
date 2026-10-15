@@ -178,6 +178,87 @@ public class SigningJourneyTests
         }
     }
 
+    [Fact]
+    public void TheOperatorsRecoveryKeyAdmitsAReplacementWhenEveryDeviceIsLost()
+    {
+        const string Passphrase = "correct horse battery staple";
+        string a = CliHarness.TempDirectory("recovery-a");
+        string home = CliHarness.TempDirectory("recovery-home");
+        string newHome = CliHarness.TempDirectory("recovery-new-home");
+        string safe = CliHarness.TempDirectory("recovery-safe");
+        string scratch = CliHarness.TempDirectory("recovery-scratch");
+        string? previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
+            CliHarness.Outcome init = CliHarness.Ok("--estate", a, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Recovery journey.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
+            string op = init.Json.GetProperty("operator").GetString()!;
+            string laptop = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", op, "--name", "Operator laptop", "--custody", "file").Id;
+            CliHarness.Ok("--estate", a, "--json", "devices", "admit", laptop, "--by", op, "--note", "The operator's own laptop.");
+            string charterPath = CliHarness.WriteJson(scratch, "charter.json", $$$"""{"name":"Example","slug":"example","purpose":"Recovery journey.","operator":"{{{op}}}","recordFormat":2,"policies":{"signatures":"required","releaseAcceptance":["operator"]},"organization":{"name":"Example"}}""");
+            CliHarness.Ok("--estate", a, "--json", "records", "new", "estate", "--by", op, "--body", charterPath, "--supersedes", init.Json.GetProperty("estate").GetString()!);
+
+            // The recovery key goes to a new file outside the repository, under a passphrase of twelve characters or more.
+            string keyFile = Path.Combine(safe, "recovery.key");
+            Assert.Equal(2, CliHarness.RunWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "recovery", "--principal", op, "--name", "Recovery key", "--output", Path.Combine(a, "recovery.key"), "--passphrase-stdin").Code);
+            Assert.Equal(2, CliHarness.RunWithInput("too short\n", "--estate", a, "--json", "devices", "recovery", "--principal", op, "--name", "Recovery key", "--output", keyFile, "--passphrase-stdin").Code);
+            Assert.False(File.Exists(Path.Combine(a, "recovery.key")));
+            Assert.False(File.Exists(keyFile));
+
+            // Made once, encrypted, admitted by the laptop, and never held by this machine.
+            string recovery = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "recovery", "--principal", op, "--name", "Recovery key in the safe", "--output", keyFile, "--passphrase-stdin").Id;
+            string text = File.ReadAllText(keyFile);
+            Assert.Contains("BEGIN ENCRYPTED PRIVATE KEY", text, StringComparison.Ordinal);
+            Assert.Contains(recovery, text, StringComparison.Ordinal);
+            if (!OperatingSystem.IsWindows())
+            {
+                Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(keyFile));
+            }
+
+            Assert.DoesNotContain(Directory.EnumerateFiles(Path.Combine(home, "keys")), f => f.Contains(recovery, StringComparison.Ordinal));
+            JsonElement row = CliHarness.Ok("--estate", a, "--json", "devices", "list").Json.EnumerateArray().Single(d => d.GetProperty("id").GetString() == recovery);
+            Assert.Equal("offline", row.GetProperty("custody").GetString());
+            Assert.Equal("recovery", row.GetProperty("purpose").GetString());
+            Assert.Equal("admitted", row.GetProperty("admission").GetString());
+            Assert.False(row.GetProperty("heldHere").GetBoolean());
+            CliHarness.Outcome check = CliHarness.Run("--estate", a, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+            Assert.DoesNotContain("recovery.unreviewed", check.Out, StringComparison.Ordinal);
+
+            // Every device is lost. On a new machine nothing admits the replacement, except the recovery key with its passphrase.
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, newHome);
+            string replacement = CliHarness.Ok("--estate", a, "--json", "devices", "create", "--principal", op, "--name", "Replacement laptop", "--custody", "file").Id;
+            Assert.Equal(2, CliHarness.Run("--estate", a, "--json", "devices", "admit", replacement, "--by", op, "--note", "Replaces the lost laptop.").Code);
+            CliHarness.Outcome wrong = CliHarness.RunWithInput("not the passphrase at all\n", "--estate", a, "--json", "devices", "admit", replacement, "--by", op, "--note", "Replaces the lost laptop.", "--recovery", keyFile, "--passphrase-stdin");
+            Assert.Equal(2, wrong.Code);
+            Assert.Contains("does not open", wrong.Err, StringComparison.Ordinal);
+            CliHarness.Outcome admitted = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "admit", replacement, "--by", op, "--note", "Replaces the lost laptop.", "--recovery", keyFile, "--passphrase-stdin");
+            Thread.Sleep(1100); // revocation applies from its own second; the laptop's records must sit in an earlier one
+            CliHarness.Outcome revoked = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "revoke", laptop, "--by", op, "--reason", "Laptop lost.", "--recovery", keyFile, "--passphrase-stdin");
+
+            // The replacement signs as the operator again, and both uses stay in view until the operator reviews them.
+            CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-1"));
+            check = CliHarness.Run("--estate", a, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+            Assert.Equal(2, check.Out.Split("recovery.unreviewed").Length - 1);
+            Assert.Contains("recovery.unreviewed", CliHarness.Ok("--estate", a, "status").Out, StringComparison.Ordinal);
+            string review = CliHarness.WriteJson(scratch, "review.json", """{"independence":"self","outcome":"pass","summary":"My own recovery after the laptop was lost.","findings":[]}""");
+            foreach (CliHarness.Outcome use in new[] { admitted, revoked })
+            {
+                CliHarness.Ok("--estate", a, "--json", "records", "new", "review", "--by", op, "--subject", $"admission:{use.Id}:{use.Hash}", "--body", review);
+            }
+
+            check = CliHarness.Run("--estate", a, "estate", "check");
+            Assert.True(check.Code == 0, check.Out + check.Err);
+            Assert.DoesNotContain("recovery.unreviewed", check.Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, previousHome);
+            CliHarness.Delete(a, home, newHome, safe, scratch);
+        }
+    }
+
     private static string Init(string root) =>
         CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Device journey.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
 

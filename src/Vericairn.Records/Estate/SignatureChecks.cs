@@ -36,6 +36,34 @@ public static class SignatureChecks
             }
 
             Rotation(model, record, findings);
+            RecoveryUse(model, record, findings);
+        }
+    }
+
+    /// <summary>True when the id names a recovery device, one whose key is kept offline for emergency access.</summary>
+    public static bool Recovers(EstateModel model, string? deviceId)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return deviceId is not null && model.ById.TryGetValue(deviceId, out RecordEnvelope? device) && device.Type == "device" && EstateModel.BodyString(model.Latest(device), "purpose") == "recovery";
+    }
+
+    /// <summary>
+    /// Every use of a recovery device stays in view until the operator reviews it: a record it signed, other than its own device
+    /// records, carries a warning until a review by an operator names that exact record.
+    /// </summary>
+    private static void RecoveryUse(EstateModel model, RecordEnvelope record, FindingList findings)
+    {
+        string? recovery = record.Signatures.Select(s => IdentityOf(model, s.Device)).FirstOrDefault(identity => Recovers(model, identity));
+        if (recovery is null || (record.Type == "device" && model.Chain(record)[0] == recovery))
+        {
+            return;
+        }
+
+        bool reviewed = model.About(record.Id, "review").Any(review =>
+            model.IsCurrent(review) && model.HasRole(review.By, Types.Roles.Operator) && review.Subject?.Hash == record.ComputedHash && !review.Signatures.Any(s => Recovers(model, s.Device)));
+        if (!reviewed)
+        {
+            findings.Warning("recovery.unreviewed", record.ExpectedPath, $"Signed by recovery device {recovery}: emergency access stays in view until the operator reviews this record.");
         }
     }
 
@@ -82,13 +110,14 @@ public static class SignatureChecks
     /// <summary>
     /// The estate's first authority: the earliest admission by the root operator of a device that signed that admission itself.
     /// It is the only self-admission ever accepted; every later device is admitted by a device already admitted, so nobody who can
-    /// add records can mint a device for the operator and sign as the operator with it.
+    /// add records can mint a device for the operator and sign as the operator with it. A recovery device is never the first: an
+    /// admitted device of the operator makes and admits it.
     /// </summary>
     public static RecordEnvelope? FirstAuthority(EstateModel model, string? rootOperator)
     {
         ArgumentNullException.ThrowIfNull(model);
         return rootOperator is null ? null : model.OfType("admission")
-            .Where(a => a.By == rootOperator && SelfSigned(model, a))
+            .Where(a => a.By == rootOperator && SelfSigned(model, a) && !Recovers(model, a.Subject?.Id))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .FirstOrDefault();
     }
@@ -243,6 +272,13 @@ public static class SignatureChecks
             }
 
             findings.Error("signature.invalid", location, $"The signature by device {chain[0]} does not verify against the record's content hash with the key the device held when it was authored.");
+            return;
+        }
+
+        // A recovery device signs its own device records, admissions and revocations, and nothing else.
+        if (EstateModel.BodyString(device, "purpose") == "recovery" && record.Type is not ("device" or "admission"))
+        {
+            findings.Error("signature.recovery-scope", location, $"Device {chain[0]} is a recovery device, which signs only device records, admissions and revocations.");
             return;
         }
 

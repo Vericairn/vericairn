@@ -13,6 +13,7 @@ namespace Vericairn.Records.Tests;
 public class SigningTests : IDisposable
 {
     private const string FormatTwo = """ ,"presence":"none","purpose":"signing" """;
+    private const string Recovery = """ ,"presence":"none","purpose":"recovery" """;
     private const string OrderBody = """{"key":"W-1","kind":"ordinary","title":"Signed task","intent":"Exercise signatures.","scope":["x"],"exitQuestion":"Done?","inputs":[],"deliverables":["y"]}""";
     private readonly string home = Path.Combine(Path.GetTempPath(), "vericairn-keys-" + Ulid.NewUlid().Value);
     private readonly FileKeyStore store;
@@ -265,6 +266,62 @@ public class SigningTests : IDisposable
         Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(byIdentity.Id, StringComparison.Ordinal));
         Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(byRevision.Id, StringComparison.Ordinal));
         Assert.Contains(model.Findings, f => f.Code == "signature.unadmitted" && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheOperatorsRecoveryDeviceSignsOnlyAdmissionsAndEachUseStaysInViewUntilReviewed()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope laptop = CreateDevice(estate, estate.OperatorId, "Operator laptop", extra: FormatTwo);
+        RecordEnvelope laptopAdmission = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Root."}""", laptop.Reference, signer: Signer(laptop));
+        RecordEnvelope recovery = CreateDevice(estate, estate.OperatorId, "Recovery key", custody: "offline", extra: Recovery);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The recovery device."}""", recovery.Reference, signer: Signer(laptop));
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error);
+        Assert.DoesNotContain(findings, f => f.Code == "recovery.unreviewed");
+
+        // Every device is lost: the recovery key admits a replacement and revokes the lost laptop, and the replacement signs again.
+        RecordEnvelope replacement = CreateDevice(estate, estate.OperatorId, "Replacement laptop", extra: FormatTwo);
+        RecordEnvelope admitted = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Replaces the lost laptop."}""", replacement.Reference, signer: Signer(recovery));
+        string revokedAt = RecordParser.FormatTimestamp(estate.Clock.AddSeconds(1));
+        RecordEnvelope revoked = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"revoked","note":"Laptop lost.","revokedAt":"{{revokedAt}}"}""", laptop.Reference, supersedes: laptopAdmission.Id, signer: Signer(recovery));
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, OrderBody, signer: Signer(replacement));
+        findings = estate.Load().Findings.ToList();
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error);
+        Assert.Contains(findings, f => f.Code == "recovery.unreviewed" && f.Location == admitted.ExpectedPath && f.Message.Contains(recovery.Id, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "recovery.unreviewed" && f.Location == revoked.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Location.StartsWith(order.ExpectedPath, StringComparison.Ordinal));
+
+        // A recovery device signs nothing but device records, admissions and revocations.
+        RecordEnvelope misuse = estate.Add("work-order", estate.OperatorId, OrderBody.Replace("W-1", "W-2", StringComparison.Ordinal), signer: Signer(recovery));
+        Assert.Contains(estate.Load().Findings, f => f.Code == "signature.recovery-scope" && f.Location.Contains(misuse.Id, StringComparison.Ordinal));
+
+        // The operator's review from the replacement takes a use out of view; a review the recovery device signed does not.
+        const string Review = """{"independence":"self","outcome":"pass","summary":"The operator's own recovery, after the laptop was lost.","findings":[]}""";
+        estate.Add("review", estate.OperatorId, Review, admitted.Reference, signer: Signer(replacement));
+        estate.Add("review", estate.OperatorId, Review, revoked.Reference, signer: Signer(recovery));
+        findings = estate.Load().Findings.ToList();
+        Assert.DoesNotContain(findings, f => f.Code == "recovery.unreviewed" && f.Location == admitted.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "recovery.unreviewed" && f.Location == revoked.ExpectedPath);
+    }
+
+    [Fact]
+    public void OnlyARecoveryDevicesKeyIsOfflineAndARecoveryDeviceIsNeverTheFirstAuthority()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope offlineSigner = CreateDevice(estate, estate.OperatorId, "Offline signer", custody: "offline", extra: FormatTwo);
+        RecordEnvelope fileRecovery = CreateDevice(estate, estate.OperatorId, "Recovery in a file", extra: Recovery);
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.Contains(findings, f => f.Code == "device.recovery" && f.Location == offlineSigner.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "device.recovery" && f.Location == fileRecovery.ExpectedPath);
+
+        // An admitted device of the operator makes and admits a recovery device; one that admits itself first is no authority.
+        using var fresh = new TestEstate(recordFormat: 2);
+        RecordEnvelope only = CreateDevice(fresh, fresh.OperatorId, "Recovery first", custody: "offline", extra: Recovery);
+        RecordEnvelope self = fresh.Add("admission", fresh.OperatorId, $$"""{"principal":"{{fresh.OperatorId}}","status":"admitted","note":"Admits itself."}""", only.Reference, signer: Signer(only));
+        EstateModel model = fresh.Load();
+        Assert.Null(SignatureChecks.FirstAuthority(model, fresh.OperatorId));
+        Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(self.Id, StringComparison.Ordinal));
     }
 
     [Fact]

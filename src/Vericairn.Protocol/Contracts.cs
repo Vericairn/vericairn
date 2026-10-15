@@ -157,7 +157,16 @@ public sealed record DeviceCreateRequest(string Principal, string Name, string? 
 /// <param name="Device">Device id.</param>
 /// <param name="By">Admitting principal.</param>
 /// <param name="Note">Why.</param>
-public sealed record AdmitRequest(string Device, string By, string Note);
+/// <param name="Recovery">Absolute path of the operator's recovery key, to sign with it when no admitted device of the operator is left; from record format 2.</param>
+/// <param name="Passphrase">The recovery key's passphrase.</param>
+public sealed record AdmitRequest(string Device, string By, string Note, string? Recovery = null, string? Passphrase = null);
+
+/// <summary>Make the operator's recovery device: a key made in memory, written once encrypted to a file for offline keeping, never held by this machine; from record format 2.</summary>
+/// <param name="Principal">The operator the device acts for.</param>
+/// <param name="Name">Descriptive name, never a machine path.</param>
+/// <param name="Output">Absolute path of the new key file; an existing file is never overwritten.</param>
+/// <param name="Passphrase">The passphrase that encrypts the key, of at least twelve characters.</param>
+public sealed record DeviceRecoveryRequest(string Principal, string Name, string Output, string Passphrase);
 
 /// <summary>Rename a device, keeping its identity; from record format 2.</summary>
 /// <param name="Device">Device id: its identity or any revision.</param>
@@ -174,7 +183,9 @@ public sealed record DeviceRotateRequest(string Device, string? Custody = null, 
 /// <param name="Device">Device id.</param>
 /// <param name="By">Revoking principal.</param>
 /// <param name="Reason">Why.</param>
-public sealed record RevokeRequest(string Device, string By, string Reason);
+/// <param name="Recovery">Absolute path of the operator's recovery key, to sign with it when no admitted device of the operator is left; from record format 2.</param>
+/// <param name="Passphrase">The recovery key's passphrase.</param>
+public sealed record RevokeRequest(string Device, string By, string Reason, string? Recovery = null, string? Passphrase = null);
 
 /// <summary>One release record.</summary>
 /// <param name="Version">Version.</param>

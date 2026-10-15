@@ -92,7 +92,7 @@ build cannot read.
 | `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
 | `device` | `presence` | `required` or `none`, required | Whether each signature needs the owner's presence; `required` only where the custody enforces it (`macos-secure-enclave`), and never for an agent's or a service's device |
 | `device` | `purpose` | `signing` or `recovery`, required | Ordinary signing, or the operator's offline recovery device; a recovery device belongs to an operator |
-| `device` | `custody` | gains `macos-secure-enclave` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac |
+| `device` | `custody` | gains `macos-secure-enclave` and `offline` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac; or a recovery device's key, exported once and kept off every machine |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
@@ -137,3 +137,24 @@ give a device a new key than to record a new device.
   take the old one's place, so a refused rotation leaves the device as it was. Moving a key into other custody, from
   a file into the Secure Enclave for example, is a rotation with `--custody`; the new key keeps the device's presence
   where its custody enforces it, and `--presence` sets it.
+
+## Emergency access
+
+A recovery device is the operator's way back in when every other device is lost. It is a device of purpose `recovery`,
+and its key is the only one whose custody is `offline` (`device.recovery`).
+
+- `vericairn devices recovery --principal <operator> --name <name> --output <file>` makes it on a machine that holds an
+  admitted device of the operator. The key is made in memory and written once to a new file outside the estate's
+  repository, readable by its owner only. It is an encrypted PKCS#8 key: AES-256-CBC, with the key derived from a
+  passphrase of at least twelve characters by PBKDF2-SHA256 at 600,000 iterations. No key store ever holds it. The
+  operator's admitted device admits it at once. A recovery device is never the estate's first authority, even when it
+  signs its own admission.
+- With `--recovery <file>`, `vericairn devices admit` and `vericairn devices revoke` sign with that key, opened in
+  memory with its passphrase: to admit a replacement device and to revoke a lost one. A recovery device signs its own
+  device records, admissions and revocations, and nothing else (`signature.recovery-scope`).
+- Each record it signs, other than its own device records, carries the warning `recovery.unreviewed`. The warning shows
+  in `vericairn status` and `vericairn estate check` until an operator records a review of that exact record, signed by
+  a device other than a recovery device.
+- Losing every device without a recovery device leaves the estate readable and its history verifiable, but nothing can
+  author in it again. The way on is a new estate that adopts the old one's records, said as such, never a silent
+  self-admission.

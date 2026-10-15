@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Json = System.Text.Json.Nodes;
 using Vericairn.Daemon;
@@ -812,11 +813,102 @@ internal static class Commands
         return Clean;
     });
 
-    public static int DevicesAdmit(string root, string deviceId, string by, string note, bool json) =>
-        WithApi(root, api => ReportOutcome(api.DeviceAdmit(new AdmitRequest(deviceId, by, note)), json));
+    public static int DevicesAdmit(string root, string deviceId, string by, string note, string? recovery, bool passphraseStdin, bool json)
+    {
+        string? passphrase = null;
+        if (recovery is not null && (passphrase = Passphrase(passphraseStdin, confirm: false)) is null)
+        {
+            return Failed;
+        }
 
-    public static int DevicesRevoke(string root, string deviceId, string by, string reason, bool json) =>
-        WithApi(root, api => ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason)), json));
+        return WithApi(root, api => ReportOutcome(api.DeviceAdmit(new AdmitRequest(deviceId, by, note, recovery is null ? null : Path.GetFullPath(recovery), passphrase)), json));
+    }
+
+    public static int DevicesRevoke(string root, string deviceId, string by, string reason, string? recovery, bool passphraseStdin, bool json)
+    {
+        string? passphrase = null;
+        if (recovery is not null && (passphrase = Passphrase(passphraseStdin, confirm: false)) is null)
+        {
+            return Failed;
+        }
+
+        return WithApi(root, api => ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason, recovery is null ? null : Path.GetFullPath(recovery), passphrase)), json));
+    }
+
+    public static int DevicesRecovery(string root, string principal, string name, string output, bool passphraseStdin, bool json)
+    {
+        string? passphrase = Passphrase(passphraseStdin, confirm: true);
+        if (passphrase is null)
+        {
+            return Failed;
+        }
+
+        string path = Path.GetFullPath(output);
+        int code = WithApi(root, api => ReportOutcome(api.DeviceRecovery(new DeviceRecoveryRequest(principal, name, path, passphrase)), json));
+        if (code == 0 && !json)
+        {
+            Console.Out.WriteLine($"The recovery key is in {path}, encrypted with your passphrase. Move it off this machine now and keep the passphrase apart from it.");
+        }
+
+        return code;
+    }
+
+    /// <summary>A passphrase from the first line of standard input, or typed at the terminal without echo; null, with the reason written, when there is none.</summary>
+    private static string? Passphrase(bool fromStandardInput, bool confirm)
+    {
+        if (fromStandardInput)
+        {
+            string? line = Console.In.ReadLine();
+            if (string.IsNullOrEmpty(line))
+            {
+                Console.Error.WriteLine("Standard input holds no passphrase.");
+                return null;
+            }
+
+            return line;
+        }
+
+        if (Console.IsInputRedirected)
+        {
+            Console.Error.WriteLine("A passphrase is typed at a terminal, or given on standard input with --passphrase-stdin.");
+            return null;
+        }
+
+        string first = ReadHidden("Passphrase: ");
+        if (confirm && ReadHidden("Passphrase again: ") != first)
+        {
+            Console.Error.WriteLine("The two passphrases differ; nothing was made.");
+            return null;
+        }
+
+        return first;
+    }
+
+    private static string ReadHidden(string prompt)
+    {
+        Console.Error.Write(prompt);
+        var text = new StringBuilder();
+        while (true)
+        {
+            ConsoleKeyInfo key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                break;
+            }
+
+            if (key.Key == ConsoleKey.Backspace)
+            {
+                text.Length = Math.Max(0, text.Length - 1);
+            }
+            else if (!char.IsControl(key.KeyChar))
+            {
+                text.Append(key.KeyChar);
+            }
+        }
+
+        Console.Error.WriteLine();
+        return text.ToString();
+    }
 
     public static int DevicesRename(string root, string deviceId, string name, bool json) =>
         WithApi(root, api => ReportOutcome(api.DeviceRename(new DeviceRenameRequest(deviceId, name)), json));
