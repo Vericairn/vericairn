@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -30,7 +31,7 @@ public sealed class MigrationType : IRecordType
         new("migrations", "string[]", true, "Names of the record-format migrations applied; may be empty."),
         new("changes", "string[]", true, "What changed in the repository; may be empty."),
         new("release", "ulid", false, "The release record upgraded to, when pinning a release."),
-        new("anchored", "object[]", false, "The admissions recorded without a signature that were in force when the estate moved to record format 2, each {id, hash}; signed by the operator or a principal with the 'administer' scope, this list is what keeps them counting after the move.", 2),
+        new("anchored", "object[]", false, "Every admission recorded without a signature when the estate moved to record format 2, each {id, hash}; signed by the estate's root operator or a principal with the 'administer' scope, this list is what keeps them counting after the move.", 2),
     ];
 
     /// <inheritdoc />
@@ -75,12 +76,15 @@ public sealed class MigrationType : IRecordType
 
             if (context.Record.Signatures.Count == 0)
             {
-                body.Error("migration.anchor-unsigned", "anchored", "A migration that anchors admissions is signed, by the operator or a principal with the 'administer' scope; unsigned, it anchors nothing.");
+                body.Error("migration.anchor-unsigned", "anchored", "A migration that anchors admissions is signed, by the estate's root operator or a principal with the 'administer' scope; unsigned, it anchors nothing.");
             }
 
-            if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
+            // Anchors count only for the principals SignatureChecks.Anchored reads them from; a list by any other author, another
+            // principal with the operator role among them, would validate and anchor nothing, so it is refused.
+            string? rootOperator = context.Model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+            if (context.Record.By != rootOperator && !context.HasScope(context.Record.By, Scopes.Administer))
             {
-                body.Error("migration.anchor-author", "anchored", "Admissions are anchored by the operator or a principal with the 'administer' scope.");
+                body.Error("migration.anchor-author", "anchored", "Admissions are anchored by the estate's root operator, the operator its charter names, or a principal with the 'administer' scope; no one else's list counts.");
             }
         }
 
