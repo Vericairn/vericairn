@@ -31,6 +31,24 @@ public class EstateChecksTests
     }
 
     [Fact]
+    public void AMailmapAtTheRootIsGitMetadataBesideGitattributes()
+    {
+        // A .mailmap shows one author in git's own views of the history; like .gitattributes it is allowed at the root and scanned as text.
+        using var estate = new TestEstate();
+        estate.WriteFile(".gitattributes", "* text=auto eol=lf\n");
+        estate.WriteFile(".mailmap", "Test Operator <operator@example.invalid>\nTest Operator <operator@example.invalid> <old@example.invalid>\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Assert.False(checks.HasErrors, string.Join("\n", checks));
+        Assert.DoesNotContain(checks, f => f.Location.StartsWith(".mailmap", StringComparison.Ordinal));
+
+        estate.WriteFile(".mailmap", "Test Operator <operator@example.invalid> /Users/someone/mailmap\r\n");
+        checks = EstateChecks.Run(estate.Load());
+        Assert.Contains(checks, f => f.Code == "portability.absolute-path" && f.Location == ".mailmap:1");
+        Assert.Contains(checks, f => f.Code == "layout.line-endings" && f.Location == ".mailmap");
+        Assert.DoesNotContain(checks, f => f.Code == "layout.unexpected");
+    }
+
+    [Fact]
     public void DocumentRevisionsDetectDrift()
     {
         using var estate = new TestEstate();

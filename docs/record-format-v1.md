@@ -178,4 +178,9 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   naming that acceptance and whether it was a self-acceptance (`result.checks-accepted`).
 - `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
-  no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.
+  no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys. The
+  allowlist names what an estate repository holds at its root: `estate`, `records`, `design`, `docs`, `objects`,
+  `README.md`, `LICENSE`, `bootstrap`, `bootstrap.ps1`, the per-clone `.vericairn` (never scanned, like `.git`), and
+  git's and GitHub's metadata: `.git`, `.gitignore`, `.gitattributes`, `.github` and, from 0.6.0, a `.mailmap`, which
+  shows the history's names and addresses as one author in git's own views; it is scanned as text and travels in an
+  export like `.gitattributes`.

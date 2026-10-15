@@ -38,7 +38,7 @@ public static class EstateExport
     /// <summary>Entry name of the export description.</summary>
     public const string SummaryEntry = "export/export.json";
 
-    private static readonly string[] CopiedTopLevel = ["estate", "objects", "design", "docs", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1", ".gitattributes", ".gitignore", ".github"];
+    private static readonly string[] CopiedTopLevel = ["estate", "objects", "design", "docs", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1", ".gitattributes", ".gitignore", ".mailmap", ".github"];
 
     /// <summary>Writes an export of an opened estate to a zip file.</summary>
     public static ExportSummary Write(EstateSession session, string zipPath, string? by = null)
