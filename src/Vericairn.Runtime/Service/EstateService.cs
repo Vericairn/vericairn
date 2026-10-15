@@ -739,6 +739,11 @@ public sealed class EstateService : IEstateApi, IDisposable
             return Refuse($"A document review's outcome is {string.Join(", ", DocumentReviewType.Outcomes)}.");
         }
 
+        if (request.Independence is not null && Array.IndexOf(DocumentReviewType.Independences, request.Independence) < 0)
+        {
+            return Refuse($"A document review's independence is {string.Join(", ", DocumentReviewType.Independences)}.");
+        }
+
         lock (gate)
         {
             EstateModel model = session.Load();
@@ -746,6 +751,19 @@ public sealed class EstateService : IEstateApi, IDisposable
             if (declared is null)
             {
                 return NotFound($"No living-document declaration has id {declaration}.");
+            }
+
+            // Who wrote an estate file is in the estate's own revisions, and they decide its reviewer's independence. Who wrote a
+            // document of another repository is not in the estate, so there the reviewer states it; without a statement a
+            // principal with the builder role, which writes the product's documents, is taken to review its own work.
+            string independence = DocumentIndependence(model, declared, request.By, request.Outcome);
+            if (EstateModel.BodyString(declared, "repository") is not null)
+            {
+                independence = request.Independence ?? (model.HasRole(request.By, Roles.Builder) ? "self" : independence);
+            }
+            else if (request.Independence is not null && request.Independence != independence)
+            {
+                return Refuse($"{EstateModel.BodyString(declared, "path")} is an estate file, whose revisions in the estate decide its reviewer's independence: {independence} for this review, not {request.Independence}.");
             }
 
             // The runtime, not the reviewer, states what was reviewed: the exact bytes (of the estate's file, or of another
@@ -814,7 +832,7 @@ public sealed class EstateService : IEstateApi, IDisposable
                 ["answers"] = new JsonArray(state.Reasons.Select(r => (JsonNode)(r.Record is null
                     ? new JsonObject { ["on"] = r.On }
                     : new JsonObject { ["on"] = r.On, ["record"] = new JsonObject { ["type"] = model.ById[r.Record].Type, ["id"] = r.Record, ["hash"] = model.ById[r.Record].ComputedHash } })).ToArray()),
-                ["independence"] = DocumentIndependence(model, declared, request.By, request.Outcome),
+                ["independence"] = independence,
                 ["summary"] = request.Summary,
                 ["findings"] = new JsonArray((request.Findings ?? []).Select(f => (JsonNode)(f.Location is null
                     ? new JsonObject { ["severity"] = f.Severity, ["summary"] = f.Summary }
@@ -877,8 +895,9 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>
-    /// The reviewer's independence of the content, as the record's rules judge it: self when it revised the content (this review, the
-    /// estate file's latest revision, or another repository's latest revising review), else operator or independent agent.
+    /// The reviewer's independence of the content, as the record's rules judge it from the estate's records: self when it revised the
+    /// content (this review, the estate file's latest revision, or another repository's latest revising review), else operator or
+    /// independent agent. For another repository's document it is only the default for a reviewer without the builder role.
     /// </summary>
     private static string DocumentIndependence(EstateModel model, RecordEnvelope declaration, string by, string outcome)
     {

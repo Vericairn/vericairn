@@ -27,10 +27,10 @@ public static class EstateLayout
     /// <summary>Largest object allowed in objects/ (bytes).</summary>
     public const long MaxObjectBytes = 8 * 1024 * 1024;
 
-    /// <summary>Entries allowed at the repository root.</summary>
+    /// <summary>Entries allowed at the repository root, git's metadata (.gitignore, .gitattributes, .mailmap) among them.</summary>
     public static readonly IReadOnlySet<string> AllowedTopLevel = new HashSet<string>(StringComparer.Ordinal)
     {
-        ".git", ".github", ".gitignore", ".gitattributes", ".vericairn", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1",
+        ".git", ".github", ".gitignore", ".gitattributes", ".mailmap", ".vericairn", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1",
         "estate", RecordsDirectory, DesignDirectory, DocsDirectory, ObjectsDirectory,
     };
 

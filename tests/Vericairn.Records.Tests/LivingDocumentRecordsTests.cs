@@ -100,6 +100,48 @@ public class LivingDocumentRecordsTests
         Assert.Contains(estate.Load().Findings, f => f.Code == "document.independence" && f.Location.StartsWith(revised.ExpectedPath, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void AReviewerOfAnotherRepositorysDocumentMayStateSelfAndTheOtherIndependenceRulesHold()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope product = Product(estate);
+        RecordEnvelope repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Example","role":"source of the example","location":{"github":"Example/example"},"visibility":"public"}""");
+        RecordEnvelope readme = estate.Add("living-document", estate.OperatorId, Elsewhere(repository.Id, product.Id, "README.md", "any"));
+        RecordEnvelope index = estate.Add("living-document", estate.OperatorId, Elsewhere(repository.Id, product.Id, "docs/releases/README.md", "independent"));
+
+        // The estate's records do not show who wrote a document of another repository, so the builder that wrote the README says
+        // so; a self review does not clear a document that asks for independence, and the operator's review does.
+        RecordEnvelope own = estate.Add("document-review", estate.BuilderId, ElsewhereReview("current", "self"), readme.Reference);
+        RecordEnvelope ownIndex = estate.Add("document-review", estate.BuilderId, ElsewhereReview("current", "self"), index.Reference);
+        RecordEnvelope operatorIndex = estate.Add("document-review", estate.OperatorId, ElsewhereReview("current", "operator"), index.Reference);
+
+        // The other rules hold: independent-agent needs an agent principal, operator the operator role.
+        RecordEnvelope human = estate.Add("document-review", estate.OperatorId, ElsewhereReview("current", "independent-agent"), readme.Reference);
+        RecordEnvelope promoted = estate.Add("document-review", estate.BuilderId, ElsewhereReview("current", "operator"), readme.Reference);
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(own.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "document.cleared-by" && f.Location.StartsWith(ownIndex.ExpectedPath, StringComparison.Ordinal));
+        Assert.DoesNotContain(findings, f => f.Code == "document.independence" && f.Location.StartsWith(ownIndex.ExpectedPath, StringComparison.Ordinal));
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(operatorIndex.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "document.independence" && f.Location.StartsWith(human.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "document.independence" && f.Location.StartsWith(promoted.ExpectedPath, StringComparison.Ordinal));
+
+        // A reviewer who revised the content is self: after the builder's revising review it cannot claim independence, and a
+        // revising review is self whoever records it.
+        estate.Add("document-review", estate.BuilderId, ElsewhereReview("revised", "self"), readme.Reference);
+        RecordEnvelope claimed = estate.Add("document-review", estate.BuilderId, ElsewhereReview("current", "independent-agent"), readme.Reference);
+        RecordEnvelope revising = estate.Add("document-review", estate.OperatorId, ElsewhereReview("revised", "operator"), readme.Reference);
+        findings = estate.Load().Findings.ToList();
+        Assert.Contains(findings, f => f.Code == "document.independence" && f.Location.StartsWith(claimed.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "document.independence" && f.Location.StartsWith(revising.ExpectedPath, StringComparison.Ordinal));
+
+        // An estate file keeps its rule: its revisions show who wrote it, and a reviewer that did not revise it is not self.
+        RecordEnvelope guide = estate.Add("living-document", estate.OperatorId, """{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says how to use it."}""");
+        estate.Add("document-revision", estate.OperatorId, $$"""{"path":"docs/guide.md","title":"Guide","hash":"{{Hash}}","bytes":10,"mediaType":"text/markdown","revision":1,"summary":"First."}""");
+        RecordEnvelope notOwn = estate.Add("document-review", estate.BuilderId, Review("current", "self", ""","answers":[],"checks":[]"""), guide.Reference);
+        Assert.Contains(estate.Load().Findings, f => f.Code == "document.independence" && f.Location.StartsWith(notOwn.ExpectedPath, StringComparison.Ordinal));
+    }
+
     private static RecordEnvelope Product(TestEstate estate) =>
         estate.Add("product", estate.OperatorId, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
 
@@ -108,6 +150,12 @@ public class LivingDocumentRecordsTests
 
     private static string Review(string outcome, string independence, string extra) =>
         $$"""{"outcome":"{{outcome}}","content":{"hash":"{{Hash}}","bytes":10},"independence":"{{independence}}","summary":"Read it against the release.","findings":[]{{extra}}}""";
+
+    private static string Elsewhere(string repository, string product, string path, string clearedBy) =>
+        $$"""{"path":"{{path}}","repository":"{{repository}}","title":"{{path}}","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"clearedBy":"{{clearedBy}}","summary":"Follows the releases."}""";
+
+    private static string ElsewhereReview(string outcome, string independence) =>
+        $$"""{"outcome":"{{outcome}}","content":{"hash":"{{Hash}}","bytes":10,"commit":"0123456789abcdef0123456789abcdef01234567"},"answers":[],"independence":"{{independence}}","summary":"Read it at the commit.","findings":[],"checks":[]}""";
 
     private static string Decision(TestEstate estate, string extra) =>
         $$"""{"title":"Ship","statement":"Ship it.","summary":"Ship.","synthesis":"The operator decides to ship.","effects":["ship"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"medium","notAuthorized":[]{{extra}}}""";

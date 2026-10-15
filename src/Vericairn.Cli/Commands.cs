@@ -954,7 +954,7 @@ internal static class Commands
         return Clean;
     });
 
-    public static int DocsReview(string root, string path, string by, string outcome, string summary, string[] findings, string? commit, bool json) => WithApi(root, api =>
+    public static int DocsReview(string root, string path, string by, string outcome, string summary, string[] findings, string? commit, string? independence, bool json) => WithApi(root, api =>
     {
         // A document is named by its path; the estate's own file unless a commit says it is in another repository.
         DocumentRow? row = api.Documents().FirstOrDefault(d => d.Path == path && (commit is null ? d.Repository is null : d.Repository is not null));
@@ -976,7 +976,7 @@ internal static class Commands
             parsed.Add(new DocumentFinding(severity, finding[(colon + 1)..].Trim()));
         }
 
-        return ReportOutcome(api.DocumentReview(row.Declaration, new DocumentReviewRequest(by, outcome, summary, parsed, commit)), json);
+        return ReportOutcome(api.DocumentReview(row.Declaration, new DocumentReviewRequest(by, outcome, summary, parsed, commit, independence)), json);
     });
 
     public static int DocsDeclare(string root, string by, string bodyPath, string? supersedes, bool json) =>

@@ -36,6 +36,9 @@ public class PortabilityJourneyTests
             CliHarness.Outcome put = CliHarness.Ok("--estate", a, "--json", "objects", "put", widget);
             string hash = put.Json.GetProperty("hash").GetString()!;
             CliHarness.Ok("--estate", a, "--json", "work", "result", attempt, "--by", builder, "--body", CliHarness.WriteJson(scratch, "result.json", $$"""{"outcome":"partial","summary":"Half done before the machine was lost.","outputs":[{"name":"widget.txt","hash":"{{hash}}","location":"objects/{{hash["sha256:".Length..]}}"}],"evidence":[],"checks":[],"limitations":["Tests not run."],"unresolvedEffects":["A publication may have been dispatched; reconcile before retry."],"nextStep":"Reconcile, then finish."}"""));
+
+            // Git's metadata travels with the estate's documents: a .mailmap beside .gitattributes.
+            File.WriteAllText(Path.Combine(a, ".mailmap"), "Operator <operator@example.invalid> <old@example.invalid>\n");
             string statusA = CliHarness.Ok("--estate", a, "--json", "status").Out;
 
             // Export, then restore on "another machine" (a different per-user state directory).
@@ -49,6 +52,7 @@ public class PortabilityJourneyTests
             CliHarness.Outcome restore = CliHarness.Ok("--json", "estate", "restore", "--from", zip, "--to", b);
             Assert.Equal(0, restore.Json.GetProperty("errors").GetInt32());
             Assert.Equal(0, CliHarness.Run("--estate", b, "estate", "check").Code);
+            Assert.Equal(File.ReadAllText(Path.Combine(a, ".mailmap")), File.ReadAllText(Path.Combine(b, ".mailmap")));
             Assert.Equal(statusA, CliHarness.Ok("--estate", b, "--json", "status").Out);
             Assert.Equal(0, CliHarness.Run("--estate", b, "objects", "verify").Code);
             string inspect = CliHarness.Ok("--estate", b, "recover", "inspect").Out;

@@ -245,6 +245,27 @@ public class DaemonTests
     }
 
     [Fact]
+    public async Task ADocumentReviewsStatedIndependenceTravelsThroughTheApi()
+    {
+        // The request's independence, added to API v1 in 0.6.0, is in the contract and reaches the runtime through the socket: an
+        // estate file's revisions decide its reviewer's independence, so a statement that differs is refused and one that agrees is
+        // recorded.
+        using JsonDocument contract = JsonDocument.Parse(OpenApiDocument.Json);
+        Assert.True(contract.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("DocumentReviewRequest").GetProperty("properties").TryGetProperty("independence", out _));
+        using var estate = new TestEstate(recordFormat: 2);
+        estate.WriteFile("docs/guide.md", "# Guide\n");
+        string declaration = estate.Add("living-document", estate.OperatorId, """{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says how to use it."}""").Id;
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(host.Endpoint);
+        WriteOutcome refused = client.DocumentReview(declaration, new DocumentReviewRequest(estate.BuilderId, "current", "Read it.", Independence: "self"));
+        Assert.Equal("refused", refused.Problem?.Code);
+        Assert.Contains("independent-agent for this review, not self", refused.Problem!.Message, StringComparison.Ordinal);
+        WriteOutcome written = client.DocumentReview(declaration, new DocumentReviewRequest(estate.BuilderId, "current", "Read it.", Independence: "independent-agent"));
+        Assert.True(written.Ok, written.Problem?.Message);
+        Assert.Equal("independent-agent", client.Record(written.Written!.Id)!.Envelope.GetProperty("body").GetProperty("independence").GetString());
+    }
+
+    [Fact]
     public void TheContractNamesEveryProblemCodeAClientCanReceiveAndMarksConflictReserved()
     {
         using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);

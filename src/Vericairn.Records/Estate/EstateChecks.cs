@@ -14,7 +14,7 @@ public static partial class EstateChecks
 {
     private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
-        ".json", ".md", ".txt", ".yml", ".yaml", ".sh", ".ps1", ".toml", ".csv", ".xml", ".html", ".css", ".js", ".ts", ".cs", ".py", ".gitignore", ".gitattributes",
+        ".json", ".md", ".txt", ".yml", ".yaml", ".sh", ".ps1", ".toml", ".csv", ".xml", ".html", ".css", ".js", ".ts", ".cs", ".py", ".gitignore", ".gitattributes", ".mailmap",
     };
 
     /// <summary>Runs every check against a loaded estate.</summary>

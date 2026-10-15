@@ -44,7 +44,7 @@ public sealed class DocumentReviewType : IRecordType
         new("content", "object", true, "The reviewed bytes: hash (sha256) and bytes, and commit for a document of another repository.", 2),
         new("covered", "hash", false, "The covered paths' content identity when reviewed, for a document with a covers trigger; required to clear one.", 2),
         new("answers", "object[]", true, "The triggers this review answers: on, and the record that fired it for release, upgrade, decision and accepted; may be empty.", 2),
-        new("independence", string.Join('|', Independences), true, "self when the reviewer revised the content; independent-agent for another agent; operator for the operator.", 2),
+        new("independence", string.Join('|', Independences), true, "self when the reviewer revised the content, or, for a document of another repository, states that it wrote it; independent-agent for another agent; operator for the operator.", 2),
         new("summary", "string", true, "What was checked.", 2),
         new("findings", "object[]", true, "severity (error|warning|info), summary, optional location; may be empty.", 2),
         new("checks", "object[]", true, "The declared checks that ran: name, outcome (passed|failed|skipped|not-performed), summary; a failed check refuses the clearance; may be empty.", 2),
@@ -162,7 +162,9 @@ public sealed class DocumentReviewType : IRecordType
 
     /// <summary>
     /// The reviewer's independence of the content: self when this review revised it, or when the reviewer recorded the estate file's
-    /// latest revision or the latest revising review; and the declaration's clearedBy, which only a clearing review must meet.
+    /// latest revision or the latest revising review before this review. The estate's records show who revised an estate file but
+    /// not who wrote a document of another repository, so there a reviewer may also state self. And the declaration's clearedBy,
+    /// which only a clearing review must meet: a self review does not clear a document that asks for independence.
     /// </summary>
     private static void Independence(ValidationContext context, RecordEnvelope declaration, RecordEnvelope reviewer, string outcome, string? independence)
     {
@@ -170,19 +172,20 @@ public sealed class DocumentReviewType : IRecordType
         bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;
         IReadOnlyList<string> chain = context.Model.Chain(context.Model.Latest(declaration));
         RecordEnvelope? reviser = elsewhere
-            ? context.Model.OfType("document-review").Where(r => r.Id != context.Record.Id && r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised" && string.CompareOrdinal(r.At, context.Record.At) <= 0).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
-            : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && string.CompareOrdinal(r.At, context.Record.At) <= 0).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
-        bool self = outcome == "revised" || reviser?.By == context.Record.By;
+            ? context.Model.OfType("document-review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised" && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
+            : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        bool revised = outcome == "revised" || reviser?.By == context.Record.By;
+        bool self = revised || (elsewhere && independence == "self");
         string kind = EstateModel.BodyString(reviewer, "kind") ?? string.Empty;
         if (independence is not null)
         {
-            if (self && independence != "self")
+            if (revised && independence != "self")
             {
                 context.Error("document.independence", "The reviewer revised this content, so independence must be 'self'.");
             }
             else if (!self && independence == "self")
             {
-                context.Error("document.independence", "The reviewer did not revise this content, so independence cannot be 'self'.");
+                context.Error("document.independence", "The reviewer did not revise this estate file, so independence cannot be 'self'.");
             }
             else if (independence == "operator" && !context.HasRole(context.Record.By, Roles.Operator))
             {
@@ -202,11 +205,15 @@ public sealed class DocumentReviewType : IRecordType
         switch (EstateModel.BodyString(declaration, "clearedBy") ?? "any")
         {
             case "independent" when self:
-                context.Error("document.cleared-by", "This document is cleared by a principal other than the one that revised its content.");
+                context.Error("document.cleared-by", "This document is cleared by a principal other than the one that wrote or revised its content.");
                 break;
             case "operator" when !context.HasRole(context.Record.By, Roles.Operator):
                 context.Error("document.cleared-by", "This document is cleared by the operator.");
                 break;
         }
     }
+
+    /// <summary>Record order: by authoring time, and by identifier within the same second, as record format 2 orders records of one second.</summary>
+    private static bool Before(RecordEnvelope a, RecordEnvelope b) =>
+        string.CompareOrdinal(a.At, b.At) < 0 || (a.At == b.At && string.CompareOrdinal(a.Id, b.Id) < 0);
 }
