@@ -108,6 +108,16 @@ public static class EstateStatus
             }
         }
 
+        IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.Derive(model);
+        if (documents.Count > 0)
+        {
+            text.Append("Living documents: ").Append(documents.Count(d => d.Due).ToString(CultureInfo.InvariantCulture)).Append(" due of ").Append(documents.Count.ToString(CultureInfo.InvariantCulture)).Append(" declared\n");
+            foreach (LivingDocuments.State document in documents.Where(d => d.Due || d.Unavailable.Count > 0))
+            {
+                text.Append("  ").Append(document.Describe()).Append('\n');
+            }
+        }
+
         text.Append("Decisions: ").Append(model.Current("decision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Documents: ").Append(model.Current("document-revision").Count().ToString(CultureInfo.InvariantCulture))
             .Append(" · Resources: ").Append(model.Current("resource").Count().ToString(CultureInfo.InvariantCulture))
@@ -195,6 +205,17 @@ public static class EstateStatus
                 ["state"] = a.State,
             }).ToArray()),
             ["operations"] = new JsonArray(OperationItems(model).Select(o => (JsonNode)new JsonObject { ["identity"] = o.Identity, ["provider"] = o.Provider, ["action"] = o.Action, ["status"] = o.Status, ["id"] = o.Id }).ToArray()),
+            ["documents"] = new JsonArray(LivingDocuments.Derive(model).Select(d => (JsonNode)new JsonObject
+            {
+                ["path"] = d.Path,
+                ["repository"] = d.Repository,
+                ["declaration"] = d.Declaration.Id,
+                ["state"] = d.Unavailable.Count > 0 ? "unavailable" : d.Due ? "due" : "current",
+                ["level"] = d.Level,
+                ["reasons"] = new JsonArray(d.Reasons.Select(r => (JsonNode)new JsonObject { ["on"] = r.On, ["level"] = r.Level, ["summary"] = r.Summary, ["record"] = r.Record }).ToArray()),
+                ["clearance"] = d.Clearance?.Id,
+                ["unavailable"] = new JsonArray(d.Unavailable.Select(u => (JsonNode)u).ToArray()),
+            }).ToArray()),
             ["findings"] = new JsonArray(model.Findings.Concat(checks).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
             ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)

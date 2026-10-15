@@ -101,7 +101,9 @@ The release as intent, then observed effect:
    the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
    identified, or `known-failure` when the provider refused before any effect. While an operation under
    that identity is dispatched or uncertain, a second submit is refused; after a failure or a
-   cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled.
+   cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled. While a
+   living document of the product is due at level `refuse`, the submission is refused before the
+   intent, naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)).
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that

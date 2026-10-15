@@ -70,6 +70,7 @@ public static partial class EstateChecks
 
         CheckRetirements(model, findings);
         CheckDocuments(model, findings);
+        CheckLivingDocuments(model, findings);
         return findings;
     }
 
@@ -256,6 +257,24 @@ public static partial class EstateChecks
                 break;
             default:
                 break;
+        }
+    }
+
+    /// <summary>A living document due at level warn or refuse is a warning naming its triggers; one that names a contribution no installed pack provides is never skipped in silence.</summary>
+    private static void CheckLivingDocuments(EstateModel model, FindingList findings)
+    {
+        foreach (LivingDocuments.State state in LivingDocuments.Derive(model))
+        {
+            string location = state.Repository is null ? state.Path : state.Declaration.ExpectedPath;
+            if (state.Level is "warn" or "refuse")
+            {
+                findings.Warning("document.due", location, $"Due at {state.Level}: {string.Join("; ", state.Reasons.Where(r => r.Level != "remind").Select(r => r.Summary))}. Revise it or record a document review.");
+            }
+
+            if (state.Unavailable.Count > 0)
+            {
+                findings.Warning("document.unavailable", location, $"Its declaration names {string.Join(", ", state.Unavailable)}, which no installed pack provides, so it cannot be evaluated{(state.DeclaresRefuse ? " and closes its product's release gate" : string.Empty)}. Install the pack or revise the declaration.");
+            }
         }
     }
 

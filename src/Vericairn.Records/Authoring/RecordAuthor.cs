@@ -51,9 +51,11 @@ public static class RecordAuthor
             throw new ArgumentException($"This build writes record formats {RecordFormats.First} to {RecordFormats.Current}, not {format}.", nameof(draft));
         }
 
-        string at = RecordParser.FormatTimestamp(draft.At ?? DateTimeOffset.UtcNow);
-        DateTimeOffset atTime = DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
-        string id = draft.Id ?? Ulid.NewUlid(atTime).Value;
+        // Times are whole seconds; the identifier keeps the moment's milliseconds, so records made within one second sort, by
+        // identifier, in the order they were made.
+        DateTimeOffset moment = draft.At ?? DateTimeOffset.UtcNow;
+        string at = RecordParser.FormatTimestamp(moment);
+        string id = draft.Id ?? Ulid.NewUlid(moment).Value;
         var envelope = new JsonObject
         {
             ["format"] = RecordFormats.Identifier(format),
