@@ -14,6 +14,12 @@ public sealed class VerificationType : IRecordType
     /// <summary>Who or what performed the check.</summary>
     public static readonly string[] Roles = ["self", "independent-agent", "operator", "automation"];
 
+    /// <summary>How the evidence was obtained, from record format 2.</summary>
+    public static readonly string[] EvidenceClasses = ["observation", "report", "attestation", "inference"];
+
+    /// <summary>What kind of observer made the claim, from record format 2.</summary>
+    public static readonly string[] Observers = ["person", "agent", "automation", "provider"];
+
     /// <inheritdoc />
     public string Name => "verification";
 
@@ -42,6 +48,9 @@ public sealed class VerificationType : IRecordType
         new("finishedAt", "timestamp", false, "When it finished."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("limitations", "string[]", true, "What the check does not establish; may be empty."),
+        new("evidenceClass", string.Join('|', EvidenceClasses), false, "How the evidence was obtained: observed where it was recorded, reported by a host or provider, attested by a principal, or inferred from other evidence.", 2),
+        new("observer", string.Join('|', Observers), false, "What kind of observer made the claim.", 2),
+        new("expires", "timestamp", false, "When the claim stops counting as current and needs observing again.", 2),
     ];
 
     /// <inheritdoc />
@@ -74,6 +83,20 @@ public sealed class VerificationType : IRecordType
         body.Number("durationMs", false, 0, long.MaxValue);
         string? started = body.Timestamp("startedAt", false);
         string? finished = body.Timestamp("finishedAt", false);
+        if (body.Since(2, "evidenceClass"))
+        {
+            body.Enum("evidenceClass", false, EvidenceClasses);
+        }
+
+        if (body.Since(2, "observer"))
+        {
+            body.Enum("observer", false, Observers);
+        }
+
+        if (body.Since(2, "expires") && body.Timestamp("expires", false) is { } expires && string.CompareOrdinal(expires, context.Record.At) <= 0)
+        {
+            body.Error("verification.expires", "expires", "A claim expires after it is made.");
+        }
         foreach (BodyReader evidence in body.NestedArray("evidence", true, allowEmpty: true) ?? [])
         {
             evidence.Text("summary", true, 2000);

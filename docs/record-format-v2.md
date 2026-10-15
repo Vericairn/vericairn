@@ -63,6 +63,21 @@ build cannot read.
   `recommendation` first, the `consequence` of leaving it unanswered, optional `options` and `goal`, and its `state`.
   It starts `open`; the asker alone revises it, to `notified` (delivery stays unknown) or `withdrawn`, never changing
   the question or whom it is put to. A decision that names it in `answers` answers it; waiting never does.
+- **`possibility`**: an idea captured with its disposition, explicitly not an approval: the `idea`, its `origin`, and
+  its `disposition` (open, parked, adopted or declined, with the `reason` unless it is open). An adopted idea names
+  what it became in `adoptedAs`: a work order, a decision or a goal. Nothing is authorized by a possibility.
+- **`discharge`**: the discharge of one obligation a decision left (see the decision's `obligations` below), about
+  the decision, naming the obligation's key and the evidence that discharges it. Only the obligation's owner or the
+  operator records it, and an obligation has one current discharge; until one exists it stays open.
+- **`credential-reference`**: a credential named by reference and never by its value: its `name`, `purpose`, `kind`,
+  the `holder` responsible, the `store` where it is kept (described, never a value or a machine path), the `scopes`
+  it permits, how its presence is `check`ed without using it (a presence check is not authentication), its `status`,
+  and when it was rotated and is due again. Names are unique among current references.
+- **`qualification`**: a platform profile's qualification for a release, about the release record: the `profile` as
+  `design/platforms.md` names it, the `outcome` (qualified, measured-in-part, not-qualified or non-claim), the
+  `evidence` it rests on (verifications, reviews and observations; a qualified or partly measured profile needs at
+  least one, a non-claim needs none), a `summary` and its `limitations`. Qualification is derived from observations,
+  never asserted beside them.
 
 ## Fields new in format 2
 
@@ -71,6 +86,10 @@ build cannot read.
 | `decision` | `stake` | `low`, `medium`, `high` or `critical`, required | How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time |
 | `decision` | `notAuthorized` | string list, required, may be empty | What this answer does not authorize, so no one reads more into it |
 | `decision` | `answers` | ULID list, optional | The asks the decision answers; an ask is answered by the principal it was put to, and a withdrawn ask is not answered |
+| `decision` | `obligations` | object list, optional | What the answer leaves owed: each with a `key`, a `summary`, its `owner`, how it is resolved (`action`, `evidence`, `review` or `decision`), what `discharge`s it and optionally what it `gates`; keys are unique within the decision |
+| `verification` | `evidenceClass` | `observation`, `report`, `attestation` or `inference`, optional | How the evidence was obtained: `vericairn check run` records an observation, `vericairn check observe` a host's report |
+| `verification` | `observer` | `person`, `agent`, `automation` or `provider`, optional | What kind of observer made the claim |
+| `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
@@ -85,4 +104,6 @@ build cannot read.
   in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
 - Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
   without an expiry, as every format-1 grant is, behave as they always did.
+- Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names
+  bytes without granting access to them.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.

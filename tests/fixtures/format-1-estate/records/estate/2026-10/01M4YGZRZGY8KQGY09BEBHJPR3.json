@@ -1,0 +1,24 @@
+{
+  "at": "2026-10-15T00:56:54Z",
+  "body": {
+    "name": "Format 1 Fixture",
+    "operator": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+    "organization": {
+      "name": "Example"
+    },
+    "policies": {
+      "releaseAcceptance": [
+        "operator"
+      ],
+      "signatures": "optional"
+    },
+    "purpose": "A small estate written by release 0.4.2 in record format 1, kept as a golden fixture.",
+    "recordFormat": 1,
+    "slug": "format-1-fixture"
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:49c91a6a62414320815aa63eb841b9e23b0adb5283794d039e94b2d826336ca8",
+  "id": "01M4YGZRZGY8KQGY09BEBHJPR3",
+  "type": "estate"
+}

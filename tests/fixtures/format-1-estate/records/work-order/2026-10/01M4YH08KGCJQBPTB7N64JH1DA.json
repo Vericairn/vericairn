@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-15T00:57:10Z",
+  "body": {
+    "deliverables": [
+      "records"
+    ],
+    "exitQuestion": "Is it read unchanged?",
+    "inputs": [
+      {
+        "id": "01M4YH07M8PNE3HPWH9W02EV5D",
+        "type": "decision"
+      }
+    ],
+    "intent": "Exercise record format 1.",
+    "key": "FIX-1",
+    "kind": "ordinary",
+    "scope": [
+      "records"
+    ],
+    "title": "A format-1 work order"
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:0a6f2ecbe2afd3a64843e9fc21347774412c93a7fe6fe4bf54ee69895bf09610",
+  "id": "01M4YH08KGCJQBPTB7N64JH1DA",
+  "type": "work-order"
+}

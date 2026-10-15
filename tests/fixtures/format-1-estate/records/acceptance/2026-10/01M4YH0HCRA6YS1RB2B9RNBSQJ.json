@@ -1,0 +1,18 @@
+{
+  "at": "2026-10-15T00:57:19Z",
+  "body": {
+    "basis": [],
+    "self": true,
+    "statement": "Accepted for the fixture."
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:a058a9c6bce7ed685b15b992e14bb40f7cd433faf6f5815f0fe390fb0cfa1605",
+  "id": "01M4YH0HCRA6YS1RB2B9RNBSQJ",
+  "subject": {
+    "hash": "sha256:506955da87f032936a67ad8614e1985b029738beaa9efd05edf5e381579e9556",
+    "id": "01M4YH08KG5SFMF7EGHNBMT4X6",
+    "type": "release"
+  },
+  "type": "acceptance"
+}

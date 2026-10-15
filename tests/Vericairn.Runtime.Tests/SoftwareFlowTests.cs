@@ -15,7 +15,9 @@ using Vericairn.Runtime.Upgrade;
 
 namespace Vericairn.Runtime.Tests;
 
+// The upgrade tests change the process-wide formats and migrations a test reads, so they run one at a time.
 /// <summary>Adoption and release bodies carry no machine path; the release flow is intent then observed effect; a synthetic migration proves the upgrade path.</summary>
+[Collection("upgrade")]
 public class SoftwareFlowTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
