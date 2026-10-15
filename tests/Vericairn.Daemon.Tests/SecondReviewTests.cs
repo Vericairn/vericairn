@@ -472,6 +472,40 @@ public class SecondReviewTests
         Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
     }
 
+    [Theory]
+    [InlineData("{\"at\":")]
+    [InlineData("malformed tail")]
+    [InlineData("{\"at\":\"unfinished")]
+    public void C4_ATornTailCannotSwallowTheNextIntentOrItsReconciliation(string tail)
+    {
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string path = Path.Combine(directory, LocalNetworkLedger.FileName);
+            var ledger = new LocalNetworkLedger(directory);
+            string first = ledger.Intend("2026-10-15T00:00:00Z", "device", "principal", "POST /v1/records");
+            File.AppendAllText(path, tail);
+            string second = ledger.Intend("2026-10-15T00:00:01Z", "device", "principal", "POST /v1/records");
+            Assert.Equal(new[] { first, second }, LocalNetworkLedger.Read(directory).Select(w => w.Id));
+            Assert.All(LocalNetworkLedger.Read(directory), w => Assert.Equal("pending", w.State));
+
+            // A failed outcome append must not swallow the interruption appended on the next start either.
+            File.AppendAllText(path, tail);
+            Assert.Equal(2, new LocalNetworkLedger(directory).Reconcile("2026-10-15T00:00:02Z", (_, _) => ["candidate"]));
+            Assert.All(LocalNetworkLedger.Read(directory), w =>
+            {
+                Assert.Equal("interrupted", w.State);
+                Assert.Equal("candidate", Assert.Single(w.Candidates!));
+            });
+            Assert.Equal(0, ledger.Reconcile("2026-10-15T00:00:03Z", (_, _) => []));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task C4_AWriteWhosePairedDeviceCannotBeKeptIsRefusedAndNothingIsWritten()
     {

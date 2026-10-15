@@ -147,18 +147,37 @@ public sealed class LocalNetworkLedger
     /// <summary>Appends one line, flushed to disk before it returns; the file is created readable by its owner only.</summary>
     private void Append(LocalNetworkWrite write)
     {
-        byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(write, ProtocolJson.Options) + "\n");
+        string json = JsonSerializer.Serialize(write, ProtocolJson.Options);
+        byte[] line = Encoding.UTF8.GetBytes(json + "\n");
         lock (gate)
         {
-            var options = new FileStreamOptions { Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.Read, Options = FileOptions.WriteThrough };
+            var options = new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.Read, Options = FileOptions.WriteThrough };
             if (!OperatingSystem.IsWindows())
             {
                 options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
             }
 
-            using var stream = new FileStream(path, options);
-            stream.Write(line);
-            stream.Flush(flushToDisk: true);
+            using (var stream = new FileStream(path, options))
+            {
+                // Preserve a torn tail as its own ignored line, never as a prefix of this entry.
+                if (stream.Length > 0)
+                {
+                    stream.Seek(-1, SeekOrigin.End);
+                    if (stream.ReadByte() != '\n')
+                    {
+                        stream.WriteByte((byte)'\n');
+                    }
+                }
+
+                stream.Write(line);
+                stream.Flush(flushToDisk: true);
+            }
+
+            // Use the ledger's reader too: a successful append must be visible as a complete JSON entry before a write proceeds.
+            if (!ReadLines(path).Any(kept => JsonSerializer.Serialize(kept, ProtocolJson.Options) == json))
+            {
+                throw new IOException("The local-network ledger did not keep a parseable entry.");
+            }
         }
     }
 }
