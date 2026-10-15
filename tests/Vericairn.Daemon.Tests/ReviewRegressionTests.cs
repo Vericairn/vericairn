@@ -1061,7 +1061,12 @@ internal static class Raw
         return (false, swap?.Swapped ?? true, answer);
     }
 
-    public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait)
+    /// <summary>
+    /// Writes exact bytes over TLS and reads the answer until the runtime closes the connection or the wait ends. After the payload,
+    /// <paramref name="meanwhile"/> runs once the runtime has had time to read it, and then <paramref name="trickle"/> follows, a chunk
+    /// at a time with a pause before each.
+    /// </summary>
+    public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait, byte[]? trickle = null, int chunkSize = 0, TimeSpan delay = default, Action? meanwhile = null)
     {
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -1076,6 +1081,34 @@ internal static class Raw
         });
         await tls.WriteAsync(payload);
         await tls.FlushAsync();
+        if (meanwhile is not null)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            meanwhile();
+        }
+
+        if (trickle is not null)
+        {
+            // The runtime may answer and close before the trickle ends; what it answered is read below.
+            int size = chunkSize > 0 ? chunkSize : Math.Max(1, trickle.Length);
+            try
+            {
+                for (int sent = 0; sent < trickle.Length; sent += size)
+                {
+                    if (delay > TimeSpan.Zero)
+                    {
+                        await Task.Delay(delay);
+                    }
+
+                    await tls.WriteAsync(trickle.AsMemory(sent, Math.Min(size, trickle.Length - sent)));
+                    await tls.FlushAsync();
+                }
+            }
+            catch (IOException)
+            {
+            }
+        }
+
         using var buffer = new MemoryStream();
         byte[] chunk = new byte[8192];
         using var timeout = new CancellationTokenSource(wait);

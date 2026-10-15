@@ -23,6 +23,9 @@ internal sealed class ReplayCache(int capacity)
         /// <summary>Accepted before, in this or an equivalent form.</summary>
         Repeated,
 
+        /// <summary>Stale already when offered: its time to be remembered has passed, so it is never accepted.</summary>
+        Stale,
+
         /// <summary>The device has as many signatures in its window as the cache holds for one device.</summary>
         Full,
     }
@@ -30,6 +33,12 @@ internal sealed class ReplayCache(int capacity)
     /// <summary>Accepts a signature of a device once, remembering it until it expires; never evicts a live one.</summary>
     internal Outcome Accept(string device, string key, DateTimeOffset expires, DateTimeOffset now)
     {
+        // A signature past its time is refused, never accepted as new: what remembered it may already have forgotten it.
+        if (expires < now)
+        {
+            return Outcome.Stale;
+        }
+
         lock (gate)
         {
             if (!devices.TryGetValue(device, out Dictionary<string, DateTimeOffset>? seen))

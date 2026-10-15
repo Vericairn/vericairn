@@ -41,7 +41,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     /// <summary>The administrator's client on the runtime's own machine, over the local socket.</summary>
     public VericairnClient Socket { get; }
 
-    /// <summary>The clock pairing codes and the certificate schedule are judged by.</summary>
+    /// <summary>The clock pairing codes, request signatures and the certificate schedule are judged by, unless the harness runs on the system clock.</summary>
     public ManualTime Time { get; }
 
     /// <summary>The second machine's home: the keys and connections of the devices that pair.</summary>
@@ -65,14 +65,15 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
             ? RequestSigning.Digest(method, target, signedAt, body)
             : RequestSigning.LocalNetworkDigest(Binding.Estate, Binding.Identity, method, target, signedAt, body);
 
-    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000)
+    /// <summary>Starts the runtime on loopback's local-network profile, on a clock the test moves, or on the system's when <paramref name="systemClock"/>.</summary>
+    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
         var time = new ManualTime(DateTimeOffset.UtcNow);
         DaemonHost host = await DaemonHost.StartAsync(
             estate.Root,
-            options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = time, ReplayCapacity = replayCapacity },
+            options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity },
             cancellationToken: TestContext.Current.CancellationToken);
         var socket = new VericairnClient(host.Endpoint);
 
