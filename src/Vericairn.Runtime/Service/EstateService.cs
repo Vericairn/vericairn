@@ -1915,6 +1915,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>
+    /// The records a principal authored at or after a time (RFC 3339 UTC), oldest first: what a write a paired device asked for, whose
+    /// outcome the runtime never kept, may have produced.
+    /// </summary>
+    public IReadOnlyList<string> WrittenSince(string principal, string since)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        ArgumentException.ThrowIfNullOrWhiteSpace(since);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            return [.. model.ById.Values.Where(r => r.By == principal && string.CompareOrdinal(r.At, since) >= 0).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).Select(r => r.Id)];
+        }
+    }
+
     /// <summary>Whether a principal administers this estate now: it holds the operator role or a grant of the 'administer' scope.</summary>
     public bool Administers(string principal)
     {

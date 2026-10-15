@@ -71,25 +71,25 @@ public class SecondReviewTests
         Assert.Single(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C1");
 
         // A device revoked while its body arrives is refused once the body is in: the device is read from the records again.
-        byte[] second = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.BuilderId + "\",\"body\":" + Order("W-C1b") + "}");
+        byte[] second = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.BuilderId + "\",\"body\":" + Order("W-C1B") + "}");
         at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         head = Head("POST", "/v1/records", second, at, signer, harness.Digest("POST", "/v1/records", at, second));
         string revoked = await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, second[0]], TimeSpan.FromSeconds(5), trickle: second[1..], meanwhile: () => Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(connection.Device, harness.Estate.OperatorId, "Lost while it wrote.")).Ok));
         Say(revoked);
         Assert.StartsWith("HTTP/1.1 401", revoked, StringComparison.Ordinal);
         Assert.Contains("revoked", revoked, StringComparison.Ordinal);
-        Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C1b");
+        Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C1B");
 
         // On loopback too, a body that arrives after the signature is stale is refused.
         DeviceRequestSigner operatorDevice = DeviceRequestSigner.Find(harness.OperatorDevice)!;
-        byte[] third = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.OperatorId + "\",\"body\":" + Order("W-C1c") + "}");
+        byte[] third = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.OperatorId + "\",\"body\":" + Order("W-C1C") + "}");
         at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         head = Head("POST", "/v1/records", third, at, operatorDevice, RequestSigning.Digest("POST", "/v1/records", at, third));
         string loopback = await Raw.ExchangeAsync(LoopbackAddress(harness), null, pinned, [.. head, third[0]], TimeSpan.FromSeconds(5), trickle: third[1..], meanwhile: () => harness.Time.Advance(TimeSpan.FromMinutes(6)));
         Say(loopback);
         Assert.StartsWith("HTTP/1.1 401", loopback, StringComparison.Ordinal);
         Assert.Contains("five minutes", loopback, StringComparison.Ordinal);
-        Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C1c");
+        Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C1C");
     }
 
     [Fact]
@@ -470,5 +470,73 @@ public class SecondReviewTests
         });
         Assert.False(reached);
         Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task C4_AWriteWhosePairedDeviceCannotBeKeptIsRefusedAndNothingIsWritten()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection laptop = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        string live = Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!;
+        string ledger = Path.Combine(live, LocalNetworkLedger.FileName);
+
+        // A ledger that cannot be written, here because a directory stands where it would be.
+        Directory.CreateDirectory(ledger);
+        using JsonDocument order = JsonDocument.Parse(Order("W-C4"));
+        using (VericairnClient lan = VericairnClient.LocalNetwork(laptop, harness.Signer(laptop)))
+        {
+            HttpRequestException refused = Assert.Throws<HttpRequestException>(() => lan.NewRecord(new NewRecordRequest("work-order", harness.Estate.BuilderId, order.RootElement)));
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        }
+
+        Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C4");
+
+        // Once it can be written, the write goes through, and its paired device is kept with the record it produced.
+        Directory.Delete(ledger);
+        using (VericairnClient lan = VericairnClient.LocalNetwork(laptop, harness.Signer(laptop)))
+        {
+            WriteOutcome written = lan.NewRecord(new NewRecordRequest("work-order", harness.Estate.BuilderId, order.RootElement));
+            Assert.True(written.Ok, written.Problem?.Message);
+            LocalNetworkWrite kept = Assert.Single(LocalNetworkLedger.Read(live));
+            Assert.Equal(("written", laptop.Device, written.Written!.Id, written.Written.Hash), (kept.State, kept.Device, kept.Record, kept.Hash));
+        }
+
+        // The file holds the intent, flushed before the write, and the outcome after it, under one id.
+        string[] lines = File.ReadAllLines(ledger);
+        Assert.Equal(2, lines.Length);
+        Assert.Contains("\"state\":\"pending\"", lines[0], StringComparison.Ordinal);
+        Assert.Contains("\"state\":\"written\"", lines[1], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task C4_AWriteTheRuntimeStoppedInTheMiddleOfIsClosedAsInterruptedWhenItStartsAgain()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection laptop = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
+        string live = Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!;
+
+        // The crash window: the intent kept, the record written, the runtime gone before the outcome.
+        string intended = new LocalNetworkLedger(live).Intend(Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), laptop.Device, harness.Estate.BuilderId, "POST /v1/records");
+        using JsonDocument order = JsonDocument.Parse(Order("W-C4B"));
+        WriteOutcome written = harness.Socket.NewRecord(new NewRecordRequest("work-order", harness.Estate.BuilderId, order.RootElement));
+        Assert.True(written.Ok, written.Problem?.Message + " " + string.Join("; ", written.Problem?.Findings.Select(f => $"{f.Code} {f.Message}") ?? []));
+        Assert.Equal("pending", Assert.Single(LocalNetworkLedger.Read(live)).State);
+        await harness.Host.StopAsync();
+
+        // The next start closes it, naming the record it may have produced; a start after that closes nothing again.
+        var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()) };
+        await using (DaemonHost restarted = await DaemonHost.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            LocalNetworkWrite closed = Assert.Single(LocalNetworkLedger.Read(live));
+            Assert.Equal((intended, "interrupted", laptop.Device), (closed.Id, closed.State, closed.Device));
+            Assert.Contains(written.Written!.Id, closed.Candidates!);
+            await restarted.StopAsync();
+        }
+
+        await using (DaemonHost again = await DaemonHost.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            Assert.Equal(2, File.ReadAllLines(Path.Combine(live, LocalNetworkLedger.FileName)).Length);
+            await again.StopAsync();
+        }
     }
 }

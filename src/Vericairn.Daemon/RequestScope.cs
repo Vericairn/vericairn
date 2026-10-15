@@ -16,7 +16,7 @@ namespace Vericairn.Daemon;
 /// is refused, so a new operation is held to a principal before it can be reached by a device. Requests over the local socket carry
 /// no device, and the operating system's identity of their caller stands for them as before.
 /// </summary>
-internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger) : IEndpointFilter
+internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null) : IEndpointFilter
 {
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -55,22 +55,53 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             return Denied(context.HttpContext, device, presence);
         }
 
-        object? result = await next(context).ConfigureAwait(false);
-        Keep(device, operation, result);
+        // Which paired device asked is kept before anything is written, flushed to disk; when it cannot be, nothing is written.
+        string at = Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        string id;
+        try
+        {
+            id = ledger.Intend(at, device.Identity, device.Principal, operation);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            log?.Invoke($"refused {operation} for device {device.Identity}: the local-network ledger cannot be written: {exception.Message}");
+            return Results.Content(JsonSerializer.Serialize(new Problem("refused", $"The runtime cannot keep which paired device asks for this write, so it writes nothing: {exception.Message}", []), ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status503ServiceUnavailable);
+        }
+
+        object? result;
+        try
+        {
+            result = await next(context).ConfigureAwait(false);
+        }
+        catch
+        {
+            Keep(id, at, device, operation, null, failed: true);
+            throw;
+        }
+
+        Keep(id, at, device, operation, result, failed: false);
         return result;
     }
 
-    /// <summary>Keeps a write a paired device made: which device, for whom, what operation, and the record it produced.</summary>
-    private void Keep(AuthenticatedDevice device, string operation, object? result)
+    /// <summary>
+    /// Keeps the outcome of a write a paired device asked for, under its intent's id: the record it produced, or for a run's stop the
+    /// run's id, or that it failed. An outcome that cannot be kept is logged; the start after closes its intent as interrupted.
+    /// </summary>
+    private void Keep(string id, string at, AuthenticatedDevice device, string operation, object? result, bool failed)
     {
         int status = result is IStatusCodeHttpResult { StatusCode: int code } ? code : StatusCodes.Status200OK;
-        if (status >= 300)
+        object? value = result is IValueHttpResult { Value: object answered } ? answered : null;
+        RecordWritten? written = value is WriteOutcome { Written: RecordWritten record } ? record : null;
+        string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false };
+        try
         {
-            return;
+            ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
         }
-
-        RecordWritten? written = result is IValueHttpResult { Value: WriteOutcome { Written: RecordWritten record } } ? record : null;
-        ledger.Append(new LocalNetworkWrite(Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), device.Identity, device.Principal, operation, written?.Id, written?.Hash, written?.Path));
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            log?.Invoke($"the outcome of {operation} for device {device.Identity} ({id}) could not be kept in the local-network ledger: {exception.Message}");
+        }
     }
 
     /// <summary>

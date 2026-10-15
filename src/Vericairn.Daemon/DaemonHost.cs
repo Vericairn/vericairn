@@ -184,6 +184,13 @@ public sealed class DaemonHost : IAsyncDisposable
 
         // The live store's directory holds the runtime's certificate and key, its identity and settings, and the local-network ledger.
         RuntimeCertificate.OwnerOnly(directory);
+
+        // A write a paired device asked for whose outcome the last runtime never kept is closed now, with what it may have produced.
+        int interrupted = new LocalNetworkLedger(directory).Reconcile(Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), service.WrittenSince);
+        if (interrupted > 0)
+        {
+            options.Log?.Invoke($"{interrupted} local-network write(s) had no outcome kept when the last runtime stopped; kept as interrupted");
+        }
         bool pipe = OperatingSystem.IsWindows();
         if (!pipe && File.Exists(address))
         {
@@ -281,7 +288,7 @@ public sealed class DaemonHost : IAsyncDisposable
         app.Use(host.AuthenticateAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
-        routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory)));
+        routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log));
         ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
         DaemonRoutes.Map(routes, host);
         try

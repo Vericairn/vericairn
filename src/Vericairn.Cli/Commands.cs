@@ -1579,7 +1579,14 @@ internal static class Commands
 
             foreach (LocalNetworkWrite write in writes)
             {
-                Console.Out.WriteLine($"{write.At}  device {write.Device} for {write.Principal}  {write.Operation}{(write.Record is null ? string.Empty : $"  {write.Record}  {write.Hash}")}");
+                string outcome = write.State switch
+                {
+                    "interrupted" => write.Candidates is { Count: > 0 } candidates ? $"interrupted, the runtime stopped before its outcome was kept; it may have written {string.Join(", ", candidates)}" : "interrupted, the runtime stopped before its outcome was kept; its principal wrote nothing since",
+                    "pending" => "pending, no outcome kept yet",
+                    "failed" => "failed, nothing written",
+                    _ => "written",
+                };
+                Console.Out.WriteLine($"{write.At}  device {write.Device} for {write.Principal}  {write.Operation}  {outcome}{(write.Record is null ? string.Empty : $"  {write.Record}{(write.Hash is null ? string.Empty : "  " + write.Hash)}")}");
             }
 
             return Clean;
