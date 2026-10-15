@@ -148,6 +148,17 @@ The release as intent, then observed effect:
 `vericairn status` lists every current operation with its state; one that is not observed-success or
 canceled needs attention.
 
+A release's documentation set (for Vericairn, `docs/releases/<version>/`) carries a manifest the product's
+build tooling writes from the build; from 0.6.0 it states the record formats the build reads and writes,
+which step 2 reads from the draft. `vericairn docs notes --from <previous> --to <version> --out <set>`
+writes the set's release notes from the estate's records and records their window in the manifest
+(`notes: {from, to}`, the records dated after `from` and up to `to`). The notes begin where the notes of
+the previous set, the directory `<previous>` names beside `<set>`, ended, so no record falls between two
+sets. For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
+notes state, to the minute, and with no previous set at the previous publication; `--since <time>` names
+the beginning instead. Until the version's publication is recorded they end at the second before they are
+generated.
+
 ## The synthetic migration
 
 The move from record format 1 to 2 (`record-format-2`, [record-format-v2.md](record-format-v2.md)) stages nothing:

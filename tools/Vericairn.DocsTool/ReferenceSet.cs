@@ -74,6 +74,21 @@ internal static class ReferenceSet
                 documents = declared.RootElement.EnumerateArray().Where(n => n.ValueKind == JsonValueKind.String).Select(n => n.GetString()!).ToList();
             }
 
+            // The window of the set's notes is written by `vericairn docs notes`; a set generated again keeps it.
+            JsonNode? notes = null;
+            string manifestPath = Path.Combine(output, "manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                try
+                {
+                    notes = (JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject)?["notes"]?.DeepClone();
+                }
+                catch (JsonException)
+                {
+                    notes = null;
+                }
+            }
+
             Directory.CreateDirectory(output);
             List<CommandDoc> commands = Walk(CliApp.Build(), string.Empty);
             using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
@@ -97,6 +112,11 @@ internal static class ReferenceSet
                 ["operations"] = new JsonArray(operations.Select(o => (JsonNode)o).ToArray()),
                 ["recordTypes"] = new JsonArray(types.Select(t => (JsonNode)t).ToArray()),
             };
+            if (notes is not null)
+            {
+                manifest["notes"] = notes;
+            }
+
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
 
             if (json)
