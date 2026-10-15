@@ -113,7 +113,7 @@ public static class OpenApiDocument
                 ["title"] = "Vericairn API",
                 ["version"] = ApiVersion.Current,
                 ["description"] = "One versioned API that every client uses. Authority is evaluated by the runtime behind it; a client presents, requests and observes. "
-                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, conflict, denied), "
+                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider; conflict is reserved and nothing answers with it yet), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
                     + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1).",

@@ -32,7 +32,7 @@ public sealed class ProductType : IRecordType
         new("summary", "string", true, "The product in a sentence."),
         new("editions", "object[]", true, "name, slug, summary, optional license (SPDX expression)."),
         new("surfaces", "object[]", true, "name, slug, summary: runtime, Workbench, Remote, CLI, SDK, websites."),
-        new("release", "object", false, "How the product's releases are made: destination (provider id and its settings, string values), checksums (the asset that lists the others' hashes) and artifacts (name with {version} and optionally {platform}, role distributable|sbom|notices|documentation|other, platforms). Read by release 0.4.0 and later."),
+        new("release", "object", false, "How the product's releases are made: destination (provider id and its settings, string values), checksums (the asset that lists the others' hashes) and artifacts (name with {version} and optionally {platform}, role distributable|sbom|notices|documentation|other, platforms). Read by release 0.4.2, the first published release to read it, and later (0.4.0, which introduced it, was withdrawn)."),
     ];
 
     /// <inheritdoc />

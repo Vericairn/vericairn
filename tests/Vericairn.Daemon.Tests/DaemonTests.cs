@@ -3,6 +3,7 @@
 
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Signing;
@@ -195,6 +196,22 @@ public class DaemonTests
         Assert.True(revocation.Ok, revocation.Problem?.Message);
         HttpRequestException revoked = Assert.Throws<HttpRequestException>(() => loopback.Health());
         Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
+    }
+
+    [Fact]
+    public void TheContractNamesEveryProblemCodeAClientCanReceiveAndMarksConflictReserved()
+    {
+        using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
+        string description = document.RootElement.GetProperty("info").GetProperty("description").GetString()!;
+        Match codes = Regex.Match(description, @"stable code \((?<codes>[^)]*)\)");
+        Assert.True(codes.Success, description);
+        string[] listed = codes.Groups["codes"].Value.Split([',', ';'], StringSplitOptions.TrimEntries);
+        foreach (string code in new[] { "refused", "rejected", "not-found", "invalid", "denied", "provider" })
+        {
+            Assert.Contains(code, listed);
+        }
+
+        Assert.Contains("conflict is reserved and nothing answers with it yet", listed);
     }
 
     [Fact]

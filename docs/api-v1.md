@@ -97,6 +97,9 @@ record was rejected:
 | `denied` | A loopback request without a valid signature by a device admitted now | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded | 200, inside the `ReleaseResponse` |
 
+`conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
+and it stays named so that no client that knows it breaks.
+
 The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
 they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there
 is nothing to record yet, and a refusal is its `problem`, not an HTTP status. A read of a missing
