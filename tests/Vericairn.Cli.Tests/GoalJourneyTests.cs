@@ -184,6 +184,34 @@ public class GoalJourneyTests
         }
     }
 
+    [Fact]
+    public void AGoalIsRevisedOnlyByWhoDecidesForItByEveryRoute()
+    {
+        string root = CliHarness.TempDirectory("goal-revise");
+        string scratch = CliHarness.TempDirectory("goal-revise-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Revisions.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = Principal(root, scratch, op, "Builder", "builder");
+            string[] goal = ["--title", "Keep the guide current", "--objective", "The guide describes the widget.", "--done", """{"evidence":"The guide describes the widget.","check":"Read it."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2"];
+
+            // The builder proposes a goal for the operator: anyone may propose one. Revising it is the operator's, its sponsor's, alone.
+            string proposed = CliHarness.Ok(["--estate", root, "--json", "goal", "propose", "--by", builder, "--sponsor", op, .. goal]).Id;
+            Refused(root, "A goal is revised only by its sponsor, Operator", ["goal", "propose", "--by", builder, "--sponsor", builder, "--supersedes", proposed, .. goal]);
+            JsonElement body = CliHarness.Ok("--estate", root, "--json", "goal", "show", proposed).Json.GetProperty("goal").GetProperty("body");
+            CliHarness.Outcome around = CliHarness.Run("--estate", root, "--json", "records", "new", "goal", "--by", builder, "--supersedes", proposed, "--body", CliHarness.WriteJson(scratch, "revision.json", body.GetRawText()));
+            Assert.Equal(1, around.Code);
+            Assert.Contains("goal.revision", around.Out, StringComparison.Ordinal);
+            string revised = CliHarness.Ok(["--estate", root, "--json", "goal", "propose", "--by", op, "--supersedes", proposed, .. goal]).Id;
+            Assert.Equal(2, CliHarness.Ok("--estate", root, "--json", "goal", "show", revised).Json.GetProperty("goal").GetProperty("revision").GetInt32());
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static string Principal(string root, string scratch, string op, string name, string role) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, name + ".json", $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
 

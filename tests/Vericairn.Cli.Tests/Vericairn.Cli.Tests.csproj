@@ -18,6 +18,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The stand-in harness: started with its marker, the test executable behaves as a coding agent's harness and exits. -->
+    <Compile Include="../Vericairn.Runtime.Tests/FakeHarness.cs" Link="FakeHarness.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../src/Vericairn.Cli/Vericairn.Cli.csproj" />
     <ProjectReference Include="../../tools/Vericairn.DocsTool/Vericairn.DocsTool.csproj" />
     <ProjectReference Include="../../src/Vericairn.Records/Vericairn.Records.csproj" />

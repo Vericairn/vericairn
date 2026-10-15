@@ -290,6 +290,261 @@ internal static class Commands
     public static int GoalAccept(string root, string goal, string by, string statement, bool json) =>
         WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
 
+    /// <summary>What <c>vericairn worker run</c> was given.</summary>
+    internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach);
+
+    /// <summary>Lists the coding-agent launchers, labeling a generic one as not complete agent support.</summary>
+    public static int WorkerLaunchers(string root, bool json) => WithApi(root, api =>
+    {
+        IReadOnlyList<ProviderRow> rows = api.Launchers();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+            return Clean;
+        }
+
+        if (rows.Count == 0)
+        {
+            Console.Out.WriteLine("No coding-agent launcher is available to the runtime here.");
+            return Clean;
+        }
+
+        foreach (ProviderRow row in rows)
+        {
+            Console.Out.WriteLine($"{row.Provider}  {row.Implementation}  {row.Contract}  {row.Status}{(row.Provider == "generic" ? "  (" + Vericairn.Runtime.Workers.IAgentLauncher.GenericLabel + ")" : string.Empty)}");
+            foreach (ProviderSettingRow setting in row.Settings)
+            {
+                Console.Out.WriteLine($"  {setting.Name,-10} {(setting.Required ? "required" : setting.Default is null ? "optional" : "default " + setting.Default)}: {setting.Summary}");
+            }
+
+            foreach (string limitation in row.Limitations)
+            {
+                Console.Out.WriteLine($"  limitation: {limitation}");
+            }
+        }
+
+        return Clean;
+    });
+
+    /// <summary>
+    /// Runs a coding agent on an assignment: starts the run, then waits in the foreground until it settles and reports its usage, a
+    /// Ctrl+C asking it to stop; with --detach, returns once the daemon serving the estate has launched it.
+    /// </summary>
+    public static int WorkerRun(string root, WorkerRunOptions options, bool json)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
+        if (settings is null)
+        {
+            return Fail(problem!);
+        }
+
+        return WithApi(root, api =>
+        {
+            if (options.Detach && api is not VericairnClient)
+            {
+                return Fail("--detach leaves the run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or run in the foreground.");
+            }
+
+            RunResponse started = api.RunStart(new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings));
+            if (!started.Ok)
+            {
+                return started.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(started.Message);
+            }
+
+            if (!json)
+            {
+                Console.Out.WriteLine($"run {started.Run}  {started.Status}  {started.Workspace}");
+                Console.Out.WriteLine($"  cap {Units(started.Cap)}");
+                Console.Out.WriteLine("  " + started.Message);
+            }
+
+            if (options.Detach)
+            {
+                if (json)
+                {
+                    Console.Out.WriteLine(JsonSerializer.Serialize(started, ProtocolJson.Options));
+                }
+
+                return Clean;
+            }
+
+            // The run is observed by the runtime; this waits for its settlement, and a Ctrl+C asks for its stop rather than abandoning it.
+            int stopping = 0;
+            void Interrupt(object? sender, ConsoleCancelEventArgs e)
+            {
+                e.Cancel = true;
+                if (Interlocked.Exchange(ref stopping, 1) == 0)
+                {
+                    ThreadPool.QueueUserWorkItem(_ => api.RunStop(started.Run, new RunStopRequest(options.By, "interrupted at the command line")));
+                }
+            }
+
+            Console.CancelKeyPress += Interrupt;
+            try
+            {
+                RunRow? row = null;
+                int unobserved = 0;
+                while (unobserved < 5)
+                {
+                    Thread.Sleep(1000);
+                    row = api.Runs().Runs.FirstOrDefault(r => r.Run == started.Run);
+                    if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
+                    {
+                        break;
+                    }
+
+                    unobserved = row.Observed ? 0 : unobserved + 1;
+                }
+
+                if (json)
+                {
+                    Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
+                }
+                else if (row is not null)
+                {
+                    PrintRun(row);
+                    if (row.Status is "dispatched" or "not-started" or "uncertain")
+                    {
+                        Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
+                    }
+                }
+
+                return row?.Status == "observed-success" ? Clean : HasErrors;
+            }
+            finally
+            {
+                Console.CancelKeyPress -= Interrupt;
+            }
+        });
+    }
+
+    /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
+    public static int WorkerStop(string root, string run, string by, string? reason, int? grace, bool json) => WithApi(root, api =>
+    {
+        RunStopResponse response = api.RunStop(run, new RunStopRequest(by, reason, grace));
+        if (response.Problem is not null && response.Stop is null)
+        {
+            return Fail(response.Message);
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+        }
+        else
+        {
+            Console.Out.WriteLine($"run {response.Run}  stop {response.State}");
+            if (response.Stop is not null)
+            {
+                PrintStop(response.Stop);
+            }
+
+            Console.Out.WriteLine("  " + response.Message);
+        }
+
+        return response.Ok ? Clean : HasErrors;
+    });
+
+    /// <summary>Lists the agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
+    public static int WorkerRuns(string root, bool json) => WithApi(root, api =>
+    {
+        RunsResponse response = api.Runs();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
+            return Clean;
+        }
+
+        if (response.Runs.Count == 0)
+        {
+            Console.Out.WriteLine("No agent runs.");
+        }
+
+        foreach (RunRow row in response.Runs)
+        {
+            PrintRun(row);
+        }
+
+        foreach (LedgerRow ledger in response.Goals)
+        {
+            Console.Out.WriteLine($"goal {ledger.Goal}  {ledger.Status}  {ledger.Title}");
+            Console.Out.WriteLine($"  budget {string.Join(", ", ledger.Units.Select(u => $"{u.Unit} {u.Spent} of {u.Budget}{(u.Currency is null ? string.Empty : " " + u.Currency)} charged, {u.Remaining} remain"))}; {ledger.InFlight} of {ledger.Concurrency} runs in flight; {ledger.AttemptsPerStep} attempts per step");
+            foreach (string fence in ledger.Fenced)
+            {
+                Console.Out.WriteLine($"  fenced: {fence}");
+            }
+        }
+
+        return Clean;
+    });
+
+    private static void PrintRun(RunRow row)
+    {
+        Console.Out.WriteLine($"run {row.Run}  {row.Status}  {row.Launcher} as {row.Agent}  assignment {row.Assignment}  goal {row.Goal}");
+        Console.Out.WriteLine($"  workspace {row.Workspace}");
+        Console.Out.WriteLine($"  cap {Units(row.Cap)}");
+        Console.Out.WriteLine(row.Usage is JsonElement usage ? $"  usage {Units(usage)}" : "  usage: not settled yet, so charged at its cap");
+        Console.Out.WriteLine($"  charged {Units(row.Charged)}");
+        if (row.Stop is not null)
+        {
+            PrintStop(row.Stop);
+        }
+
+        if (row.Heartbeat is not null)
+        {
+            Console.Out.WriteLine(row.Observed ? $"  observed by a worker on this machine, its last heartbeat at {row.Heartbeat}" : $"  not observed by a worker now; its last heartbeat here was at {row.Heartbeat}");
+        }
+
+        if (row.Generic)
+        {
+            Console.Out.WriteLine("  " + Vericairn.Runtime.Workers.IAgentLauncher.GenericLabel);
+        }
+    }
+
+    private static void PrintStop(RunStop stop)
+    {
+        Console.Out.WriteLine($"  stop requested at {stop.RequestedAt} by {stop.RequestedBy}{(stop.Reason is null ? string.Empty : ": " + stop.Reason)}");
+        Console.Out.WriteLine(stop.TransmittedAt is null ? "    transmitted: not observed" : $"    transmitted at {stop.TransmittedAt}: {stop.Transmission}");
+        Console.Out.WriteLine(stop.AcknowledgedAt is null ? "    acknowledged: not observed" : $"    acknowledged at {stop.AcknowledgedAt}: {stop.Acknowledgment}");
+        if (stop.EscalatedAt is not null)
+        {
+            Console.Out.WriteLine($"    escalated at {stop.EscalatedAt}: {stop.Escalation}");
+        }
+
+        Console.Out.WriteLine(stop.ContainedAt is null ? "    contained: not observed" : $"    contained at {stop.ContainedAt}");
+    }
+
+    /// <summary>Caps, usage or charges in words: each unit and its amount, and the units not reported.</summary>
+    private static string Units(JsonElement? caps)
+    {
+        if (caps is not JsonElement element || element.ValueKind != JsonValueKind.Object)
+        {
+            return "none";
+        }
+
+        var parts = new List<string>();
+        foreach (JsonProperty unit in element.EnumerateObject().OrderBy(p => Array.IndexOf(Caps.UnitNames, p.Name) is int at and >= 0 ? at : Caps.UnitNames.Length))
+        {
+            if (unit.Name == "unreported")
+            {
+                List<string> names = unit.Value.ValueKind == JsonValueKind.Array ? unit.Value.EnumerateArray().Select(v => v.GetString() ?? "?").ToList() : [];
+                if (names.Count > 0)
+                {
+                    parts.Add($"not reported: {string.Join(", ", names)} (charged at the cap)");
+                }
+
+                continue;
+            }
+
+            parts.Add(unit.Value.ValueKind == JsonValueKind.Object
+                ? $"{unit.Name} {(unit.Value.TryGetProperty("amount", out JsonElement amount) ? amount.GetRawText() : "?")} {(unit.Value.TryGetProperty("unit", out JsonElement code) ? code.GetString() : string.Empty)}"
+                : $"{unit.Name} {unit.Value.GetRawText()}");
+        }
+
+        return parts.Count == 0 ? "nothing" : string.Join(", ", parts);
+    }
+
     public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
     {
         try
