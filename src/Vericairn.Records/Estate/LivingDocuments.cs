@@ -17,7 +17,7 @@ namespace Vericairn.Records.Estate;
 public static class LivingDocuments
 {
     /// <summary>The foundation's own contributions that are named namespace/name: its generators.</summary>
-    public static readonly string[] FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes"];
+    public static readonly string[] FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes", "vericairn.records/releases"];
 
     private static readonly HashSet<string> Contributions = new(FoundationGenerators, StringComparer.Ordinal);
 
@@ -143,6 +143,13 @@ public static class LivingDocuments
         return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => l + "\n"))))).ToLowerInvariant();
     }
 
+    /// <summary>Every path a declaration's covers triggers name, in order and once each.</summary>
+    public static IReadOnlyList<string> CoveredPaths(RecordEnvelope declaration)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        return Triggers(declaration).Where(t => t.On == "covers").SelectMany(t => t.Values).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
+    }
+
     /// <summary>A declaration's triggers with their parameters.</summary>
     public static IReadOnlyList<(string On, string Level, string? Product, IReadOnlyList<string> Values)> Triggers(RecordEnvelope declaration)
     {
@@ -183,6 +190,11 @@ public static class LivingDocuments
 
         var reasons = new List<Reason>();
         var notes = new List<string>();
+
+        // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all.
+        IReadOnlyList<string> coveredPaths = CoveredPaths(declaration);
+        RecordEnvelope? coveredReview = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
+        bool coveredChanged = !elsewhere && coveredPaths.Count > 0 && (coveredReview is null || EstateModel.BodyString(coveredReview, "covered") != CoveredIdentity(model.Root, coveredPaths));
         foreach ((string on, string level, string? product, IReadOnlyList<string> values) in Triggers(declaration))
         {
             if (on == "covers")
@@ -190,14 +202,10 @@ public static class LivingDocuments
                 if (elsewhere)
                 {
                     notes.Add("its covered paths are compared where its repository is, through its source, at the commit reviewed or released");
-                    continue;
                 }
-
-                RecordEnvelope? covered = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
-                string identity = CoveredIdentity(model.Root, values);
-                if (covered is null || EstateModel.BodyString(covered, "covered") != identity)
+                else if (coveredChanged)
                 {
-                    reasons.Add(new Reason(on, level, covered is null ? $"no review has recorded its covered paths ({string.Join(", ", values)})" : $"its covered paths ({string.Join(", ", values)}) changed after the review {covered.Id}", null));
+                    reasons.Add(new Reason(on, level, coveredReview is null ? $"no review has recorded its covered paths ({string.Join(", ", values)})" : $"its covered paths ({string.Join(", ", values)}) changed after the review {coveredReview.Id}", null));
                 }
 
                 continue;

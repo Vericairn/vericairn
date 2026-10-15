@@ -275,6 +275,24 @@ public static partial class EstateChecks
             {
                 findings.Warning("document.unavailable", location, $"Its declaration names {string.Join(", ", state.Unavailable)}, which no installed pack provides, so it cannot be evaluated{(state.DeclaresRefuse ? " and closes its product's release gate" : string.Empty)}. Install the pack or revise the declaration.");
             }
+
+            if (state.Repository is not null)
+            {
+                continue;
+            }
+
+            // The estate's own generated content is held to its generator: a hand edit inside a region, or to a generated file, is refused.
+            string file = Path.Combine(model.Root, state.Path.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(file))
+            {
+                findings.Warning("document.absent", state.Path, $"Declared living by {state.Declaration.Id}, and no such file is in the estate.");
+                continue;
+            }
+
+            foreach (string problem in DocumentChecks.Generated(model, state.Declaration, File.ReadAllText(file)))
+            {
+                findings.Error("document.generated-edited", state.Path, $"Generated content was edited by hand: {problem}. Run vericairn docs regenerate {state.Path}; author outside the markers.");
+            }
         }
     }
 

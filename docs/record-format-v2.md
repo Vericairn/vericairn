@@ -86,7 +86,7 @@ build cannot read.
   repository, the `repository` resource; whether it is `authored` or `generated` (a generated one names its
   `generator`); the `source` its content is read through (`estate-file`, or a pack's, such as
   `vericairn.software/git-file`); its `triggers`, each with a `level` (`remind`, `warn` or `refuse`); its generated
-  `regions`; who may clear it (`clearedBy`: `any`, `independent` or `operator`); and the `checks` run when it is
+  `regions`, each with its generator and optional `inputs`; who may clear it (`clearedBy`: `any`, `independent` or `operator`); and the `checks` run when it is
   cleared. The foundation's triggers are `covers` with `paths`, `release` with a `product`, `upgrade`, `decision`, and
   `accepted` with work-order `keys`; its checks are `names-version`, `matches-generator` and `links-resolve`. A pack's
   trigger, check, source or generator is named `namespace/name`. One current declaration per document: a revision
@@ -147,6 +147,20 @@ is recorded, naming every such document at once. A declaration that names a sour
 installed pack provides is shown as unavailable (`document.unavailable`) and, when it declares a `refuse` trigger,
 closes its product's release gate until the pack is installed or the declaration is revised. Status in JSON lists
 every declared document with its state, reasons and latest clearance.
+
+A generated region is the content between `<!-- vericairn:generated <id> -->` and `<!-- vericairn:end <id> -->`, each
+on its own line. For the estate's own files, `vericairn estate check` regenerates every region whose generator is
+installed, and a generated document as a whole, and refuses a hand edit or lost markers (`document.generated-edited`);
+`vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's region generator
+`vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first.
+`vericairn docs living` lists the declared documents; `vericairn docs declare` records or revises a declaration; and
+`vericairn docs review <path> --by <id> --outcome current|revised|needs-change --summary <text>` records a review in
+which the runtime, not the reviewer, states the content's hash, the covered paths' identity, the triggers answered and
+the reviewer's independence, and runs the declared checks: `names-version` (the document names the version of each
+release the review answers), `links-resolve` (every relative link resolves within the repository) and
+`matches-generator` (generated content equals a fresh generation). A failed check refuses the clearance; a check no
+installed pack provides is recorded as not performed. A declared estate document that is not in the working tree is a
+`document.absent` warning.
 
 ## A device keeps its identity
 
