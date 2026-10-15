@@ -22,7 +22,8 @@ in an endpoint file beside the live store:
 
 where `<key>` is `local` for a local-only estate and otherwise the first 16 hexadecimal digits of the
 SHA-256 of the root's full path, with `kind` (`unix` or `pipe`), `address`, `processId`, `startedAt`,
-`root`, `api` and, when served, the `loopback` endpoint (`host`, `port`, `certificate`). A daemon
+`root`, `api`, when served the `loopback` endpoint (`host`, `port`, `certificate`) and, from 0.6.0, when
+served the `localNetwork` endpoint (`host`, `port`, `identity`, the runtime identity's fingerprint). A daemon
 refuses to start while another answers for the same estate; a stale endpoint file or socket left by a
 crashed daemon never blocks the next owner. The CLI follows the same rule on every estate command except
 the four named at the end of Operations: it reads the endpoint file, checks that the daemon answers, and
@@ -35,16 +36,22 @@ same refusals and the same status bytes; nothing lives only in the daemon.
 |---|---|---|
 | Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
 | Loopback | TLS on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
+| Local network, from 0.6.0 | Mutual TLS at the address and port the operator configured; off unless configured | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests under the device's permitted profiles |
 
 On Windows the pipe is created by Kestrel's named-pipe transport with its default, `CurrentUserOnly`, and no
 other pipe security. Its access list allows only the owner of the daemon's process token: the account that
 started the daemon or, for a daemon run elevated, the owner Windows gives elevated processes (by default the
 Administrators group), so that only administrators' elevated processes reach it.
 
-The runtime certificate is self-signed ECDSA P-256, valid 180 days and replaced at the next start when
-fewer than 30 days remain, kept owner-only as `runtime-certificate.p12` beside the live store. Its SHA-256
-fingerprint is published in the endpoint file; a client accepts that certificate and no other, and
-consults no trust store.
+The runtime certificate is self-signed ECDSA P-256, valid 180 days, kept owner-only as
+`runtime-certificate.p12` beside the live store, and presented on both TLS profiles. It is replaced when
+fewer than 30 days remain: at the next start and, from 0.6.0, by a running daemon, which checks every hour;
+`vericairn runtime rotate` replaces it at once. A replacement writes the new file whole and publishes the
+new fingerprint in the endpoint file. A loopback client pins the fingerprint the endpoint file names when
+it is made, accepts that certificate and no other, and consults no trust store, so a loopback client made
+before a rotation refuses the new certificate on its next connection and is made again from the endpoint
+file, as every command makes its client. Paired devices on the local network pin the runtime identity
+instead (below), so a rotation leaves them working.
 
 A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At`
 (RFC 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the
@@ -61,6 +68,140 @@ signs with `DeviceRequestSigner`, which uses the device key in this machine's cu
 refused, as stale after five minutes and as a repeat before then while it is among the last 4,096, and a
 copied key file is useless where platform custody holds the key.
 
+## The local-network profile
+
+From 0.6.0 a runtime can serve paired devices on other machines over the local network. Nothing listens
+beyond the local socket and loopback unless the operator configures an address: `vericairn runtime
+configure --local-network <address:port>` keeps an IP address of the machine and a port (`192.168.1.20:7443`,
+`[fe80::1]:7443`; port 0 asks for any free port, which only tests want) in `runtime.json` beside the live
+store, owner-only, and the runtime listens there from its next start; `--local-network off` turns it off. The
+address is machine configuration, never a record. Devices reach the runtime at that explicit address;
+discovery is not built.
+
+**The runtime identity.** A runtime that serves the local network has an identity of its own: a P-256 key
+made in the strongest custody the machine offers, as a device key is (CNG on Windows, the Secure Enclave
+through the helper on a Mac, the secret service on Linux where one runs, otherwise an owner-only file), never
+asking for presence and never used by TLS. `runtime-identity.json` beside the live store names the key and
+its custody, never the key. A device pins the identity's public key when it pairs; the endpoint file and
+`vericairn runtime status` show its fingerprint. The identity outlives restarts and certificate rotations;
+when its key is no longer held, the runtime makes a new identity and every paired device pairs again.
+
+**A connection.** The runtime presents its certificate and asks for a client certificate, which only the
+pairing exchange may go without, and never resumes a TLS session. A paired device presents a certificate it
+issues for its connections: a fresh P-256 key held in memory, the subject `CN=<device id>`, valid one day,
+signed ECDSA with SHA-256 by the device's own key wherever that key is held. Before any other request on a
+connection the device asks `GET /v1/runtime/identity?nonce=<32 random bytes, base64url>`, signed like every
+request, and verifies the `RuntimeIdentityProof` it gets: the identity it pinned signed, ECDSA P-256 in IEEE
+P1363 form, the SHA-256 of the line-feed-joined `vericairn-runtime-identity/1`, the estate's id, the
+fingerprint of the certificate its own handshake showed (`sha256:` and hex) and its nonce. A connection
+whose proof fails is closed with nothing else sent. A certificate is therefore accepted only while the
+runtime identity signs it: rotating the certificate keeps every paired device working, and a replaced
+certificate is refused by every paired device, whoever presents it.
+
+**Every request.** Every request but the pairing exchange is device-signed as on loopback (scheme
+`vericairn-request/1`, the same three headers, five minutes of skew, each signature accepted once in any of
+its forms; the last 4,096 are remembered across both profiles). The runtime reads the device from the records
+at every request and refuses it unless it is current, admitted now and permitted `local-network` in its
+device record's `profiles`, unless the connection's client certificate names it and verifies with its current
+key, and unless the signature verifies with that key. A revoked device is therefore refused at its next
+request, on a connection it already has open as well; disconnection alone revokes nothing. A request whose
+JSON body names an acting principal at its top level (`by` or `principal`, in any spelling) must name the
+device's own principal, whose authority the runtime then evaluates as for any request. What acts on the
+runtime's own machine is refused: `POST /v1/shutdown`, `/v1/devices`, `/v1/devices/rename`,
+`/v1/devices/rotate`, `/v1/devices/recovery`, `/v1/estate/export`, `/v1/pairings` and
+`/v1/runtime/certificate`, and any request that names a `recovery` key file. A refusal is `401` with a
+problem of code `denied`, and the connection is closed.
+
+A record written over the local network is authored by the device's principal and signed as every API write
+is: by an admitted device of that principal whose key the runtime's machine holds; where there is none it is
+written unsigned when the charter leaves signatures optional, and refused when the charter requires them. A
+paired device's key signs its requests and its connection certificates, never the records the runtime writes.
+Loopback does not check `profiles` yet, so devices recorded before 0.6.0 with the default `embedded` keep
+their loopback access.
+
+## Pairing
+
+A device on another machine pairs with the runtime under an administrator's authority: the operator, or a
+principal holding the `administer` scope, whose admitted device on the runtime's machine signs the
+admission as `vericairn devices admit` signs it. The exchange is scheme `vericairn-pairing/1`.
+
+1. On the runtime's machine the administrator asks for a code: `vericairn devices pair --principal <id> --by
+   <administrator> [--profile <profile>]...` (`POST /v1/pairings`, refused over the local network). The runtime
+   checks the principal, the profiles (`local-network` unless others are named), the administrator's authority
+   and that the admission can be signed here, and issues 20 characters of Crockford's base32 alphabet, shown in
+   five groups of four: the first group is the pairing's handle and the other sixteen characters are its
+   secret, 80 bits from the system's cryptographic random generator. A code works for ten minutes, pairs one
+   device and allows five exchanges; at most sixteen wait at once. The daemon keeps only the keys derived from
+   a code, in memory, so a restart forgets every code. The code is shown once; the administrator gives it, with
+   the address, to the person at the new device, who types it (case, hyphens and spaces do not matter, and I,
+   L and O read as 1, 1 and 0).
+2. Each side derives two keys from the code with HKDF-SHA256 (RFC 5869): extract from the secret's sixteen
+   characters with the salt `vericairn-pairing/1`, and expand 32 bytes for the runtime (info
+   `vericairn-pairing/1 runtime <handle>`) and 32 for the device (`vericairn-pairing/1 device <handle>`). The
+   code itself never crosses the network.
+3. The device sends `POST /v1/pairing/hello` with the handle and a 32-byte nonce, nothing derived from the
+   secret.
+4. The runtime refuses an unknown, expired, used or exhausted code; otherwise it uses one of the code's
+   attempts and answers a `PairingChallenge`: both nonces, the estate, the runtime identity's public key, the
+   fingerprint of the certificate it presented on this connection, the principal with its name and kind, the
+   profiles, and the id, time and record format of the device record it will write, with an HMAC-SHA256 under
+   the runtime's key over all of it.
+5. The device verifies that MAC and that the certificate named is the one its own handshake showed; only
+   then does it make its key, in the strongest custody of its machine unless told otherwise, held under the
+   record's id. It builds the device record exactly as the runtime will write it (the principal, its name and
+   platform, its custody and presence, its public key, the profiles), signs the record's content hash with
+   the new key, and sends `POST /v1/pairing/confirm` with its key, its descriptive identity and that signature,
+   with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields.
+6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired or was used
+   meanwhile, and one whose MAC does not match, which also ends the exchange. It rebuilds the device record
+   from its own challenge and the device's fields, verifies the signature with the key presented, writes the
+   device record with that signature, the device's own, and then the admission by the administrator, signed
+   by the administrator's admitted device; when the admission is refused the device record is removed again.
+   The code is used up. It answers `PairingCompleted`, the device and admission ids and the record's hash,
+   with an HMAC-SHA256 under the runtime's key over the whole exchange.
+7. The device verifies that MAC and keeps the connection: the address, the estate, the runtime identity's
+   public key, and its device's id and public key. A failure on the device removes the key it made, and a
+   failure anywhere records nothing.
+
+Each transcript is unambiguous: the scheme and a label (`challenge`, `confirm` or `completed`), then each
+field as a 4-byte big-endian length and its UTF-8 bytes, a list preceded by its count and an optional field by
+a byte saying whether it is present; each later transcript contains the earlier one and its MAC. MACs are
+compared in constant time. Every primitive is a standard one in the platform's implementation: HKDF-SHA256,
+HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
+
+### Threat model
+
+- Someone watching the network sees TLS only.
+- Someone between the device and the runtime who ends TLS with a certificate of their own cannot make the
+  runtime's MAC name that certificate without the code, so the device stops at step 5, before it makes a key,
+  and nothing is recorded. A test runs such a relay.
+- Whoever reaches the pairing endpoint, or stands between, can obtain one MAC under a key derived from the
+  code and test guesses against it offline: the exchange uses no password-authenticated key exchange, so the
+  secret is long enough instead. Each guess succeeds with probability 2^-80, so even odds take some 2^79
+  guesses, each a chain of HMAC-SHA256 computations, beyond reach in a code's ten minutes; and a code once used
+  or expired is worth nothing. Online guessing is bounded tighter still by the five attempts.
+- Anyone who reaches the pairing endpoint with a code's handle can use up its attempts, a denial of service;
+  the administrator issues a new code.
+- Whoever learns a code before its device uses it can pair a key of their own in its place, once and within
+  ten minutes. The genuine device is then refused as "used already", and `vericairn devices list` shows the
+  device that did pair; the administrator revokes it. A code is shown only to the person pairing.
+- Whoever holds a copy of the runtime certificate and its key cannot pass for the runtime to a paired device:
+  every proof names the certificate the runtime presents and is signed by the identity, which never enters
+  TLS. `vericairn runtime rotate --compromised` replaces the certificate and closes every open connection;
+  from then on the runtime presents and proves only the new one. A test has such a holder relay the runtime's
+  genuine proofs and be refused.
+- An identity whose key may have leaked is replaced with `vericairn runtime rotate --identity`, after which
+  every paired device refuses the runtime until it pairs again. The identity's custody decides how hard its
+  key is to copy, as a device key's custody does.
+- A connection's key and certificate live in memory for at most a day and are useless alone, since every
+  request is signed by the device key. A device key in an owner-only file can be copied, which is why the
+  strongest custody is the default; a lost or copied device is revoked and refused at its next request.
+- A captured request is accepted once, within five minutes of its signing time, and only over a connection
+  whose certificate the device's key issued.
+
+Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
+paired device by its own key.
+
 ## Operations
 
 | Method and path | Meaning |
@@ -74,7 +215,7 @@ copied key file is useless where platform custody holds the key.
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
-| `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke`, `POST /v1/devices/rename`, `POST /v1/devices/rotate`, `POST /v1/devices/recovery` | Devices and admission; a device is created, renamed and rotated on the machine that holds its key, and the operator's recovery device is made there and its key written once for offline keeping. Admit and revoke accept the recovery key's path and passphrase. |
+| `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke`, `POST /v1/devices/rename`, `POST /v1/devices/rotate`, `POST /v1/devices/recovery` | Devices and admission; a device is created, renamed and rotated on the machine that holds its key, and the operator's recovery device is made there and its key written once for offline keeping. Admit and revoke accept the recovery key's path and passphrase. From 0.6.0 each `DeviceRow` gives the device's permitted `profiles`; a device on another machine is recorded by pairing. |
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release |
 | `GET /v1/documents` | The declared living documents (`DocumentRow`: path, repository, declaration, title, state current, due or unavailable, level, reasons, latest clearance, unavailable contributions, notes) |
 | `POST /v1/documents/{id}/reviews` | Review a living document by its declaration (`DocumentReviewRequest`: by, outcome, summary, findings, commit, and from 0.6.0 independence). The runtime reads the content, records its hash, the covered paths' identity and the triggers the review answers, records the reviewer's independence and runs the declared checks; a failed check, or the declaration's `clearedBy`, refuses a clearance. An estate file's revisions decide its reviewer's independence, and a stated one that differs is refused; for a document of another repository the runtime records the one stated, or without one `self` for a principal with the builder role and otherwise its judgement from the estate's records ([record-format-v2.md](record-format-v2.md#living-documents-due)). Returns a `WriteOutcome`. |
@@ -90,6 +231,15 @@ copied key file is useless where platform custody holds the key.
 | `GET /v1/reconcile`, `GET /v1/recover/inspect` | Reconcile tasks left by diverged copies; what this copy holds |
 | `GET /v1/objects`, `POST /v1/objects`, `GET /v1/objects/{hash}`, `GET /v1/objects/verify` | Content-addressed objects: list, store bytes, verified bytes, verify all |
 | `POST /v1/shutdown` | Ask the daemon to stop; closing a client never stops it |
+| `POST /v1/pairings` | From 0.6.0, issue a pairing code (`PairingIssueRequest`: principal, by, profiles) under an administrator's authority, on the runtime's machine only. Returns `PairingIssued`: the code, the principal and its name, the profiles, the expiry, the attempts, the address and the runtime identity's fingerprint; 409 when the runtime serves no local-network profile or sixteen codes wait, 422 when refused |
+| `POST /v1/pairing/hello`, `POST /v1/pairing/confirm` | From 0.6.0, the pairing exchange (`PairingHello`, `PairingChallenge`, `PairingConfirm`, `PairingCompleted`), over the local network only and without a device credential, since the code authenticates it |
+| `GET /v1/runtime/identity?nonce=<nonce>` | From 0.6.0, the runtime identity's proof for a nonce over the certificate this connection presented (`RuntimeIdentityProof`); 404 when the runtime serves no local-network profile |
+| `POST /v1/runtime/certificate` | From 0.6.0, replace the runtime certificate now (`CertificateRotateRequest`: compromised, reason, identity), on the runtime's machine only. Returns `CertificateRotated`: the new and the replaced fingerprints, the new expiry, whether open connections were closed and how many, and the new identity's fingerprint when it was replaced; 409 when the daemon serves no TLS profile |
+
+The pairing routes, the identity proof and the certificate's rotation are served by a running daemon only:
+the embedded runtime has no listener and keeps nothing between commands. So `vericairn devices pair` is
+refused when no daemon answers, and `vericairn runtime rotate` without one replaces the certificate file
+for the next start.
 
 Restore, `recover compare`, `docs notes` and `docs regenerate` do not go through the API. Restore
 creates another copy. The other three load this copy (and, for compare, the other copy too) directly
@@ -104,10 +254,10 @@ record was rejected:
 | Code | Meaning | HTTP |
 |---|---|---|
 | `rejected` | The estate would be invalid with this record; the findings say why; nothing was written | 422 |
-| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit | 422 (409 for upgrade and export, 413 for an object above the size limit) |
+| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
-| `denied` | A loopback request without a valid signature by a device admitted now | 401 |
+| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a local-network request from a device not permitted that profile, over a connection whose client certificate its key did not issue, naming another principal, or acting on the runtime's own machine; and a pairing code that is unknown, expired, used, out of attempts or does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded | 200, inside the `ReleaseResponse` |
 
 `conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
@@ -129,12 +279,31 @@ in the body, and partial, pending and changed-target states are never flattened 
 | `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` serves the local socket only; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
 | `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
-| `vericairn runtime status` | Whether a daemon serves the estate and where, or whether commands run the embedded runtime |
+| `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured |
 | `vericairn runtime install [--plan]` | Install the daemon as a per-user service that starts at login and restarts after failure: a launchd agent (`~/Library/LaunchAgents`), a systemd user unit (`~/.config/systemd/user`) or a Task Scheduler logon task; `--plan` shows the unit and the commands without installing |
 | `vericairn runtime uninstall` | Remove that service |
+| `vericairn runtime configure [--local-network <address:port>\|off]` | From 0.6.0, the address the local-network profile listens on from the runtime's next start, or off; without options, the configuration. Kept in `runtime.json` beside the live store |
+| `vericairn runtime rotate [--compromised] [--identity] [--reason <text>]` | From 0.6.0, replace the runtime certificate now: through the daemon when one serves the estate, otherwise in the file the next start serves. `--compromised` also closes every open connection; `--identity` also replaces the runtime identity, and every paired device pairs again |
 
 The service unit lives in the user's own configuration and names this machine's paths, because a service
 manager needs them; nothing of it enters a repository.
+
+## Pairing and connections on the command line
+
+| Command | Does |
+|---|---|
+| `vericairn devices pair --principal <id> --by <administrator> [--profile <profile>]...` | On the runtime's machine, with the runtime serving the local-network profile: issue a pairing code and show it once, with its expiry, its attempts, the runtime identity's fingerprint and the command to run on the new device |
+| `vericairn connections add <address> --code <code> --name <name> [--custody <custody>] [--presence true\|false]` | On the new device: pair with the runtime at the address, keep the connection, and check it |
+| `vericairn connections list` | Check every connection now and show its state |
+| `vericairn connections remove <id>` | Forget a connection on this machine; the device stays admitted until an administrator revokes it, and its key stays in this machine's custody |
+
+Connections are kept for the user under the Vericairn home (`connections/<id>.json`, owner-only), never in a
+repository. Their states are the state language's connection vocabulary: `connecting` while a check waits for
+its first answer (the SDK reports it; a command shows where the check ended), `current` when the runtime
+proved the paired identity, accepted the device and answered every read, `partial` when it proved its
+identity and answered only some reads, `denied` when it refused the device, `cached` when nothing answered but
+an earlier check was current, shown with when, and `unavailable` otherwise. A connection proves nothing about
+the state of workers.
 
 ## The SDK
 
@@ -144,7 +313,20 @@ builds from a device key held on this machine. `VericairnClient.IsAlive(endpoint
 answers. The client implements `IEstateApi`, so code written against the interface runs unchanged against
 the embedded `EstateService`.
 
+From 0.6.0, `VericairnClient.LocalNetwork(connection, signer)` connects to a paired runtime over the local
+network. `RuntimeConnections` keeps this machine's connections: `Add` pairs and keeps one, `List`, `Find` and
+`Remove` manage them, `Probe` checks one (reporting `connecting` first, then the state it came to) and
+`Connect` returns a client for one. `RuntimePairing.Pair` is the device's side of the exchange alone, and
+`LocalNetworkCredential` issues a connection's client certificate with a device key. On the runtime's machine
+`IssuePairing` asks for a code, `RotateCertificate` replaces the certificate, and `RuntimeIdentity(nonce)`
+returns a proof. `ConnectionStates` names the states. A refusal while a local-network connection is set up
+surfaces as an `HttpRequestException` whose inner `RuntimeConnectionException` says `denied` or `unavailable`.
+
 ## Changes visible to scripts
+
+From 0.6.0, `GET /v1/devices` and `vericairn devices list --json` give each device's `profiles`; `vericairn
+runtime status --json` adds `localNetwork`, the address configured, and its `daemon` carries the
+`localNetwork` endpoint when one is served, as the endpoint file does.
 
 `vericairn estate upgrade --json` prints the plan with camel-case names (`fromPin`, `toPin`, `fromFormat`,
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the

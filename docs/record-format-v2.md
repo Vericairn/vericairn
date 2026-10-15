@@ -352,6 +352,25 @@ give a device a new key than to record a new device.
   a file into the Secure Enclave for example, is a rotation with `--custody`; the new key keeps the device's presence
   where its custody enforces it, and `--presence` sets it.
 
+## A paired device
+
+From 0.6.0 a device on another machine is paired over the local network ([api-v1.md](api-v1.md#pairing)
+describes the exchange). Pairing writes the records `devices create` and `devices admit` write, in the estate's
+own format, and adds no type and no field:
+
+- The device record is authored by the device's principal and names the key the device presented, its
+  descriptive name, platform, custody and presence as the device stated them, and the profiles the
+  administrator permitted (`local-network` unless others were named). It is signed by that key over its
+  content hash, a signature the device made on its own machine, which proves possession as every device's
+  first record does.
+- The admission is the administrator's, the operator's or a principal's holding `administer`, signed by the
+  administrator's admitted device on the runtime's machine like every admission in format 2.
+
+The runtime writes both or neither. The key a paired device proves on the local network, on every connection
+and every request, is the one its device record names, and `profiles` decides where it connects: the local
+network admits only a device whose current record permits `local-network`. A paired device's key stays on its
+own machine, so `vericairn devices list` on the runtime's machine does not show it as held there.
+
 ## Emergency access
 
 A recovery device is the operator's way back in when every other device is lost. It is a device of purpose `recovery`,

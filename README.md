@@ -32,17 +32,21 @@ release and pins the one it runs on.
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
-  an estate's live state and serves it over a local socket and pinned loopback TLS, and the typed client,
-  documented in [docs/api-v1.md](docs/api-v1.md).
+  an estate's live state and serves it over a local socket, pinned loopback TLS and, when the operator
+  configures an address, the local network to paired devices with mutual TLS, and the typed client with the
+  device's side of pairing and its connections, documented in [docs/api-v1.md](docs/api-v1.md).
 - The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
   verification evidence), `Vericairn.Adapters.Git` (read-only observation of a repository) and
   `Vericairn.Providers.GitHub` (releases built by a GitHub Actions workflow and held as drafts, with intent
   recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
-- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `devices`, `release`, `sources`, `check`, `runtime`,
-  `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when
-  one serves the estate, the embedded runtime otherwise. `vericairn goal` carries an objective: a goal is
+- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `devices`, `connections`, `release`, `sources`, `check`,
+  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the
+  daemon when one serves the estate, the embedded runtime otherwise. `vericairn devices pair` issues a
+  short-lived pairing code under an administrator's authority, `vericairn connections add` pairs another
+  machine with the runtime over the local network, and `vericairn connections list` shows each connection's
+  state; a revoked device is refused at its next request. `vericairn goal` carries an objective: a goal is
   proposed and activated, record predicates and an evaluator who did none of its work judge it condition by
   condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
   given can activate, fund or accept one. There is no conductor yet: people and agents do a goal's steps.
