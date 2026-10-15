@@ -102,9 +102,9 @@ internal static class FakeHarness
                 Emit("""{"type":"assistant","message":{"id":"m1","type":"message","role":"assistant","content":[{"type":"text","text":"Working."}]}}""");
                 return 0;
             case "claude-fails":
-                Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"output_tokens":5}}""");
+                Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}}""");
                 return 1;
-            case "codex" or "codex-spender" when listing:
+            case "codex" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" when listing:
                 Emit("apps                                     stable             true");
                 Emit("goals                                    stable             true");
                 Emit("hooks                                    stable             true");
@@ -116,6 +116,22 @@ internal static class FakeHarness
                 Emit("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""");
                 Emit("""{"type":"turn.started"}""");
                 Emit("""{"type":"turn.completed","usage":{"input_tokens":400,"cached_input_tokens":0,"output_tokens":50}}""");
+                return 0;
+            case "codex-incomplete":
+                Emit("""{"type":"turn.completed","usage":{}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}""");
+                return 0;
+            case "codex-overflow":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":9223372036854775807,"output_tokens":0}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":0}}""");
+                return 0;
+            case "codex-unfinished":
+                Emit("""{"type":"turn.started"}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}""");
+                Emit("""{"type":"turn.started"}""");
+                return 1;
+            case "claude-incomplete":
+                Emit("""{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}""");
                 return 0;
             case "codex-spender":
                 Emit("""{"type":"thread.started","thread_id":"stand-in"}""");
@@ -224,7 +240,7 @@ internal static class FakeHarness
             return 1;
         }
 
-        Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"output_tokens":100}}""");
+        Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100}}""");
         return 0;
     }
 

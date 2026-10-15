@@ -21,8 +21,11 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
 /// <param name="TokensAdded">The tokens one turn spent, added to the tally.</param>
 /// <param name="Price">What the run has cost, in minor units, as a total; only a launcher whose provider reports price sets it.</param>
 /// <param name="PriceUnit">The price's currency, three upper-case letters.</param>
+/// <param name="UsageIncomplete">A usage event was missing or invalid; the run must be charged at its token cap.</param>
+/// <param name="UsageStarted">A turn began whose usage is in flight.</param>
+/// <param name="UsageCompleted">A turn ended.</param>
 /// <param name="Acknowledged">The harness acknowledged a stop.</param>
-public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false);
+public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false);
 
 /// <summary>
 /// The coding-agent launcher contract, version 1 (vericairn.launcher.agent/1): how one harness is verified before a run is recorded,

@@ -50,6 +50,8 @@ public sealed class RunSupervisor
     private readonly Thread[] readers;
     private long written;
     private long? tokens;
+    private bool tokensIncomplete;
+    private bool usageInFlight;
     private long? price;
     private string? priceUnit;
     private DateTimeOffset? transmitted;
@@ -183,7 +185,7 @@ public sealed class RunSupervisor
             {
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
                 state.Heartbeats++;
-                state.Tokens = tokens;
+                state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
                 if (state.Stop is null)
                 {
                     if (rootExited)
@@ -222,14 +224,14 @@ public sealed class RunSupervisor
         {
             state.ExitCode = process.ExitCode;
             state.ExitedAt = RecordParser.FormatTimestamp(exited);
-            state.Tokens = tokens;
+            state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
             if (state.Stop is not null)
             {
                 state.Stop = state.Stop with { ContainedAt = RecordParser.FormatTimestamp(exited) };
             }
 
             Save();
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokens, price, priceUnit, state.Stop, state.EscalationFailure);
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure);
             process.Close();
             return outcome;
         }
@@ -330,20 +332,55 @@ public sealed class RunSupervisor
                 }
                 catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException)
                 {
-                    // A line the launcher cannot read reports nothing.
+                    lock (gate)
+                    {
+                        tokensIncomplete = true;
+                    }
                 }
 
                 lock (gate)
                 {
                     state.Output = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-                    if (signal?.Tokens is long total)
+                    tokensIncomplete |= signal?.UsageIncomplete == true;
+                    if (signal?.UsageStarted == true)
                     {
-                        tokens = total;
+                        usageInFlight = true;
                     }
 
-                    if (signal?.TokensAdded is long added)
+                    if (signal?.UsageCompleted == true)
                     {
-                        tokens = (tokens ?? 0) + added;
+                        usageInFlight = false;
+                    }
+
+                    try
+                    {
+                        if (signal?.Tokens is long total)
+                        {
+                            if (total < 0 || total < tokens)
+                            {
+                                tokensIncomplete = true;
+                            }
+                            else
+                            {
+                                tokens = total;
+                            }
+                        }
+
+                        if (signal?.TokensAdded is long added)
+                        {
+                            if (added < 0)
+                            {
+                                tokensIncomplete = true;
+                            }
+                            else
+                            {
+                                tokens = checked((tokens ?? 0) + added);
+                            }
+                        }
+                    }
+                    catch (OverflowException)
+                    {
+                        tokensIncomplete = true;
                     }
 
                     if (signal?.Price is long cost)

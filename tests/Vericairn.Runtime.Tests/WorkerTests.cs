@@ -19,6 +19,23 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class WorkerTests
 {
+    [Theory]
+    [InlineData("codex", "codex-incomplete")]
+    [InlineData("codex", "codex-overflow")]
+    [InlineData("codex", "codex-unfinished")]
+    [InlineData("claude-code", "claude-incomplete")]
+    public void AnyUnaccountedUsageChargesTheWholeTokenCap(string launcher, string scenario)
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000}""");
+        RunResponse started = run.Start(launcher, scenario, run.Report("unknown-usage"));
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.False(row.Usage!.Value.TryGetProperty("tokens", out _));
+        Assert.Contains(row.Usage.Value.GetProperty("unreported").EnumerateArray(), u => u.GetString() == "tokens");
+        Assert.Equal(5000, row.Charged.GetProperty("tokens").GetInt64());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     [Fact]
     public void CodexGetsAFreshConfigurationWithoutAmbientServersPluginsOrHooks()
     {

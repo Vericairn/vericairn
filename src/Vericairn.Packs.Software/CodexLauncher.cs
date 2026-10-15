@@ -134,28 +134,35 @@ public sealed class CodexLauncher : IAgentLauncher
     public HarnessSignal? Read(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (!line.TrimStart().StartsWith('{') || !line.Contains("turn.completed", StringComparison.Ordinal))
+        if (!line.TrimStart().StartsWith('{'))
         {
             return null;
         }
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.GetString() != "turn.completed" || !root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String)
         {
             return null;
         }
 
-        long tokens = 0;
-        foreach (string field in new[] { "input_tokens", "output_tokens" })
+        if (type.GetString() == "turn.started")
         {
-            if (usage.TryGetProperty(field, out JsonElement count) && count.TryGetInt64(out long value))
-            {
-                tokens += value;
-            }
+            return new HarnessSignal(UsageStarted: true);
         }
 
-        return new HarnessSignal(TokensAdded: tokens);
+        if (type.GetString() == "turn.failed")
+        {
+            return new HarnessSignal(UsageIncomplete: true, UsageCompleted: true);
+        }
+
+        if (type.GetString() != "turn.completed")
+        {
+            return null;
+        }
+
+        long? tokens = HarnessUsage.Total(root, "input_tokens", "output_tokens");
+        return new HarnessSignal(TokensAdded: tokens, UsageIncomplete: tokens is null, UsageCompleted: true);
     }
 
     /// <summary>A TOML basic string, which a -c override's value is parsed as.</summary>

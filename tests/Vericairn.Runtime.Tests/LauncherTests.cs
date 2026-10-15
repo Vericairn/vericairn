@@ -20,6 +20,34 @@ public class LauncherTests
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"input_tokens\":1}")]
+    [InlineData("{\"input_tokens\":-1,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":1.5,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":\"1\",\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":null,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":9223372036854775807,\"output_tokens\":1}")]
+    [InlineData("{\"input_tokens\":9223372036854775808,\"output_tokens\":1}")]
+    public void IncompleteOrInvalidUsageIsNeverATokenSignal(string usage)
+    {
+        HarnessSignal codex = new CodexLauncher().Read("{\"type\":\"turn.completed\",\"usage\":" + usage + "}")!;
+        HarnessSignal claude = new ClaudeCodeLauncher().Read("{\"type\":\"result\",\"usage\":" + usage + "}")!;
+        Assert.Null(codex.TokensAdded);
+        Assert.True(codex.UsageIncomplete);
+        Assert.Null(claude.Tokens);
+        Assert.True(claude.UsageIncomplete);
+    }
+
+    [Fact]
+    public void CompleteZeroUsageIsKnownAndClaudeRequiresItsCacheCounts()
+    {
+        var launcher = new ClaudeCodeLauncher();
+        Assert.True(launcher.Read("""{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}""")!.UsageIncomplete);
+        Assert.Equal(0, launcher.Read("""{"type":"result","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""")!.Tokens);
+        Assert.Null(launcher.Read("""{"type":"result","usage":{"input_tokens":9223372036854775807,"output_tokens":0,"cache_creation_input_tokens":1,"cache_read_input_tokens":0}}""")!.Tokens);
+    }
+
     [Fact]
     public void EachLauncherDeclaresItsContractAndTheGenericOneIsLabeled()
     {
@@ -58,7 +86,7 @@ public class LauncherTests
         Assert.Equal(1734, launcher.Read("""{"type":"result","subtype":"success","usage":{"input_tokens":1000,"cache_creation_input_tokens":200,"cache_read_input_tokens":300,"output_tokens":234},"total_cost_usd":0.01}""")!.Tokens);
         Assert.Null(launcher.Read("""{"type":"assistant","message":{"usage":{"input_tokens":5,"output_tokens":1}}}"""));
         Assert.Null(launcher.Read("Some text the harness printed."));
-        Assert.Null(launcher.Read("""{"type":"result","subtype":"success"}"""));
+        Assert.True(launcher.Read("""{"type":"result","subtype":"success"}""")!.UsageIncomplete);
     }
 
     [Fact]
@@ -73,7 +101,7 @@ public class LauncherTests
         Assert.Equal("projects.\"/work/widget\".trust_level=\"untrusted\"", command[10]);
         Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
-        Assert.Null(launcher.Read("""{"type":"turn.started"}"""));
+        Assert.True(launcher.Read("""{"type":"turn.started"}""")!.UsageStarted);
         Assert.Null(launcher.Read("""{"type":"item.completed","item":{"text":"turn.completed"}}"""));
     }
 

@@ -61,20 +61,12 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.GetString() != "result" || !root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "result")
         {
             return null;
         }
 
-        long tokens = 0;
-        foreach (string field in new[] { "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens" })
-        {
-            if (usage.TryGetProperty(field, out JsonElement count) && count.TryGetInt64(out long value))
-            {
-                tokens += value;
-            }
-        }
-
-        return new HarnessSignal(Tokens: tokens);
+        long? tokens = HarnessUsage.Total(root, "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens");
+        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null);
     }
 }
