@@ -254,19 +254,22 @@ public sealed class DaemonHost : IAsyncDisposable
                     listen.Use(host.Track(LocalNetworkMarker));
 
                     // A client certificate is read for what its device's key signed, never by building its chain: nothing it names, no
-                    // issuer, OCSP or CRL address, is fetched, so no client, paired or not, makes the runtime reach anywhere. The chain
-                    // policy holds where TLS 1.3 encrypts the certificate; macOS asks its trust service about a client certificate
-                    // before any policy applies, so the screen refuses one that names an address while TLS 1.2 still shows it.
+                    // issuer, OCSP or CRL address, is fetched, so no client, paired or not, makes the runtime reach anywhere. A platform's
+                    // TLS may evaluate a client certificate before any policy applies (macOS's asks its trust service, which fetches), so
+                    // the listener speaks TLS 1.2 only, where the certificate travels in the clear, and the screen refuses one that names
+                    // an address before the platform's TLS reads it. The chain policy stays as well.
                     listen.Use(Screen);
                     listen.UseHttps(new HttpsConnectionAdapterOptions
                     {
                         ServerCertificateSelector = host.SelectCertificate,
+                        SslProtocols = TlsScreenStream.Protocols,
                         ClientCertificateMode = ClientCertificateMode.AllowCertificate,
                         ClientCertificateValidation = (_, _, _) => true,
                         CheckCertificateRevocation = false,
                         OnAuthenticate = (_, tls) =>
                         {
                             tls.AllowTlsResume = false;
+                            tls.CipherSuitesPolicy = TlsScreenStream.CipherSuites;
                             tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
                         },
                     });

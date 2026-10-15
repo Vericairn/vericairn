@@ -36,7 +36,7 @@ same refusals and the same status bytes; nothing lives only in the daemon.
 |---|---|---|
 | Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
 | Loopback | TLS on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
-| Local network, from 0.6.0 | Mutual TLS at the address and port the operator configured; off unless configured, and on a wildcard or public address only when the operator allows it | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests bound to the estate and the runtime identity, under the device's permitted profiles |
+| Local network, from 0.6.0 | Mutual TLS 1.2 at the address and port the operator configured; off unless configured, and on a wildcard or public address only when the operator allows it | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests bound to the estate and the runtime identity, under the device's permitted profiles |
 
 On Windows the pipe is created by Kestrel's named-pipe transport with its default, `CurrentUserOnly`, and no
 other pipe security. Its access list allows only the owner of the daemon's process token: the account that
@@ -108,22 +108,29 @@ its custody, never the key. A device pins the identity's public key when it pair
 `vericairn runtime status` show its fingerprint. The identity outlives restarts and certificate rotations;
 when its key is no longer held, the runtime makes a new identity and every paired device pairs again.
 
-**A connection.** The runtime presents its certificate and asks for a client certificate, which only the
-pairing exchange may go without, and never resumes a TLS session. A paired device presents a certificate it
-issues for its connections: a fresh P-256 key, valid one day and replaced in its last hour, signed ECDSA with
-SHA-256 by the device's own key wherever that key is held. Its subject and issuer are `CN=vericairn device` for
-every device, since TLS 1.2, which macOS negotiates, shows certificates in clear: the device is named only
-inside the connection, by the requests it signs. The connection's key is held as the runtime certificate's is
-while presented: in memory on Linux, in a temporary keychain file on macOS, in the user's key store on Windows,
-until the SDK disposes of it, which it does when the credential that replaced it is replaced in turn.
+**A connection.** The local network speaks TLS 1.2 only, at both ends, with ECDHE, ECDSA and AES-GCM:
+`TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`, then `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256` (on Windows, whose TLS
+takes no list from an application, the system's own order, which puts these first). A client that offers no TLS
+1.2 is refused. The runtime presents its certificate and asks for a client certificate, which only the pairing
+exchange may go without, and never resumes a TLS session. A paired device presents a certificate it issues for
+its connections: a fresh P-256 key, valid one day and replaced in its last hour, signed ECDSA with SHA-256 by the
+device's own key wherever that key is held. Its subject and issuer are `CN=vericairn device` for every device,
+since TLS 1.2 shows certificates in clear: the device is named only inside the connection, by the requests it
+signs, though whoever holds the estate's device records could still tell from the certificate's signature which
+device's key issued it. The connection's key is held as the runtime certificate's is while presented: in memory
+on Linux, in a temporary keychain file on macOS, in the user's key store on Windows, until the SDK disposes of it,
+which it does when the credential that replaced it is replaced in turn.
 
-Neither side builds a peer's certificate chain or fetches anything a certificate names: revocation is checked
-nowhere and nothing is downloaded. macOS's TLS asks the system's trust service about a peer's certificate before
-any check the caller configures, and that service fetches the issuer a certificate names, so the runtime and the
-SDK read each handshake while it travels in clear and refuse, before the platform's TLS sees it, a certificate
-that names an address to fetch (authority or subject information access, CRL distribution points, a freshest
-CRL), one that does not parse, or more than one. Where TLS 1.3 is negotiated, as on Linux and recent Windows,
-certificates travel encrypted, and the policy that downloads nothing is what holds.
+TLS 1.2 is chosen because its certificates travel in clear, where Vericairn reads them before the platform's TLS
+does. Neither side builds a peer's certificate chain online: revocation is checked nowhere and nothing is
+downloaded. But a platform's TLS can evaluate a peer's certificate before any check the caller configures, as
+macOS's does, asking the system's trust service, which fetches the issuer a certificate names; under TLS 1.3 the
+certificate would be encrypted, out of reach. So the runtime and the SDK read each handshake while it travels in
+clear and refuse, before this machine's TLS sees it, a certificate that names an address to fetch (authority or
+subject information access, CRL distribution points, a freshest CRL), one that does not parse, a list of more than
+one, and an offer to fetch certificates from addresses (`certificate_url`). The policy that downloads nothing
+stays as well. What TLS 1.2 gives up against 1.3 is certificates hidden from whoever watches the network, which
+the constant subject answers in part, and one round trip on each new connection.
 
 Before any other request on a connection the device asks `GET /v1/runtime/identity?nonce=<32 random bytes,
 base64url>`, signed as on loopback (`vericairn-request/1`), since nothing has yet proven which runtime answers,
@@ -274,8 +281,9 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A captured request is accepted once, within five minutes of its signing time, only over a connection whose
   certificate the device's key issued, and only by the runtime it was signed for; no flood makes the runtime
   forget a signature before it is stale.
-- No certificate makes either side connect anywhere: nothing a certificate names is fetched, and on macOS a
-  certificate that names an address is refused before the platform's TLS reads it.
+- No certificate makes either side connect anywhere: the local network speaks TLS 1.2 only, so a certificate that
+  names an address is refused in clear before the platform's TLS reads it, on every platform, and nothing a
+  certificate names is fetched.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
 Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
@@ -410,7 +418,8 @@ network. `RuntimeConnections` keeps this machine's connections: `Add` pairs and 
 where each platform's TLS holds the connection's key, and a `TimeProvider` may drive its renewal. The client
 signs every local-network request after the identity proof with `vericairn-request/2`, for the estate and the
 identity it pinned. `TlsScreenStream`, which the SDK and the runtime put under their local-network TLS, refuses a
-peer certificate that names an address to fetch before the platform's TLS reads it. No SDK client follows an
+peer certificate that names an address to fetch before the platform's TLS reads it; its `Protocols` (TLS 1.2)
+and `CipherSuites` are what both ends of the local network speak. No SDK client follows an
 HTTP redirect. On the runtime's machine `IssuePairing` asks for a code and `RotateCertificate` replaces the
 certificate; `RuntimeIdentity(nonce)` asks for a proof, which a runtime gives over the local network only.
 `ConnectionStates` names the states. A refusal while a local-network connection is set up surfaces as an

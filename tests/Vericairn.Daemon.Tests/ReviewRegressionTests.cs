@@ -464,30 +464,24 @@ public class ReviewRegressionTests
     {
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         await using AddressListener addresses = AddressListener.Start();
-        using X509Certificate2 leaf = AddressListener.Addressed(addresses.Port, "CN=" + harness.OperatorDevice, client: true);
+        (X509Certificate2 addressed, X509Certificate2 plain) = AddressListener.Presentable(addresses.Port, "CN=" + harness.OperatorDevice, client: true);
+        using X509Certificate2 named = addressed;
+        using X509Certificate2 nameless = plain;
 
-        // Each handshake is refused before the platform's TLS reads the certificate (macOS, TLS 1.2) or answered "pairs first"
-        // (TLS 1.3, where the offline chain policy holds); none makes this machine fetch what the certificate names. The listener
-        // answers every request at once, so the system's trust service never pauses its fetches after one fails.
-        var outcomes = new List<string>();
+        // The runtime receives a certificate that names this listener as its issuer's, OCSP and CRL address. The local network speaks
+        // TLS 1.2 only, so on every platform the runtime's screen reads it in the clear and refuses the handshake before the runtime's
+        // TLS reads it. On Windows the client's own TLS holds a certificate that names nothing, and its stream sends the other in its
+        // place, since Windows' TLS fetches the issuer of a certificate it is given to present. The listener answers every request at
+        // once, so the system's trust service never pauses its fetches after one fails.
+        bool windows = OperatingSystem.IsWindows();
         for (int i = 0; i < 12; i++)
         {
-            string answer;
-            try
-            {
-                answer = await Raw.ExchangeOfflineAsync(harness.Address, leaf, harness.Host.Endpoint.Loopback!.Certificate, Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\n\r\n"), TimeSpan.FromSeconds(5));
-            }
-            catch (Exception exception) when (exception is IOException or System.Security.Authentication.AuthenticationException)
-            {
-                answer = "refused";
-            }
-
-            Assert.True(answer == "refused" || answer.StartsWith("HTTP/1.1 401", StringComparison.Ordinal), $"handshake {i}: [{answer}]");
-            outcomes.Add(answer == "refused" ? "refused" : "401");
+            (bool refused, bool sent, string answer) = await Raw.PresentAsync(harness.Address, windows ? nameless : named, windows ? named.RawData : null, harness.Host.Endpoint.Loopback!.Certificate);
+            Assert.True(sent, $"handshake {i}: the client never sent its certificate");
+            Assert.True(refused, $"handshake {i} was not refused: [{answer}]");
         }
 
         await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
-        Say($"handshakes: {string.Join(", ", outcomes.Distinct())}");
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a client certificate named: {string.Join(", ", addresses.Requests)}");
     }
 
@@ -495,11 +489,16 @@ public class ReviewRegressionTests
     public async Task F5_ARuntimeCertificatesAddressesAreNeverFetched()
     {
         // Something answering at a runtime's address with a certificate that names an address: the device pairing with it refuses
-        // the handshake before its TLS reads the certificate, and fetches nothing.
+        // the handshake before its TLS reads the certificate, and fetches nothing. On Windows the impostor's own TLS holds a
+        // certificate with the same key that names nothing, and its stream sends the other in its place.
         await using AddressListener addresses = AddressListener.Start();
-        using X509Certificate2 impostor = AddressListener.Addressed(addresses.Port, "CN=vericairn runtime", client: false);
+        (X509Certificate2 addressed, X509Certificate2 plain) = AddressListener.Presentable(addresses.Port, "CN=vericairn runtime", client: false);
+        using X509Certificate2 named = addressed;
+        using X509Certificate2 nameless = plain;
+        bool windows = OperatingSystem.IsWindows();
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
+        CertificateSwap? swap = null;
         try
         {
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
@@ -507,10 +506,11 @@ public class ReviewRegressionTests
                 async () =>
                 {
                     using TcpClient client = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
-                    await using var tls = new SslStream(client.GetStream());
+                    swap = windows ? new CertificateSwap(client.GetStream(), named.RawData) : null;
+                    await using var tls = new SslStream(swap ?? (Stream)client.GetStream());
                     try
                     {
-                        await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificateContext = SslStreamCertificateContext.Create(impostor, null, offline: true), AllowTlsResume = false }, TestContext.Current.CancellationToken);
+                        await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificateContext = SslStreamCertificateContext.Create(windows ? nameless : named, null, offline: true), AllowTlsResume = false }, TestContext.Current.CancellationToken);
                         var buffer = new byte[1024];
                         _ = await tls.ReadAsync(buffer, TestContext.Current.CancellationToken);
                     }
@@ -521,7 +521,9 @@ public class ReviewRegressionTests
                 TestContext.Current.CancellationToken);
             PairingException refused = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }));
             Say($"{refused.Code}: {refused.Message}");
+            Assert.Contains("names an address to fetch", refused.Message, StringComparison.Ordinal);
             await serve.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            Assert.True(!windows || swap?.Swapped == true, "The impostor never sent its certificate.");
         }
         finally
         {
@@ -530,6 +532,48 @@ public class ReviewRegressionTests
 
         await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a runtime's certificate named: {string.Join(", ", addresses.Requests)}");
+    }
+
+    [Fact]
+    public async Task F5_TheLocalNetworkSpeaksTls12WithAesGcmOnly()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        string pinned = harness.Host.Endpoint.Loopback!.Certificate;
+        Assert.True(RuntimeConnection.TryParseAddress(harness.Address, out string host, out int port));
+        async Task<SslStream> HandshakeAsync(System.Security.Authentication.SslProtocols protocols)
+        {
+            var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            await socket.ConnectAsync(host, port, TestContext.Current.CancellationToken);
+            var tls = new SslStream(new NetworkStream(socket, ownsSocket: true));
+            try
+            {
+                await tls.AuthenticateAsClientAsync(
+                    new SslClientAuthenticationOptions
+                    {
+                        TargetHost = "vericairn-runtime",
+                        AllowTlsResume = false,
+                        EnabledSslProtocols = protocols,
+                        RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == pinned,
+                    },
+                    TestContext.Current.CancellationToken);
+                return tls;
+            }
+            catch
+            {
+                await tls.DisposeAsync();
+                throw;
+            }
+        }
+
+        // A client that offers whatever its platform does is answered in TLS 1.2, with ECDHE, ECDSA and AES-GCM.
+        await using (SslStream offered = await HandshakeAsync(System.Security.Authentication.SslProtocols.None))
+        {
+            Assert.Equal(System.Security.Authentication.SslProtocols.Tls12, offered.SslProtocol);
+            Assert.Contains(offered.NegotiatedCipherSuite, new[] { TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 });
+        }
+
+        // One that offers TLS 1.3 alone is refused, where its platform can offer it at all.
+        await Assert.ThrowsAnyAsync<Exception>(async () => await (await HandshakeAsync(System.Security.Authentication.SslProtocols.Tls13)).DisposeAsync());
     }
 
     [Fact]
@@ -971,47 +1015,50 @@ internal static class Raw
         return $"{RequestSigning.DeviceHeader}: {signer.DeviceId}\r\n{RequestSigning.SignedAtHeader}: {at}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n";
     }
 
-    public static async Task<string> ExchangeOfflineAsync(string address, X509Certificate2 certificate, string runtimeCertificate, byte[] payload, TimeSpan wait)
+    /// <summary>
+    /// A handshake whose client holds a certificate and, when <paramref name="sent"/> is given, sends that certificate in its place
+    /// through <see cref="CertificateSwap"/>: whether the runtime refused it, whether the runtime was sent the certificate meant for
+    /// it, and what was answered when the handshake was not refused.
+    /// </summary>
+    public static async Task<(bool Refused, bool Sent, string Answer)> PresentAsync(string address, X509Certificate2 held, byte[]? sent, string runtimeCertificate)
     {
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         await socket.ConnectAsync(host, port);
-        await using var tls = new SslStream(new NetworkStream(socket, ownsSocket: false));
-        await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
-        {
-            TargetHost = "vericairn-runtime",
-            AllowTlsResume = false,
-            // The client never builds or fetches a chain for its own certificate: offline, with nothing to add.
-            ClientCertificateContext = SslStreamCertificateContext.Create(certificate, null, offline: true),
-            CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck },
-            RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == runtimeCertificate,
-        });
-        await tls.WriteAsync(payload);
-        await tls.FlushAsync();
-        using var buffer = new MemoryStream();
-        byte[] chunk = new byte[8192];
-        using var timeout = new CancellationTokenSource(wait);
+        var stream = new NetworkStream(socket, ownsSocket: false);
+        CertificateSwap? swap = sent is null ? null : new CertificateSwap(stream, sent);
+        await using var tls = new SslStream(swap ?? (Stream)stream);
         try
         {
-            while (true)
+            await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
-                int read = await tls.ReadAsync(chunk, timeout.Token);
-                if (read == 0)
-                {
-                    break;
-                }
-
-                buffer.Write(chunk, 0, read);
-            }
+                TargetHost = "vericairn-runtime",
+                AllowTlsResume = false,
+                ClientCertificateContext = SslStreamCertificateContext.Create(held, null, offline: true),
+                CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck },
+                RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == runtimeCertificate,
+            });
         }
-        catch (OperationCanceledException)
+        catch (Exception exception) when (exception is IOException or System.Security.Authentication.AuthenticationException)
         {
-        }
-        catch (IOException)
-        {
+            return (true, swap?.Swapped ?? true, exception.Message);
         }
 
-        return Encoding.UTF8.GetString(buffer.ToArray());
+        await tls.WriteAsync(Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
+        await tls.FlushAsync();
+        using var reader = new StreamReader(tls, Encoding.UTF8);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        string answer;
+        try
+        {
+            answer = await reader.ReadToEndAsync(timeout.Token);
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        {
+            answer = exception.Message;
+        }
+
+        return (false, swap?.Swapped ?? true, answer);
     }
 
     public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait)
@@ -1084,22 +1131,30 @@ internal sealed class AddressListener : IAsyncDisposable
         return new AddressListener(listener);
     }
 
-    /// <summary>A certificate with its key whose authority information access and CRL distribution points name this listener.</summary>
-    public static X509Certificate2 Addressed(int port, string subject, bool client)
+    /// <summary>
+    /// Two certificates with one key, each with it: one issued by a CA nobody holds, whose authority information access and CRL
+    /// distribution points name this listener, and one that names nothing, self-signed, which a test's own TLS holds on Windows
+    /// while a <see cref="CertificateSwap"/> sends the first in its place.
+    /// </summary>
+    public static (X509Certificate2 Addressed, X509Certificate2 Plain) Presentable(int port, string subject, bool client)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        var usage = new System.Security.Cryptography.Oid(client ? "1.3.6.1.5.5.7.3.2" : "1.3.6.1.5.5.7.3.1");
         using var caKey = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
         var caRequest = new CertificateRequest("CN=Review CA " + port.ToString(System.Globalization.CultureInfo.InvariantCulture), caKey, System.Security.Cryptography.HashAlgorithmName.SHA256);
         caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
         using X509Certificate2 ca = caRequest.CreateSelfSigned(now.AddHours(-1), now.AddDays(1));
-        using var leafKey = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
-        var leafRequest = new CertificateRequest(subject, leafKey, System.Security.Cryptography.HashAlgorithmName.SHA256);
-        leafRequest.CertificateExtensions.Add(new X509AuthorityInformationAccessExtension([$"http://127.0.0.1:{port}/ocsp"], [$"http://127.0.0.1:{port}/ca.cer"]));
-        leafRequest.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension([$"http://127.0.0.1:{port}/crl"]));
-        leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new System.Security.Cryptography.Oid(client ? "1.3.6.1.5.5.7.3.2" : "1.3.6.1.5.5.7.3.1")], false));
-        using X509Certificate2 bare = leafRequest.Create(ca, now.AddHours(-1), now.AddDays(1), [1, 2, 3, 4]);
-        using X509Certificate2 withKey = bare.CopyWithPrivateKey(leafKey);
-        return X509CertificateLoader.LoadPkcs12(withKey.Export(X509ContentType.Pkcs12), null);
+        using var key = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var addressedRequest = new CertificateRequest(subject, key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        addressedRequest.CertificateExtensions.Add(new X509AuthorityInformationAccessExtension([$"http://127.0.0.1:{port}/ocsp"], [$"http://127.0.0.1:{port}/ca.cer"]));
+        addressedRequest.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension([$"http://127.0.0.1:{port}/crl"]));
+        addressedRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([usage], false));
+        using X509Certificate2 addressed = addressedRequest.Create(ca, now.AddHours(-1), now.AddDays(1), [1, 2, 3, 4]);
+        using X509Certificate2 addressedWithKey = addressed.CopyWithPrivateKey(key);
+        var plainRequest = new CertificateRequest(subject, key, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        plainRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([usage], false));
+        using X509Certificate2 plain = plainRequest.CreateSelfSigned(now.AddHours(-1), now.AddDays(1));
+        return (X509CertificateLoader.LoadPkcs12(addressedWithKey.Export(X509ContentType.Pkcs12), null), X509CertificateLoader.LoadPkcs12(plain.Export(X509ContentType.Pkcs12), null));
     }
 
     public async ValueTask DisposeAsync()
@@ -1148,5 +1203,142 @@ internal sealed class AddressListener : IAsyncDisposable
                 }
             });
         }
+    }
+}
+
+/// <summary>
+/// A test endpoint's stream that swaps the certificate its TLS 1.2 endpoint presents for another on the wire. The endpoint's own
+/// TLS holds a certificate that names nothing, and the other end receives the one given here: Windows' TLS builds the chain of a
+/// certificate it is given to present, fetching the issuer the certificate names, so an endpoint holding a certificate that names
+/// an address would fetch it itself before the other end saw anything. What it reads passes through unchanged.
+/// </summary>
+internal sealed class CertificateSwap(Stream inner, byte[] sent) : Stream
+{
+    private const int MaxFragment = 1 << 14;
+
+    private readonly List<byte> records = [];
+    private readonly List<byte> messages = [];
+    private bool clear = true;
+
+    /// <summary>Whether a certificate was swapped.</summary>
+    public bool Swapped { get; private set; }
+
+    public override bool CanRead => true;
+
+    public override bool CanWrite => true;
+
+    public override bool CanSeek => false;
+
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+
+    public override int Read(Span<byte> buffer) => inner.Read(buffer);
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => inner.ReadAsync(buffer, offset, count, cancellationToken);
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);
+
+    public override void Write(byte[] buffer, int offset, int count) => inner.Write(Swap(buffer.AsSpan(offset, count)));
+
+    public override void Write(ReadOnlySpan<byte> buffer) => inner.Write(Swap(buffer));
+
+    public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => inner.WriteAsync(Swap(buffer.AsSpan(offset, count)), cancellationToken).AsTask();
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => inner.WriteAsync(Swap(buffer.Span), cancellationToken);
+
+    public override void Flush() => inner.Flush();
+
+    public override Task FlushAsync(CancellationToken cancellationToken) => inner.FlushAsync(cancellationToken);
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private static byte[] Length24(int length) => [(byte)(length >> 16), (byte)(length >> 8), (byte)length];
+
+    /// <summary>Rewrites what the endpoint writes until its change of cipher spec: whole handshake messages, each Certificate replaced.</summary>
+    private byte[] Swap(ReadOnlySpan<byte> written)
+    {
+        if (!clear && records.Count == 0)
+        {
+            return written.ToArray();
+        }
+
+        records.AddRange(written.ToArray());
+        var output = new List<byte>();
+        while (records.Count >= 5)
+        {
+            if (!clear)
+            {
+                output.AddRange(records);
+                records.Clear();
+                break;
+            }
+
+            int length = (records[3] << 8) | records[4];
+            if (records.Count < 5 + length)
+            {
+                break;
+            }
+
+            byte[] header = [.. records.GetRange(0, 5)];
+            byte[] fragment = [.. records.GetRange(5, length)];
+            records.RemoveRange(0, 5 + length);
+            if (header[0] != 22)
+            {
+                clear = header[0] != 20;
+                output.AddRange(header);
+                output.AddRange(fragment);
+                continue;
+            }
+
+            messages.AddRange(fragment);
+            var whole = new List<byte>();
+            while (messages.Count >= 4)
+            {
+                int size = (messages[1] << 16) | (messages[2] << 8) | messages[3];
+                if (messages.Count < 4 + size)
+                {
+                    break;
+                }
+
+                byte[] message = [.. messages.GetRange(0, 4 + size)];
+                messages.RemoveRange(0, 4 + size);
+                if (message[0] == 11)
+                {
+                    // TLS 1.2: certificate_list<0..2^24-1> of ASN.1Cert<1..2^24-1>, here the one certificate given.
+                    message = [11, .. Length24(6 + sent.Length), .. Length24(3 + sent.Length), .. Length24(sent.Length), .. sent];
+                    Swapped = true;
+                }
+
+                whole.AddRange(message);
+            }
+
+            for (int at = 0; at < whole.Count; at += MaxFragment)
+            {
+                int count = Math.Min(MaxFragment, whole.Count - at);
+                output.AddRange([22, header[1], header[2], (byte)(count >> 8), (byte)count]);
+                output.AddRange(whole.GetRange(at, count));
+            }
+        }
+
+        return [.. output];
     }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Net.Security;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -9,15 +11,18 @@ namespace Vericairn.Sdk;
 /// <summary>
 /// A stream to put under a TLS stream on the local network. It reads the other end's handshake while it travels in the clear,
 /// and refuses a certificate before this machine's TLS sees it, unless the certificate stands alone and names no address to
-/// fetch: no authority or subject information access, no CRL distribution points and no freshest CRL. On macOS the platform's
-/// TLS asks the system's trust service about a peer's certificate before any validation the caller configures, and that service
-/// fetches the issuer a certificate names, so no chain policy can keep a stranger's certificate from making this machine connect
-/// where the stranger says. Under TLS 1.2, which is all macOS serves, the certificate travels in the clear and the screen reads
-/// it. TLS 1.3 encrypts it, and the platforms that negotiate TLS 1.3 build chains under the caller's offline policy instead.
-/// Screening ends at the other end's change of cipher spec, after which its records are encrypted and pass through untouched.
+/// fetch: no authority or subject information access, no CRL distribution points and no freshest CRL. A platform's TLS can
+/// evaluate a peer's certificate before any validation the caller configures, as macOS's does, asking the system's trust service,
+/// which fetches the issuer a certificate names; so no chain policy alone keeps a stranger's certificate from making this machine
+/// connect where the stranger says. The local network therefore speaks TLS 1.2 only (<see cref="Protocols"/>), in which every
+/// certificate travels in the clear for the screen to read; TLS 1.3 would encrypt it out of the screen's reach. Screening ends at
+/// the other end's change of cipher spec, after which its records are encrypted and pass through untouched.
 /// </summary>
 public sealed class TlsScreenStream : Stream
 {
+    /// <summary>The one protocol the local network speaks, at both ends: TLS 1.2, whose certificates the screen reads in the clear.</summary>
+    public const SslProtocols Protocols = SslProtocols.Tls12;
+
     // Record content types (RFC 5246 § 6.2.1, RFC 8446 § 5.1) and the handshake messages the screen reads.
     private const byte ChangeCipherSpec = 20;
     private const byte Alert = 21;
@@ -46,6 +51,12 @@ public sealed class TlsScreenStream : Stream
     private readonly Stream input;
     private readonly Stream output;
     private readonly bool leaveOpen;
+
+    /// <summary>
+    /// The suites the local network allows: ECDHE with ECDSA and AES-GCM, 256 bits first. Null on Windows, whose TLS takes no list
+    /// from an application and puts these first in its own order.
+    /// </summary>
+    public static CipherSuitesPolicy? CipherSuites { get; } = Suites();
     private byte[] buffer = new byte[16 * 1024];
     private int start;
     private int released;
@@ -188,6 +199,16 @@ public sealed class TlsScreenStream : Stream
         }
 
         await base.DisposeAsync().ConfigureAwait(false);
+    }
+
+    private static CipherSuitesPolicy? Suites()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return null;
+        }
+
+        return new CipherSuitesPolicy([TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384, TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
     }
 
     private static int Length24(ReadOnlySpan<byte> bytes) => (bytes[0] << 16) | (bytes[1] << 8) | bytes[2];

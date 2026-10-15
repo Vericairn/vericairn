@@ -144,6 +144,10 @@ public static class RuntimePairing
                     TargetHost = "vericairn-runtime",
                     AllowTlsResume = false,
                     ApplicationProtocols = [SslApplicationProtocol.Http11],
+
+                    // TLS 1.2 only, so the runtime's certificate travels in the clear, where the screen reads it first.
+                    EnabledSslProtocols = TlsScreenStream.Protocols,
+                    CipherSuitesPolicy = TlsScreenStream.CipherSuites,
                     CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
                     CertificateChainPolicy = LocalNetworkTransport.OfflineChainPolicy(),
 
