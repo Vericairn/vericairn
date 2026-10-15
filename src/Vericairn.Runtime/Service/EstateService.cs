@@ -2043,7 +2043,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(exception.Message);
         }
 
-        FindingList relevant = Invalid(session.Load(), [record]);
+        FindingList relevant = Invalid(session.Load(), [record], stored: true);
         if (relevant.HasErrors)
         {
             session.Discard(record);
@@ -2091,15 +2091,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
-    /// The estate is judged with all of them before any is stored, so none is stored when any would make it invalid, and none is
-    /// removed once stored: a store that fails part-way returns what it stored with the problem. Caller holds the gate.
+    /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
+    /// make it invalid, and none is removed once stored: a store that fails part-way returns what it stored with the problem. Caller
+    /// holds the gate.
     /// </summary>
     private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records)
     {
-        FindingList relevant = Invalid(LoadWith(records), records);
+        FindingList relevant = Invalid(LoadWith(records), records, stored: false);
         if (relevant.HasErrors)
         {
-            return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
+            return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings));
         }
 
         var written = new List<RecordWritten>();
@@ -2134,14 +2135,23 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
-    /// themselves, and a result whose output no longer has the bytes it claims.
+    /// themselves, and a result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored
+    /// file gets, on their canonical bytes, since the checks of stored files cannot see them.
     /// </summary>
-    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
+    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records, bool stored)
     {
         var relevant = new FindingList();
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
         {
             relevant.Add(finding);
+        }
+
+        if (!stored)
+        {
+            foreach (Finding finding in records.SelectMany(r => EstateChecks.Content(r.RelativePath, r.Bytes)).Where(f => f.Severity == Severity.Error))
+            {
+                relevant.Add(finding);
+            }
         }
 
         foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))

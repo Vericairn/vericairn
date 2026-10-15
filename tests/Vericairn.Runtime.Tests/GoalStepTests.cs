@@ -221,6 +221,35 @@ public class GoalStepTests
     }
 
     [Fact]
+    public void RecordsStoredTogetherGetTheContentChecksASingleRecordGets()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        Done(run, run.Assignment);
+        int assignments = run.Service.Records("assignment").Count;
+        string branch = "work/ghp_" + new string('a', 36);
+
+        // A credential-shaped branch name would enter the run's intent: routing's assignment of W-2 and the intent are both kept out.
+        GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "never"), Branch: branch));
+        Assert.False(refused.Ok, refused.Message);
+        Assert.Contains("Not written: the estate would be invalid with these records (", refused.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("Routing assigned", refused.Message, StringComparison.Ordinal);
+        Assert.Contains(refused.Problem!.Findings, f => f.Code == "secrets.pattern" && f.Location.StartsWith("records/operation/", StringComparison.Ordinal));
+        Assert.Null(refused.Assignment);
+        Assert.Equal(assignments, run.Service.Records("assignment").Count);
+        Assert.Empty(run.Service.Records("operation"));
+
+        // A single record gets the same check from the stored file: the run of W-1's assignment on that branch is refused too.
+        RunResponse single = run.Start("claude-code", "claude", run.Report("never"), branch: branch);
+        Assert.False(single.Ok, single.Message);
+        Assert.Contains(single.Problem!.Findings, f => f.Code == "secrets.pattern");
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.False(File.Exists(run.Report("never")));
+    }
+
+    [Fact]
     public void APublisherAgentsBriefProhibitsEveryReservedEffectAndNamesItsGrant()
     {
         using var run = new RunEstate();

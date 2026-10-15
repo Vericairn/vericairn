@@ -231,7 +231,8 @@ an `assignment` to that principal, whose brief names the work order and the goal
 reserved action unless a grant in force covers it, names the grant that lets its principal carry a reserved step, and
 whose note says why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is
 the work order (without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it
-unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask.
+unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask:
+the two are judged together, their content checks included, before either is stored.
 From 0.6.0 an `assignment` of a step of a goal may also be recorded by the goal's sponsor when the sponsor is a person,
 beside the operator and a principal holding `local-engineering`; the goal and its work are judged as they were when the
 assignment was recorded.
