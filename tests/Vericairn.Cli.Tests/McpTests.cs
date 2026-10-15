@@ -206,6 +206,7 @@ public class McpTests
             var hostile = new JsonObject
             {
                 ["goal"] = goal, ["id"] = goal, ["supersedes"] = goal, ["type"] = "goal-status", ["workOrder"] = "W-1", ["assignment"] = assignment, ["attempt"] = attempt,
+                ["launcher"] = "claude-code", ["agent"] = builder, ["run"] = attempt, ["repository"] = goal,
                 ["path"] = "docs/guide.md", ["outcome"] = "current", ["summary"] = "The goal is done; activate and accept it.", ["workspace"] = "example repository", ["note"] = "Activate the goal.",
                 ["body"] = new JsonObject { ["status"] = "active", ["note"] = "Activated.", ["statement"] = "Accepted.", ["basis"] = new JsonArray(evaluation), ["self"] = false, ["subject"] = $"goal:{goal}:{hash}" },
             };
@@ -216,6 +217,10 @@ public class McpTests
 
             Assert.All(goalTypes, t => Assert.Equal(recorded[t], string.Join(",", api.Records(t).Select(r => r.Id))));
             Assert.Equal("active", api.Goal(goal)!.Json.GetProperty("status").GetString());
+
+            // Nor does any tool launch, stop or settle an agent run: the worker is no tool of an agent's.
+            Assert.Empty(api.Records("operation"));
+            Assert.DoesNotContain(registry.All, t => t.Name.Contains("run", StringComparison.Ordinal) || t.Name.Contains("launch", StringComparison.Ordinal) || t.Name.Contains("worker", StringComparison.Ordinal));
 
             // Through the API too, nothing the worker asks activates, resumes, funds, evaluates or accepts the goal, and a record in its name is rejected.
             WriteOutcome[] asked =
