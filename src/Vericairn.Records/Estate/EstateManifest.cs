@@ -99,6 +99,14 @@ public sealed partial class EstateManifest
             }
 
             string? estate = reader.Ulid("estate", true);
+
+            // An estate a later release moved to a newer format is refused whole, never misread by an older build.
+            if (element.TryGetProperty("recordFormat", out JsonElement declaredFormat) && declaredFormat.ValueKind == JsonValueKind.Number && declaredFormat.TryGetInt64(out long declared) && declared > Model.RecordFormats.Latest)
+            {
+                findings.Error("manifest.record-format", EstateLayout.ManifestPath + "#.recordFormat", $"This estate is at record format {declared}, and this build reads formats {Model.RecordFormats.First} to {Model.RecordFormats.Latest}; open it with the release its manifest pins.");
+                return null;
+            }
+
             long? recordFormat = reader.Number("recordFormat", true, 1, Model.RecordFormats.Latest);
             string profile = reader.Has("profile") ? reader.Enum("profile", false, Profiles) ?? Profiles[0] : Profiles[0];
             BodyReader? vericairn = reader.Nested("vericairn", true);

@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Estate;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>An operator decision, with the operator's words preserved verbatim.</summary>
 public sealed class DecisionType : IRecordType
 {
+    /// <summary>How much rides on a decision, from record format 2.</summary>
+    public static readonly string[] Stakes = ["low", "medium", "high", "critical"];
+
     /// <inheritdoc />
     public string Name => "decision";
 
@@ -29,6 +34,8 @@ public sealed class DecisionType : IRecordType
         new("affects", "ulid[]", true, "Work orders this decision changes; may be empty."),
         new("decidedBy", "ulid", true, "The operator principal who decided."),
         new("decidedAt", "timestamp", true, "When the operator decided."),
+        new("stake", string.Join('|', Stakes), true, "How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time.", 2),
+        new("notAuthorized", "string[]", true, "What this answer does not authorize, so no one reads more into it; may be empty.", 2),
     ];
 
     /// <inheritdoc />
@@ -48,7 +55,23 @@ public sealed class DecisionType : IRecordType
         IReadOnlyList<string>? affects = body.StringArray("affects", true, allowEmpty: true, maxItemLength: Identity.Ulid.Length);
         string? decidedBy = body.Ulid("decidedBy", true);
         body.Timestamp("decidedAt", true);
+        if (body.Since(2, "stake"))
+        {
+            body.Enum("stake", true, Stakes);
+        }
+
+        if (body.Since(2, "notAuthorized"))
+        {
+            body.StringArray("notAuthorized", true, allowEmpty: true, maxItemLength: 2000);
+        }
+
         body.NoOtherKeys();
+
+        // From format 2 the operator's words are protected: a revision corrects everything around them, and new words are a new decision.
+        if (context.Format >= 2 && context.Find(context.Record.Supersedes) is { Type: "decision" } previous && EstateModel.BodyString(previous, "statement") != EstateModel.BodyString(context.Record, "statement"))
+        {
+            context.Error("decision.statement", "A revision of a decision keeps the operator's words verbatim; different words are a new decision.");
+        }
         if (affects is not null)
         {
             foreach (string id in affects)

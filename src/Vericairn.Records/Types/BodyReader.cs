@@ -17,13 +17,17 @@ public sealed class BodyReader
     private readonly FindingList findings;
     private readonly HashSet<string> declared = new(StringComparer.Ordinal);
 
-    /// <summary>Creates a reader over an object element.</summary>
-    public BodyReader(JsonElement element, string location, FindingList findings)
+    /// <summary>Creates a reader over an object element of a record written in the given format.</summary>
+    public BodyReader(JsonElement element, string location, FindingList findings, long format = RecordFormats.First)
     {
         this.element = element;
         this.location = location;
         this.findings = findings ?? throw new ArgumentNullException(nameof(findings));
+        Format = format;
     }
+
+    /// <summary>The record format of the record being read; a field belongs to the formats from the one that introduced it.</summary>
+    public long Format { get; }
 
     /// <summary>The element being read.</summary>
     public JsonElement Element => element;
@@ -215,7 +219,7 @@ public sealed class BodyReader
     public BodyReader? Nested(string name, bool required)
     {
         JsonElement? value = Get(name, required, JsonValueKind.Object);
-        return value is null ? null : new BodyReader(value.Value, Field(name), findings);
+        return value is null ? null : new BodyReader(value.Value, Field(name), findings, Format);
     }
 
     /// <summary>Reads an array of objects as readers.</summary>
@@ -238,7 +242,7 @@ public sealed class BodyReader
                 continue;
             }
 
-            readers.Add(new BodyReader(item, itemLocation, findings));
+            readers.Add(new BodyReader(item, itemLocation, findings, Format));
         }
 
         if (!allowEmpty && readers.Count == 0)
@@ -252,6 +256,26 @@ public sealed class BodyReader
 
     /// <summary>Declares an optional key as known without reading it.</summary>
     public void Allow(string name) => declared.Add(name);
+
+    /// <summary>
+    /// Whether this record's format admits a field the given format introduced. When it does not, the key is declared so that it is
+    /// reported once, as belonging to a later format, and the caller skips reading it.
+    /// </summary>
+    public bool Since(long format, string name)
+    {
+        if (Format >= format)
+        {
+            return true;
+        }
+
+        declared.Add(name);
+        if (Has(name))
+        {
+            findings.Error("body.format", Field(name), $"'{name}' belongs to record format {format}, and this record states format {Format}; an estate writes format-{format} records once it is upgraded to a release that writes that format.");
+        }
+
+        return false;
+    }
 
     /// <summary>Reports every key that no reader call declared.</summary>
     public void NoOtherKeys()

@@ -37,7 +37,7 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         string scratch = Seed.Temp("wb-release-scratch");
         string op = Seed.Init(root);
         string builder = Seed.Admit(root, op, scratch, "Builder", "agent", "builder");
-        string decision = Seed.Id(Seed.Cli("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", Seed.Write(scratch, "decision.json", $$"""{"title":"Delegate","statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")));
+        string decision = Seed.Id(Seed.Cli("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", Seed.Write(scratch, "decision.json", $$"""{"title":"Delegate","stake":"low","notAuthorized":[],"statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")));
         Seed.Cli("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", Seed.Write(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering"],"reserved":["publication"],"conditions":["label self-review"],"basis":"{{decision}}"}"""));
         Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "product.json", Product));
 

@@ -25,7 +25,7 @@ public static class Roles
     public static readonly string[] All = [Operator, Builder, Reviewer, Contributor, Service];
 }
 
-/// <summary>Authority scope names with a defined meaning in format 1.</summary>
+/// <summary>Authority scope names with a defined meaning.</summary>
 public static class Scopes
 {
     /// <summary>Engineering inside the estate's repositories: code, tests, documents, records.</summary>

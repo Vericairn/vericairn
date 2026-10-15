@@ -91,9 +91,10 @@ public static partial class RecordParser
             }
 
             string? format = StringOrNull(root, "format");
-            if (format != RecordEnvelope.Format1)
+            long? formatNumber = RecordFormats.Parse(format);
+            if (formatNumber is null)
             {
-                findings.Error("record.format", location, $"Unsupported record format '{format}'; expected '{RecordEnvelope.Format1}'.");
+                findings.Error("record.format", location, $"Unsupported record format '{format}'; this build reads {RecordFormats.Identifier(RecordFormats.First)} to {RecordFormats.Identifier(RecordFormats.Latest)}.");
             }
 
             string? type = StringOrNull(root, "type");
@@ -200,7 +201,7 @@ public static partial class RecordParser
                 findings.Error("record.formatting", location, "The file is not in canonical pretty form (sorted keys, two-space indent, LF, trailing newline). Run 'vericairn records format'.");
             }
 
-            return new RecordEnvelope(type!, id!, at!, by!, subject, supersedes, root.GetProperty("body").Clone(), declaredHash!, computedHash, parsedSignatures);
+            return new RecordEnvelope(type!, id!, at!, by!, subject, supersedes, root.GetProperty("body").Clone(), declaredHash!, computedHash, parsedSignatures, formatNumber ?? RecordFormats.First);
         }
     }
 

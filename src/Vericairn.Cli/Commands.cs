@@ -155,10 +155,10 @@ internal static class Commands
     {
         if (type is null)
         {
-            Console.Out.WriteLine("Record types in record format 1:");
+            Console.Out.WriteLine($"Record types this build reads (record formats {string.Join(", ", RecordFormats.Reads)}; new records use the estate's format, at most {RecordFormats.Current}):");
             foreach (IRecordType recordType in RecordTypeRegistry.All)
             {
-                Console.Out.WriteLine($"  {recordType.Name,-18} {recordType.Summary}");
+                Console.Out.WriteLine($"  {recordType.Name,-18} {(recordType.SinceFormat > RecordFormats.First ? $"[format {recordType.SinceFormat}] " : string.Empty)}{recordType.Summary}");
             }
 
             Console.Out.WriteLine();
@@ -175,10 +175,16 @@ internal static class Commands
 
         Console.Out.WriteLine($"{found.Name}: {found.Summary}");
         Console.Out.WriteLine(found.SubjectType is null ? (found.SubjectHashRequired ? "Subject: required, pinned to an exact hash." : "Subject: none.") : $"Subject: {found.SubjectType}{(found.SubjectHashRequired ? ", pinned to an exact hash" : string.Empty)}.");
+        if (found.SinceFormat > RecordFormats.First)
+        {
+            Console.Out.WriteLine($"Record format: {found.SinceFormat} and later.");
+        }
+
         Console.Out.WriteLine("Body fields:");
         foreach (FieldDescription field in found.Fields)
         {
-            Console.Out.WriteLine($"  {field.Name,-18} {field.Kind,-28} {(field.Required ? "required" : "optional"),-9} {field.Description}");
+            string since = field.SinceFormat > RecordFormats.First ? $"[format {field.SinceFormat}] " : string.Empty;
+            Console.Out.WriteLine($"  {field.Name,-18} {field.Kind,-28} {(field.Required ? "required" : "optional"),-9} {since}{field.Description}");
         }
 
         return Clean;
@@ -256,6 +262,7 @@ internal static class Commands
         Console.Out.WriteLine($"dotnet    {Probe("dotnet", "--version") ?? "not found on PATH (needed only to build from source)"}");
         Console.Out.WriteLine(IsEstate(root) ? $"estate    {Path.GetFullPath(root)} (manifest present)" : $"estate    {Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath})");
         Console.Out.WriteLine($"custody   {DeviceKeyStores.Default().Kind} (default on this platform); per-user state at {VericairnHome.Path()}");
+        Console.Out.WriteLine($"records   reads record formats {string.Join(", ", RecordFormats.Reads)}; writes an estate's own format, at most {RecordFormats.Current}");
         if (IsEstate(root))
         {
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);

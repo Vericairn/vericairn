@@ -29,7 +29,7 @@ public sealed class CanonicalJsonException : Exception
 }
 
 /// <summary>
-/// Canonical JSON for record format 1: RFC 8785 member ordering and string escaping, restricted to
+/// Canonical JSON for the record formats (format 2 keeps format 1's): RFC 8785 member ordering and string escaping, restricted to
 /// objects, arrays, strings, booleans, null and plain safe integers (|n| ≤ 2^53 − 1).
 /// The compact form is what gets hashed; the pretty form is what gets stored in files.
 /// </summary>
@@ -206,7 +206,7 @@ public static class CanonicalJson
         string raw = element.GetRawText();
         if (!element.TryGetInt64(out long value) || raw.Contains('.', StringComparison.Ordinal) || raw.Contains('e', StringComparison.OrdinalIgnoreCase))
         {
-            throw new CanonicalJsonException($"Number '{raw}' is not a plain integer; record format 1 allows only safe integers.");
+            throw new CanonicalJsonException($"Number '{raw}' is not a plain integer; records allow only safe integers.");
         }
 
         if (value > MaxSafeInteger || value < -MaxSafeInteger)

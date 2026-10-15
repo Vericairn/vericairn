@@ -9,9 +9,10 @@ namespace Vericairn.Records.Types;
 /// <summary>Documentation of one body field, printed by <c>vericairn records describe</c>.</summary>
 /// <param name="Name">Field name.</param>
 /// <param name="Kind">Value kind in plain words.</param>
-/// <param name="Required">Whether the field is required.</param>
+/// <param name="Required">Whether the field is required (in the formats that have it).</param>
 /// <param name="Description">What the field means.</param>
-public sealed record FieldDescription(string Name, string Kind, bool Required, string Description);
+/// <param name="SinceFormat">The record format that introduced the field; records of older formats never carry it.</param>
+public sealed record FieldDescription(string Name, string Kind, bool Required, string Description, long SinceFormat = RecordFormats.First);
 
 /// <summary>A record type: its name, documentation, and body rules.</summary>
 public interface IRecordType
@@ -31,6 +32,9 @@ public interface IRecordType
     /// <summary>Body field documentation.</summary>
     IReadOnlyList<FieldDescription> Fields { get; }
 
+    /// <summary>The record format that introduced the type; a record of an older format cannot be of this type.</summary>
+    long SinceFormat => RecordFormats.First;
+
     /// <summary>Validates the body and the record's relationships.</summary>
     void Validate(ValidationContext context);
 }
@@ -44,8 +48,11 @@ public sealed class ValidationContext
         Model = model ?? throw new ArgumentNullException(nameof(model));
         Record = record ?? throw new ArgumentNullException(nameof(record));
         Findings = findings ?? throw new ArgumentNullException(nameof(findings));
-        Body = new BodyReader(record.Body, record.ExpectedPath + "#body", findings);
+        Body = new BodyReader(record.Body, record.ExpectedPath + "#body", findings, record.Format);
     }
+
+    /// <summary>The record format the record under validation states; its rules are the ones that apply.</summary>
+    public long Format => Record.Format;
 
     /// <summary>The whole estate.</summary>
     public EstateModel Model { get; }

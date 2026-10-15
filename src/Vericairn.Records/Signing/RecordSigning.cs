@@ -43,7 +43,7 @@ public sealed class StoreSigner : IRecordSigner
         new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(DeviceId, digest)));
 }
 
-/// <summary>The signature scheme of record format 1 and its verification.</summary>
+/// <summary>The signature scheme of the record formats and its verification; format 2 keeps format 1's.</summary>
 public static class RecordSigning
 {
     /// <summary>ECDSA over the NIST P-256 curve with SHA-256 digests, IEEE P1363 fixed-field encoding (64 bytes).</summary>

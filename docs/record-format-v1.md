@@ -4,6 +4,9 @@ A Vericairn estate is a body of records. A record is one immutable fact: a chart
 a work order, a status change, a review, an acceptance. Records are never edited; a later record supersedes an
 earlier one. Everything else (status, who may do what, what is accepted) is derived from the records.
 
+Every record written in format 1 keeps format 1's rules, in whatever estate it lives. Records written after an
+estate moves to record format 2 follow [record-format-v2.md](record-format-v2.md), which describes only what differs.
+
 ## Envelope
 
 Every record is a JSON object with these keys and no others:
