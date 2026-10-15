@@ -817,3 +817,130 @@ public sealed class ReleaseWorkspace : Document
 
     private static List<string> Lines(string text) => text.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToList();
 }
+
+/// <summary>A living document as the Documents page lists it: its state, what made it due, and its latest clearance.</summary>
+public sealed class LivingDocumentRow(DocumentRow row)
+{
+    /// <summary>The runtime's row.</summary>
+    public DocumentRow Row { get; } = row;
+
+    /// <summary>The document and its state.</summary>
+    public string Heading => $"{Row.Path}  {Row.State}{(Row.Level is null ? string.Empty : " at " + Row.Level)}{(Row.Title is null ? string.Empty : "  " + Row.Title)}";
+
+    /// <summary>Every reason, missing contribution and note, or the latest clearance when it is current.</summary>
+    public string Detail => string.Join("\n", Row.Reasons.Select(r => $"{r.On} ({r.Level}): {r.Summary}")
+        .Concat(Row.Unavailable.Select(u => $"unavailable: {u} is provided by no installed pack"))
+        .Concat(Row.Notes.Select(n => "note: " + n))
+        .DefaultIfEmpty(Row.Clearance is null ? "Never cleared." : $"Cleared by {Row.Clearance}."));
+}
+
+/// <summary>
+/// The Documents page: each declared living document with its state, what made it due and its latest clearance, and a review of
+/// the selected one. The runtime reads the content, records the triggers the review answers and runs the declared checks; the
+/// page decides neither independence nor clearance, and a refusal comes back with every reason.
+/// </summary>
+public sealed class LivingDocumentsWorkspace : Document
+{
+    private static readonly string[] Severities = ["error", "warning", "info"];
+    private LivingDocumentRow? selected;
+    private string outcome = "current", summary = string.Empty, commit = string.Empty, findings = string.Empty, status = "Nothing sent.";
+
+    /// <summary>The page; fill it with the runtime's rows.</summary>
+    public LivingDocumentsWorkspace() : base("Living documents", "documents")
+    {
+    }
+
+    /// <summary>The declared documents.</summary>
+    public ObservableCollection<LivingDocumentRow> Rows { get; } = [];
+
+    /// <summary>The document a review is for.</summary>
+    public LivingDocumentRow? Selected
+    {
+        get => selected;
+        set
+        {
+            if (Set(ref selected, value))
+            {
+                Raise(nameof(CommitHint));
+            }
+        }
+    }
+
+    /// <summary>What a review can find.</summary>
+    public IReadOnlyList<string> Outcomes { get; } = ["current", "revised", "needs-change"];
+
+    /// <summary>current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due).</summary>
+    public string Outcome { get => outcome; set => Set(ref outcome, value); }
+
+    /// <summary>What was checked.</summary>
+    public string Summary { get => summary; set => Set(ref summary, value); }
+
+    /// <summary>The commit a document of another repository is reviewed at.</summary>
+    public string Commit { get => commit; set => Set(ref commit, value); }
+
+    /// <summary>Findings, one per line as severity: text.</summary>
+    public string Findings { get => findings; set => Set(ref findings, value); }
+
+    /// <summary>What the runtime answered.</summary>
+    public string Status { get => status; set => Set(ref status, value); }
+
+    /// <summary>What needs attention.</summary>
+    public string Note => Rows.Count == 0
+        ? "No living document is declared; declare one with vericairn docs declare."
+        : $"{Rows.Count(r => r.Row.State != "current")} of {Rows.Count} need attention. A document due at refuse holds its product's next release.";
+
+    /// <summary>Whether the selected document needs a commit.</summary>
+    public string CommitHint => Selected?.Row.Repository is null ? "Commit (only for a document of another repository)" : "Commit (required: the document is in another repository)";
+
+    /// <summary>Replaces the rows with the runtime's, keeping the selection.</summary>
+    public void Fill(IReadOnlyList<DocumentRow> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        string? declaration = Selected?.Row.Declaration;
+        Rows.Clear();
+        foreach (DocumentRow row in rows)
+        {
+            Rows.Add(new LivingDocumentRow(row));
+        }
+
+        Selected = Rows.FirstOrDefault(r => r.Row.Declaration == declaration) ?? Rows.FirstOrDefault(r => r.Row.State != "current") ?? Rows.FirstOrDefault();
+        Raise(nameof(Note));
+    }
+
+    /// <summary>Sends the review of the selected document as the acting principal.</summary>
+    public void Submit(IEstateApi api, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        if (string.IsNullOrWhiteSpace(by))
+        {
+            Status = "No acting principal: this machine holds no admitted device, so nothing can be authored here.";
+            return;
+        }
+
+        if (Selected is null)
+        {
+            Status = "Choose a document.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(Summary))
+        {
+            Status = "Say what was checked.";
+            return;
+        }
+
+        var parsed = new List<DocumentFinding>();
+        foreach (string line in Findings.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0))
+        {
+            string severity = Severities.FirstOrDefault(s => line.StartsWith(s + ":", StringComparison.OrdinalIgnoreCase)) ?? "info";
+            parsed.Add(new DocumentFinding(severity, line.StartsWith(severity + ":", StringComparison.OrdinalIgnoreCase) ? line[(severity.Length + 1)..].Trim() : line));
+        }
+
+        string? reviewed = string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim();
+        WriteOutcome sent = api.DocumentReview(Selected.Row.Declaration, new DocumentReviewRequest(by, Outcome, Summary.Trim(), parsed, reviewed));
+        Status = sent.Ok
+            ? $"Written: document review {sent.Written!.Id}. The runtime read {Selected.Row.Path}, recorded the triggers the review answers and ran the declared checks."
+            : AssignmentComposer.Refusal(sent.Problem);
+    }
+}
+

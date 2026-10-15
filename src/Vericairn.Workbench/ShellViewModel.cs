@@ -255,6 +255,11 @@ public sealed class ShellViewModel : Observable
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
+            foreach (LivingDocumentsWorkspace page in Documents.OfType<LivingDocumentsWorkspace>().ToList())
+            {
+                page.Fill(Try(() => connection.Api.Documents()) ?? []);
+            }
+
             foreach (ReleaseWorkspace page in Documents.OfType<ReleaseWorkspace>().ToList())
             {
                 FillRelease(page);
@@ -490,6 +495,15 @@ public sealed class ShellViewModel : Observable
         page.Acting = ActingPrincipal;
         HealthResponse? health = connection?.Api is null ? null : Try(() => connection.Api.Health());
         page.Health = health is null ? "No daemon answers." : $"API {health.Api}; Vericairn {health.Vericairn}; estate {health.Estate}; profile {health.Profile}; record format {health.RecordFormat}; started {health.StartedAt}; process {health.ProcessId}.";
+    }
+
+    /// <summary>Opens or refreshes the Documents page: the declared living documents with their state and a review of one.</summary>
+    public LivingDocumentsWorkspace OpenLivingDocuments()
+    {
+        LivingDocumentsWorkspace page = Documents.OfType<LivingDocumentsWorkspace>().FirstOrDefault() ?? new LivingDocumentsWorkspace();
+        page.Fill(Try(() => connection?.Api?.Documents() ?? []) ?? []);
+        Open(page);
+        return page;
     }
 
     /// <summary>Opens or refreshes the release workspace.</summary>

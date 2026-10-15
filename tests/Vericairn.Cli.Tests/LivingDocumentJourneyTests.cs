@@ -222,6 +222,90 @@ public class LivingDocumentJourneyTests
         }
     }
 
+    /// <summary>
+    /// J50, keep a product's living documents true across a release (the estate's design/living-documents.md § 12): the README and
+    /// the index of documentation sets become due at a publication; the builder revises the README, another principal clears the
+    /// index; a declaration naming a check no installed pack provides holds the release until it is revised; two machines derive
+    /// the same due documents from the same records; and the next release passes.
+    /// </summary>
+    [Fact]
+    public void J50_KeepAProductsLivingDocumentsTrueAcrossARelease()
+    {
+        string root = CliHarness.TempDirectory("j50");
+        string repo = CliHarness.TempDirectory("j50-widget");
+        string scratch = CliHarness.TempDirectory("j50-scratch");
+        string second = string.Empty;
+        IReleaseProvider? previous = Commands.ReleaseProvider;
+        var provider = new FakeReleaseProvider();
+        Commands.ReleaseProvider = provider;
+        try
+        {
+            Git(repo, "init", "-q", "-b", "main");
+            Directory.CreateDirectory(Path.Combine(repo, "docs", "releases"));
+            File.WriteAllText(Path.Combine(repo, "README.md"), "# Widget\n\nThe releases page lists every release.\n");
+            File.WriteAllText(Path.Combine(repo, "docs", "releases", "README.md"), "# Documentation sets\n\n- 0.1.0\n");
+            Git(repo, "add", ".");
+            Git(repo, "commit", "-q", "-m", "First commit");
+
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "J50.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Delegate","stake":"low","notAuthorized":[],"statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", CliHarness.WriteJson(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering"],"reserved":["publication"],"conditions":["label self-review"],"basis":"{{decision}}"}"""));
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", Product)).Id;
+            string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", repo, "--by", op, "--name", "Widget", "--role", "source of the widget", "--visibility", "public").Json.GetProperty("resource").GetProperty("id").GetString()!;
+            CliHarness.Ok("--estate", root, "sources", "clone", repo, "--resource", resource);
+
+            // The operator declares the README and the index of documentation sets; both refuse the next release until cleared.
+            foreach ((string path, string title, string clearedBy) in new[] { ("README.md", "Readme", "any"), ("docs/releases/README.md", "Documentation sets", "independent") })
+            {
+                CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, title + ".json", $$"""{"path":"{{path}}","repository":"{{resource}}","title":"{{title}}","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"clearedBy":"{{clearedBy}}","summary":"Follows the releases."}"""));
+            }
+
+            Publish(root, scratch, provider, op, builder, product, "0.2.0");
+            JsonElement due = CliHarness.Ok("--estate", root, "--json", "status").Json.GetProperty("documents");
+            Assert.Equal(2, due.EnumerateArray().Count(d => d.GetProperty("state").GetString() == "due" && d.GetProperty("reasons")[0].GetProperty("summary").GetString()!.StartsWith("release 0.2.0 was published", StringComparison.Ordinal)));
+
+            // The builder revises the README at the release commit and records its own review; the operator clears the index as current.
+            File.WriteAllText(Path.Combine(repo, "docs", "releases", "README.md"), "# Documentation sets\n\n- 0.1.0\n- 0.2.0\n");
+            File.AppendAllText(Path.Combine(repo, "README.md"), "Release 0.2.0 is out.\n");
+            Git(repo, "commit", "-q", "-am", "Documents for 0.2.0");
+            string release = GitOutput(repo, "rev-parse", "HEAD");
+            CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", builder, "--outcome", "revised", "--summary", "Named 0.2.0.", "--commit", release);
+            Assert.Contains("document.cleared-by", CliHarness.Run("--estate", root, "--json", "docs", "review", "docs/releases/README.md", "--by", builder, "--outcome", "revised", "--summary", "Added 0.2.0.", "--commit", release).Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "--json", "docs", "review", "docs/releases/README.md", "--by", op, "--outcome", "current", "--summary", "Lists 0.2.0.", "--commit", release);
+
+            // A declaration naming a check no installed pack provides is shown unavailable and holds the release until it is revised.
+            CliHarness.Outcome unavailable = CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "notices.json", $$"""{"path":"NOTICE","repository":"{{resource}}","title":"Notices","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"checks":["vericairn.example/notices-cover-locks"],"summary":"Names every bundled component."}"""));
+            Assert.Contains("unavailable: vericairn.example/notices-cover-locks", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+            CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Equal(2, held.Code);
+            Assert.Contains("NOTICE: unavailable", held.Out + held.Err, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--supersedes", unavailable.Id, "--body", CliHarness.WriteJson(scratch, "notices-revised.json", $$"""{"path":"NOTICE","repository":"{{resource}}","title":"Notices","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"warn","product":"{{product}}"}],"summary":"Names every bundled component; its check waits for the pack."}"""));
+
+            // Another machine derives the same due documents from the same records.
+            second = CliHarness.Clone(root, "j50-second");
+            Assert.Equal(CliHarness.Ok("--estate", root, "--json", "docs", "living").Out, CliHarness.Ok("--estate", second, "--json", "docs", "living").Out);
+
+            // The next release passes, with both documents compared at the commit it builds.
+            Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+        }
+        finally
+        {
+            Commands.ReleaseProvider = previous;
+            CliHarness.Delete(root, repo, scratch, second);
+        }
+    }
+
+    private static void Publish(string root, string scratch, FakeReleaseProvider provider, string op, string builder, string product, string version)
+    {
+        string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", version, "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
+        provider.CompleteRun("Example/widget", run, true, version);
+        JsonElement candidate = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", version, "--repository", "Example/widget", "--by", builder, "--qualified", "linux-x64", "--limitation", "Nothing signed.").Json.GetProperty("candidate");
+        CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.GetProperty("id").GetString()}:{candidate.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, $"accept-{version}.json", $$"""{"statement":"Accepted {{version}}.","basis":[],"self":false}"""));
+        provider.Publish("Example/widget", "v" + version);
+        Assert.Equal("published", CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", version, "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+    }
+
     private static void Git(string repo, params string[] arguments) => Assert.Equal(0, RunGit(repo, out _, arguments));
 
     private static string GitOutput(string repo, params string[] arguments)
