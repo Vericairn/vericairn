@@ -91,7 +91,7 @@ public partial class MainWindow : Window
         {
             FocusRegion(EstatePathBox);
         }
-        else if (command && e.Key == Key.G)
+        else if (command && !shift && e.Key == Key.G)
         {
             FocusRegion(RecordIdBox);
         }
@@ -113,6 +113,11 @@ public partial class MainWindow : Window
         else if (command && shift && e.Key == Key.P)
         {
             shell.OpenProgress();
+            FocusDocument();
+        }
+        else if (command && shift && e.Key == Key.G)
+        {
+            shell.OpenGoals();
             FocusDocument();
         }
         else if (command && shift && e.Key == Key.U)
@@ -412,6 +417,12 @@ public partial class MainWindow : Window
     private void OnOpenProgress(object? sender, RoutedEventArgs e)
     {
         shell.OpenProgress();
+        FocusDocument();
+    }
+
+    private void OnOpenGoals(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenGoals();
         FocusDocument();
     }
 

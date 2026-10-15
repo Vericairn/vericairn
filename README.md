@@ -72,8 +72,9 @@ release and pins the one it runs on.
   the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
   `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
-  the runtime: home with attention and the progress report, products, work orders, assignments, results, review and decisions,
-  releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
+  the runtime: home with attention, the asks waiting among it, and the progress report, products, work orders, assignments,
+  results, review and decisions, goals, releases, living documents and the runtime, documented in
+  [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record
   references and its manifest from the build, and refuses a set that disagrees with the build. The release

@@ -40,6 +40,170 @@ public sealed class ProgressDocument() : Document("Progress", "progress")
     public string Text { get => text; set => Set(ref text, value); }
 }
 
+/// <summary>
+/// The Goals workspace (the estate's design/goals.md § 8): the estate's goals, and for the one selected its objective, its conditions with
+/// their current verdicts, its plan and steps with the principal each reaches from the runtime's machine, spend against its budget from
+/// the agent-run ledger, its asks and its evaluations. It reads the runtime's goal view and routed next steps and shows them; it
+/// activates, accepts, funds and answers nothing, and takes no step: those are the sponsor's or an operator's, through the command line.
+/// </summary>
+public sealed class GoalsWorkspace : Document
+{
+    /// <summary>What the page says while the runtime gives no goal.</summary>
+    public const string Unavailable = "The runtime gave no goal; the estate is unavailable to this client.";
+
+    private readonly Func<IEstateApi?> api;
+    private GoalListRow? selected;
+    private string heading = string.Empty, objective = string.Empty, acceptance = string.Empty, next = string.Empty, note = Unavailable;
+
+    /// <summary>The workspace over the API the shell holds now.</summary>
+    public GoalsWorkspace(Func<IEstateApi?> api) : base("Goals", "goals")
+    {
+        this.api = api;
+    }
+
+    /// <summary>The estate's goals.</summary>
+    public ObservableCollection<GoalListRow> Goals { get; } = [];
+
+    /// <summary>The goal shown; choosing one shows it.</summary>
+    public GoalListRow? Selected
+    {
+        get => selected;
+        set
+        {
+            if (Set(ref selected, value))
+            {
+                Show();
+            }
+        }
+    }
+
+    /// <summary>The selected goal's title and status.</summary>
+    public string Heading { get => heading; private set => Set(ref heading, value); }
+
+    /// <summary>Its objective, in the sponsor's words.</summary>
+    public string Objective { get => objective; private set => Set(ref objective, value); }
+
+    /// <summary>Who sponsors and accepts it, and whether it is ready for its acceptance.</summary>
+    public string Acceptance { get => acceptance; private set => Set(ref acceptance, value); }
+
+    /// <summary>What comes next.</summary>
+    public string Next { get => next; private set => Set(ref next, value); }
+
+    /// <summary>What the page is, or why it shows nothing.</summary>
+    public string Note { get => note; private set => Set(ref note, value); }
+
+    /// <summary>The conditions with their current verdicts.</summary>
+    public ObservableCollection<ConditionRow> Conditions { get; } = [];
+
+    /// <summary>The plan's steps with the principal each reaches.</summary>
+    public ObservableCollection<StepRow> Steps { get; } = [];
+
+    /// <summary>Spend against the budget.</summary>
+    public ObservableCollection<SpendRow> Spend { get; } = [];
+
+    /// <summary>The goal's asks, the recommendation first.</summary>
+    public ObservableCollection<AskRow> Asks { get; } = [];
+
+    /// <summary>The goal's evaluations.</summary>
+    public ObservableCollection<EvaluationRow> Evaluations { get; } = [];
+
+    /// <summary>Reads the goals again and shows the one named, else the one shown, else the first open one.</summary>
+    public void Fill(string? goal = null)
+    {
+        IEstateApi? estate = api();
+        IReadOnlyList<GoalRow> rows;
+        try
+        {
+            rows = estate?.Goals() ?? [];
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Note = "The runtime did not answer: " + exception.Message;
+            return;
+        }
+
+        string? keep = goal ?? selected?.Id;
+        Goals.Clear();
+        foreach (GoalRow row in rows)
+        {
+            Goals.Add(new GoalListRow(row.Id, row.Title, row.Status, row.SponsorName ?? row.Sponsor));
+        }
+
+        Note = estate is null ? Unavailable : Goals.Count == 0
+            ? "No goal is proposed; vericairn goal propose proposes one."
+            : "Each goal from the runtime's records; the steps are routed from the runtime's machine. Activation, acceptance, funding, answers and steps are the sponsor's or an operator's, through vericairn goal and vericairn ask; this page shows them.";
+        GoalListRow? chosen = Goals.FirstOrDefault(g => g.Id == keep) ?? Goals.FirstOrDefault(g => g.Status is not ("achieved" or "impossible" or "abandoned")) ?? Goals.FirstOrDefault();
+        if (ReferenceEquals(chosen, selected) || chosen?.Id == selected?.Id)
+        {
+            selected = chosen;
+            Raise(nameof(Selected));
+            Show();
+        }
+        else
+        {
+            Selected = chosen;
+        }
+    }
+
+    private void Show()
+    {
+        Conditions.Clear();
+        Steps.Clear();
+        Spend.Clear();
+        Asks.Clear();
+        Evaluations.Clear();
+        IEstateApi? estate = api();
+        if (selected is null || estate is null)
+        {
+            Heading = Objective = Acceptance = Next = string.Empty;
+            return;
+        }
+
+        GoalPresentation view;
+        try
+        {
+            GoalResponse? goal = estate.Goal(selected.Id);
+            NextResponse? routed = estate.GoalNext(selected.Id);
+            view = GoalPresentation.From(goal?.Json ?? default, routed?.Json ?? default);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        {
+            Heading = selected.Title;
+            Objective = "The runtime did not answer: " + exception.Message;
+            return;
+        }
+
+        Heading = view.Heading;
+        Objective = view.Objective;
+        Acceptance = view.Acceptance;
+        Next = view.Next;
+        foreach (ConditionRow row in view.Conditions)
+        {
+            Conditions.Add(row);
+        }
+
+        foreach (StepRow row in view.Steps)
+        {
+            Steps.Add(row);
+        }
+
+        foreach (SpendRow row in view.Spend)
+        {
+            Spend.Add(row);
+        }
+
+        foreach (AskRow row in view.Asks)
+        {
+            Asks.Add(row);
+        }
+
+        foreach (EvaluationRow row in view.Evaluations)
+        {
+            Evaluations.Add(row);
+        }
+    }
+}
+
 /// <summary>A product as its record states it.</summary>
 public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces, string? ReleaseProvider = null, IReadOnlyDictionary<string, string>? ReleaseSettings = null);
 

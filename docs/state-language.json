@@ -93,6 +93,37 @@
       "failed check",
       "incident",
       "information"
+    ],
+    "goal": [
+      "proposed",
+      "active",
+      "paused",
+      "budget-limited",
+      "blocked",
+      "impossible",
+      "abandoned",
+      "achieved"
+    ],
+    "condition": [
+      "met",
+      "not-met",
+      "unknown"
+    ],
+    "evaluation": [
+      "met",
+      "not-yet",
+      "impossible"
+    ],
+    "step-route": [
+      "agent",
+      "person",
+      "reserved",
+      "unavailable",
+      "running",
+      "assigned",
+      "review",
+      "asked",
+      "answered"
     ]
   }
 }

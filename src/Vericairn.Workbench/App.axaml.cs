@@ -8,7 +8,7 @@ using Avalonia.Threading;
 
 namespace Vericairn.Workbench;
 
-/// <summary>The application: one main window, a client of the daemon. Arguments: --estate root, --as principal, --open products, inbox, release, runtime or a work-order key, --probe file [--cell name] [--virtual].</summary>
+/// <summary>The application: one main window, a client of the daemon. Arguments: --estate root, --as principal, --open products, inbox, release, runtime, goals or a work-order key, --probe file [--cell name] [--virtual].</summary>
 public partial class App : Application
 {
     /// <summary>The command-line arguments, set by Program before the lifetime starts.</summary>
@@ -47,6 +47,9 @@ public partial class App : Application
                             break;
                         case "runtime":
                             window.Shell.OpenRuntime();
+                            break;
+                        case "goals":
+                            window.Shell.OpenGoals();
                             break;
                         case null:
                             break;
