@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Formats.Asn1;
 using System.Net.Security;
 using System.Security.Authentication;
-using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 namespace Vericairn.Sdk;
@@ -256,33 +256,88 @@ public sealed class TlsScreenStream : Stream
             }
         }
 
-        X509Certificate2 certificate;
+        bool addressed = false;
         try
         {
-            certificate = X509CertificateLoader.LoadCertificate(der);
+            // Read the extension envelopes ourselves: platform certificate loaders disagree on malformed identifiers.
+            var reader = new AsnReader(der.ToArray(), AsnEncodingRules.DER);
+            AsnReader certificate = reader.ReadSequence();
+            reader.ThrowIfNotEmpty();
+            AsnReader tbs = certificate.ReadSequence();
+            var versionTag = new Asn1Tag(TagClass.ContextSpecific, 0, isConstructed: true);
+            if (tbs.PeekTag().HasSameClassAndValue(versionTag))
+            {
+                AsnReader version = tbs.ReadSequence(versionTag);
+                version.ReadInteger();
+                version.ThrowIfNotEmpty();
+            }
+
+            tbs.ReadIntegerBytes(); // serialNumber
+            tbs.ReadSequence(); // signature
+            tbs.ReadSequence(); // issuer
+            tbs.ReadSequence(); // validity
+            tbs.ReadSequence(); // subject
+            tbs.ReadSequence(); // subjectPublicKeyInfo
+            for (int tag = 1; tag <= 2; tag++)
+            {
+                var uniqueId = new Asn1Tag(TagClass.ContextSpecific, tag);
+                if (tbs.HasData && tbs.PeekTag().HasSameClassAndValue(uniqueId))
+                {
+                    tbs.ReadBitString(out _, uniqueId);
+                }
+            }
+
+            if (tbs.HasData)
+            {
+                AsnReader wrapper = tbs.ReadSequence(new Asn1Tag(TagClass.ContextSpecific, 3, isConstructed: true));
+                AsnReader extensions = wrapper.ReadSequence();
+                wrapper.ThrowIfNotEmpty();
+                if (!extensions.HasData)
+                {
+                    throw new AsnContentException();
+                }
+
+                var identifiers = new HashSet<string>(StringComparer.Ordinal);
+                while (extensions.HasData)
+                {
+                    AsnReader extension = extensions.ReadSequence();
+                    string oid = extension.ReadObjectIdentifier();
+                    if (!identifiers.Add(oid))
+                    {
+                        throw new AsnContentException();
+                    }
+
+                    if (extension.HasData && extension.PeekTag().HasSameClassAndValue(Asn1Tag.Boolean))
+                    {
+                        // FALSE is the default and must be omitted in DER.
+                        if (!extension.ReadBoolean())
+                        {
+                            throw new AsnContentException();
+                        }
+                    }
+
+                    extension.ReadOctetString();
+                    extension.ThrowIfNotEmpty();
+                    addressed |= Array.IndexOf(AddressExtensions, oid) >= 0;
+                }
+            }
+
+            tbs.ThrowIfNotEmpty();
+            certificate.ReadSequence(); // signatureAlgorithm
+            certificate.ReadBitString(out _);
+            certificate.ThrowIfNotEmpty();
+
+            // Retain the loader's checks of the remaining certificate fields, without asking it to decode extensions.
+            using X509Certificate2 parsed = X509CertificateLoader.LoadCertificate(der);
         }
-        catch (CryptographicException)
+        catch (Exception exception) when (exception is not OutOfMemoryException and not StackOverflowException and not AccessViolationException)
         {
             throw Refused("presents a certificate that does not parse");
         }
 
-        using (certificate)
+        if (addressed)
         {
-            // An extension that does not decode is a certificate that does not parse: refused as the screen refuses, never thrown past it.
-            bool addressed;
-            try
-            {
-                addressed = certificate.Extensions.Any(e => Array.IndexOf(AddressExtensions, e.Oid?.Value) >= 0);
-            }
-            catch (CryptographicException)
-            {
-                throw Refused("presents a certificate that does not parse");
-            }
-
-            if (addressed)
-            {
-                throw Refused("presents a certificate that names an address to fetch");
-            }
+            throw Refused("presents a certificate that names an address to fetch");
         }
     }
 
