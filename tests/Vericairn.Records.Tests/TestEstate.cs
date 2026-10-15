@@ -28,7 +28,7 @@ public sealed class TestEstate : IDisposable
     public string Root { get; }
 
     /// <summary>The estate's record format: the one its manifest states and its records are written in unless a test names another.</summary>
-    public long RecordFormat { get; }
+    public long RecordFormat { get; private set; }
 
     public string OperatorId { get; }
 
@@ -42,6 +42,16 @@ public sealed class TestEstate : IDisposable
 
     /// <summary>A fixed, advancing clock so records are ordered deterministically.</summary>
     public DateTimeOffset Clock { get; private set; } = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
+
+    /// <summary>Moves the manifest to another record format, as an upgrade does; records added afterwards state that format unless a test names another.</summary>
+    public void MoveTo(long recordFormat)
+    {
+        RecordFormat = recordFormat;
+        WriteManifest(Estate.Id);
+    }
+
+    /// <summary>Sets the clock, so a test can write a record that claims an earlier time than the records before it.</summary>
+    public void SetClock(DateTimeOffset at) => Clock = at;
 
     public RecordEnvelope Add(string type, string by, string bodyJson, RecordReference? subject = null, string? supersedes = null, string? id = null, IRecordSigner? signer = null, long? format = null, IReadOnlyList<IRecordSigner>? signers = null)
     {

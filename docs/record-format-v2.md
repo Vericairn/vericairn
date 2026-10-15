@@ -42,6 +42,14 @@ before and after are equal; `--check` shows the same without writing. The releas
 estate's records use; an upgrade to a release that does not is refused, as is one to a release writing a format this
 build cannot read.
 
+Format 1 counted an admission recorded without a signature while the charter left signatures optional. The move lists
+those in force by id and hash, in the migration record's `anchored`, and from then on an unsigned admission counts only
+when that list names it (rules, below). The list counts only when the migration is signed by the operator, or by a
+principal with the `administer` scope, with a device whose own admission rests on signatures; so `estate upgrade`, when
+there is anything to list, refuses before changing anything unless the principal applying it is one of those and holds
+such a device on this machine, and `--check` names the admissions the move would list. An estate created at format 2
+has no list, and in it no unsigned admission ever counts.
+
 ## Types new in format 2
 
 `vericairn records describe <type>` and the record reference list every field; these are the meanings and the rules.
@@ -103,6 +111,7 @@ build cannot read.
 
 | Type | Field | Kind | Meaning |
 |---|---|---|---|
+| `migration` | `anchored` | object list, optional | The admissions recorded without a signature that were in force when the estate moved to format 2, each `{id, hash}`; only a migration that moves the estate to format 2, signed by the operator or an administrator, lists them |
 | `decision` | `stake` | `low`, `medium`, `high` or `critical`, required | How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time |
 | `decision` | `notAuthorized` | string list, required, may be empty | What this answer does not authorize, so no one reads more into it |
 | `decision` | `answers` | ULID list, optional | The asks the decision answers; an ask is answered by the principal it was put to, and a withdrawn ask is not answered |
@@ -127,12 +136,12 @@ build cannot read.
 - An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
   in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
 - A device revision keeps its principal and its purpose, and keeps the device's identity (below).
-- An admission, admitting or revoking, is signed: by a device already admitted or, for the operator's first device, by
-  the device it admits, the estate's first authority. An unsigned one is refused when it is written and, whatever the
-  charter's signature policy, admits nothing, revokes nothing and unseats no admission it supersedes
-  (`signature.admission-unsigned`). Format 1 counted an unsigned admission while signatures were optional, and its
-  records keep that rule, so in an estate begun under format 1 the devices admitted that way stay admitted until an
-  administrator revokes them.
+- In an estate at format 2 an admission, admitting or revoking, is signed: by a device already admitted or, for the
+  operator's first device, by the device it admits, the estate's first authority. An unsigned one is refused when it is
+  written, and one found among the records counts only when the signed migration that moved the estate to format 2 lists
+  it (above); otherwise, whatever format or date it states, it admits nothing, revokes nothing and unseats no admission
+  it supersedes (`signature.admission-unsigned`). A record's format and date are what its author wrote, and a signature
+  is the one thing an author without an admitted key cannot write.
 - Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
   without an expiry, as every format-1 grant is, behave as they always did.
 - Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names

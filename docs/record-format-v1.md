@@ -75,10 +75,11 @@ signed by its own key to prove possession. An **admission** record, authored by 
 admission with status `revoked` and `revokedAt` ends it. The root operator's admission of a device that signed that
 admission itself is the estate's first authority and is accepted once in its history, for its first device; every later
 device is admitted under the signature of a device already admitted (release 0.4.2 and earlier accepted any such
-self-admission). In a format-1 record an unsigned admission still counts while the charter leaves signatures optional, so
-under format 1 nobody able to add records can mint a device for the operator and sign as the operator only once the
-charter requires signatures; from record format 2 every admission is signed whatever the policy
-([record-format-v2.md](record-format-v2.md#rules-enforced-in-format-2)). A signature is `ecdsa-p256-sha256` over the 32 digest
+self-admission). In an estate at record format 1 an admission recorded without a signature counts while the charter
+leaves signatures optional, and a required-signature policy binds only records dated after it, a date being what a
+record's author wrote; so at format 1 anyone able to add records can still admit a device by an unsigned admission, and
+`estate check` does not tell. From the move to record format 2 an unsigned admission counts only when the signed
+migration lists it ([record-format-v2.md](record-format-v2.md#moving-an-estate-to-format-2)). A signature is `ecdsa-p256-sha256` over the 32 digest
 bytes of the record's `hash`, encoded as a 64-byte base64url value in IEEE P1363 form. On load, every signature
 is verified against its device's public key; a signature by a device of another principal, by an unadmitted
 device, before its admission, or from its revocation onward is an error. The estate's `policies.signatures`

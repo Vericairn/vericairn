@@ -78,6 +78,57 @@ public class FormatOneFixtureTests
         }
     }
 
+    [Fact]
+    public void MovingToFormat2AnchorsTheUnsignedAdmissionsUnderTheOperatorsSignature()
+    {
+        string copy = Path.Combine(Path.GetTempPath(), "vericairn-format-1-anchor-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            CopyDirectory(Path.Combine(RepositoryRoot(), "tests", "fixtures", "format-1-estate"), copy);
+            using var service = EstateService.Open(copy);
+            string op = service.Session.Load().CurrentEstate!.Body.GetProperty("operator").GetString()!;
+            const string Builder = "01M4YH07M8PBFQRP3A4PJBD6PR";
+
+            // As in the first-party estate: the builder's device was admitted without a signature before the operator had a device.
+            WriteOutcome builderDevice = service.DeviceCreate(new DeviceCreateRequest(Builder, "Build machine", "file"));
+            Assert.True(builderDevice.Ok, builderDevice.Problem?.Message);
+            WriteOutcome unsigned = service.DeviceAdmit(new AdmitRequest(builderDevice.Written!.Id, op, "Admitted before the operator had a device."));
+            Assert.True(unsigned.Ok, unsigned.Problem?.Message);
+            Assert.Empty(service.Session.Load().ById[unsigned.Written!.Id].Signatures);
+            WriteOutcome laptop = service.DeviceCreate(new DeviceCreateRequest(op, "Operator laptop", "file"));
+            Assert.True(laptop.Ok, laptop.Problem?.Message);
+            Assert.True(service.DeviceAdmit(new AdmitRequest(laptop.Written!.Id, op, "The first authority.")).Ok);
+
+            // The plan names the admission the move anchors; the builder may not apply it, and nothing changes when it tries.
+            (UpgradeResponse? check, Problem? planned) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
+            Assert.Null(planned);
+            Assert.Equal([unsigned.Written.Id], check!.Anchored);
+            (UpgradeResponse? byBuilder, Problem? refused) = service.Upgrade(new UpgradeRequest("0.9.0", Builder, false));
+            Assert.Null(byBuilder);
+            Assert.Contains("operator", refused!.Message, StringComparison.Ordinal);
+            Assert.Equal(1, service.Session.Load().Manifest!.RecordFormat);
+
+            // The operator's upgrade signs the migration that lists it, and the builder's device stays admitted at format 2.
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            Assert.Null(problem);
+            Assert.True(applied!.Applied);
+            EstateModel moved = service.Session.Load();
+            Assert.Equal(2, moved.Manifest!.RecordFormat);
+            Assert.DoesNotContain(moved.Findings, f => f.Severity == Severity.Error);
+            RecordEnvelope migration = moved.Current("migration").Single();
+            Assert.NotEmpty(migration.Signatures);
+            Assert.Contains(unsigned.Written.Id, migration.Body.GetProperty("anchored").GetRawText(), StringComparison.Ordinal);
+            Assert.True(SignatureChecks.IsAdmitted(moved, moved.ById[builderDevice.Written.Id]));
+        }
+        finally
+        {
+            if (Directory.Exists(copy))
+            {
+                Directory.Delete(copy, recursive: true);
+            }
+        }
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))

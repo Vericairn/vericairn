@@ -392,6 +392,69 @@ public class SigningTests : IDisposable
     }
 
     [Fact]
+    public void InAnEstateAtFormatTwoAnUnsignedAdmissionCountsForNothingWhateverFormatOrDateItStates()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = CreateDevice(estate, estate.OperatorId, "First laptop", extra: FormatTwo);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", first.Reference, signer: Signer(first));
+        DateTimeOffset early = estate.Clock;
+        estate.Add("work-order", estate.OperatorId, OrderBody, signer: Signer(first));
+
+        // The author of a record writes its format and its date: an unsigned admission written in format 1 and dated before the
+        // records already there admits nothing in an estate created at format 2, which anchors no unsigned admission.
+        estate.SetClock(early);
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", format: 1);
+        RecordEnvelope unsigned = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Unsigned, in format 1."}""", minted.Reference, format: 1);
+        RecordEnvelope forged = estate.Add("work-order", estate.OperatorId, OrderBody.Replace("W-1", "W-2", StringComparison.Ordinal), signer: Signer(minted), format: 1);
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.admission-unsigned" && f.Location == unsigned.ExpectedPath);
+        Assert.False(SignatureChecks.IsAdmitted(model, minted));
+        Assert.Contains(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+        Assert.True(SignatureChecks.IsAdmitted(model, first));
+    }
+
+    [Fact]
+    public void TheOperatorsSignedMoveToFormatTwoAnchorsTheUnsignedAdmissionsInForceAndNothingElse()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope laptop = CreateDevice(estate, estate.OperatorId, "Operator laptop");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", laptop.Reference, signer: Signer(laptop));
+        RecordEnvelope builderDevice = CreateDevice(estate, estate.BuilderId, "Build machine");
+        RecordEnvelope unsigned = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.BuilderId}}","status":"admitted","note":"Admitted unsigned under format 1."}""", builderDevice.Reference);
+        estate.Add("work-order", estate.BuilderId, OrderBody, signer: Signer(builderDevice));
+        Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+        DateTimeOffset beforeMove = estate.Clock;
+
+        // Moved to format 2 with no anchor, the builder's unsigned admission stops counting, and so do the builder's signatures.
+        estate.MoveTo(2);
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.admission-unsigned" && f.Location == unsigned.ExpectedPath);
+        Assert.False(SignatureChecks.IsAdmitted(model, builderDevice));
+
+        // The operator's signed migration anchors it, by id and hash, and the estate is whole again.
+        string body = $$"""{"fromPin":"release 0.4.2","toPin":"release 0.5.2","fromFormat":1,"toFormat":2,"migrations":["record-format-2"],"changes":[],"anchored":[{"id":"{{unsigned.Id}}","hash":"{{unsigned.ComputedHash}}"}]}""";
+        estate.Add("migration", estate.OperatorId, body, signer: Signer(laptop));
+        model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.True(SignatureChecks.IsAdmitted(model, builderDevice));
+
+        // An unsigned admission written after the move counts for nothing, though it states format 1 and a date before the move.
+        estate.SetClock(beforeMove);
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", format: 1);
+        RecordEnvelope backdated = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Backdated."}""", minted.Reference, format: 1);
+        model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.admission-unsigned" && f.Location == backdated.ExpectedPath);
+        Assert.False(SignatureChecks.IsAdmitted(model, minted));
+
+        // Nor can another principal's migration anchor it: the list is the operator's or an administrator's.
+        string builderBody = $$"""{"fromPin":"release 0.4.2","toPin":"release 0.5.2","fromFormat":1,"toFormat":2,"migrations":["record-format-2"],"changes":[],"anchored":[{"id":"{{backdated.Id}}","hash":"{{backdated.ComputedHash}}"}]}""";
+        estate.Add("migration", estate.BuilderId, builderBody, signer: Signer(builderDevice));
+        model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "migration.anchor-author");
+        Assert.False(SignatureChecks.IsAdmitted(model, minted));
+    }
+
+    [Fact]
     public void InRecordFormatOneAnUnsignedAdmissionStillCountsWhileSignaturesAreOptional()
     {
         // Format 1 keeps its own rule: records written under it do not change meaning when a later release reads them.

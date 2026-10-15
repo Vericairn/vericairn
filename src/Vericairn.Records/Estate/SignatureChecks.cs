@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Estate;
 
@@ -18,13 +21,14 @@ public static class SignatureChecks
         bool required = estate is not null && estate.Body.TryGetProperty("policies", out System.Text.Json.JsonElement policies) && policies.TryGetProperty("signatures", out System.Text.Json.JsonElement policy) && policy.GetString() == "required";
         string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
+        IReadOnlySet<string> anchored = Anchored(model);
         foreach (RecordEnvelope record in model.Records)
         {
             if (record.Signatures.Count == 0)
             {
-                if (!Counts(record))
+                if (!Counts(model, record, anchored))
                 {
-                    findings.Error("signature.admission-unsigned", record.ExpectedPath, "An admission written in record format 2 is signed: by a device already admitted or, for the operator's first device, by the device it admits. Unsigned, it admits and revokes nothing, whatever the estate's signature policy.");
+                    findings.Error("signature.admission-unsigned", record.ExpectedPath, "In an estate at record format 2 an admission is signed: by a device already admitted or, for the operator's first device, by the device it admits. An unsigned one counts only when the signed migration that moved the estate to format 2 lists it; otherwise, whatever format or date it states, it admits and revokes nothing.");
                 }
                 else if (required && string.CompareOrdinal(record.At, estate!.At) > 0)
                 {
@@ -36,7 +40,7 @@ public static class SignatureChecks
 
             foreach (RecordSignature signature in record.Signatures)
             {
-                Verify(model, record, signature, rootOperator, firstAuthority, findings);
+                Verify(model, record, signature, rootOperator, firstAuthority, findings, anchored);
             }
 
             Rotation(model, record, findings);
@@ -131,23 +135,99 @@ public static class SignatureChecks
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(device);
+        IReadOnlySet<string> anchored = Anchored(model);
         IReadOnlyList<string> chain = model.Chain(model.Latest(device));
-        return chain.SelectMany(id => model.About(id, "admission")).Where(Counts).Where(a => CurrentAmongCounting(model, a)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+        return chain.SelectMany(id => model.About(id, "admission")).Where(a => Counts(model, a, anchored)).Where(a => CurrentAmongCounting(model, a, anchored)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
-    /// <summary>Current unless superseded by a record that counts: an unsigned format-2 revision cannot unseat an admission either.</summary>
-    private static bool CurrentAmongCounting(EstateModel model, RecordEnvelope admission) =>
-        !model.SupersededBy.TryGetValue(admission.Id, out string? next) || !model.ById.TryGetValue(next, out RecordEnvelope? successor) || !Counts(successor);
+    /// <summary>Current unless superseded by a record that counts: an unsigned revision that counts for nothing cannot unseat an admission either.</summary>
+    private static bool CurrentAmongCounting(EstateModel model, RecordEnvelope admission, IReadOnlySet<string> anchored) =>
+        !model.SupersededBy.TryGetValue(admission.Id, out string? next) || !model.ById.TryGetValue(next, out RecordEnvelope? successor) || !Counts(model, successor, anchored);
 
     /// <summary>
-    /// Whether a record can admit or revoke: an admission written in record format 2 counts only when it is signed, so that while a
-    /// charter leaves signatures optional nobody who can add records admits a device, or revokes one, by writing an unsigned record.
-    /// Format 1 keeps its own rule, under which an unsigned admission counted while signatures were optional.
+    /// Whether a record can admit or revoke. In an estate still at record format 1 an unsigned admission counts while the charter leaves
+    /// signatures optional, as format 1 has it. Once the estate is at record format 2 an unsigned admission counts only when the signed
+    /// migration that moved the estate lists it (<see cref="Anchored"/>), whatever format or date the admission states: a format and a
+    /// date are what the record's author wrote, and only a signature is something an author without an admitted key cannot write.
     /// </summary>
-    public static bool Counts(RecordEnvelope record)
+    public static bool Counts(EstateModel model, RecordEnvelope record)
     {
+        ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(record);
-        return record.Type != "admission" || record.Format < 2 || record.Signatures.Count > 0;
+        return Counts(model, record, Anchored(model));
+    }
+
+    private static bool Counts(EstateModel model, RecordEnvelope record, IReadOnlySet<string> anchored) =>
+        record.Type != "admission" || record.Signatures.Count > 0 || EstateFormat(model) < 2 || anchored.Contains(AnchorKey(record.Id, record.ComputedHash));
+
+    /// <summary>The estate's record format: its manifest's, or, where a model has no manifest, the newest format its records state.</summary>
+    private static long EstateFormat(EstateModel model) =>
+        model.Manifest?.RecordFormat ?? (model.Records.Count == 0 ? RecordFormats.First : model.Records.Max(r => r.Format));
+
+    private static readonly ConditionalWeakTable<EstateModel, IReadOnlySet<string>> AnchorCache = [];
+
+    private static readonly IReadOnlySet<string> NoAnchors = new HashSet<string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The unsigned admissions an estate at record format 2 keeps counting, as id and hash keys: those listed by a migration record that
+    /// names the step record-format-2 and is signed by the root operator, or by a principal with the 'administer' scope, with a device
+    /// whose admission rests on signed admissions alone. A list in an unsigned migration, in one by another principal, or in one signed by
+    /// a device that only an unsigned admission admitted, anchors nothing.
+    /// </summary>
+    public static IReadOnlySet<string> Anchored(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return AnchorCache.GetValue(model, ComputeAnchors);
+    }
+
+    /// <summary>The key of an anchored admission: its id and the hash of its content.</summary>
+    public static string AnchorKey(string id, string hash) => id + " " + hash;
+
+    private static IReadOnlySet<string> ComputeAnchors(EstateModel model)
+    {
+        var anchored = new HashSet<string>(StringComparer.Ordinal);
+        if (EstateFormat(model) < 2)
+        {
+            return anchored;
+        }
+
+        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
+        foreach (RecordEnvelope migration in model.OfType("migration").Where(m => m.Format >= 2 && m.Signatures.Count > 0))
+        {
+            if (!migration.Body.TryGetProperty("migrations", out JsonElement steps) || steps.ValueKind != JsonValueKind.Array || !steps.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == "record-format-2"))
+            {
+                continue;
+            }
+
+            if (migration.By != rootOperator && !model.HasScope(migration.By, Scopes.Administer, migration.AtTime))
+            {
+                continue;
+            }
+
+            // The signer's own admission must rest on signatures: verified with no anchors, so that a migration cannot anchor the
+            // unsigned admission of the device that signs it.
+            var findings = new FindingList();
+            foreach (RecordSignature signature in migration.Signatures)
+            {
+                Verify(model, migration, signature, rootOperator, firstAuthority, findings, NoAnchors);
+            }
+
+            if (findings.HasErrors || !migration.Body.TryGetProperty("anchored", out JsonElement list) || list.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (JsonElement entry in list.EnumerateArray())
+            {
+                if (entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String && entry.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String)
+                {
+                    anchored.Add(AnchorKey(id.GetString()!, hash.GetString()!));
+                }
+            }
+        }
+
+        return anchored;
     }
 
     /// <summary>True when the device is currently admitted (and not revoked).</summary>
@@ -182,10 +262,15 @@ public static class SignatureChecks
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(device);
+        return AdmissionStateAt(model, device, at, Anchored(model));
+    }
+
+    private static AdmissionState AdmissionStateAt(EstateModel model, RecordEnvelope device, string at, IReadOnlySet<string> anchored)
+    {
         string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")).Where(Counts))
+        foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")).Where(a => Counts(model, a, anchored)))
         {
             if (admission.Id != firstAuthority && SelfSigned(model, admission))
             {
@@ -227,7 +312,7 @@ public static class SignatureChecks
         };
     }
 
-    private static void Verify(EstateModel model, RecordEnvelope record, RecordSignature signature, string? rootOperator, string? firstAuthority, FindingList findings)
+    private static void Verify(EstateModel model, RecordEnvelope record, RecordSignature signature, string? rootOperator, string? firstAuthority, FindingList findings, IReadOnlySet<string> anchored)
     {
         string location = record.ExpectedPath + "#signatures";
         if (signature.Algorithm != RecordSigning.Algorithm)
@@ -312,13 +397,13 @@ public static class SignatureChecks
             return;
         }
 
-        if (selfAdmission && AdmissionStateAt(model, device, record.At) != AdmissionState.Admitted)
+        if (selfAdmission && AdmissionStateAt(model, device, record.At, anchored) != AdmissionState.Admitted)
         {
             findings.Error("signature.self-admission", location, $"Device {chain[0]} admitted itself for the operator; that is accepted once, for the estate's first device ({firstAuthority}). A later device is admitted under the signature of a device already admitted.");
             return;
         }
 
-        switch (AdmissionStateAt(model, device, record.At))
+        switch (AdmissionStateAt(model, device, record.At, anchored))
         {
             case AdmissionState.Admitted:
                 return;

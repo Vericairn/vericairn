@@ -71,7 +71,8 @@ public interface IRecordFormatMigration
 /// <param name="Migrations">Migrations that would run, in order.</param>
 /// <param name="Release">The published release record upgraded to.</param>
 /// <param name="Artifacts">Distributable hash per platform, carried into the manifest.</param>
-public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts);
+/// <param name="Anchored">Moving to record format 2, the admissions recorded without a signature that are in force, by id and hash, which the signed migration anchors.</param>
+public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, RecordEnvelope Release, IReadOnlyDictionary<string, string> Artifacts, IReadOnlyList<RecordReference> Anchored);
 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
 public static class EstateUpgrade
@@ -164,7 +165,13 @@ public static class EstateUpgrade
         }
 
         string repository = EstateModel.BodyString(release, "repository") ?? manifest.Repository ?? "?";
-        return new UpgradePlan(manifest.Describe(), $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts);
+
+        // Moving to record format 2, the admissions recorded without a signature that are in force are listed by id and hash, so that the
+        // signed migration anchors them; from then on an unsigned admission the list does not name counts for nothing.
+        IReadOnlyList<RecordReference> anchored = steps.Contains("record-format-2")
+            ? [.. model.OfType("admission").Where(a => a.Signatures.Count == 0).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).Select(a => new RecordReference("admission", a.Id, a.ComputedHash))]
+            : [];
+        return new UpgradePlan(manifest.Describe(), $"release {version}", manifest.RecordFormat, toFormat, steps, release, artifacts, anchored);
     }
 
     private sealed class Restore : IDisposable
@@ -239,7 +246,7 @@ public static class EstateUpgrade
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(changes);
-        return new JsonObject
+        var body = new JsonObject
         {
             ["fromPin"] = plan.FromPin,
             ["toPin"] = plan.ToPin,
@@ -249,5 +256,11 @@ public static class EstateUpgrade
             ["changes"] = new JsonArray(changes.Select(c => (JsonNode)c).ToArray()),
             ["release"] = plan.Release.Id,
         };
+        if (plan.Anchored.Count > 0)
+        {
+            body["anchored"] = new JsonArray(plan.Anchored.Select(a => (JsonNode)new JsonObject { ["id"] = a.Id, ["hash"] = a.Hash }).ToArray());
+        }
+
+        return body;
     }
 }

@@ -1327,7 +1327,7 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", exception.Message, []));
             }
 
-            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null);
+            var response = new UpgradeResponse(plan.FromPin, plan.ToPin, plan.FromFormat, plan.ToFormat, plan.Migrations, plan.Release.Id, plan.Artifacts, false, null, plan.Anchored.Count == 0 ? null : [.. plan.Anchored.Select(a => a.Id)]);
             if (request.Check)
             {
                 return (response, null);
@@ -1336,6 +1336,24 @@ public sealed class EstateService : IEstateApi, IDisposable
             if (request.By is null || !Ulid.IsValid(request.By))
             {
                 return (null, new Problem("refused", "The principal applying the upgrade must be a ULID.", []));
+            }
+
+            // The migration that anchors the unsigned admissions decides which of them keep counting, so it is the operator's, or an
+            // administrator's, and it is signed; refuse before anything changes rather than leave the estate's admissions to a check.
+            if (plan.Anchored.Count > 0)
+            {
+                string anchoredIds = string.Join(", ", plan.Anchored.Select(a => a.Id));
+                string? rootOperator = model.CurrentEstate is { } charter ? EstateModel.BodyString(charter, "operator") : null;
+                if (request.By != rootOperator && !model.HasScope(request.By, Scopes.Administer))
+                {
+                    return (null, new Problem("refused", $"Moving to record format 2 anchors the admissions recorded without a signature ({anchoredIds}), and the migration that anchors them is the operator's or a principal's with the 'administer' scope; run the upgrade as one of them. Nothing changed.", []));
+                }
+
+                using JsonDocument probe = JsonDocument.Parse("{}");
+                if (ResolveSigner(model, new RecordDraft("migration", request.By, probe.RootElement), out IRecordSigner? signer) is not null || signer is null)
+                {
+                    return (null, new Problem("refused", $"The migration that anchors the admissions recorded without a signature ({anchoredIds}) is signed, and principal {request.By} has no admitted device whose key this machine holds; run the upgrade where one is held. Nothing changed.", []));
+                }
             }
 
             // Migrations stage their files first; nothing is written until every step succeeded.
