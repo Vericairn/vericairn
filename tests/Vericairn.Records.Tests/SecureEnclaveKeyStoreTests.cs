@@ -48,6 +48,7 @@ public class SecureEnclaveKeyStoreTests : IDisposable
 
         store.Remove(id);
         Assert.False(store.Has(id));
+        new SecureEnclaveKeyStore(Path.Combine(home, "never")).Remove(Ulid.NewUlid().Value);
     }
 
     [Fact]

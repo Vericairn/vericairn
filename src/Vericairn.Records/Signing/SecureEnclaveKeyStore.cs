@@ -108,7 +108,14 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     }
 
     /// <inheritdoc />
-    public void Remove(string deviceId) => File.Delete(Blob(deviceId));
+    public void Remove(string deviceId)
+    {
+        string blob = Blob(deviceId);
+        if (File.Exists(blob))
+        {
+            File.Delete(blob);
+        }
+    }
 
     /// <inheritdoc />
     public void Promote(string keyId, string deviceId)

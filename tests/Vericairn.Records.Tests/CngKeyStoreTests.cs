@@ -76,7 +76,10 @@ public class CngKeyStoreTests
         finally
         {
             store.Remove(device);
-            Directory.Delete(home, recursive: true);
+            if (Directory.Exists(home))
+            {
+                Directory.Delete(home, recursive: true);
+            }
         }
 
         Assert.False(store.Has(device));

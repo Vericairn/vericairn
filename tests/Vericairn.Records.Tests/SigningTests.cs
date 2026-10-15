@@ -288,6 +288,9 @@ public class SigningTests : IDisposable
         Assert.Throws<InvalidOperationException>(() => store.Promote(Ulid.NewUlid().Value, id));
         store.Remove(id);
         Assert.False(store.Has(id));
+
+        // Removing a key that was never held is nothing, even where the keys directory does not exist yet.
+        new FileKeyStore(Path.Combine(home, "never")).Remove(Ulid.NewUlid().Value);
     }
 
     public void Dispose()

@@ -283,7 +283,12 @@ public sealed class CngKeyStore : IDeviceKeyStore
             key.Delete();
         }
 
-        File.Delete(AliasOf(deviceId));
+        // File.Delete tolerates a missing file but not a missing directory, and a device never rotated has no alias directory.
+        string alias = AliasOf(deviceId);
+        if (File.Exists(alias))
+        {
+            File.Delete(alias);
+        }
     }
 
     /// <inheritdoc />
