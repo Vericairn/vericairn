@@ -309,6 +309,6 @@ public class PlacementTests
             Assert.DoesNotContain(referenced, name => name.StartsWith("Vericairn.Providers.", StringComparison.Ordinal) || name.StartsWith("Vericairn.Adapters.", StringComparison.Ordinal) || name.StartsWith("Vericairn.Packs.", StringComparison.Ordinal));
         }
 
-        Assert.DoesNotContain(typeof(Vericairn.Runtime.Service.EstateService).Assembly.GetTypes(), type => type.Name is "GitHubReleaseProvider" or "GhReleaseProvider" or "GitCommandAdapter" or "SourceAdoption" or "Checks");
+        Assert.DoesNotContain(typeof(Vericairn.Runtime.Service.EstateService).Assembly.GetTypes(), type => type.Name is "GitHubReleaseProvider" or "GhReleaseProvider" or "GitCommandAdapter" or "SourceAdoption" or "Checks" or "ClaudeCodeLauncher" or "CodexLauncher" or "GenericLauncher" or "GitWorktreeWorkspaces");
     }
 }

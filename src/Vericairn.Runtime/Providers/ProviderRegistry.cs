@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Runtime.Workers;
+
 namespace Vericairn.Runtime.Providers;
 
 /// <summary>
@@ -13,6 +15,8 @@ public sealed class ProviderRegistry
     private readonly object gate = new();
     private readonly Dictionary<string, IReleaseProvider> releases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ISourceAdapter> sources = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IAgentLauncher> launchers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IWorkspaceProvider> workspaces = new(StringComparer.Ordinal);
 
     /// <summary>The registry of this process, which the host fills before any operation runs.</summary>
     public static ProviderRegistry Current { get; } = new();
@@ -38,6 +42,104 @@ public sealed class ProviderRegistry
             {
                 return sources.OrderBy(s => s.Key, StringComparer.Ordinal).Select(s => s.Value).ToList();
             }
+        }
+    }
+
+    /// <summary>The coding-agent launchers available, ordered by launcher.</summary>
+    public IReadOnlyList<IAgentLauncher> Launchers
+    {
+        get
+        {
+            lock (gate)
+            {
+                return launchers.Values.OrderBy(l => l.Launcher, StringComparer.Ordinal).ToList();
+            }
+        }
+    }
+
+    /// <summary>The workspace providers available, ordered by kind.</summary>
+    public IReadOnlyList<IWorkspaceProvider> Workspaces
+    {
+        get
+        {
+            lock (gate)
+            {
+                return workspaces.OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => w.Value).ToList();
+            }
+        }
+    }
+
+    /// <summary>Makes a launcher available for its launcher, replacing the one registered before; returns that one, or null.</summary>
+    public IAgentLauncher? Register(IAgentLauncher launcher)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        lock (gate)
+        {
+            launchers.TryGetValue(launcher.Launcher, out IAgentLauncher? previous);
+            launchers[launcher.Launcher] = launcher;
+            return previous;
+        }
+    }
+
+    /// <summary>Makes a launcher available unless one already serves its launcher; true when it was registered.</summary>
+    public bool RegisterIfAbsent(IAgentLauncher launcher)
+    {
+        ArgumentNullException.ThrowIfNull(launcher);
+        lock (gate)
+        {
+            return launchers.TryAdd(launcher.Launcher, launcher);
+        }
+    }
+
+    /// <summary>Makes a workspace provider available for its kind, replacing the one registered before; returns that one, or null.</summary>
+    public IWorkspaceProvider? Register(IWorkspaceProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate)
+        {
+            workspaces.TryGetValue(provider.Kind, out IWorkspaceProvider? previous);
+            workspaces[provider.Kind] = provider;
+            return previous;
+        }
+    }
+
+    /// <summary>Makes a workspace provider available unless one already serves its kind; true when it was registered.</summary>
+    public bool RegisterIfAbsent(IWorkspaceProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate)
+        {
+            return workspaces.TryAdd(provider.Kind, provider);
+        }
+    }
+
+    /// <summary>The launcher registered for a launcher id, or null.</summary>
+    public IAgentLauncher? Launcher(string launcher)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(launcher);
+        lock (gate)
+        {
+            return launchers.GetValueOrDefault(launcher);
+        }
+    }
+
+    /// <summary>Removes the launcher of a launcher id; returns it, or null.</summary>
+    public IAgentLauncher? RemoveLauncher(string launcher)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(launcher);
+        lock (gate)
+        {
+            return launchers.Remove(launcher, out IAgentLauncher? removed) ? removed : null;
+        }
+    }
+
+    /// <summary>The workspace provider registered for a kind, or null.</summary>
+    public IWorkspaceProvider? Workspace(string kind)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(kind);
+        lock (gate)
+        {
+            return workspaces.GetValueOrDefault(kind);
         }
     }
 
