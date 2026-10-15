@@ -138,6 +138,7 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
 | `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept in every revision; `wallMinutes` is required |
 | `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it, and the units it did not report (`unreported`), which are charged at the cap |
+| `review` | `conditions` | object list, required for a review of a goal and refused for any other | The goal's evaluation: one verdict per completion condition, in the goal's order, each with its `verdict` (`met`, `not-yet` or `impossible`), its `reason` and the records it `read`, each `{type, id, hash}` |
 
 ## Rules enforced in format 2
 
@@ -249,6 +250,22 @@ provides, or whose covered paths are in a repository with no clone registered he
 due whatever else could not be evaluated. Like status, a living document's `covers` trigger compares its covered paths
 in the working tree; every other input of a verdict is a record, so every machine gives the same verdicts for the same
 records. An evidence statement is always `unknown` to the runtime: the evaluation judges it.
+
+## A goal's evaluation
+
+A review of a goal is its evaluation (the estate's `design/goals.md` § 5), pinned to the goal's exact revision. Its
+`conditions` give, for each completion condition in the goal's order, a `verdict` (`met`, `not-yet` or `impossible`),
+the `reason`, and the records the verdict `read`, each at the hash it pins, which must be the record's own
+(`review.read`); an evidence condition found met names at least one record. One verdict is given for each condition
+(`review.conditions`), and the review's `outcome` follows them: `pass` when every verdict is met, `fail` when one is
+impossible, and `findings` otherwise (`review.outcome`).
+
+The evaluator is a principal other than any step's author (`review.evaluator`). A goal's work is the work orders its
+plan gives and the current ones that name the goal, by any revision, among their `inputs`; the authors of its steps
+are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
+one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
+authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
+goal's current evaluation is the latest one of its exact revision; a revised goal is evaluated afresh.
 
 ## A device keeps its identity
 
