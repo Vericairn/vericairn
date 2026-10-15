@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using Vericairn.Protocol;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -67,6 +68,12 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
 
         return new PreparedWorkspace(directory, branch, Head(directory), false);
     }
+
+    /// <inheritdoc />
+    public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeAudit.Capture(workspace.Path);
+
+    /// <inheritdoc />
+    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline, Capture(workspace), permitted);
 
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
 

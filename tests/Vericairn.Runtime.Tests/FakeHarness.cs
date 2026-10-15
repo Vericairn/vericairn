@@ -149,6 +149,20 @@ internal static class FakeHarness
             case "codex-broken" when listing:
                 Console.Error.WriteLine("error: unrecognized subcommand 'features'");
                 return 2;
+            case "scope-edits":
+                Directory.CreateDirectory("src");
+                Directory.CreateDirectory("docs");
+                Directory.CreateDirectory("ignored");
+                File.WriteAllText("src/allowed.cs", "permitted source");
+                File.WriteAllText("docs/allowed.md", "permitted document");
+                File.WriteAllText(".gitignore", "ignored/\n");
+                File.WriteAllText("ignored/outside.txt", "ignored but outside scope");
+                File.WriteAllText("outside.txt", "untracked and outside scope");
+                File.WriteAllText("committed.txt", "committed and outside scope");
+                File.Move("README.md", "README-old.md");
+                RunEstate.Git(Directory.GetCurrentDirectory(), "add", "README.md", "README-old.md", "src", "docs", ".gitignore", "committed.txt");
+                RunEstate.Git(Directory.GetCurrentDirectory(), "commit", "-q", "-m", "Stand-in changes");
+                return 0;
             case "generic":
                 Emit("The generic harness ran.");
                 return 0;

@@ -54,6 +54,7 @@ public sealed class OperationType : IRecordType
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts and kept in every revision; wallMinutes is required. A run that names its goal starts only while the goal is active, with the units its budget grants, within what remains of them, its concurrency and its attempts per step. Units: " + Caps.Units + ".", 2),
         new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
+        new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
         new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
@@ -334,6 +335,26 @@ public sealed class OperationType : IRecordType
         BodyReader? cap = body.Since(2, "cap") ? body.Nested("cap", false) : null;
         BodyReader? usage = body.Since(2, "usage") ? body.Nested("usage", false) : null;
         BodyReader? stop = body.Since(2, "stop") ? body.Nested("stop", false) : null;
+        BodyReader? scope = body.Since(2, "scope") ? body.Nested("scope", false) : null;
+        if (scope is not null)
+        {
+            long? changed = scope.Number("changed", true, 0, int.MaxValue);
+            long? outside = scope.Number("outsideCount", true, 0, int.MaxValue);
+            IReadOnlyList<string>? paths = scope.StringArray("outside", true, allowEmpty: true, maxItemLength: 600);
+            scope.Text("problem", false, 2000);
+            if (outside > changed || paths?.Count > outside || paths?.Count > 1000)
+            {
+                context.Error("operation.scope", "Scope counts cover every outside path, with at most one thousand names listed.");
+            }
+
+            if (EstateModel.BodyString(context.Record, "action") != AgentRun || status is not ("known-failure" or "observed-success"))
+            {
+                context.Error("operation.scope", "A scope audit describes a settled agent run.");
+            }
+
+            scope.NoOtherKeys();
+        }
+
         BodyReader? liveness = body.Since(2, "liveness") ? body.Nested("liveness", false) : null;
         if (liveness is not null)
         {

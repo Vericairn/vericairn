@@ -133,11 +133,13 @@ public sealed partial class EstateService
 
         // Prepare: the workspace on its work branch, never the shared clone, with the brief exported into it.
         PreparedWorkspace workspace;
+        WorkspaceSnapshot baseline;
         string brief;
         try
         {
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces", Slug(plan.Branch)));
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
+            baseline = workspaces.Capture(workspace);
         }
         catch (ProviderRefusedException exception)
         {
@@ -342,7 +344,7 @@ public sealed partial class EstateService
             previous["dispatchedAt"] = RecordParser.FormatTimestamp(supervisor.LaunchedAt);
         });
         var abandon = new CancellationTokenSource();
-        supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, abandon.Token)), abandon);
+        supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), abandon.Token)), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
         if (excepted is not null)
         {
@@ -383,7 +385,8 @@ public sealed partial class EstateService
                     run.InFlight ? observed?.Heartbeat : null,
                     run.InFlight && Fresh(observed),
                     run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
-                    run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness));
+                    run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
+                    run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null));
             }
 
             var ledgers = new List<LedgerRow>();
@@ -772,7 +775,7 @@ public sealed partial class EstateService
     }
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, CancellationToken abandon)
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, CancellationToken abandon)
     {
         RunOutcome? outcome;
         try
@@ -790,10 +793,20 @@ public sealed partial class EstateService
             return;
         }
 
+        RunScope scope;
+        try
+        {
+            scope = workspaces.CheckScope(workspace, baseline, permitted);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or RegexMatchTimeoutException)
+        {
+            scope = new RunScope(0, 0, [], "The workspace scope audit could not complete; scope is unverified.");
+        }
+
         try
         {
             string? status = null;
-            WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome)["status"]?.GetValue<string>());
+            WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
             supervisor.Settled(settled.Ok ? status : null, settled.Ok ? null : settled.Problem?.Message);
             if (!settled.Ok)
             {
@@ -817,7 +830,7 @@ public sealed partial class EstateService
     }
 
     /// <summary>The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts.</summary>
-    private JsonObject Settle(JsonObject body, RunOutcome outcome)
+    private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope)
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
         TimeSpan elapsed = outcome.ExitedAt - outcome.LaunchedAt;
@@ -859,6 +872,12 @@ public sealed partial class EstateService
                 : $"The harness exited with code {outcome.ExitCode.ToString(CultureInfo.InvariantCulture)} after {took}.";
         }
 
+        if (scope.OutsideCount > 0 || scope.Problem is not null)
+        {
+            summary += $" Scope attention: {scope.OutsideCount.ToString(CultureInfo.InvariantCulture)} changed paths outside the assignment's permitted paths. " + scope.Problem;
+        }
+
+        body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
         body["usage"] = usage;
         if (outcome.Liveness is not null)
