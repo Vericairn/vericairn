@@ -313,7 +313,9 @@ public sealed class EstateService : IEstateApi, IDisposable
                     EstateModel.BodyString(device, "platform"),
                     EstateModel.BodyString(device, "custody"),
                     admission is null ? "not admitted" : EstateModel.BodyString(admission, "status") ?? "?",
-                    stores.Any(s => s.Has(device.Id)));
+                    stores.Any(s => s.Has(device.Id)),
+                    EstateModel.BodyString(device, "presence"),
+                    EstateModel.BodyString(device, "purpose"));
             }).ToList();
         }
     }
@@ -330,15 +332,24 @@ public sealed class EstateService : IEstateApi, IDisposable
         IDeviceKeyStore store;
         try
         {
-            store = DeviceKeyStores.Named(request.Custody);
+            store = DeviceKeyStores.Named(request.Custody, request.Presence);
         }
         catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
         {
-            return Refuse(exception.Message);
+            // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
+            string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
+            return Refuse(message);
         }
 
         lock (gate)
         {
+            // Presence and the Secure Enclave are named in device records from record format 2; an older estate refuses them.
+            long format = session.Load().Manifest?.RecordFormat ?? session.Manifest.RecordFormat;
+            if (format < 2 && (request.Presence || store.Kind == SecureEnclaveCustody.Kind))
+            {
+                return Refuse("A device with presence or Secure Enclave custody is recorded in record format 2; upgrade the estate to a release that writes format 2 first.");
+            }
+
             DateTimeOffset now = DateTimeOffset.UtcNow;
             string id = Ulid.NewUlid(now).Value;
             byte[] publicKey;
@@ -362,6 +373,12 @@ public sealed class EstateService : IEstateApi, IDisposable
                 ["publicKey"] = RecordSigning.EncodePublicKey(publicKey),
                 ["profiles"] = new JsonArray(profiles.Select(p => (JsonNode)p).ToArray()),
             };
+            if (format >= 2)
+            {
+                body["presence"] = request.Presence ? "required" : "none";
+                body["purpose"] = "signing";
+            }
+
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), session.Load(), new StoreSigner(store, id));
             if (!outcome.Ok)

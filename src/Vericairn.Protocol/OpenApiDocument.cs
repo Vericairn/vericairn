@@ -189,7 +189,7 @@ public static class OpenApiDocument
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
-            ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array")),
+            ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
             ["AdmitRequest"] = Object(("device", "string"), ("by", "string"), ("note", "string")),
             ["RevokeRequest"] = Object(("device", "string"), ("by", "string"), ("reason", "string")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object")),

@@ -71,6 +71,31 @@ public class SigningTests : IDisposable
     }
 
     [Fact]
+    public void AFormatTwoDeviceStatesItsPresenceAndPurposeAndClaimsOnlyWhatItsCustodyEnforces()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        CreateDevice(estate, estate.OperatorId, "Workstation", extra: """ ,"presence":"none","purpose":"signing" """);
+        Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+
+        RecordEnvelope bare = CreateDevice(estate, estate.OperatorId, "Bare");
+        RecordEnvelope fileClaims = CreateDevice(estate, estate.OperatorId, "File claims presence", extra: """ ,"presence":"required","purpose":"signing" """);
+        RecordEnvelope agentClaims = CreateDevice(estate, estate.BuilderId, "Agent claims presence", custody: "macos-secure-enclave", extra: """ ,"presence":"required","purpose":"signing" """);
+        RecordEnvelope agentRecovery = CreateDevice(estate, estate.BuilderId, "Agent recovery", extra: """ ,"presence":"none","purpose":"recovery" """);
+        RecordEnvelope enclave = CreateDevice(estate, estate.OperatorId, "Enclave", custody: "macos-secure-enclave", extra: """ ,"presence":"required","purpose":"signing" """);
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.Contains(findings, f => f.Code == "body.missing" && f.Location == bare.ExpectedPath + "#body.presence");
+        Assert.Contains(findings, f => f.Code == "device.presence" && f.Location == fileClaims.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "device.presence" && f.Location == agentClaims.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "device.purpose" && f.Location == agentRecovery.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(enclave.ExpectedPath, StringComparison.Ordinal));
+
+        // Format 1 knows no Secure Enclave and no presence.
+        using var early = new TestEstate();
+        RecordEnvelope old = CreateDevice(early, early.OperatorId, "Old", custody: "macos-secure-enclave");
+        Assert.Contains(early.Load().Findings, f => f.Code == "body.enum" && f.Location == old.ExpectedPath + "#body.custody");
+    }
+
+    [Fact]
     public void TamperedForeignUnadmittedAndRevokedSignaturesAreRejected()
     {
         using var estate = new TestEstate();
@@ -157,11 +182,11 @@ public class SigningTests : IDisposable
         }
     }
 
-    private RecordEnvelope CreateDevice(TestEstate estate, string principal, string name)
+    private RecordEnvelope CreateDevice(TestEstate estate, string principal, string name, string custody = "file-owner-only", string extra = "")
     {
         string id = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
         string publicKey = RecordSigning.EncodePublicKey(store.Create(id));
-        return estate.Add("device", principal, $$"""{"principal":"{{principal}}","name":"{{name}}","platform":"linux","custody":"file-owner-only","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["embedded"]}""", id: id, signer: new StoreSigner(store, id));
+        return estate.Add("device", principal, $$"""{"principal":"{{principal}}","name":"{{name}}","platform":"linux","custody":"{{custody}}","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["embedded"]{{extra}}}""", id: id, signer: new StoreSigner(store, id));
     }
 
     private StoreSigner Signer(RecordEnvelope device) => new(store, device.Id);

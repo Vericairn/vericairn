@@ -141,14 +141,17 @@ public sealed record AmendRequest(string Assignment, string By, JsonElement Body
 /// <param name="Custody">Custody kind.</param>
 /// <param name="Admission">admitted, revoked or not admitted.</param>
 /// <param name="HeldHere">Whether this machine holds its key.</param>
-public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere);
+/// <param name="Presence">required or none: whether each signature needs the owner's presence (record format 2).</param>
+/// <param name="Purpose">signing or recovery (record format 2).</param>
+public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null);
 
 /// <summary>Create a device for a principal on the runtime's machine.</summary>
 /// <param name="Principal">Principal id.</param>
 /// <param name="Name">Device name.</param>
-/// <param name="Custody">Custody: default, file or cng.</param>
+/// <param name="Custody">Custody: default, file, cng, or secure-enclave on a Mac.</param>
 /// <param name="Profiles">Permitted profiles.</param>
-public sealed record DeviceCreateRequest(string Principal, string Name, string? Custody = null, IReadOnlyList<string>? Profiles = null);
+/// <param name="Presence">Whether every signature needs the owner's presence; Secure Enclave custody only.</param>
+public sealed record DeviceCreateRequest(string Principal, string Name, string? Custody = null, IReadOnlyList<string>? Profiles = null, bool Presence = false);
 
 /// <summary>Admit a device.</summary>
 /// <param name="Device">Device id.</param>

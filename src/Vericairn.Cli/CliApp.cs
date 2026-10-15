@@ -473,18 +473,21 @@ internal static class CliApp
 
         var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
         var nameOption = new Option<string>("--name") { Description = "Descriptive device name, never a machine path.", Required = true };
-        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default (CNG on Windows, owner-only file elsewhere), file, or cng." };
+        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default (CNG on Windows, owner-only file elsewhere), file, cng, or secure-enclave on a Mac." };
+        var presenceOption = new Option<bool>("--presence") { Description = "Every signature needs its owner's presence (Touch ID or the login password); Secure Enclave custody only, never for an agent." };
         var profilesOption = new Option<string[]>("--profile") { Description = "Permitted connectivity profile; repeatable (default: embedded).", AllowMultipleArgumentsPerToken = true };
         var create = new Command("create", "Generate a key on this machine and record the device, signed by its own key.");
         create.Options.Add(principalOption);
         create.Options.Add(nameOption);
         create.Options.Add(custodyOption);
+        create.Options.Add(presenceOption);
         create.Options.Add(profilesOption);
         create.SetAction(parseResult => Commands.DevicesCreate(
             parseResult.GetValue(estateOption)!,
             parseResult.GetValue(principalOption)!,
             parseResult.GetValue(nameOption)!,
             parseResult.GetValue(custodyOption),
+            parseResult.GetValue(presenceOption),
             parseResult.GetValue(profilesOption) ?? [],
             parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(create);

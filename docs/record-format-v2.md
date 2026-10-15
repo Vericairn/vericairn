@@ -90,6 +90,9 @@ build cannot read.
 | `verification` | `evidenceClass` | `observation`, `report`, `attestation` or `inference`, optional | How the evidence was obtained: `vericairn check run` records an observation, `vericairn check observe` a host's report |
 | `verification` | `observer` | `person`, `agent`, `automation` or `provider`, optional | What kind of observer made the claim |
 | `verification` | `expires` | timestamp, optional | When the claim stops counting as current and needs observing again; it is later than the record |
+| `device` | `presence` | `required` or `none`, required | Whether each signature needs the owner's presence; `required` only where the custody enforces it (`macos-secure-enclave`), and never for an agent's or a service's device |
+| `device` | `purpose` | `signing` or `recovery`, required | Ordinary signing, or the operator's offline recovery device; a recovery device belongs to an operator |
+| `device` | `custody` | gains `macos-secure-enclave` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
@@ -102,6 +105,7 @@ build cannot read.
   corrects what surrounds them, and different words are a new decision (`decision.statement`).
 - An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
   in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
+- A device revision keeps its principal and its purpose.
 - Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
   without an expiry, as every format-1 grant is, behave as they always did.
 - Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names
