@@ -15,14 +15,11 @@ public sealed class GoalStatusType : IRecordType
     /// <summary>Statuses only the sponsor records: activation and resumption grant the budget, and ending is the sponsor's call.</summary>
     private static readonly string[] SponsorOnly = ["active", "impossible", "abandoned"];
 
-    /// <summary>Statuses after which a goal never moves again.</summary>
-    private static readonly string[] Ended = ["impossible", "abandoned"];
-
     /// <inheritdoc />
     public string Name => "goal-status";
 
     /// <inheritdoc />
-    public string Summary => "A change in a goal's lifecycle: active (activated or resumed by its sponsor, which grants its budget), paused, budget-limited, blocked, impossible (the evaluator's verdict, confirmed by the sponsor) or abandoned. Achievement is the sponsor's acceptance, never a status.";
+    public string Summary => "A change in a goal's lifecycle: active (activated or resumed by its sponsor, a person with the authority to spend, which grants its budget), paused, budget-limited, blocked, impossible (the evaluator's verdict, confirmed by the sponsor) or abandoned. Achievement is an acceptance of the goal, never a status.";
 
     /// <inheritdoc />
     public string? SubjectType => "goal";
@@ -36,7 +33,7 @@ public sealed class GoalStatusType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its sponsor's activation.", 2),
+        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its sponsor's activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force; impossible and abandoned by the sponsor.", 2),
         new("note", "string", true, "Why, and what remains.", 2),
     ];
 
@@ -59,25 +56,29 @@ public sealed class GoalStatusType : IRecordType
             return;
         }
 
-        if (Array.IndexOf(SponsorOnly, status) >= 0 && context.Record.By != EstateModel.BodyString(goal, "sponsor"))
+        if (status == "active")
+        {
+            // Activation and resumption grant the budget: only the sponsor, a person, within the sponsor's authority to spend.
+            foreach ((string code, string message) in GoalRules.ActivationRefusals(context.Model, goal, context.Record.By, context.Record.AtTime))
+            {
+                context.Error(code, message);
+            }
+        }
+        else if (Array.IndexOf(SponsorOnly, status) >= 0 && context.Record.By != EstateModel.BodyString(goal, "sponsor"))
         {
             context.Error("goal-status.sponsor", $"Only the goal's sponsor records it as {status}.");
         }
 
-        RecordEnvelope? previous = context.Model.About(goal.Id, Name)
-            .Where(s => s.Id != context.Record.Id && Before(s, context.Record))
-            .OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal)
-            .LastOrDefault();
+        // The statuses before this one that count: a status its author could not record changes nothing.
+        IReadOnlyList<RecordEnvelope> before = GoalRules.Statuses(context.Model, goal, context.Record);
+        RecordEnvelope? previous = before.Count == 0 ? null : before[^1];
         if (previous is null && status is not ("active" or "abandoned"))
         {
             context.Error("goal-status.first", "A goal starts when its sponsor activates it, or ends unstarted when its sponsor abandons it.");
         }
-        else if (previous is not null && EstateModel.BodyString(previous, "status") is { } last && Array.IndexOf(Ended, last) >= 0)
+        else if (previous is not null && EstateModel.BodyString(previous, "status") is { } last && Array.IndexOf(GoalRules.Ended, last) >= 0)
         {
             context.Error("goal-status.ended", $"The goal ended as {last}; a new objective is a new goal.");
         }
     }
-
-    private static bool Before(RecordEnvelope a, RecordEnvelope b) =>
-        string.CompareOrdinal(a.At, b.At) < 0 || (a.At == b.At && string.CompareOrdinal(a.Id, b.Id) < 0);
 }

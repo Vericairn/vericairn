@@ -69,9 +69,11 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   (proposed by a planner or given as work orders, and who approves it), `limits` and `inputs`.
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
   `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when its sponsor activates it, which grants
-  its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and abandoned;
-  nothing follows impossible or abandoned; a revised goal starts again from its sponsor's activation. Achievement is
-  never a status: it is an operator's acceptance of the goal (the sponsor's, when the sponsor holds the operator role).
+  its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and abandoned,
+  and active only when the sponsor is a person with the authority to spend (see [A goal's activation and
+  acceptance](#a-goals-activation-and-acceptance)); nothing follows impossible or abandoned; a revised goal starts
+  again from its sponsor's activation. Achievement is never a status: it is the goal's acceptance, by its sponsor when
+  the sponsor is a person and by an operator when an agent sponsors it.
 - **`roster`**: who fills each role of the estate's work (planner, builder, reviewer, evaluator, release manager,
   publisher, decider, or a role the estate names), principals in order of preference. One current roster per estate,
   recorded by the operator or under `administer`; the decider role is held by operators, because decisions and
@@ -266,6 +268,35 @@ are the contributor of every assignment of that work and every principal that re
 one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
 authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
 goal's current evaluation is the latest one of its exact revision; a revised goal is evaluated afresh.
+
+## A goal's activation and acceptance
+
+Activating a goal, its first `active` status, and resuming it, an `active` status after `paused`, `budget-limited` or
+`blocked`, grant its budget, which is spending. Only its sponsor records them (`goal-status.sponsor`), and only a
+sponsor who is a person (`goal-status.person`): an agent may propose a goal, as its author or even as its sponsor, but
+never activates or funds one, so a goal an agent sponsors stays proposed until a person revises it, naming themselves
+its sponsor, and activates the revision. The sponsor needs the authority to spend at the time
+(`goal-status.authority`): the operator holds it, and anyone else holds it under a grant of the `spending` scope.
+Like every grant, one recorded later authorizes what came before it, and an expired one authorizes nothing written
+from its expiry on. What is granted is the goal's budget, unit by unit: `wallMinutes` and `attemptsPerStep` always,
+and `tokens`, `concurrency` and `currency` where the goal states them; a unit the goal does not state is not granted,
+never granted without limit. A status counts only when its author could record it, so an activation an agent wrote
+around the runtime activates nothing.
+
+A goal is achieved by an `acceptance` of its exact revision, which:
+
+- is by its sponsor when the sponsor is a person, and by an operator when an agent or a service sponsors it
+  (`acceptance.policy`). This is the rule recommended to the operator, whose decision on who accepts a goal is
+  pending; it is kept in one place, so that the decision changes it alone. Delegating a goal's acceptance to a
+  principal with `accept-work` authority, which the design allows for an ordinary goal, is not built;
+- comes after its sponsor's activation, and before the goal ends as impossible or abandoned (`acceptance.activation`);
+- names in its `basis` the goal's current evaluation, which finds every condition met (`acceptance.evaluation`); an
+  evaluation by a step's author never counts;
+- is never by that evaluation's author, nor by a principal that authored one of the goal's steps
+  (`acceptance.independence`).
+
+Each is judged from the records before the acceptance, so a later record never unmakes it. Until an acceptance passes
+all four, the goal's status is the latest status of its exact revision, and `proposed` before any.
 
 ## A device keeps its identity
 
