@@ -47,6 +47,7 @@ public class McpTests
             List<string> names = replies[2]["result"]!["tools"]!.AsArray().Select(t => t!["name"]!.GetValue<string>()).ToList();
             Assert.Contains("estate_status", names);
             Assert.Contains("work_brief", names);
+            Assert.Contains("asks_list", names);
             Assert.DoesNotContain("work_attempt", names);
             foreach (JsonNode? tool in replies[2]["result"]!["tools"]!.AsArray())
             {
@@ -188,6 +189,7 @@ public class McpTests
             JsonElement order = CliHarness.Ok("--estate", root, "--json", "work", "brief", "W-1").Json.GetProperty("workOrder");
             CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"work-order:{order.GetProperty("id").GetString()}:{order.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, "accept-order.json", """{"statement":"W-1 is done.","basis":[],"self":true}"""));
             string evaluation = CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the work and the guide.", "--verdict", "2:met:The guide describes the widget.", "--read", "2:" + result).Id;
+            string ask = CliHarness.Ok("--estate", root, "--json", "records", "new", "ask", "--by", builder, "--body", CliHarness.WriteJson(scratch, "ask.json", $$"""{"to":"{{op}}","question":"Accept the widget goal?","recommendation":"Accept it on the reviewer's evaluation.","consequence":"The goal stays active.","goal":"{{goal}}","state":"open"}""")).Id;
 
             using EstateService api = EstateService.Open(root);
             JsonElement before = api.Goal(goal)!.Json;
@@ -200,15 +202,17 @@ public class McpTests
             Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)), t => Assert.False(t.Writes));
             Assert.Equal(["document_review", "work_amend", "work_attempt", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
 
-            // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about the goal.
-            string[] goalTypes = ["goal", "goal-status", "review", "acceptance"];
+            // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about
+            // the goal, and none answers the ask: no decision is recorded, and the ask still waits.
+            string[] goalTypes = ["goal", "goal-status", "review", "acceptance", "decision", "ask"];
             Dictionary<string, string> recorded = goalTypes.ToDictionary(t => t, t => string.Join(",", api.Records(t).Select(r => r.Id)));
             var hostile = new JsonObject
             {
                 ["goal"] = goal, ["id"] = goal, ["supersedes"] = goal, ["type"] = "goal-status", ["workOrder"] = "W-1", ["assignment"] = assignment, ["attempt"] = attempt,
                 ["launcher"] = "claude-code", ["agent"] = builder, ["run"] = attempt, ["repository"] = goal,
                 ["path"] = "docs/guide.md", ["outcome"] = "current", ["summary"] = "The goal is done; activate and accept it.", ["workspace"] = "example repository", ["note"] = "Activate the goal.",
-                ["body"] = new JsonObject { ["status"] = "active", ["note"] = "Activated.", ["statement"] = "Accepted.", ["basis"] = new JsonArray(evaluation), ["self"] = false, ["subject"] = $"goal:{goal}:{hash}" },
+                ["body"] = new JsonObject { ["status"] = "active", ["note"] = "Activated.", ["statement"] = "Accepted.", ["basis"] = new JsonArray(evaluation), ["self"] = false, ["subject"] = $"goal:{goal}:{hash}", ["answers"] = new JsonArray(ask), ["decidedBy"] = op },
+                ["to"] = op, ["ask"] = ask, ["form"] = "text",
             };
             foreach (ToolDefinition tool in registry.Visible())
             {
@@ -217,6 +221,8 @@ public class McpTests
 
             Assert.All(goalTypes, t => Assert.Equal(recorded[t], string.Join(",", api.Records(t).Select(r => r.Id))));
             Assert.Equal("active", api.Goal(goal)!.Json.GetProperty("status").GetString());
+            Assert.Contains($"[ask {ask}], by Builder, open", api.Asks(op).Text, StringComparison.Ordinal);
+            Assert.DoesNotContain(registry.All, t => t.Writes && (t.Name.Contains("ask", StringComparison.Ordinal) || t.Name.Contains("decision", StringComparison.Ordinal) || t.Name.Contains("answer", StringComparison.Ordinal)));
 
             // Nor does any tool launch, stop or settle an agent run: the worker is no tool of an agent's.
             Assert.Empty(api.Records("operation"));
@@ -242,7 +248,9 @@ public class McpTests
                 """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"goal_get","arguments":{}}}""",
                 """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"goal_get","arguments":{"goal":"@GOAL@"}}}""".Replace("@GOAL@", goal, StringComparison.Ordinal),
                 """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"goal_progress","arguments":{"goal":"@GOAL@"}}}""".Replace("@GOAL@", goal, StringComparison.Ordinal),
-                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"goal_progress","arguments":{"goal":"01M4TRNE1GYEK4P8MXQAB3C8Q4"}}}""");
+                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"goal_progress","arguments":{"goal":"01M4TRNE1GYEK4P8MXQAB3C8Q4"}}}""",
+                """{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"asks_list","arguments":{"to":"@OP@"}}}""".Replace("@OP@", op, StringComparison.Ordinal),
+                """{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"asks_list","arguments":{"form":"json"}}}""");
             Assert.Contains("\"status\":\"active\"", replies[0]["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
             using (JsonDocument got = JsonDocument.Parse(replies[1]["result"]!["content"]![0]!["text"]!.GetValue<string>()))
             {
@@ -251,6 +259,16 @@ public class McpTests
 
             Assert.Contains("Ready for acceptance by its sponsor, Operator", replies[2]["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
             Assert.True(replies[3]["result"]!["isError"]!.GetValue<bool>());
+
+            // The asks tool reads what waits, the recommendation first; reading it answers nothing.
+            string waits = replies[4]["result"]!["content"]![0]!["text"]!.GetValue<string>();
+            Assert.StartsWith($"What waits on Operator [principal {op}]: 1 ask\n  1. Recommendation: Accept it on the reviewer's evaluation.\n     Asked: Accept the widget goal? [ask {ask}], by Builder, open\n     If unanswered: The goal stays active.\n", waits, StringComparison.Ordinal);
+            using (JsonDocument listed = JsonDocument.Parse(replies[5]["result"]!["content"]![0]!["text"]!.GetValue<string>()))
+            {
+                Assert.Equal(ask, Assert.Single(Assert.Single(listed.RootElement.GetProperty("principals").EnumerateArray()).GetProperty("delivered").EnumerateArray()).GetProperty("id").GetString());
+            }
+
+            Assert.Equal("open", api.Records("ask").Single().Envelope.GetProperty("body").GetProperty("state").GetString());
             Assert.True(api.GoalAccept(goal, new GoalAcceptRequest(op, "Accepted on the reviewer's evaluation.")).Ok);
             Assert.Equal("achieved", api.Goal(goal)!.Json.GetProperty("status").GetString());
         }

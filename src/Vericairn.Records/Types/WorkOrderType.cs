@@ -33,6 +33,7 @@ public sealed class WorkOrderType : IRecordType
         new("deliverables", "string[]", true, "What will exist when the work is done."),
         new("after", "ulid[]", false, "Work orders this one starts after, so the next eligible work can be derived; never itself, never a cycle.", 2),
         new("blockedBy", "reference[]", false, "What holds it: asks, decisions, operations or work orders, as {type, id, hash?}.", 2),
+        new("role", "string", false, "The role of the roster whose principals carry it: planner, builder, reviewer, evaluator, release-manager, publisher, decider, or a role the estate names; builder when omitted. A step whose role is publisher or decider is a reserved action: it reaches only a person who holds it, or an agent a grant in force covers, and otherwise becomes an ask.", 2),
     ];
 
     /// <summary>The records that can hold a work order.</summary>
@@ -111,6 +112,11 @@ public sealed class WorkOrderType : IRecordType
         body.StringArray("deliverables", true, allowEmpty: false, maxItemLength: 2000);
         IReadOnlyList<string>? after = body.Since(2, "after") ? body.StringArray("after", false, allowEmpty: true, maxItemLength: Identity.Ulid.Length) : null;
         IReadOnlyList<BodyReader>? blockedBy = body.Since(2, "blockedBy") ? body.NestedArray("blockedBy", false, allowEmpty: true) : null;
+        if (body.Since(2, "role"))
+        {
+            body.Text("role", false, 60, Patterns.Slug, "a lower-case role name such as builder");
+        }
+
         body.NoOtherKeys();
         After(context, after);
         foreach (BodyReader blocker in blockedBy ?? [])

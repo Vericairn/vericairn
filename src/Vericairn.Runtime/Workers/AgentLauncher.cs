@@ -47,6 +47,13 @@ public interface IAgentLauncher
     /// <summary>True for a launcher that starts any process rather than a harness it knows: listed and run with <see cref="GenericLabel"/>.</summary>
     bool Generic => false;
 
+    /// <summary>
+    /// The harness it starts, as an agent principal's product names it (Claude Code, Codex): routing gives a step to an agent only where
+    /// a launcher for its harness is available (design/goals.md § 6). Null for a launcher that names no harness, such as the generic
+    /// one, which serves no agent by itself.
+    /// </summary>
+    string? Harness => null;
+
     /// <summary>The harness's own configuration variables that pass to it beside the worker's allowlist; never a credential, which never passes.</summary>
     IReadOnlyList<string> EnvironmentNames => [];
 

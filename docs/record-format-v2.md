@@ -86,6 +86,14 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   `recommendation` first, the `consequence` of leaving it unanswered, optional `options` and `goal`, and its `state`.
   It starts `open`; the asker alone revises it, to `notified` (delivery stays unknown) or `withdrawn`, never changing
   the question or whom it is put to. A decision that names it in `answers` answers it; waiting never does.
+- **`custody-exception`**, from 0.6.0: the sponsor's exception to the custody precondition for one goal (the estate's
+  `design/goals.md` § 10), about the goal's exact revision: the `reason` and the time it `expires`, later than the record.
+  While it is in force, a coding agent's run of the goal may launch unattended on a machine where a key of an operator or
+  of the sponsor signs without its owner's presence, and the run names it (see [An agent run and its goal's
+  ledger](#an-agent-run-and-its-goals-ledger)). It is recorded only by who decides for the goal, its sponsor when the
+  sponsor is a person and an operator when an agent sponsors it (`custody-exception.sponsor`); a revision is its author's,
+  about the same goal revision (`custody-exception.revision`), and can bring the expiry forward; a revised goal needs a
+  fresh one.
 - **`possibility`**: an idea captured with its disposition, explicitly not an approval: the `idea`, its `origin`, and
   its `disposition` (open, parked, adopted or declined, with the `reason` unless it is open). An adopted idea names
   what it became in `adoptedAs`: a work order, a decision or a goal. Nothing is authorized by a possibility.
@@ -141,6 +149,9 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `device` | `custody` | gains `macos-secure-enclave` and `offline` | A key generated inside the Secure Enclave and kept as its enclave-wrapped blob, which signs nothing on any other Mac; or a recovery device's key, exported once and kept off every machine |
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
+| `work-order` | `role` | string, optional | The roster role whose principals carry it, `builder` when omitted; a `publisher` or `decider` step is a reserved action (see [Routing a goal's steps](#routing-a-goals-steps)); from 0.6.0 |
+| `assignment` | `routedWith` | `run` or `ask`, optional | Set by routing on an assignment it stores together with the record that carries it: `run`, the `agent-run` intent of a run on it, or `ask`, the ask that names it in `assignment`; until that record exists the assignment holds nothing of its step, so a store interrupted between the two never holds a step; from 0.6.0 |
+| `ask` | `assignment` | ULID, optional | The assignment routing stored together with the ask, of the principal asked (`ask.assignment`); from 0.6.0 |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
 | `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept unchanged in every revision; `wallMinutes` is required, and a run charged to a goal states exactly the units its budget grants (see [An agent run and its goal's ledger](#an-agent-run-and-its-goals-ledger)) |
 | `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it: for each of `wallMinutes`, `tokens` and `currency` its cap states, the amount spent or the unit listed in `unreported`, which is charged at the cap |
@@ -180,7 +191,64 @@ revision) holds it until it is accepted. A record in its `blockedBy` holds it wh
 retired; an operation until its effect is observed (`observed-success`) or it is canceled; a decision while one of the
 obligations it leaves has no discharge. A record the estate does not hold holds it, since nothing shows it free. The
 view reads the records alone, so every machine derives the same one. `vericairn progress` lists the eligible work and,
-for each work order held, every relation with its state; routing by roster and budget is not part of the view yet.
+for each work order held, every relation with its state; `vericairn goal next` routes a goal's eligible steps, below.
+
+## Routing a goal's steps
+
+From 0.6.0 the next-eligible view routes each eligible step of a goal (the estate's `design/goals.md` § 6): the work
+orders of the goal's work that are planned and that nothing holds. A step is carried in a role, the work order's `role`
+or `builder`, and the goal's roster names the principals of the role in order of preference: the goal's own `roles` when
+they name it, otherwise the roster the goal names at its current revision, otherwise the estate's current roster. The
+first of them that is available takes the step:
+
+- an agent, when a launcher for its harness is available on the machine routing it (the launcher's harness is the agent
+  principal's `agent.product`, such as Claude Code or Codex; the generic launcher serves no agent by itself), a key of
+  one of its admitted devices is held there, and the goal's budget leaves something for a run of the step: no charged
+  unit spent and, for a step it already holds, attempts left. Whether the goal is active and how many runs are in flight
+  decide when its run starts, not who carries the step;
+- a person, when the estate holds its principal record and it holds the role (the decider role is an operator's).
+
+A step whose role is `publisher` or `decider` is a reserved action: publication, or a decision such as a release's or a
+milestone's acceptance. It reaches only a person who holds the action, an operator or, for publication, a principal with
+a grant of the `publication` scope in force, or an agent such a grant covers. A grant in force covers the action for
+every goal while it lasts.
+
+A step a principal holds stays with it: a run of it in flight; the latest current assignment of its work order, which is
+a person's (the step is with that person) or an agent's (its result goes to review, a review by another principal with
+outcome `findings` or `fail` sends it back to the agent for another attempt, and otherwise the agent goes on with
+another run while it is available); or an ask about it, an ask whose subject is the work order and whose `goal` is the
+goal, while the ask waits. An agent that holds a step and cannot go on is never replaced by another contributor, since
+another assignment would start its attempts afresh.
+
+When no principal is available the step is an ask: to who decides for the goal (its sponsor when a person, otherwise the
+operator who activated it), or, for a reserved action that principal does not hold, to the estate's root operator. The view
+never falls back to a principal the roster does not name, and a principal who answered an ask about the step is not
+asked again while the answer holds. Each eligible step's route is one of `agent`, `person`, `reserved` or `unavailable`,
+which the one-step operation acts on, or a state that holds it: `running`, `assigned`, `review`, `asked` or `answered`.
+The view also says whether the goal's budget allows each step now. It reads the machine's launchers and keys, so unlike
+the progress report it is not the same on every machine; it is a read-only query, and it records and starts nothing.
+
+The one-step operation (`vericairn goal step`) records what a route produces: for a step routed to a principal it chose,
+an `assignment` to that principal, whose brief names the work order and the goal among its sources, prohibits every
+reserved action unless a grant in force covers it, names the grant that lets its principal carry a reserved step, and
+whose note says why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is
+the work order (without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it
+unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask:
+the two are judged together, their content checks included, before either is stored. Storing them is not atomic, so
+routing marks the assignment with `routedWith`, and an assignment whose `run` intent or `ask` does not exist holds
+nothing of its step: a store that stops between the two never holds a step, and the stranded assignment stays a
+record, as every record does. The runtime that stores them keeps a journal of the pair on its machine and, until the
+step is held again or is no longer planned, reports a pair it stopped storing part-way as a reconcile task,
+`batch.incomplete`, naming what was stored and what was not.
+From 0.6.0 an `assignment` of a step of a goal may also be recorded by the goal's sponsor when the sponsor is a person,
+beside the operator and a principal holding `local-engineering`; the goal and its work are judged as they were when the
+assignment was recorded.
+
+A hand-over of a step an agent holds to a person (`vericairn work takeover`) is an `assignment` of the step to the person,
+whose brief carries the agent's brief with the agent's assignment among its sources. From 0.6.0 any `assignment` of a
+person to a work order whose latest assignment recorded before it is an agent's or a service's is a hand-over, whatever its
+brief says, and is recorded by a person only: the person taking the step over, the sponsor of a goal the step belongs to,
+or an operator (`assignment.handover`). An agent never records one, whatever scope it holds.
 
 ## Living documents due
 
@@ -355,11 +423,19 @@ A coding agent's run is an operation of action `agent-run` (the estate's `design
 01M4YBR5PGCPQD94BVNC547EBA). The worker, `vericairn worker run` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)),
 records its intent before anything starts: its identity is `agent-run:` and the intent's id, which is the run's id; its
 `provider` the launcher; its `target` the `assignment`, the agent `principal`, the `workspace` as a repository and branch
-(never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key and the
-worker contract (`worker`: `vericairn.worker/1`); and its `cap`, taken from the goal's budget. The intent is the
+(never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key, the
+worker contract (`worker`: `vericairn.worker/1`) and, for a run launched under it, the sponsor's `custodyException`, which
+must have covered the goal's revision when the intent was recorded, unexpired and not yet replaced by a revision recorded
+before the intent (`operation.custody`), judged as of the intent so that a later revision or expiry leaves the run valid;
+and its `cap`, taken from the goal's budget. Beside the operator and a principal holding `local-engineering`, who record
+every external operation, the sponsor of the goal a run is charged to records the run's operation when the sponsor is a
+person, from 0.6.0 (`operation.author`). The intent is the
 `not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
-(`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
-operation never records that the work is done: the agent's result is a claim another principal reviews.
+(`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. A run
+whose custody precondition no longer holds when its harness is about to start, judged again then, is `canceled` before
+any dispatch, from 0.6.0, with what was observed naming the devices and the exception its intent named: it is neither
+in flight nor charged. The operation never records that the work is done: the agent's result is a claim another
+principal reviews.
 
 A run is charged to its goal, unit by unit:
 

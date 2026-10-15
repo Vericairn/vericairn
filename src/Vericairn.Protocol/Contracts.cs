@@ -244,6 +244,68 @@ public sealed record GoalRow(string Id, string Hash, string Title, string Status
 public sealed record GoalResponse(string Text, JsonElement Json);
 
 /// <summary>
+/// A goal's next steps routed from the runtime's machine (the next-eligible view with routing and budget): each of its steps with the
+/// state status derives, what holds each planned one, and for each eligible one the principal its role's roster reaches, or why none
+/// is available, with whether the goal's budget allows it; the goal's ledger and its asks. It reads that machine's launchers and keys,
+/// so it is not the same on every machine; reading it records and starts nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.next/1.</param>
+public sealed record NextResponse(string Text, JsonElement Json);
+
+/// <summary>
+/// Take a goal's next step, one at a time (the smallest form of Community's conductor): the first eligible step whose route acts, routed
+/// from the runtime's machine. An agent's step is assigned to the agent when no assignment holds it and its run starts through the
+/// worker, within the custody precondition; a person's step is assigned to the person and asked of them; a step no principal is
+/// available for is asked of the sponsor. Nothing else is dispatched, and nothing is accepted.
+/// </summary>
+/// <param name="By">The principal recording the assignment, the ask and the run: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="Repository">For an agent's step, the repository resource whose registered clone its workspace is made from.</param>
+/// <param name="Settings">For an agent's step, the settings of the launcher routing chose, for example command.</param>
+/// <param name="WallMinutes">For an agent's step, the run's cap in wall minutes; what remains of the goal's budget when omitted, and never more.</param>
+/// <param name="Branch">For an agent's step, the work branch; work/ and the work order's key when omitted.</param>
+/// <param name="Base">For an agent's step, what a new work branch starts from.</param>
+public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null);
+
+/// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
+/// <param name="Goal">The goal's current revision.</param>
+/// <param name="Outcome">run (an agent's run started), ask (an ask recorded, with an assignment for a person), or none (nothing to dispatch).</param>
+/// <param name="Message">What happened and what follows, in words.</param>
+/// <param name="Ok">Whether the step was taken as routed, or there was nothing to take.</param>
+/// <param name="Step">The step taken: its work order's key.</param>
+/// <param name="Route">Its route: agent, person, reserved or unavailable.</param>
+/// <param name="Principal">The principal it reached: the agent, or the person asked.</param>
+/// <param name="Assignment">The assignment written to the chosen principal, when this call wrote one.</param>
+/// <param name="Ask">The ask written, when this call wrote one.</param>
+/// <param name="Run">For an agent, what starting its run did.</param>
+/// <param name="Problem">Why nothing was dispatched.</param>
+public sealed record GoalStepResponse(string Goal, string Outcome, string Message, bool Ok, string? Step = null, string? Route = null, string? Principal = null, RecordWritten? Assignment = null, RecordWritten? Ask = null, RunResponse? Run = null, Problem? Problem = null);
+
+/// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
+/// <param name="Assignment">The agent's assignment, which holds the step.</param>
+/// <param name="By">The principal recording the hand-over: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="Contributor">The person who takes the step over; the recording principal when omitted.</param>
+/// <param name="Note">Why; a sentence naming the hand-over when omitted.</param>
+public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null);
+
+/// <summary>What a hand-over did: the assignment written, and the stop asked of every run of the agent's assignment still in flight.</summary>
+/// <param name="Message">What happened, in words.</param>
+/// <param name="Ok">Whether the hand-over was recorded.</param>
+/// <param name="Assignment">The person's assignment, the hand-over record.</param>
+/// <param name="Stops">The stops asked of the agent's runs in flight, each with what was observed.</param>
+/// <param name="Problem">Why nothing was recorded.</param>
+public sealed record TakeoverResponse(string Message, bool Ok, RecordWritten? Assignment = null, IReadOnlyList<RunStopResponse>? Stops = null, Problem? Problem = null);
+
+/// <summary>
+/// What waits on a principal, or on every principal: the asks still open or notified, oldest first, at most three delivered to each
+/// principal with the recommendation first and the consequence of leaving it unanswered, and the rest waiting in order behind them.
+/// The same on every machine for the same records; reading it answers nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.asks/1.</param>
+public sealed record AsksResponse(string Text, JsonElement Json);
+
+/// <summary>
 /// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
 /// activation. Anyone may propose a new goal; a revision of an existing one is recorded only by its sponsor when the sponsor is a
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).

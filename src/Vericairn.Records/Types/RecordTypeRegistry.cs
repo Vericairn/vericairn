@@ -32,6 +32,7 @@ public static class RecordTypeRegistry
         new GoalStatusType(),
         new RosterType(),
         new AskType(),
+        new CustodyExceptionType(),
         new PossibilityType(),
         new DischargeType(),
         new CredentialReferenceType(),

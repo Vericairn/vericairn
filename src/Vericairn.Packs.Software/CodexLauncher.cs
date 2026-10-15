@@ -27,6 +27,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public string Launcher => LauncherId;
 
     /// <inheritdoc />
+    public string? Harness => "Codex";
+
+    /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "codex-cli",
         IAgentLauncher.Contract,

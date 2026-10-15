@@ -74,6 +74,28 @@ public static partial class EstateChecks
         return findings;
     }
 
+    /// <summary>
+    /// The checks a file of the estate gets once it is stored, run on its bytes before it is: its size, then for a text file its
+    /// encoding, line endings, machine paths, credential-shaped text and keys, and its prose. For records judged together before any
+    /// of them is stored, which the checks of stored files cannot see yet.
+    /// </summary>
+    public static FindingList Content(string relativePath, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        ArgumentNullException.ThrowIfNull(bytes);
+        var findings = new FindingList();
+        if (bytes.Length > EstateLayout.MaxFileBytes)
+        {
+            findings.Error("layout.size", relativePath, $"{bytes.Length:N0} bytes exceeds the {EstateLayout.MaxFileBytes:N0}-byte limit; large artifacts go to releases and are referenced by hash.");
+        }
+        else if (IsTextFile(relativePath))
+        {
+            ScanText(bytes, relativePath, findings);
+        }
+
+        return findings;
+    }
+
     private static IEnumerable<string> Walk(string root)
     {
         foreach (string entry in Directory.EnumerateFileSystemEntries(root).OrderBy(e => e, StringComparer.Ordinal))
@@ -120,9 +142,10 @@ public static partial class EstateChecks
         }
     }
 
-    private static void ScanText(string file, string relative, FindingList findings)
+    private static void ScanText(string file, string relative, FindingList findings) => ScanText(File.ReadAllBytes(file), relative, findings);
+
+    private static void ScanText(byte[] bytes, string relative, FindingList findings)
     {
-        byte[] bytes = File.ReadAllBytes(file);
         if (Array.IndexOf(bytes, (byte)0) >= 0)
         {
             findings.Warning("layout.binary", relative, "Looks binary despite its name; binary content belongs under objects/ or in a release.");

@@ -46,7 +46,7 @@ public sealed class OperationType : IRecordType
         new("action", "string", true, "The declared operation, for example dispatch-release-workflow."),
         new("identity", "string", true, "The original identity the effect is reconciled under; unique among current operations."),
         new("intent", "string", true, "The intended effect, in a sentence."),
-        new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; for an agent run, its assignment, its principal, its workspace (a repository and branch, never a machine path), the goal it is charged to and the worker contract; string values only."),
+        new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; for an agent run, its assignment, its principal, its workspace (a repository and branch, never a machine path), the goal it is charged to, the worker contract and, for a run launched under it, the sponsor's custody exception (custodyException); string values only."),
         new("status", string.Join('|', Statuses), true, "not-started, dispatched, observed-success, known-failure, canceled or uncertain."),
         new("dispatchedAt", "timestamp", false, "When the dispatch was made; required once dispatched."),
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
@@ -138,7 +138,38 @@ public sealed class OperationType : IRecordType
             {
                 context.Error(code, message);
             }
+
+            // A run launched under the sponsor's custody exception names one that covered the goal's revision when its intent was
+            // recorded, judged as of then: neither expired nor replaced by a revision recorded before the intent.
+            if (target.TryGetProperty("custodyException", out JsonElement excepted) && excepted.ValueKind == JsonValueKind.String
+                && (context.Find(excepted.GetString()) is not RecordEnvelope exception || !CustodyExceptions.CoveredWhen(context.Model, exception, goal, context.Record)))
+            {
+                context.Error("operation.custody", $"The run names custody exception {excepted.GetString()}, which did not cover goal {goal.Id}'s revision when the run was recorded: an exception is recorded by who decides for the goal, about its exact revision, is in force until its expiry, and a revision of it replaces it.");
+            }
         }
+        else if (context.Record.Supersedes is null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("custodyException", out _))
+        {
+            context.Error("operation.custody", "A run names a custody exception only with the goal it is charged to, whose exception it is.");
+        }
+    }
+
+    /// <summary>
+    /// True for an agent run, from record format 2, recorded by who decides for the goal it is charged to when that is a person, its
+    /// sponsor: taking a step of the goal under its activation, which granted the budget the run spends (design/goals.md §§ 6 and 9). The
+    /// goal is judged at its revision when the record was written.
+    /// </summary>
+    private static bool SponsorsRun(ValidationContext context)
+    {
+        if (context.Format < 2 || EstateModel.BodyString(context.Record, "action") != AgentRun
+            || !context.Record.Body.TryGetProperty("target", out JsonElement target) || target.ValueKind != JsonValueKind.Object
+            || !target.TryGetProperty("goal", out JsonElement named) || named.ValueKind != JsonValueKind.String
+            || AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record) is not RecordEnvelope goal)
+        {
+            return false;
+        }
+
+        GoalRules.Accepter decider = GoalRules.AccepterOf(context.Model, goal, context.Record);
+        return decider.Principal is not null && decider.Principal == context.Record.By;
     }
 
     /// <summary>A revision keeps the cap its run's intent recorded: what a run may spend is fixed before it starts.</summary>
@@ -280,9 +311,9 @@ public sealed class OperationType : IRecordType
         {
             context.Error("operation.author", $"Principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering) && !SponsorsRun(context))
         {
-            context.Error("operation.author", "External operations are recorded by the operator or under the 'local-engineering' scope.");
+            context.Error("operation.author", "External operations are recorded by the operator or under the 'local-engineering' scope; an agent's run of a goal also by the goal's sponsor when the sponsor is a person.");
         }
 
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);

@@ -28,6 +28,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/attempt"),
         ("POST", "/v1/work/result"),
         ("POST", "/v1/work/amend"),
+        ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
         ("POST", "/v1/devices"),
         ("POST", "/v1/devices/admit"),
@@ -38,9 +39,12 @@ public static class OpenApiDocument
         ("GET", "/v1/releases"),
         ("GET", "/v1/documents"),
         ("POST", "/v1/documents/{id}/reviews"),
+        ("GET", "/v1/asks"),
         ("GET", "/v1/goals"),
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
+        ("GET", "/v1/goals/{id}/next"),
+        ("POST", "/v1/goals/{id}/step"),
         ("POST", "/v1/goals/{id}/activate"),
         ("POST", "/v1/goals/{id}/pause"),
         ("POST", "/v1/goals/{id}/resume"),
@@ -101,6 +105,11 @@ public static class OpenApiDocument
             if (method == "GET" && path == RuntimeIdentityScheme.Path)
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
+            }
+
+            if (method == "GET" && path == "/v1/asks")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "to", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "The principal asked, by id; every principal when omitted." });
             }
 
             if (path.Contains('{', StringComparison.Ordinal))
@@ -184,6 +193,11 @@ public static class OpenApiDocument
         else if (method == "POST" && path.StartsWith("/v1/runs", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = path == "/v1/runs" ? "RunResponse: what was recorded and launched; a problem inside when nothing was launched." : "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked." };
+            responses.Remove("404");
+        }
+        else if (method == "POST" && path is "/v1/goals/{id}/step" or "/v1/work/takeover")
+        {
+            responses["200"] = new JsonObject { ["description"] = path == "/v1/work/takeover" ? "TakeoverResponse: the hand-over recorded and the stops asked; a problem inside when nothing was recorded." : "GoalStepResponse: what was recorded and started; a problem inside when nothing was dispatched." };
             responses.Remove("404");
         }
         else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
@@ -274,6 +288,10 @@ public static class OpenApiDocument
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
             ["GoalVerdict"] = Object(("condition", "integer"), ("verdict", "string"), ("reason", "string"), ("read", "array")),
             ["GoalAcceptRequest"] = Object(("by", "string"), ("statement", "string")),
+            ["GoalStepRequest"] = Object(("by", "string"), ("repository", "string"), ("settings", "object"), ("wallMinutes", "integer"), ("branch", "string"), ("base", "string")),
+            ["GoalStepResponse"] = Object(("goal", "string"), ("outcome", "string"), ("message", "string"), ("ok", "boolean"), ("step", "string"), ("route", "string"), ("principal", "string"), ("assignment", "object"), ("ask", "object"), ("run", "object"), ("problem", "object")),
+            ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
+            ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
@@ -303,6 +321,8 @@ public static class OpenApiDocument
         "/v1/work/attempt" => "AttemptRequest",
         "/v1/work/result" => "ResultRequest",
         "/v1/work/amend" => "AmendRequest",
+        "/v1/work/takeover" => "TakeoverRequest",
+        "/v1/goals/{id}/step" => "GoalStepRequest",
         "/v1/devices" => "DeviceCreateRequest",
         "/v1/devices/admit" => "AdmitRequest",
         "/v1/devices/rename" => "DeviceRenameRequest",
@@ -349,6 +369,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/attempt") => "Record the start of an attempt.",
         ("POST", "/v1/work/result") => "Submit the result of an attempt: a claim to inspect.",
         ("POST", "/v1/work/amend") => "Request an amendment; it authorizes nothing.",
+        ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",
         ("POST", "/v1/devices") => "Create a device on the runtime's machine.",
         ("POST", "/v1/devices/admit") => "Admit a device.",
@@ -359,9 +380,12 @@ public static class OpenApiDocument
         ("GET", "/v1/releases") => "Current release records.",
         ("GET", "/v1/documents") => "The declared living documents with their derived state: current, due with every trigger newer than the latest clearance, or unavailable with the contributions no installed pack provides.",
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
+        ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
+        ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
+        ("POST", "/v1/goals/{id}/step") => "Take an active goal's next step, one at a time, as an operator, the goal's sponsor when a person, or a principal holding local-engineering: its first eligible step whose route acts, routed from the runtime's machine. An agent's step goes on with the assignment that holds it, or is assigned to the agent together with its run's intent after the worker's whole preflight, and its run starts through the worker; every refusal before the intent, custody, the budget, the repository, the launcher or the workspace, records nothing, the assignment included. A person's step is assigned to the person and asked of them, the recommendation first, the two recorded together; a step no principal is available for is asked of the sponsor, never given to a contributor the roster does not name. It activates, funds, accepts and answers nothing.",
         ("POST", "/v1/goals/{id}/activate") => "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it; an agent never activates a goal.",
         ("POST", "/v1/goals/{id}/pause") => "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors.",
         ("POST", "/v1/goals/{id}/resume") => "Resume a paused, budget-limited or blocked goal, which grants its budget again; by whoever may activate it.",
@@ -371,7 +395,7 @@ public static class OpenApiDocument
         ("GET", "/v1/providers") => "The provider and adapter implementations available to the runtime on its machine, with their declared settings, destinations and served locations: release providers, source adapters, coding-agent launchers and workspace providers.",
         ("GET", "/v1/launchers") => "The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, with their settings and limitations; a generic launcher is labeled as not complete agent support.",
         ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight) and a stop's facts; and the ledger of every goal with a run or active now.",
-        ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. Nothing is accepted.",
+        ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
         ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",

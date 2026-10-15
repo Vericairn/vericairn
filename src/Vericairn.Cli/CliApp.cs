@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
@@ -50,6 +50,12 @@ internal static class CliApp
         var progress = new Command("progress", "Show the progress report, rendered from the records alone: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(progress);
+
+        var ask = new Command("ask", "Show what waits on a principal, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order. Reading them answers nothing; an ask is answered by a decision of the principal it is put to that names it in its answers.");
+        var toOption = new Option<string?>("--to") { Description = "The principal asked (ULID); every principal when omitted." };
+        ask.Options.Add(toOption);
+        ask.SetAction(parseResult => Commands.Ask(parseResult.GetValue(estateOption)!, parseResult.GetValue(toOption), parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(ask);
 
         var decisions = new Command("decisions", "List the estate's current decisions, or show one cleanly.");
         var decisionIdArgument = new Argument<string?>("id") { Description = "Decision record id (any revision); omit to list.", Arity = ArgumentArity.ZeroOrOne };
@@ -671,6 +677,10 @@ internal static class CliApp
         show.Arguments.Add(shownArgument);
         show.SetAction(parseResult => Commands.Goal(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(show);
+        var next = new Command("next", "Show a goal's next steps routed from this machine: each eligible step with the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, whether the goal's budget allows it, and what holds the others. It records and starts nothing; vericairn goal step takes the next one.");
+        next.Arguments.Add(shownArgument);
+        next.SetAction(parseResult => Commands.GoalNext(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(next);
 
         var byOption = new Option<string>("--by") { Description = "Acting principal id (ULID).", Required = true };
         var goalArgument = new Argument<string>("goal") { Description = "Goal record id (any revision)." };
@@ -740,6 +750,45 @@ internal static class CliApp
             goal.Subcommands.Add(command);
         }
 
+        var reasonOption = new Option<string>("--reason") { Description = "Why unattended runs of the goal may launch while such a key signs where they run.", Required = true };
+        var expiresOption = new Option<string>("--expires") { Description = "When the exception stops being in force, for example 2026-10-20T00:00:00Z.", Required = true };
+        var exception = new Command("custody-exception", "Record the sponsor's exception to the custody precondition for a goal's current revision: until it expires, a coding agent's run of the goal may launch unattended on a machine where a key of an operator or of the sponsor signs without its owner's presence, and the run names the exception. Recorded only by the goal's sponsor, or by an operator when an agent sponsors it; a revised goal needs a fresh one.");
+        exception.Arguments.Add(goalArgument);
+        exception.Options.Add(byOption);
+        exception.Options.Add(reasonOption);
+        exception.Options.Add(expiresOption);
+        exception.SetAction(parseResult => Commands.GoalCustodyException(parseResult.GetValue(estateOption)!, parseResult.GetValue(goalArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(expiresOption)!, parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(exception);
+
+        var repositoryOption = new Option<string?>("--repository") { Description = "For an agent's step, the repository resource whose clone, registered on this machine (vericairn sources clone), its workspace is made from." };
+        var settingOption = new Option<string[]>("--setting") { Description = "For an agent's step, a setting of the launcher routing chose, as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
+        var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "For an agent's step, the run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
+        var branchOption = new Option<string?>("--branch") { Description = "For an agent's step, the work branch; work/ and the work order's key when omitted." };
+        var baseOption = new Option<string?>("--base") { Description = "For an agent's step, what a new work branch starts from; the clone's HEAD when omitted." };
+        var detachOption = new Option<bool>("--detach") { Description = "Return once an agent's run is launched, leaving it to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
+        var step = new Command("step", "Take a goal's next step, one at a time: its first eligible step whose route acts, routed from this machine by the goal's roster, for an operator, the goal's sponsor when a person, or a principal holding local-engineering. An agent's step goes on with the assignment that holds it, or is assigned to the agent with the run's intent, after the worker's whole preflight, and its run starts through the worker; every refusal before the intent records nothing, the assignment included, as while a key of an operator or of the sponsor signs here without presence and no custody exception is in force. A person's step is assigned to the person and asked of them, the two recorded together; a step no principal is available for is asked of the sponsor, never given to another contributor. It activates, funds, accepts and answers nothing.");
+        step.Arguments.Add(shownArgument);
+        step.Options.Add(byOption);
+        step.Options.Add(repositoryOption);
+        step.Options.Add(settingOption);
+        step.Options.Add(wallMinutesOption);
+        step.Options.Add(branchOption);
+        step.Options.Add(baseOption);
+        step.Options.Add(detachOption);
+        step.SetAction(parseResult => Commands.GoalStep(
+            parseResult.GetValue(estateOption)!,
+            new Commands.GoalStepOptions(
+                parseResult.GetValue(shownArgument),
+                parseResult.GetValue(byOption)!,
+                parseResult.GetValue(repositoryOption),
+                parseResult.GetValue(settingOption) ?? [],
+                parseResult.GetValue(wallMinutesOption),
+                parseResult.GetValue(branchOption),
+                parseResult.GetValue(baseOption),
+                parseResult.GetValue(detachOption)),
+            parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(step);
+
         var summaryOption = new Option<string>("--summary") { Description = "What was reviewed and how.", Required = true };
         var verdictOption = new Option<string[]>("--verdict") { Description = "A condition's verdict, n:verdict:reason with n from 1 and the verdict met, not-yet or impossible; repeatable. Every evidence statement needs one; a record predicate gets the runtime's, unless the evaluator judges one the runtime does not find met impossible." };
         var readOption = new Option<string[]>("--read") { Description = "A record the evaluator read for a condition, n:record-id; repeatable. An evidence statement found met names at least one." };
@@ -781,7 +830,7 @@ internal static class CliApp
         var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
         var settingOption = new Option<string[]>("--setting") { Description = "A launcher setting as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
         var detachOption = new Option<bool>("--detach") { Description = "Return once the harness is launched, leaving the run to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
-        var run = new Command("run", "Run a coding agent on an assignment: refused while the goal is not active or its budget is spent, while a device of an operator or the goal's sponsor signs here without presence, or when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, the harness launched with the brief and the MCP server, observed, and its usage recorded once it exits.");
+        var run = new Command("run", "Run a coding agent on an assignment: refused while the goal is not active or its budget is spent, while a device of an operator or the goal's sponsor signs here without presence and the sponsor recorded no custody exception in force for the goal, or when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, the harness launched with the brief and the MCP server, observed, and its usage recorded once it exits.");
         run.Arguments.Add(assignmentArgument);
         run.Options.Add(launcherOption);
         run.Options.Add(agentOption);
@@ -903,6 +952,16 @@ internal static class CliApp
             parseResult.GetValue(bodyOption)!,
             parseResult.GetValue(jsonOption)));
         work.Subcommands.Add(amend);
+
+        var takenOption = new Option<string?>("--contributor") { Description = "The person who takes the step over; the recording principal when omitted." };
+        var takeoverNoteOption = new Option<string?>("--note") { Description = "Why; a sentence naming the hand-over when omitted." };
+        var takeover = new Command("takeover", "Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming the agent's assignment, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop. A person records it, the one taking the step over, the sponsor of its goal or an operator, never an agent.");
+        takeover.Arguments.Add(assignmentArgument);
+        takeover.Options.Add(byOption);
+        takeover.Options.Add(takenOption);
+        takeover.Options.Add(takeoverNoteOption);
+        takeover.SetAction(parseResult => Commands.WorkTakeover(parseResult.GetValue(estateOption)!, parseResult.GetValue(assignmentArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(takenOption), parseResult.GetValue(takeoverNoteOption), parseResult.GetValue(jsonOption)));
+        work.Subcommands.Add(takeover);
 
         var observe = new Command("observe", "Show a work order's assignments, attempts, results, amendments, reviews and acceptances.");
         observe.Arguments.Add(keyArgument);

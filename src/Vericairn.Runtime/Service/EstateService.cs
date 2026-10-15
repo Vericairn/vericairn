@@ -62,7 +62,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        return new EstateService(EstateSession.Open(root));
+        var service = new EstateService(EstateSession.Open(root));
+        service.JudgeInterruptedBatches();
+        return service;
     }
 
     /// <summary>The product version of this runtime.</summary>
@@ -84,7 +86,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            FindingList checks = EstateChecks.Run(model);
+            FindingList checks = ChecksWithBatches(model);
             using JsonDocument json = JsonDocument.Parse(EstateStatus.RenderJson(model, checks));
             return new StatusResponse(EstateStatus.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
         }
@@ -845,6 +847,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             return WriteLocked(new RecordDraft("document-review", request.By, document.RootElement, declared.Reference), model);
+        }
+    }
+
+    /// <inheritdoc />
+    public AsksResponse Asks(string? principal = null)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            using JsonDocument json = JsonDocument.Parse(global::Vericairn.Records.Estate.Asks.RenderJson(model, principal));
+            return new AsksResponse(global::Vericairn.Records.Estate.Asks.RenderText(model, principal), json.RootElement.Clone());
         }
     }
 
@@ -2072,7 +2085,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+            foreach (Finding finding in model.Findings.Concat(ChecksWithBatches(model)))
             {
                 all.Add(finding);
             }
@@ -2087,7 +2100,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            return Recovery.Inspect(model, EstateChecks.Run(model));
+            return Recovery.Inspect(model, ChecksWithBatches(model));
         }
     }
 
@@ -2198,12 +2211,40 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs, stores and validates; a record that would make the estate invalid is removed again. Caller holds the gate.</summary>
     private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
+        if (record is null)
+        {
+            return Refuse(refusal!);
+        }
+
+        try
+        {
+            session.Write(record);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return Refuse(exception.Message);
+        }
+
+        FindingList relevant = Invalid(session.Load(), [record], stored: true);
+        if (relevant.HasErrors)
+        {
+            session.Discard(record);
+            return WriteOutcome.Fail(new Problem("rejected", $"Not written: the estate would be invalid with this record ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
+        }
+
+        return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+    }
+
+    /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
+    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
+    {
         if (signers is null)
         {
             string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
             if (refusal is not null)
             {
-                return Refuse(refusal);
+                return (null, refusal);
             }
 
             signers = signer is null ? [] : [signer];
@@ -2221,41 +2262,173 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
-        AuthoredRecord record;
         try
         {
-            record = RecordAuthor.Create(draft, signers);
-            session.Write(record);
+            return (RecordAuthor.Create(draft, signers), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return Refuse(exception.Message);
+            return (null, exception.Message);
+        }
+    }
+
+    /// <summary>A test's hook, called before each record a batch stores: a test throws from it to stop a batch between its records.</summary>
+    internal Action<AuthoredRecord>? BeforeStoringTogether { get; set; }
+
+    /// <summary>
+    /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
+    /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
+    /// make it invalid. The store is not atomic: a journal naming the batch is written on this machine before the first record and
+    /// removed after the last, so a batch that stops part-way, by a failure or a crash, stays a reconcile task naming what was stored,
+    /// and none of its records is ever removed. A store that fails part-way returns what it stored with the problem. Caller holds the gate.
+    /// </summary>
+    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder)
+    {
+        FindingList relevant = Invalid(LoadWith(records), records, stored: false);
+        if (relevant.HasErrors)
+        {
+            return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings));
         }
 
-        EstateModel model = session.Load();
+        BatchJournal journal;
+        try
+        {
+            journal = BatchJournal.Begin(session, purpose, workOrder, records);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({exception.Message}).", []));
+        }
+
+        var written = new List<RecordWritten>();
+        foreach (AuthoredRecord record in records)
+        {
+            try
+            {
+                BeforeStoringTogether?.Invoke(record);
+                session.Write(record);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                // A batch that stored nothing leaves nothing to report; one that stored part keeps its journal, a reconcile task.
+                if (written.Count == 0)
+                {
+                    journal.Close();
+                }
+
+                return (written, new Problem("refused", $"Not written: {exception.Message}", []));
+            }
+
+            written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+        }
+
+        journal.Close();
+        return (written, null);
+    }
+
+    /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
+    private void JudgeInterruptedBatches()
+    {
+        if (BatchJournal.All(session).Count == 0)
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            InterruptedBatches(session.Load());
+        }
+    }
+
+    /// <summary>The estate's checks with this machine's interrupted batches among them, as status, reconcile and inspect show them. Caller holds the gate.</summary>
+    private FindingList ChecksWithBatches(EstateModel model)
+    {
+        FindingList checks = EstateChecks.Run(model);
+        foreach (Finding finding in InterruptedBatches(model))
+        {
+            checks.Add(finding);
+        }
+
+        return checks;
+    }
+
+    /// <summary>
+    /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what
+    /// was stored and what was not. A journal no longer matters, and is removed, when its batch was stored whole or not at all, when
+    /// its stored assignment is carried after all by the record it was routed with, or when its step is held again or no longer
+    /// planned. Removing a journal removes no record. Caller holds the gate.
+    /// </summary>
+    private FindingList InterruptedBatches(EstateModel model)
+    {
+        var findings = new FindingList();
+        foreach (BatchJournal journal in BatchJournal.All(session))
+        {
+            List<BatchJournal.Entry> stored = [.. journal.Records.Where(r => model.ById.ContainsKey(r.Id))];
+            List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
+            RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
+            string status = order is null ? "planned" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
+            bool moot = stored.Count == 0 || missing.Count == 0
+                || stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
+                || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"));
+            if (moot)
+            {
+                journal.Close();
+                continue;
+            }
+
+            string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
+            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned.");
+        }
+
+        return findings;
+
+        static string Listed(List<BatchJournal.Entry> entries) => string.Join(", ", entries.Select(e => $"{e.Type} {e.Id}"));
+    }
+
+    /// <summary>The estate as it would be with records added that are not stored yet; as it is without any. Caller holds the gate.</summary>
+    private EstateModel LoadWith(IReadOnlyList<AuthoredRecord> records)
+    {
+        if (records.Count == 0)
+        {
+            return session.Load();
+        }
+
+        List<RecordFile> files = session.Files().Concat(records.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+        return EstateLoader.Load(session.Root, files);
+    }
+
+    /// <summary>
+    /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
+    /// themselves, and a result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored
+    /// file gets, on their canonical bytes, since the checks of stored files cannot see them.
+    /// </summary>
+    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records, bool stored)
+    {
         var relevant = new FindingList();
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
         {
             relevant.Add(finding);
         }
 
-        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        if (!stored)
+        {
+            foreach (Finding finding in records.SelectMany(r => EstateChecks.Content(r.RelativePath, r.Bytes)).Where(f => f.Severity == Severity.Error))
+            {
+                relevant.Add(finding);
+            }
+        }
+
+        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding);
         }
 
-        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(new Finding(Severity.Error, "result.output-hash", finding.Location, "The file present does not have the hash or size this result claims; name the bytes actually produced."));
         }
 
-        if (relevant.HasErrors)
-        {
-            session.Discard(record);
-            return WriteOutcome.Fail(new Problem("rejected", $"Not written: the estate would be invalid with this record ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
-        }
-
-        return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+        return relevant;
     }
 
     /// <summary>Chooses the device that signs a record for its author on this machine, or explains why none can.</summary>

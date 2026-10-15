@@ -221,10 +221,22 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
+    public AsksResponse Asks(string? principal = null) => Get<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal))!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />
     public GoalResponse? Goal(string id) => Get<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true);
+
+    /// <inheritdoc />
+    public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
+
+    /// <inheritdoc />
+    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request)!;
+
+    /// <inheritdoc />
+    public TakeoverResponse WorkTakeover(TakeoverRequest request) => Post<TakeoverRequest, TakeoverResponse>("/v1/work/takeover", request)!;
 
     /// <inheritdoc />
     public WriteOutcome GoalPropose(GoalProposeRequest request) => Post<GoalProposeRequest, WriteOutcome>("/v1/goals", request)!;

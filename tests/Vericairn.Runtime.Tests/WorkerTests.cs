@@ -412,7 +412,7 @@ public class WorkerTests
             (new RunStartRequest(run.Assignment, "gemini", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "The launcher 'gemini' has no implementation"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["model"] = "x" }), "it takes no model"),
             (new RunStartRequest(run.Assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "this run names no command"),
-            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.BuilderId, run.Resource, Settings: settings), "holds neither"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.BuilderId, run.Resource, Settings: settings), "or by the sponsor of the goal it is charged to when the sponsor is a person, and Test Builder"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Goal, Settings: settings), "No repository resource"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, WallMinutes: 0, Settings: settings), "at least one wall minute"),
         ];
@@ -448,6 +448,170 @@ public class WorkerTests
         Assert.True(started.Ok, started.Message);
         Assert.Equal("observed-success", run.Settled(started.Run).Status);
     }
+
+    [Fact]
+    public void TheSponsorsCustodyExceptionLetsARunLaunchUnattendedAndTheRunNamesIt()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        RunResponse refused = run.Start("claude-code", "claude", run.Report("refused"));
+        Assert.False(refused.Ok);
+        Assert.Contains($"Or the goal's sponsor records a custody exception for the goal, with its reason and its expiry: vericairn goal custody-exception {run.Goal} --by <sponsor> --reason <why> --expires <time>.", refused.Message, StringComparison.Ordinal);
+        JsonElement custody = Route(run, "W-1").GetProperty("custody");
+        Assert.False(custody.GetProperty("allows").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, custody.GetProperty("exception").ValueKind);
+
+        // An agent never excepts its own runs.
+        string hash = run.Service.Goal(run.Goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
+        string expires = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1));
+        WriteOutcome byAgent = run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.BuilderId, RunEstate.Json($$"""{"reason":"I may.","expires":"{{expires}}"}"""), $"goal:{run.Goal}:{hash}"));
+        Assert.Equal("rejected", byAgent.Problem!.Code);
+        Assert.Contains(byAgent.Problem.Findings, f => f.Code == "custody-exception.sponsor");
+
+        // The sponsor's exception in force lifts the refusal: the view shows it, and the run launches unattended, names it and says what it lifted.
+        string exception = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"The build loop runs overnight on this machine.","expires":"{{expires}}"}"""), $"goal:{run.Goal}:{hash}"))).Id;
+        custody = Route(run, "W-1").GetProperty("custody");
+        Assert.True(custody.GetProperty("allows").GetBoolean());
+        Assert.Equal(exception, custody.GetProperty("exception").GetProperty("id").GetString());
+        Assert.Contains($"custody here: an unattended run is allowed under the custody exception {exception} that Test Operator recorded for the goal, in force until {expires}: The build loop runs overnight on this machine.; without it: Device {run.OperatorDevice}", run.Service.GoalNext(run.Goal)!.Text, StringComparison.Ordinal);
+        RunResponse started = run.Start("claude-code", "claude", run.Report("excepted"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Contains($"It was launched under the custody exception {exception} that Test Operator recorded for the goal, in force until {expires}", started.Message, StringComparison.Ordinal);
+        Assert.Contains($"without it the worker would refuse: Device {run.OperatorDevice}", started.Message, StringComparison.Ordinal);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(exception, recorded.Target("custodyException"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.StartsWith($"Launched unattended under the sponsor's custody exception {exception}, in force until {expires}, while device {run.OperatorDevice} of an operator", StringComparison.Ordinal));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ARunNamesTheCustodyExceptionInForceWhenItsIntentIsRecordedNotTheOneItsPreflightFound()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+        string? second = null;
+
+        // While the worker verifies its launcher, after the preflight found the first exception, the sponsor replaces it with a second.
+        HookedLauncher.Install(run, () =>
+        {
+            second ??= Except(run, DateTimeOffset.UtcNow.AddHours(2), "A narrower window.", first);
+            return null;
+        });
+        RunResponse started = run.Start("claude-code", "claude", run.Report("replaced"));
+        Assert.True(started.Ok, started.Message);
+        Assert.NotNull(second);
+        Assert.Contains($"It was launched under the custody exception {second} that Test Operator recorded for the goal", started.Message, StringComparison.Ordinal);
+        Assert.Contains("A narrower window.", started.Message, StringComparison.Ordinal);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(second, recorded.Target("custodyException"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.StartsWith($"Launched unattended under the sponsor's custody exception {second},", StringComparison.Ordinal));
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnExceptionThatLapsesWhileARunIsPreparedLaunchesNothing()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+
+        // The sponsor replaces the exception with one that expires a second later, and the preparation outlasts it.
+        Func<string?> replace = () =>
+        {
+            string expires = Except(run, DateTimeOffset.UtcNow.AddSeconds(1), "Only a moment.", first);
+            WaitPast(run, expires);
+            return null;
+        };
+        HookedLauncher.Install(run, replace);
+        RunResponse replaced = run.Start("claude-code", "claude", run.Report("replaced"));
+        Assert.False(replaced.Ok, replaced.Message);
+        Assert.StartsWith("The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine", replaced.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was recorded.", replaced.Message, StringComparison.Ordinal);
+
+        // An exception in force when the preflight read it, and expired before the intent, launches nothing either.
+        string brief = Except(run, DateTimeOffset.UtcNow.AddSeconds(2), "A short window.");
+        HookedLauncher.Install(run, () =>
+        {
+            WaitPast(run, brief);
+            return null;
+        });
+        RunResponse expired = run.Start("claude-code", "claude", run.Report("expired"));
+        Assert.False(expired.Ok, expired.Message);
+        Assert.Contains($"Device {run.OperatorDevice} (Operator's laptop, admitted) of Test Operator", expired.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was recorded.", expired.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(run.Report("replaced")));
+        Assert.False(File.Exists(run.Report("expired")));
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnExceptionThatLapsesAfterTheIntentCancelsTheRunBeforeItsDispatch()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+
+        // The intent names the exception in force; then, before the launch, the sponsor replaces it with one that expires at once.
+        HookedLauncher.Install(run, command: () => WaitPast(run, Except(run, DateTimeOffset.UtcNow.AddSeconds(1), "Only a moment.", first)));
+        RunResponse canceled = run.Start("claude-code", "claude", run.Report("lapsed"));
+        Assert.False(canceled.Ok, canceled.Message);
+        Assert.Equal("canceled", canceled.Status);
+        Assert.StartsWith($"Run {canceled.Run} was cancelled before dispatch: The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine", canceled.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Its intent is recorded as canceled; nothing was launched and nothing is charged.", canceled.Message, StringComparison.Ordinal);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), canceled.Run)!;
+        Assert.Equal(first, recorded.Target("custodyException"));
+        Assert.Equal(("canceled", false, false), (recorded.Status, recorded.InFlight, recorded.Charged));
+        string summary = recorded.Latest.Body.GetProperty("observed").GetProperty("summary").GetString()!;
+        Assert.Equal($"Cancelled before dispatch: when the harness was about to start, device {run.OperatorDevice} of an operator or of the goal's sponsor signed without its owner's presence on the machine that ran the worker, with no custody exception in force for the goal, and the custody exception {first} its intent named was no longer in force. Nothing was launched and nothing is charged.", summary);
+        Assert.False(File.Exists(run.Report("lapsed")));
+        Assert.Empty(run.Row(canceled.Run).Charged.EnumerateObject());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AKeyThatArrivesAfterTheIntentCancelsTheRunBeforeItsDispatch()
+    {
+        using var run = new RunEstate();
+        string? arrived = null;
+
+        // Nothing stood in the way when the intent was recorded; then, before the launch, an operator's key arrives on this machine.
+        HookedLauncher.Install(run, command: () => arrived = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(run.Estate.OperatorId, "Spare laptop", "file"))).Id);
+        RunResponse canceled = run.Start("claude-code", "claude", run.Report("arrived"));
+        Assert.False(canceled.Ok, canceled.Message);
+        Assert.Equal("canceled", canceled.Status);
+        Assert.Contains($"Device {arrived} (Spare laptop, not admitted) of Test Operator", canceled.Message, StringComparison.Ordinal);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), canceled.Run)!;
+        Assert.Null(recorded.Target("custodyException"));
+        Assert.Equal($"Cancelled before dispatch: when the harness was about to start, device {arrived} of an operator or of the goal's sponsor signed without its owner's presence on the machine that ran the worker, with no custody exception in force for the goal. Nothing was launched and nothing is charged.", recorded.Latest.Body.GetProperty("observed").GetProperty("summary").GetString());
+        Assert.False(File.Exists(run.Report("arrived")));
+        Assert.Equal(0, Assert.Single(run.Service.Runs().Goals).InFlight);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    /// <summary>Records the operator's custody exception for the run estate's goal, or a revision of one; returns its id.</summary>
+    private static string Except(RunEstate run, DateTimeOffset expires, string reason, string? replaces = null)
+    {
+        string hash = run.Service.Goal(run.Goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
+        string until = RecordParser.FormatTimestamp(expires);
+        return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"{{reason}}","expires":"{{until}}"}"""), $"goal:{run.Goal}:{hash}", replaces))).Id;
+    }
+
+    /// <summary>Waits until a custody exception has expired.</summary>
+    private static void WaitPast(RunEstate run, string exception)
+    {
+        DateTimeOffset expires = CustodyExceptions.Expires(run.Estate.Load().ById[exception])!.Value;
+        while (DateTimeOffset.UtcNow <= expires)
+        {
+            Thread.Sleep(50);
+        }
+    }
+
+    private static JsonElement Route(RunEstate run, string key) =>
+        Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key).GetProperty("route");
 
     private static void WaitUntil(Func<bool> condition, int seconds = 30)
     {
