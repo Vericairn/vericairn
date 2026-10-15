@@ -51,6 +51,11 @@ public static class DecisionView
         text.Append("Decided by ").Append(PrincipalName(model, decidedBy)).Append(" on ").Append(EstateModel.BodyString(decision, "decidedAt"))
             .Append("; recorded by ").Append(PrincipalName(model, recorder)).Append(" at ").Append(decision.At)
             .Append("; record ").Append(decision.Id).Append(" (revision ").Append(model.Chain(decision).Count).Append(")\n\n");
+        if (EstateModel.BodyString(decision, "stake") is { } stake)
+        {
+            text.Append("Stake: ").Append(stake).Append("\n\n");
+        }
+
         string? synthesis = EstateModel.BodyString(decision, "synthesis");
         text.Append("## Synthesis\n\n").Append(synthesis ?? "_No synthesis recorded yet._").Append("\n\n");
         text.Append("## Verbatim\n\n");
@@ -65,6 +70,15 @@ public static class DecisionView
             foreach (JsonElement effect in effects.EnumerateArray())
             {
                 text.Append("- ").Append(effect.GetString()).Append('\n');
+            }
+        }
+
+        if (decision.Body.TryGetProperty("notAuthorized", out JsonElement notAuthorized) && notAuthorized.GetArrayLength() > 0)
+        {
+            text.Append("\n## Not authorized by this answer\n\n");
+            foreach (JsonElement item in notAuthorized.EnumerateArray())
+            {
+                text.Append("- ").Append(item.GetString()).Append('\n');
             }
         }
 
@@ -85,16 +99,25 @@ public static class DecisionView
     public static string RenderJson(EstateModel model)
     {
         ArgumentNullException.ThrowIfNull(model);
-        var list = new JsonArray(Current(model).Select(d => (JsonNode)new JsonObject
+        var list = new JsonArray(Current(model).Select(d =>
         {
-            ["id"] = d.Id,
-            ["title"] = EstateModel.BodyString(d, "title"),
-            ["decidedAt"] = EstateModel.BodyString(d, "decidedAt"),
-            ["decidedBy"] = PrincipalName(model, EstateModel.BodyString(d, "decidedBy") ?? string.Empty),
-            ["summary"] = EstateModel.BodyString(d, "summary"),
-            ["synthesis"] = EstateModel.BodyString(d, "synthesis"),
-            ["statement"] = EstateModel.BodyString(d, "statement"),
-            ["revision"] = model.Chain(d).Count,
+            var row = new JsonObject
+            {
+                ["id"] = d.Id,
+                ["title"] = EstateModel.BodyString(d, "title"),
+                ["decidedAt"] = EstateModel.BodyString(d, "decidedAt"),
+                ["decidedBy"] = PrincipalName(model, EstateModel.BodyString(d, "decidedBy") ?? string.Empty),
+                ["summary"] = EstateModel.BodyString(d, "summary"),
+                ["synthesis"] = EstateModel.BodyString(d, "synthesis"),
+                ["statement"] = EstateModel.BodyString(d, "statement"),
+                ["revision"] = model.Chain(d).Count,
+            };
+            if (EstateModel.BodyString(d, "stake") is { } stake)
+            {
+                row["stake"] = stake;
+            }
+
+            return (JsonNode)row;
         }).ToArray());
         using JsonDocument document = JsonDocument.Parse(list.ToJsonString());
         return CanonicalJson.SerializePretty(document.RootElement);

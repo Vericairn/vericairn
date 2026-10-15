@@ -25,7 +25,7 @@ public sealed class EstateType : IRecordType
         new("slug", "slug", true, "Lower-case kebab-case identifier used in paths and tooling."),
         new("purpose", "string", true, "What the estate exists to do, in one or two sentences."),
         new("operator", "ulid", true, "The root operator principal; the only principal allowed to author itself."),
-        new("recordFormat", "integer", true, "Record format version the estate is written in; 1."),
+        new("recordFormat", "integer", true, "The record format the estate was chartered in, at most the format of the charter record itself; the manifest states the format new records are written in."),
         new("policies", "object", true, "signatures: optional|required; releaseAcceptance: roles that may accept a release."),
         new("organization", "object", false, "name and optional github organization login."),
     ];
@@ -39,7 +39,7 @@ public sealed class EstateType : IRecordType
         body.Text("slug", true, 100, Patterns.Slug, "a lower-case kebab-case slug");
         body.Text("purpose", true, 2000);
         string? operatorId = body.Ulid("operator", true);
-        long? format = body.Number("recordFormat", true, 1, 1);
+        long? format = body.Number("recordFormat", true, 1, context.Format);
         BodyReader? policies = body.Nested("policies", true);
         if (policies is not null)
         {

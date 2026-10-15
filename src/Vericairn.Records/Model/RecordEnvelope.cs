@@ -22,9 +22,13 @@ public sealed class RecordEnvelope
     /// <summary>Format identifier for record format 1.</summary>
     public const string Format1 = "vericairn.record/1";
 
+    /// <summary>Format identifier for record format 2.</summary>
+    public const string Format2 = "vericairn.record/2";
+
     /// <summary>Creates an envelope.</summary>
-    public RecordEnvelope(string type, string id, string at, string by, RecordReference? subject, string? supersedes, JsonElement body, string declaredHash, string computedHash, IReadOnlyList<RecordSignature> signatures)
+    public RecordEnvelope(string type, string id, string at, string by, RecordReference? subject, string? supersedes, JsonElement body, string declaredHash, string computedHash, IReadOnlyList<RecordSignature> signatures, long format = RecordFormats.First)
     {
+        Format = format;
         Type = type;
         Id = id;
         At = at;
@@ -36,6 +40,9 @@ public sealed class RecordEnvelope
         ComputedHash = computedHash;
         Signatures = signatures ?? throw new ArgumentNullException(nameof(signatures));
     }
+
+    /// <summary>The record format the record states it was written in; its rules are the ones it is validated under.</summary>
+    public long Format { get; }
 
     /// <summary>Record type, kebab-case.</summary>
     public string Type { get; }

@@ -88,7 +88,7 @@ public class JourneyTests
         {
             string op = Init(root);
             string builder = Admit(root, op, "Builder", "agent", "builder");
-            string decisionPath = CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Standing delegation","statement":"Build and accept ordinary work yourself.","summary":"The builder engineers and self-accepts ordinary work.","synthesis":"Standing delegation for ordinary work; milestones and releases stay with the operator.","effects":["builder self-accepts ordinary work"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+            string decisionPath = CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Standing delegation","stake":"low","notAuthorized":[],"statement":"Build and accept ordinary work yourself.","summary":"The builder engineers and self-accepts ordinary work.","synthesis":"Standing delegation for ordinary work; milestones and releases stay with the operator.","effects":["builder self-accepts ordinary work"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""");
             string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", decisionPath).Id;
             string authorityPath = CliHarness.WriteJson(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering","self-accept-ordinary-work"],"reserved":["publication","spending"],"conditions":["self-review is labeled"],"basis":"{{decision}}"}""");
             CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", authorityPath);

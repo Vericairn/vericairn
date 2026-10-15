@@ -88,7 +88,7 @@ public sealed class AcceptanceType : IRecordType
         }
         else if (!isOperator)
         {
-            context.Error("acceptance.policy", $"Acceptance of a {subject.Type} record is reserved to the operator in record format 1.");
+            context.Error("acceptance.policy", $"Acceptance of a {subject.Type} record is reserved to the operator.");
         }
 
         RecordEnvelope latest = context.Model.Latest(subject);

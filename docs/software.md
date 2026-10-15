@@ -125,8 +125,10 @@ canceled needs attention.
 
 ## The synthetic migration
 
-Record format 1 is the only format. The upgrade path through a record-format migration is proven by a
-synthetic migration in the tests: a migration from format 1 to a pretend format 2 stages a file through
-`MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only once
-every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
-knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+The move from record format 1 to 2 (`record-format-2`, [record-format-v2.md](record-format-v2.md)) stages nothing:
+no record is ever rewritten, so the step only moves the manifest's format, and the tests check that every record
+file is byte for byte what it was. The rest of the upgrade path is proven by a synthetic migration in the tests:
+a step from format 2 to a pretend format 3 stages a file through `MigrationContext`, the upgrade writes the staged
+files, the manifest and the migration record only once every step succeeded, a failing migration changes nothing,
+and a manifest beyond the formats this binary knows is refused rather than misread. Migrations never rewrite
+records; they stage other files.

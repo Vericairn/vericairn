@@ -20,7 +20,8 @@ namespace Vericairn.Records.Authoring;
 /// <param name="Supersedes">Optional predecessor id.</param>
 /// <param name="At">Authoring time; now when omitted.</param>
 /// <param name="Id">Explicit id; generated when omitted (only the root operator principal needs one).</param>
-public sealed record RecordDraft(string Type, string By, JsonElement Body, RecordReference? Subject = null, string? Supersedes = null, DateTimeOffset? At = null, string? Id = null);
+/// <param name="Format">The record format to write; the writer of an estate passes the estate's own format, and format 1 is the default.</param>
+public sealed record RecordDraft(string Type, string By, JsonElement Body, RecordReference? Subject = null, string? Supersedes = null, DateTimeOffset? At = null, string? Id = null, long? Format = null);
 
 /// <summary>A record ready to be written.</summary>
 /// <param name="RelativePath">Where it belongs in the estate repository.</param>
@@ -40,12 +41,18 @@ public static class RecordAuthor
             throw new ArgumentException("The body must be a JSON object.", nameof(draft));
         }
 
+        long format = draft.Format ?? RecordFormats.First;
+        if (format < RecordFormats.First || format > RecordFormats.Current)
+        {
+            throw new ArgumentException($"This build writes record formats {RecordFormats.First} to {RecordFormats.Current}, not {format}.", nameof(draft));
+        }
+
         string at = RecordParser.FormatTimestamp(draft.At ?? DateTimeOffset.UtcNow);
         DateTimeOffset atTime = DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
         string id = draft.Id ?? Ulid.NewUlid(atTime).Value;
         var envelope = new JsonObject
         {
-            ["format"] = RecordEnvelope.Format1,
+            ["format"] = RecordFormats.Identifier(format),
             ["type"] = draft.Type,
             ["id"] = id,
             ["at"] = at,

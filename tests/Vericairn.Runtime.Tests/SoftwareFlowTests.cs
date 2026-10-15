@@ -160,23 +160,23 @@ public class SoftwareFlowTests
         string op = estate.OperatorId;
         RecordEnvelope product = estate.Add("product", op, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
         string artifacts = string.Join(',', ReleaseFlow.Platforms.Select((p, i) => $$"""{"name":"{{EstateUpgrade.DistributableName("0.9.0", p)}}","hash":"sha256:{{new string((char)('1' + i), 64)}}","bytes":10,"platform":"{{p}}"}"""));
-        string candidateBody = $$"""{"version":"0.9.0","repository":"Example/example","commit":"{{Commit}}","status":"candidate","artifacts":[{{artifacts}}],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""";
+        string candidateBody = $$"""{"version":"0.9.0","repository":"Example/example","commit":"{{Commit}}","status":"candidate","artifacts":[{{artifacts}}],"recordFormat":{"reads":[1,2,3],"writes":3},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""";
         RecordEnvelope candidate = estate.Add("release", op, candidateBody, new RecordReference("product", product.Id, null));
         estate.Add("acceptance", op, """{"statement":"Accepted.","basis":[],"self":true}""", new RecordReference("release", candidate.Id, candidate.ComputedHash));
         estate.Add("release", op, candidateBody.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-10-13T13:00:00Z\",\"url\":\"https://example.invalid/releases/0.9.0\"", StringComparison.Ordinal), new RecordReference("product", product.Id, null), candidate.Id);
         Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error);
 
-        var synthetic = new SyntheticMigration(fail: false);
-        using (RecordFormats.Extend(2))
-        using (EstateUpgrade.UseMigrations([synthetic]))
+        var synthetic = new SyntheticMigration(2, 3, fail: false);
+        using (RecordFormats.Extend(3))
+        using (EstateUpgrade.UseMigrations([.. EstateUpgrade.Migrations, synthetic]))
         {
             using (var service = EstateService.Open(estate.Root))
             {
                 (UpgradeResponse? plan, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", null, true));
                 Assert.Null(problem);
-                Assert.Equal(["synthetic-1-to-2"], plan!.Migrations);
+                Assert.Equal(["record-format-2", "synthetic-2-to-3"], plan!.Migrations);
                 Assert.Equal(1, plan.FromFormat);
-                Assert.Equal(2, plan.ToFormat);
+                Assert.Equal(3, plan.ToFormat);
                 Assert.False(File.Exists(Path.Combine(estate.Root, "docs", "migrated.txt")));
 
                 (UpgradeResponse? applied, Problem? failure) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
@@ -185,20 +185,66 @@ public class SoftwareFlowTests
                 Assert.NotNull(applied.Migration);
             }
 
-            // The repository now says format 2, the records are still format 1 and still read, and the migration record names the step and the staged file.
+            // The repository now says format 3, the records are still format 1 and still read, and the migration record names the steps and the staged file.
             Assert.Equal("synthetic\n", File.ReadAllText(Path.Combine(estate.Root, "docs", "migrated.txt")));
             using var upgraded = EstateService.Open(estate.Root);
-            Assert.Equal(2, upgraded.Session.Manifest.RecordFormat);
+            Assert.Equal(3, upgraded.Session.Manifest.RecordFormat);
             FindingsResponse check = upgraded.Check();
             Assert.Equal(0, check.Errors);
-            Assert.Contains("record format 2", upgraded.Status().Text, StringComparison.Ordinal);
+            Assert.Contains("record format 3", upgraded.Status().Text, StringComparison.Ordinal);
             RecordEnvelope migration = upgraded.Session.Load().Current("migration").Single();
             Assert.Contains("docs/migrated.txt written by the migrations", migration.Body.GetProperty("changes").EnumerateArray().Select(c => c.GetString()));
             Assert.Equal(1, synthetic.Applications);
         }
 
-        // Beyond this process's knowledge, a format-2 manifest is refused rather than misread.
-        Assert.Throws<InvalidOperationException>(() => EstateService.Open(estate.Root));
+        // Beyond this process's knowledge, a format-3 manifest is refused rather than misread.
+        InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() => EstateService.Open(estate.Root));
+        Assert.Contains("record format 3", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheMoveToFormat2RewritesNoRecordAndNewRecordsFollowItsRules()
+    {
+        using var estate = new TestEstate();
+        string op = estate.OperatorId;
+        estate.Add("decision", estate.BuilderId, $$"""{"title":"Before","statement":"Keep going.","summary":"Format 1.","synthesis":"A format-1 decision has no stake.","effects":["x"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+        RecordEnvelope product = estate.Add("product", op, """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
+        string artifacts = string.Join(',', ReleaseFlow.Platforms.Select((p, i) => $$"""{"name":"{{EstateUpgrade.DistributableName("0.9.0", p)}}","hash":"sha256:{{new string((char)('1' + i), 64)}}","bytes":10,"platform":"{{p}}"}"""));
+        string candidateBody = $$"""{"version":"0.9.0","repository":"Example/example","commit":"{{Commit}}","status":"candidate","artifacts":[{{artifacts}}],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""";
+        RecordEnvelope candidate = estate.Add("release", op, candidateBody, new RecordReference("product", product.Id, null));
+        estate.Add("acceptance", op, """{"statement":"Accepted.","basis":[],"self":true}""", new RecordReference("release", candidate.Id, candidate.ComputedHash));
+        estate.Add("release", op, candidateBody.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-10-13T13:00:00Z\",\"url\":\"https://example.invalid/releases/0.9.0\"", StringComparison.Ordinal), new RecordReference("product", product.Id, null), candidate.Id);
+        string records = Path.Combine(estate.Root, "records");
+        Dictionary<string, byte[]> before = Directory.EnumerateFiles(records, "*.json", SearchOption.AllDirectories).ToDictionary(f => f, File.ReadAllBytes);
+
+        using (var service = EstateService.Open(estate.Root))
+        {
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
+            Assert.Null(problem);
+            Assert.Equal(["record-format-2"], applied!.Migrations);
+            Assert.Equal(2, applied.ToFormat);
+
+            // No record was rewritten: every file is byte for byte what it was, and the only new one is the migration record, in format 2.
+            Dictionary<string, byte[]> after = Directory.EnumerateFiles(records, "*.json", SearchOption.AllDirectories).ToDictionary(f => f, File.ReadAllBytes);
+            Assert.All(before, file => Assert.Equal(file.Value, after[file.Key]));
+            string added = Assert.Single(after.Keys.Except(before.Keys));
+            Assert.Contains("\"format\": \"vericairn.record/2\"", File.ReadAllText(added), StringComparison.Ordinal);
+            EstateModel model = service.Session.Load();
+            Assert.Equal(2, model.Manifest!.RecordFormat);
+            Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error);
+            Assert.All(model.Records.Where(r => before.ContainsKey(Path.Combine(estate.Root, r.ExpectedPath.Replace('/', Path.DirectorySeparatorChar)))), r => Assert.Equal(1, r.Format));
+            RecordEnvelope migration = model.Current("migration").Single();
+            Assert.Equal(2, migration.Format);
+            Assert.Contains(migration.Body.GetProperty("changes").EnumerateArray().Select(c => c.GetString()), c => c!.StartsWith("record-format-2: ", StringComparison.Ordinal));
+
+            // A decision written now states format 2 and must say how much rides on it and what it does not authorize.
+            WriteOutcome bare = service.NewRecord(new NewRecordRequest("decision", estate.BuilderId, Element(new JsonObject { ["title"] = "After", ["statement"] = "Go on.", ["summary"] = "Format 2.", ["synthesis"] = "A format-2 decision.", ["effects"] = new JsonArray("x"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = "2026-10-13T14:00:00Z" })));
+            Assert.False(bare.Ok);
+            Assert.Contains(bare.Problem!.Findings, f => f.Code == "body.missing" && f.Location.EndsWith("#body.stake", StringComparison.Ordinal));
+            WriteOutcome staked = service.NewRecord(new NewRecordRequest("decision", estate.BuilderId, Element(new JsonObject { ["title"] = "After", ["statement"] = "Go on.", ["summary"] = "Format 2.", ["synthesis"] = "A format-2 decision.", ["effects"] = new JsonArray("x"), ["affects"] = new JsonArray(), ["decidedBy"] = op, ["decidedAt"] = "2026-10-13T14:00:00Z", ["stake"] = "low", ["notAuthorized"] = new JsonArray("publication") })));
+            Assert.True(staked.Ok, staked.Problem?.Message);
+            Assert.Equal(2, service.Session.Load().ById[staked.Written!.Id].Format);
+        }
     }
 
     [Fact]
@@ -214,8 +260,7 @@ public class SoftwareFlowTests
         estate.Add("release", op, candidateBody.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-10-13T13:00:00Z\",\"url\":\"https://example.invalid/releases/0.9.0\"", StringComparison.Ordinal), new RecordReference("product", product.Id, null), candidate.Id);
         byte[] manifestBefore = File.ReadAllBytes(Path.Combine(estate.Root, "estate", "manifest.json"));
 
-        using (RecordFormats.Extend(2))
-        using (EstateUpgrade.UseMigrations([new SyntheticMigration(fail: true)]))
+        using (EstateUpgrade.UseMigrations([new SyntheticMigration(1, 2, fail: true)]))
         using (var service = EstateService.Open(estate.Root))
         {
             (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.9.0", op, false));
@@ -233,23 +278,25 @@ public class SoftwareFlowTests
         return document.RootElement.Clone();
     }
 
-    /// <summary>A migration from format 1 to a pretend format 2 that stages one file, or fails on purpose.</summary>
+    /// <summary>A migration between two formats, a pretend one beyond what this release writes among them, that stages one file or fails on purpose.</summary>
     private sealed class SyntheticMigration : IRecordFormatMigration
     {
         private readonly bool fail;
 
-        public SyntheticMigration(bool fail)
+        public SyntheticMigration(long from, long to, bool fail)
         {
+            FromFormat = from;
+            ToFormat = to;
             this.fail = fail;
         }
 
         public int Applications { get; private set; }
 
-        public string Name => "synthetic-1-to-2";
+        public string Name => $"synthetic-{FromFormat}-to-{ToFormat}";
 
-        public long FromFormat => 1;
+        public long FromFormat { get; }
 
-        public long ToFormat => 2;
+        public long ToFormat { get; }
 
         public void Apply(MigrationContext context)
         {

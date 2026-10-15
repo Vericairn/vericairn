@@ -3,7 +3,7 @@
 
 namespace Vericairn.Records.Types;
 
-/// <summary>All record types admitted in record format 1.</summary>
+/// <summary>All record types this build reads; a type introduced in a later format says so (<see cref="IRecordType.SinceFormat"/>).</summary>
 public static class RecordTypeRegistry
 {
     private static readonly IReadOnlyDictionary<string, IRecordType> Types = new IRecordType[]
@@ -34,7 +34,7 @@ public static class RecordTypeRegistry
         new OperationType(),
     }.ToDictionary(t => t.Name, StringComparer.Ordinal);
 
-    /// <summary>Type names reserved for later releases of format 1; not yet admitted.</summary>
+    /// <summary>Type names reserved for later releases; not yet admitted.</summary>
     public static readonly string[] Reserved = ["object"];
 
     /// <summary>All admitted types, ordered by name.</summary>

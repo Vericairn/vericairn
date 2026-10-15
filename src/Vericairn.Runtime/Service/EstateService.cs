@@ -864,6 +864,7 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
 
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
+            changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
             string manifestPath = Path.Combine(session.Root, EstateLayout.ManifestPath);
             previousContents[EstateLayout.ManifestPath] = File.ReadAllBytes(manifestPath);
@@ -887,7 +888,7 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
 
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
-            WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement), model);
+            WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement, Format: Math.Min(plan.ToFormat, RecordFormats.Current)), model);
             if (!outcome.Ok)
             {
                 RestoreFiles(session.Root, previousContents);
@@ -1107,6 +1108,12 @@ public sealed class EstateService : IEstateApi, IDisposable
             {
                 return Refuse(refusal);
             }
+        }
+
+        // A record is written in its estate's format, never in one this build does not write.
+        if (draft.Format is null)
+        {
+            draft = draft with { Format = Math.Min(current.Manifest?.RecordFormat ?? session.Manifest.RecordFormat, RecordFormats.Current) };
         }
 
         // A successor is never older than the record it supersedes, even when clocks or fast scripts put them in the same second.

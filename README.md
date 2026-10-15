@@ -23,9 +23,10 @@ release and pins the one it runs on.
 
 ## What is here
 
-- `Vericairn.Records`: record format 1 (canonical JSON, ULIDs, content hashes, signed records, devices and
-  admission, estate loading, validation, cleanliness checks, status), documented in
-  [docs/record-format-v1.md](docs/record-format-v1.md).
+- `Vericairn.Records`: record formats 1 and 2 (canonical JSON, ULIDs, content hashes, signed records, devices
+  and admission, estate loading, validation, cleanliness checks, status), documented in
+  [docs/record-format-v1.md](docs/record-format-v1.md) and, for what format 2 changes,
+  [docs/record-format-v2.md](docs/record-format-v2.md).
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns

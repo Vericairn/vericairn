@@ -56,6 +56,9 @@ public interface IRecordFormatMigration
     /// <summary>Format it writes.</summary>
     long ToFormat { get; }
 
+    /// <summary>What the step changes, in a sentence, for the migration record.</summary>
+    string Summary => $"moves the estate from record format {FromFormat} to {ToFormat}";
+
     /// <summary>Applies the migration by staging files; throws to abort the upgrade with nothing changed.</summary>
     void Apply(MigrationContext context);
 }
@@ -73,9 +76,9 @@ public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
 public static class EstateUpgrade
 {
-    private static IReadOnlyList<IRecordFormatMigration> migrations = [];
+    private static IReadOnlyList<IRecordFormatMigration> migrations = [new RecordFormat2Migration()];
 
-    /// <summary>Record-format migrations this release knows. Format 1 is the only format so far.</summary>
+    /// <summary>Record-format migrations this release knows: format 1 to 2.</summary>
     public static IReadOnlyList<IRecordFormatMigration> Migrations => migrations;
 
     /// <summary>Substitutes the known migrations for a synthetic set, for tests of the upgrade path; restored on dispose.</summary>
@@ -110,11 +113,32 @@ public static class EstateUpgrade
             throw new InvalidOperationException($"Release {version} writes record format {toFormat}, older than this estate's format {manifest.RecordFormat}; upgrades are forward-only.");
         }
 
+        if (toFormat > RecordFormats.Latest)
+        {
+            throw new InvalidOperationException($"Release {version} writes record format {toFormat}, which this Vericairn does not read; upgrade with release {version}'s own command line.");
+        }
+
+        // The target release must read every record already written: the estate's formats from the first up to its current one.
+        if (format.ValueKind == JsonValueKind.Object && format.TryGetProperty("reads", out JsonElement reads) && reads.ValueKind == JsonValueKind.Array)
+        {
+            var read = reads.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Number && r.TryGetInt64(out _)).Select(r => r.GetInt64()).ToHashSet();
+            long unread = Enumerable.Range((int)RecordFormats.First, (int)(manifest.RecordFormat - RecordFormats.First + 1)).Select(f => (long)f).FirstOrDefault(f => !read.Contains(f));
+            if (unread != 0)
+            {
+                throw new InvalidOperationException($"Release {version} does not read record format {unread}, which this estate's records use; it cannot be the estate's release.");
+            }
+        }
+
         var steps = new List<string>();
         long current = manifest.RecordFormat;
         while (current < toFormat)
         {
             IRecordFormatMigration step = Migrations.FirstOrDefault(m => m.FromFormat == current) ?? throw new InvalidOperationException($"No migration from record format {current} is known to this Vericairn.");
+            if (step.ToFormat <= current || step.ToFormat > toFormat)
+            {
+                throw new InvalidOperationException($"Migration {step.Name} goes from record format {step.FromFormat} to {step.ToFormat}, which does not lead to format {toFormat}.");
+            }
+
             steps.Add(step.Name);
             current = step.ToFormat;
         }
@@ -153,6 +177,24 @@ public static class EstateUpgrade
         }
 
         public void Dispose() => action();
+    }
+
+    /// <summary>
+    /// Record format 1 to 2. Records are never rewritten: every record already written keeps its bytes, its hash, its signatures
+    /// and the rules of format 1, and the records written after the move state format 2 and follow its rules. The step therefore
+    /// stages nothing; the upgrade moves the manifest's format and the migration record names the step.
+    /// </summary>
+    private sealed class RecordFormat2Migration : IRecordFormatMigration
+    {
+        public string Name => "record-format-2";
+
+        public long FromFormat => 1;
+
+        public long ToFormat => 2;
+
+        public string Summary => "records written from now on state record format 2 and follow its rules; every record already written keeps its bytes, hash and format";
+
+        public void Apply(MigrationContext context) => ArgumentNullException.ThrowIfNull(context);
     }
 
     /// <summary>The distributable name for a platform: a tar.gz on Linux and macOS, a zip on Windows.</summary>

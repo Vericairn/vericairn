@@ -163,8 +163,14 @@ public static class EstateLoader
             IRecordType? type = RecordTypeRegistry.Find(record.Type);
             if (type is null)
             {
-                string hint = Array.IndexOf(RecordTypeRegistry.Reserved, record.Type) >= 0 ? " It is reserved for a later release of record format 1." : string.Empty;
+                string hint = Array.IndexOf(RecordTypeRegistry.Reserved, record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
                 findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
+                continue;
+            }
+
+            if (record.Format < type.SinceFormat)
+            {
+                findings.Error("record.type-format", record.ExpectedPath, $"Type '{record.Type}' belongs to record format {type.SinceFormat}, and this record states format {record.Format}.");
                 continue;
             }
 
@@ -174,6 +180,16 @@ public static class EstateLoader
 
         SignatureChecks.Run(model, findings);
         model.Manifest = EstateManifest.Load(root, findings);
+
+        // A record is never ahead of its estate: an estate at format 1 holds only format-1 records, and moves to a later format by
+        // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.
+        if (model.Manifest is not null)
+        {
+            foreach (RecordEnvelope record in records.Where(r => r.Format > model.Manifest.RecordFormat))
+            {
+                findings.Error("record.format-ahead", record.ExpectedPath, $"This record states record format {record.Format}, and the estate is at format {model.Manifest.RecordFormat}; `vericairn estate upgrade` to a release that writes format {record.Format} moves the estate first.");
+            }
+        }
         if (model.Manifest is not null && model.CurrentEstate is not null && model.Manifest.Estate != model.Chain(model.CurrentEstate)[0])
         {
             findings.Error("manifest.estate", EstateLayout.ManifestPath, $"The manifest names estate {model.Manifest.Estate} but this estate's charter began as {model.Chain(model.CurrentEstate)[0]}.");

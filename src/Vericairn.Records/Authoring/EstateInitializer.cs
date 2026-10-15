@@ -79,7 +79,7 @@ public static class EstateInitializer
             ["slug"] = initialization.Slug,
             ["purpose"] = initialization.Purpose,
             ["operator"] = operatorId,
-            ["recordFormat"] = 1,
+            ["recordFormat"] = RecordFormats.Current,
             ["policies"] = new JsonObject { ["signatures"] = "optional", ["releaseAcceptance"] = new JsonArray("operator") },
             ["organization"] = initialization.GitHubOrganization is null
                 ? new JsonObject { ["name"] = initialization.OrganizationName }
@@ -90,7 +90,7 @@ public static class EstateInitializer
         {
             ["format"] = EstateManifest.Format1,
             ["estate"] = estateRecord.Envelope.Id,
-            ["recordFormat"] = 1,
+            ["recordFormat"] = RecordFormats.Current,
             ["profile"] = initialization.Profile,
             ["vericairn"] = new JsonObject { ["mode"] = "source", ["repository"] = initialization.Repository, ["commit"] = initialization.Commit },
         };
@@ -106,6 +106,6 @@ public static class EstateInitializer
     private static AuthoredRecord Author(string type, string by, JsonObject body, DateTimeOffset at, string? id)
     {
         using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-        return RecordAuthor.Create(new RecordDraft(type, by, document.RootElement, null, null, at, id));
+        return RecordAuthor.Create(new RecordDraft(type, by, document.RootElement, null, null, at, id, RecordFormats.Current));
     }
 }
