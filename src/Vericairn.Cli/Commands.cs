@@ -139,7 +139,7 @@ internal static class Commands
     });
 
     /// <summary>What <c>vericairn goal propose</c> was given.</summary>
-    internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);
+    internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string? Delegate, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);
 
     /// <summary>Proposes a goal from its options: the conditions as JSON, the caps as unit=value, the inputs as type:id.</summary>
     public static int GoalPropose(string root, GoalProposal proposal, bool json)
@@ -213,6 +213,11 @@ internal static class Commands
                 : new Json.JsonObject { ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new Json.JsonArray(proposal.WorkOrders.Select(w => (Json.JsonNode)w).ToArray()) },
             ["inputs"] = inputs,
         };
+        if (proposal.Delegate is not null)
+        {
+            body["delegate"] = proposal.Delegate;
+        }
+
         if (proposal.Roster is not null)
         {
             body["roster"] = proposal.Roster;

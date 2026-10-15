@@ -1086,8 +1086,9 @@ public sealed class EstateService : IEstateApi, IDisposable
 
     /// <summary>
     /// Records a goal's next status: activate a proposed goal; pause an active one; resume a paused, budget-limited or blocked one;
-    /// stop one that has not ended. Activation and resumption are its sponsor's, a person within the authority to spend; pausing and
-    /// stopping are its sponsor's too. Every refusal comes before anything is written.
+    /// stop one that has not ended. Activation and resumption are its sponsor's, a person within the authority to spend, or an
+    /// operator's for a goal an agent sponsors; pausing and stopping are the sponsor's or that operator's. Every refusal comes before
+    /// anything is written.
     /// </summary>
     private WriteOutcome GoalTransition(string goal, GoalActionRequest request, string action)
     {
@@ -1131,9 +1132,9 @@ public sealed class EstateService : IEstateApi, IDisposable
                     return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
                 }
             }
-            else if (request.By != sponsor)
+            else if (request.By != sponsor && !GoalRules.AccepterOf(model, current).Decides(model, request.By))
             {
-                return Refuse($"Only the goal's sponsor, {sponsor}, {(action == "pause" ? "pauses" : "stops")} it.");
+                return Refuse($"Only the goal's sponsor, {sponsor}, or an operator for a goal an agent sponsors, {(action == "pause" ? "pauses" : "stops")} it.");
             }
 
             (string next, string note) = action switch

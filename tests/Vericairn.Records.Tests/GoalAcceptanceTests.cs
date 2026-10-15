@@ -25,7 +25,8 @@ public class GoalAcceptanceTests
 
         RecordEnvelope unfunded = estate.Add("goal-status", person.Id, Status("active"), personal.Reference);
         RecordEnvelope byAgent = estate.Add("goal-status", estate.BuilderId, Status("active"), agents.Reference);
-        RecordEnvelope byOther = estate.Add("goal-status", estate.OperatorId, Status("active"), agents.Reference);
+        RecordEnvelope byOther = estate.Add("goal-status", person.Id, Status("active"), operators.Reference);
+        RecordEnvelope forAgent = estate.Add("goal-status", estate.OperatorId, Status("active"), agents.Reference);
         RecordEnvelope byOperator = estate.Add("goal-status", estate.OperatorId, Status("active"), operators.Reference);
         Assert.Contains(estate.Load().Findings, f => f.Code == "goal-status.authority" && f.Location == unfunded.ExpectedPath);
 
@@ -39,11 +40,12 @@ public class GoalAcceptanceTests
         estate.SetClock(estate.Clock.AddMinutes(1));
         RecordEnvelope expired = estate.Add("goal-status", person.Id, Status("active"), personal.Reference);
 
+        // An agent never activates a goal, even one it sponsors; an operator activates a goal an agent sponsors (decision 01M507XV4VBFYWMRN8WCXMXHX4).
         List<Finding> findings = estate.Load().Findings.Where(f => f.Severity == Severity.Error).ToList();
-        Assert.Contains(findings, f => f.Code == "goal-status.person" && f.Location == byAgent.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "goal-status.operator" && f.Location == byAgent.ExpectedPath);
         Assert.Contains(findings, f => f.Code == "goal-status.sponsor" && f.Location == byOther.ExpectedPath);
         Assert.Contains(findings, f => f.Code == "goal-status.authority" && f.Location == expired.ExpectedPath);
-        Assert.DoesNotContain(findings, f => f.Location == byOperator.ExpectedPath || f.Location == funded.ExpectedPath || f.Location == unfunded.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Location == byOperator.ExpectedPath || f.Location == forAgent.ExpectedPath || f.Location == funded.ExpectedPath || f.Location == unfunded.ExpectedPath);
         Assert.Equal(3, findings.Count);
     }
 
@@ -109,31 +111,89 @@ public class GoalAcceptanceTests
     }
 
     [Fact]
-    public void AGoalAnAgentSponsorsIsAcceptedByAnOperatorAndNeverActivatedByTheAgent()
+    public void AGoalAnAgentSponsorsIsActivatedAndAcceptedByAnOperatorOnly()
     {
         using var estate = new TestEstate(recordFormat: 2);
         Work work = Work.Write(estate, sponsor: estate.BuilderId);
         EstateModel model = estate.Load();
         GoalRules.Accepter accepter = GoalRules.AccepterOf(model, work.Goal);
         Assert.Null(accepter.Principal);
-        Assert.Equal("an operator, since its sponsor is an agent", accepter.Description);
-        Assert.True(accepter.Allows(model, estate.OperatorId));
-        Assert.False(accepter.Allows(model, estate.BuilderId));
+        Assert.Equal("an operator, and only an operator, since its sponsor is an agent", accepter.Description);
+        Assert.True(accepter.Allows(model, estate.OperatorId, DateTimeOffset.UtcNow));
+        Assert.False(accepter.Allows(model, estate.BuilderId, DateTimeOffset.UtcNow));
         RecordEnvelope personal = estate.Add("goal", estate.BuilderId, Goal(estate));
         Assert.Equal(estate.OperatorId, GoalRules.AccepterOf(estate.Load(), personal).Principal);
 
-        RecordEnvelope activation = estate.Add("goal-status", estate.BuilderId, Status("active"), work.Goal.Reference);
-        RecordEnvelope bySponsor = estate.Add("acceptance", estate.BuilderId, Accept([]), work.Goal.Reference);
-        RecordEnvelope byOperator = estate.Add("acceptance", estate.OperatorId, Accept([]), work.Goal.Reference);
-        List<Finding> findings = estate.Load().Findings.Where(f => f.Severity == Severity.Error).ToList();
-        Assert.Contains(findings, f => f.Code == "goal-status.person" && f.Location == activation.ExpectedPath);
-        Assert.Contains(findings, f => f.Code == "acceptance.policy" && f.Location == bySponsor.ExpectedPath && f.Message.Contains("an operator", StringComparison.Ordinal));
-        Assert.DoesNotContain(findings, f => f.Code == "acceptance.policy" && f.Location == byOperator.ExpectedPath);
-        Assert.Contains(findings, f => f.Code == "acceptance.activation" && f.Location == byOperator.ExpectedPath);
-        Assert.Equal("proposed", GoalRules.Status(estate.Load(), work.Goal));
+        RecordEnvelope byAgent = estate.Add("goal-status", estate.BuilderId, Status("active"), work.Goal.Reference);
+        RecordEnvelope early = estate.Add("acceptance", estate.OperatorId, Accept([], self: true), work.Goal.Reference);
+        estate.Add("goal-status", estate.OperatorId, Status("active"), work.Goal.Reference);
+        RecordEnvelope evaluation = estate.Add("review", work.Reviewer.Id, Evaluation("pass", Met(work.Result), Met(work.Result)), work.Goal.Reference);
+        RecordEnvelope bySponsor = estate.Add("acceptance", estate.BuilderId, Accept([evaluation.Id]), work.Goal.Reference);
+        RecordEnvelope person = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Contributor","roles":["contributor"]}""");
+        RecordEnvelope byPerson = estate.Add("acceptance", person.Id, Accept([evaluation.Id]), work.Goal.Reference);
+        RecordEnvelope byOperator = estate.Add("acceptance", estate.OperatorId, Accept([evaluation.Id], self: true), work.Goal.Reference);
+
+        model = estate.Load();
+        List<Finding> findings = model.Findings.Where(f => f.Severity == Severity.Error).ToList();
+        Assert.Contains(findings, f => f.Code == "goal-status.operator" && f.Location == byAgent.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "acceptance.activation" && f.Location == early.ExpectedPath);
+        Assert.Contains(findings, f => f.Code == "acceptance.policy" && f.Location == bySponsor.ExpectedPath && f.Message.Contains("only an operator", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "acceptance.policy" && f.Location == byPerson.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Location == byOperator.ExpectedPath);
+        Assert.Equal(byOperator.Id, GoalRules.Achievement(model, work.Goal)?.Id);
+        Assert.Equal("achieved", GoalRules.Status(model, work.Goal));
+    }
+
+    [Fact]
+    public void ThePersonWhoSponsorsAnOrdinaryGoalMayDelegateItsAcceptanceAndNeverForAReservedAction()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope delegated = estate.Add("principal", estate.OperatorId, """{"kind":"agent","name":"Acceptor","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Acceptor"}}""");
+        RecordEnvelope basis = estate.Add("decision", estate.BuilderId, $$"""{"title":"Accepting work","statement":"Accept others' ordinary work.","summary":"Accept ordinary work.","synthesis":"A grant to accept.","effects":["accept-work"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[]}""");
+        estate.Add("authority", estate.OperatorId, $$"""{"grantee":"{{delegated.Id}}","scope":["accept-work"],"reserved":[],"conditions":[],"basis":"{{basis.Id}}"}""");
+        RecordEnvelope stranger = estate.Add("principal", estate.OperatorId, """{"kind":"agent","name":"Stranger","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""");
+        Work work = Work.Write(estate, delegated: delegated.Id);
+        Assert.Equal(delegated.Id, GoalRules.AccepterOf(estate.Load(), work.Goal).Delegate);
+        estate.Add("goal-status", estate.OperatorId, Status("active"), work.Goal.Reference);
+        RecordEnvelope evaluation = estate.Add("review", work.Reviewer.Id, Evaluation("pass", Met(work.Result), Met(work.Result)), work.Goal.Reference);
+        RecordEnvelope byStranger = estate.Add("acceptance", stranger.Id, Accept([evaluation.Id]), work.Goal.Reference);
+        RecordEnvelope byDelegate = estate.Add("acceptance", delegated.Id, Accept([evaluation.Id]), work.Goal.Reference);
+        EstateModel model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "acceptance.policy" && f.Location == byStranger.ExpectedPath && f.Message.Contains("to whom the sponsor delegated it", StringComparison.Ordinal));
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location == byDelegate.ExpectedPath);
+        Assert.Equal(byDelegate.Id, GoalRules.Achievement(model, work.Goal)?.Id);
+
+        // Never the sponsor itself, never for a goal an agent sponsors, never for a goal that includes a reserved action.
+        RecordEnvelope product = estate.Add("product", estate.OperatorId, """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
+        RecordEnvelope itself = estate.Add("goal", estate.OperatorId, Goal(estate, delegated: estate.OperatorId));
+        RecordEnvelope agents = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: estate.BuilderId, delegated: delegated.Id));
+        RecordEnvelope released = estate.Add("goal", estate.OperatorId, GoalReleasing(estate, product.Id, delegated.Id));
+        RecordEnvelope milestone = estate.Add("work-order", estate.OperatorId, """{"key":"M-1","kind":"milestone","title":"Milestone","intent":"Work.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["work"]}""");
+        RecordEnvelope given = estate.Add("goal", estate.OperatorId, Goal(estate, plan: $$"""{"policy":"given","approval":"sponsor-approves","workOrders":["{{milestone.Id}}"]}""", delegated: delegated.Id));
+        List<Finding> findings = estate.Load().Findings.Where(f => f.Code == "goal.delegate").ToList();
+        Assert.Contains(findings, f => f.Location == itself.ExpectedPath && f.Message.Contains("another principal", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Location == agents.ExpectedPath && f.Message.Contains("only an operator", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Location == released.ExpectedPath && f.Message.Contains("about a release", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Location == given.ExpectedPath && f.Message.Contains("M-1 is a milestone", StringComparison.Ordinal));
+
+        // A milestone that joins an ordinary goal's work withdraws the delegation from then on.
+        using var later = new TestEstate(recordFormat: 2);
+        RecordEnvelope laterDelegate = later.Add("principal", later.OperatorId, """{"kind":"agent","name":"Acceptor","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Acceptor"}}""");
+        RecordEnvelope laterBasis = later.Add("decision", later.BuilderId, $$"""{"title":"Accepting work","statement":"Accept others' ordinary work.","summary":"Accept ordinary work.","synthesis":"A grant to accept.","effects":["accept-work"],"affects":[],"decidedBy":"{{later.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[]}""");
+        later.Add("authority", later.OperatorId, $$"""{"grantee":"{{laterDelegate.Id}}","scope":["accept-work"],"reserved":[],"conditions":[],"basis":"{{laterBasis.Id}}"}""");
+        Work laterWork = Work.Write(later, delegated: laterDelegate.Id);
+        later.Add("goal-status", later.OperatorId, Status("active"), laterWork.Goal.Reference);
+        later.Add("work-order", later.OperatorId, $$"""{"key":"M-2","kind":"milestone","title":"Milestone","intent":"Work.","scope":["work"],"exitQuestion":"Done?","inputs":[{"type":"goal","id":"{{laterWork.Goal.Id}}"}],"deliverables":["work"]}""");
+        RecordEnvelope laterEvaluation = later.Add("review", laterWork.Reviewer.Id, Evaluation("pass", Met(laterWork.Result), Met(laterWork.Result)), laterWork.Goal.Reference);
+        RecordEnvelope withdrawn = later.Add("acceptance", laterDelegate.Id, Accept([laterEvaluation.Id]), laterWork.Goal.Reference);
+        Assert.Contains(later.Load().Findings, f => f.Code == "acceptance.policy" && f.Location == withdrawn.ExpectedPath && f.Message.Contains("not delegated", StringComparison.Ordinal));
     }
 
     private static string Status(string status) => $$"""{"status":"{{status}}","note":"The sponsor's call."}""";
+
+    private static string GoalReleasing(TestEstate estate, string product, string delegated) =>
+        """{"title":"Release the widget","objective":"Publish it.","completion":[{"record":{"type":"release","subject":"@P@","fields":{"status":"published"}}}],"constraints":[],"kind":"finite","sponsor":"@S@","delegate":"@D@","budget":{"wallMinutes":600,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}"""
+            .Replace("@P@", product, StringComparison.Ordinal).Replace("@S@", estate.OperatorId, StringComparison.Ordinal).Replace("@D@", delegated, StringComparison.Ordinal);
 
     private static string Accept(string[] basis, bool self = false) =>
         $$"""{"statement":"Accepted on the evaluation.","basis":[{{string.Join(",", basis.Select(b => $"\"{b}\""))}}],"self":{{(self ? "true" : "false")}}}""";

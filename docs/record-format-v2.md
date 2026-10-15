@@ -64,16 +64,17 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   subject, product, fields, state, min, max}}`, checked from current records, or an evidence statement `{evidence,
   check}`, judged by an evaluator who did none of the work; see [A goal's completion
   conditions](#a-goals-completion-conditions)), `constraints`, `kind` (finite or stewardship), the `sponsor`, the
-  `roster` or role overrides it uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and
-  `tokens`, `concurrency` and `currency` where they apply; an absent unit is not an unlimited one), the `plan`
-  (proposed by a planner or given as work orders, and who approves it), `limits` and `inputs`.
+  `delegate` a sponsor who is a person may name for an ordinary goal's acceptance, the `roster` or role overrides it
+  uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`, `concurrency` and
+  `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a planner or given as
+  work orders, and who approves it), `limits` and `inputs`.
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
-  `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when its sponsor activates it, which grants
-  its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and abandoned,
-  and active only when the sponsor is a person with the authority to spend (see [A goal's activation and
-  acceptance](#a-goals-activation-and-acceptance)); nothing follows impossible or abandoned; a revised goal starts
-  again from its sponsor's activation. Achievement is never a status: it is the goal's acceptance, by its sponsor when
-  the sponsor is a person and by an operator when an agent sponsors it.
+  `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when it is activated, which grants its
+  budget, or ends unstarted when it is abandoned; active is recorded by its sponsor, a person with the authority to
+  spend, or by an operator when an agent sponsors it, and impossible and abandoned by the sponsor or that operator (see
+  [A goal's activation and acceptance](#a-goals-activation-and-acceptance)); nothing follows impossible or abandoned;
+  a revised goal starts again from its activation. Achievement is never a status: it is the goal's acceptance, by its
+  sponsor when the sponsor is a person and by an operator when an agent sponsors it.
 - **`roster`**: who fills each role of the estate's work (planner, builder, reviewer, evaluator, release manager,
   publisher, decider, or a role the estate names), principals in order of preference. One current roster per estate,
   recorded by the operator or under `administer`; the decider role is held by operators, because decisions and
@@ -280,39 +281,50 @@ written. The evaluator is told the conditions, never an expected answer.
 
 ## A goal's activation and acceptance
 
+Who decides for a goal is its sponsor when the sponsor is a person, and an operator when an agent or a service
+sponsors it: an agent may propose a goal, as its author or as its sponsor, but never activates, funds or accepts one.
 Activating a goal, its first `active` status, and resuming it, an `active` status after `paused`, `budget-limited` or
-`blocked`, grant its budget, which is spending. Only its sponsor records them (`goal-status.sponsor`), and only a
-sponsor who is a person (`goal-status.person`): an agent may propose a goal, as its author or even as its sponsor, but
-never activates or funds one, so a goal an agent sponsors stays proposed until a person revises it, naming themselves
-its sponsor, and activates the revision. The sponsor needs the authority to spend at the time
-(`goal-status.authority`): the operator holds it, and anyone else holds it under a grant of the `spending` scope.
-Like every grant, one recorded later authorizes what came before it, and an expired one authorizes nothing written
-from its expiry on. What is granted is the goal's budget, unit by unit: `wallMinutes` and `attemptsPerStep` always,
-and `tokens`, `concurrency` and `currency` where the goal states them; a unit the goal does not state is not granted,
-never granted without limit. A status counts only when its author could record it, so an activation an agent wrote
-around the runtime activates nothing.
+`blocked`, grant its budget, which is spending, and are recorded by who decides for it: the sponsor, never another
+principal, for a goal a person sponsors (`goal-status.sponsor`), and an operator for a goal an agent sponsors
+(`goal-status.operator`). A person who is not an operator needs the authority to spend at the time
+(`goal-status.authority`), a grant of the `spending` scope; an operator holds it. Like every grant, one recorded later
+authorizes what came before it, and an expired one authorizes nothing written from its expiry on. What is granted is
+the goal's budget, unit by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`, `concurrency` and
+`currency` where the goal states them; a unit the goal does not state is not granted, never granted without limit.
+Impossible and abandoned are recorded by the sponsor or by who decides for the goal. A status counts only when its
+author could record it, so an activation an agent wrote around the runtime activates nothing.
 
-A goal is achieved by an `acceptance` of its exact revision, which:
+A goal is achieved by an `acceptance` of its exact revision. Who accepts it is the operator's decision
+01M507XV4VBFYWMRN8WCXMXHX4, kept in one place:
 
-- is by its sponsor when the sponsor is a person, and by an operator when an agent or a service sponsors it
-  (`acceptance.policy`). This is the rule recommended to the operator, whose decision on who accepts a goal is
-  pending; it is kept in one place, so that the decision changes it alone. Delegating a goal's acceptance to a
-  principal with `accept-work` authority, which the design allows for an ordinary goal, is not built;
-- comes after its sponsor's activation, and before the goal ends as impossible or abandoned (`acceptance.activation`);
-- names in its `basis` the goal's current evaluation, which finds every condition met (`acceptance.evaluation`); an
-  evaluation by a step's author never counts;
+- its sponsor when the sponsor is a person, and an operator, only an operator, when an agent or a service sponsors it,
+  so that no agent accepts a goal it sponsors (`acceptance.policy`);
+- or, for an ordinary goal a person sponsors, the principal the sponsor delegates its acceptance to, named in the
+  goal's `delegate`, while that principal holds the `accept-work` scope. The sponsor's activation of the exact revision
+  that names the delegate is the delegation. A goal that includes a reserved action is never accepted by delegation:
+  one whose completion has a condition about a release, whose acceptance and publication are the operator's, or about
+  a milestone, or whose work includes a milestone, whose acceptance is the operator's. The goal refuses a delegate that
+  is its sponsor, a delegate of a goal an agent sponsors, and a delegate of a goal whose conditions or given work
+  include a reserved action (`goal.delegate`); a milestone that joins its work later withdraws the delegation from then
+  on.
+
+The acceptance also:
+
+- comes after the goal's activation, and before it ends as impossible or abandoned (`acceptance.activation`);
+- names in its `basis` the goal's current evaluation, which finds every condition met at the goal's exact hash
+  (`acceptance.evaluation`); an evaluation by a step's author never counts;
 - is never by that evaluation's author, nor by a principal that authored one of the goal's steps
   (`acceptance.independence`).
 
 Each is judged from the records before the acceptance, so a later record never unmakes it. Until an acceptance passes
-all four, the goal's status is the latest status of its exact revision, and `proposed` before any.
+them all, the goal's status is the latest status of its exact revision, and `proposed` before any.
 
 `vericairn goal propose` writes a goal from its options (`--done` takes each condition as JSON, `--budget` each cap as
-`unit=value`), `vericairn goal activate|pause|resume|stop <goal> --by <id>` record its statuses in their order, the
-sponsor's each time, and `vericairn goal accept <goal> --by <id> --statement <text>` accepts it on its current
-evaluation. Records can change after an evaluation, so the runtime also refuses an acceptance while a record predicate
-does not hold, before anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is
-not, why.
+`unit=value`, `--delegate` the delegate), `vericairn goal activate|pause|resume|stop <goal> --by <id>` record its
+statuses in their order (activation and resumption by who decides for the goal, a pause or a stop by the sponsor too),
+and `vericairn goal accept <goal> --by <id> --statement <text>` accepts it on its current evaluation. Records can
+change after an evaluation, so the runtime also refuses an acceptance while a record predicate does not hold, before
+anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is not, why.
 
 ## A device keeps its identity
 

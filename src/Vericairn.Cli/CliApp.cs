@@ -610,7 +610,8 @@ internal static class CliApp
         var titleOption = new Option<string>("--title") { Description = "Short title.", Required = true };
         var objectiveOption = new Option<string>("--objective") { Description = "What the sponsor wants, in the sponsor's words.", Required = true };
         var doneOption = new Option<string[]>("--done") { Description = "A completion condition as JSON; repeatable. A record predicate, {\"type\": ...} with optional subject, product, fields, state, min and max (or the same inside {\"record\": ...}), or an evidence statement, {\"evidence\": ..., \"check\": ...}.", Required = true };
-        var sponsorOption = new Option<string?>("--sponsor") { Description = "The accountable principal, who activates it and, being a person, accepts it; the proposer when omitted. An agent may propose a goal, never activate one." };
+        var sponsorOption = new Option<string?>("--sponsor") { Description = "The accountable principal; the proposer when omitted. A person who sponsors a goal activates and accepts it; a goal an agent sponsors is activated and accepted by an operator, and only an operator." };
+        var delegateOption = new Option<string?>("--delegate") { Description = "A principal the sponsor, a person, delegates the acceptance of an ordinary goal to; it accepts while it holds the 'accept-work' scope, and never a goal that includes a reserved action." };
         var constraintOption = new Option<string[]>("--constraint") { Description = "What must not change or happen; repeatable." };
         var budgetOption = new Option<string[]>("--budget") { Description = "A cap its activation grants, unit=value; repeatable: wallMinutes and attemptsPerStep (both required), tokens, concurrency, or currency=<amount in minor units>:<unit> such as currency=5000:USD. A unit not given is not granted." };
         var rosterOption = new Option<string?>("--roster") { Description = "The roster record whose roles it uses; the estate's current roster when omitted." };
@@ -625,6 +626,7 @@ internal static class CliApp
         propose.Options.Add(objectiveOption);
         propose.Options.Add(doneOption);
         propose.Options.Add(sponsorOption);
+        propose.Options.Add(delegateOption);
         propose.Options.Add(constraintOption);
         propose.Options.Add(budgetOption);
         propose.Options.Add(rosterOption);
@@ -641,6 +643,7 @@ internal static class CliApp
                 parseResult.GetValue(objectiveOption)!,
                 parseResult.GetValue(doneOption) ?? [],
                 parseResult.GetValue(sponsorOption),
+                parseResult.GetValue(delegateOption),
                 parseResult.GetValue(constraintOption) ?? [],
                 parseResult.GetValue(budgetOption) ?? [],
                 parseResult.GetValue(rosterOption),
@@ -655,10 +658,10 @@ internal static class CliApp
         var noteOption = new Option<string?>("--note") { Description = "Why, and what remains; a sentence naming the action when omitted." };
         foreach ((string name, string description) in new[]
         {
-            ("activate", "Activate a proposed goal: its sponsor, a person who holds the operator role or a grant of the spending scope, grants its budget. An agent never activates a goal."),
-            ("pause", "Pause an active goal; its sponsor's."),
-            ("resume", "Resume a paused, budget-limited or blocked goal, which grants its budget again; its sponsor's, as activation is."),
-            ("stop", "Stop a goal: its sponsor ends it as abandoned, and nothing follows. No step runs before the worker contract exists, so there is nothing to contain yet."),
+            ("activate", "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it. An agent never activates a goal."),
+            ("pause", "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors."),
+            ("resume", "Resume a paused, budget-limited or blocked goal, which grants its budget again; by whoever may activate it."),
+            ("stop", "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned, and nothing follows. No step runs before the worker contract exists, so there is nothing to contain yet."),
         })
         {
             var command = new Command(name, description);
@@ -682,7 +685,7 @@ internal static class CliApp
         goal.Subcommands.Add(evaluate);
 
         var statementOption = new Option<string>("--statement") { Description = "What is accepted and on what basis.", Required = true };
-        var accept = new Command("accept", "Accept a goal at its current revision, relying on its current evaluation: by its sponsor when the sponsor is a person and by an operator when an agent sponsors it, never by its evaluator or a step's author, once every condition is found met and every record predicate holds.");
+        var accept = new Command("accept", "Accept a goal at its current revision, relying on its current evaluation: by its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to, and by an operator, only an operator, when an agent sponsors it; never by its evaluator or a step's author, and only once every condition is found met and every record predicate holds.");
         accept.Arguments.Add(goalArgument);
         accept.Options.Add(byOption);
         accept.Options.Add(statementOption);

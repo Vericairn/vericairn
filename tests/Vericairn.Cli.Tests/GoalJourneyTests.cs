@@ -134,6 +134,56 @@ public class GoalJourneyTests
         }
     }
 
+    [Fact]
+    public void J49_AGoalAnAgentSponsorsIsActivatedAndAcceptedOnlyByAnOperator()
+    {
+        string root = CliHarness.TempDirectory("j49-agent");
+        string scratch = CliHarness.TempDirectory("j49-agent-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "J49.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = Principal(root, scratch, op, "Builder", "builder");
+            string reviewer = Principal(root, scratch, op, "Reviewer", "reviewer");
+            string person = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "person.json", """{"kind":"human","name":"Contributor","roles":["contributor"]}""")).Id;
+            string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$$"""{"title":"Accepting work","stake":"low","notAuthorized":[],"statement":"Accept others' ordinary work.","summary":"The contributor accepts ordinary work.","synthesis":"A grant to accept.","effects":["accept-work"],"affects":[],"decidedBy":"{{{op}}}","decidedAt":"2026-10-15T12:00:00Z"}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", CliHarness.WriteJson(scratch, "grant.json", $$$"""{"grantee":"{{{person}}}","scope":["accept-work"],"reserved":[],"conditions":[],"basis":"{{{decision}}}"}"""));
+
+            // The builder proposes a goal it sponsors; it may not activate it, and may not name a delegate for it.
+            string[] conditions = ["--done", """{"type":"work-order","fields":{"key":"W-3"},"state":"accepted"}""", "--done", """{"evidence":"The guide describes the widget.","check":"Read the guide."}"""];
+            CliHarness.Outcome delegated = CliHarness.Run(["--estate", root, "--json", "goal", "propose", "--by", builder, "--title", "Keep the guide current", "--objective", "The guide describes the widget.", "--delegate", person, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2", .. conditions]);
+            Assert.Equal(1, delegated.Code);
+            Assert.Contains("goal.delegate", delegated.Out, StringComparison.Ordinal);
+            string goal = CliHarness.Ok(["--estate", root, "--json", "goal", "propose", "--by", builder, "--title", "Keep the guide current", "--objective", "The guide describes the widget.", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2", .. conditions]).Id;
+            Assert.Contains("accepted by an operator, and only an operator, since its sponsor is an agent", CliHarness.Ok("--estate", root, "goal").Out, StringComparison.Ordinal);
+            Refused(root, "never activate or fund one", "goal", "activate", goal, "--by", builder);
+            Refused(root, "activated by an operator", "goal", "activate", goal, "--by", person);
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+
+            // The builder does the work, the reviewer evaluates it, and neither they nor a person with accept-work may accept it.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", $$$"""{"key":"W-3","kind":"ordinary","title":"Revise the guide","intent":"The goal's work.","scope":["guide"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{{goal}}}"}],"deliverables":["guide"]}"""));
+            string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-3", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A current guide.","sources":[],"permittedChanges":["the guide"],"prohibitedEffects":["no publication"],"workspace":["example repository"],"limits":[],"expectedOutputs":["guide"],"reviewCriteria":["it describes the widget"],"recovery":"Record a result."}""")).Id;
+            string attempt = CliHarness.Ok("--estate", root, "--json", "work", "attempt", assignment, "--by", builder, "--workspace", "example repository, work branch", "--note", "Revise the guide.").Id;
+            string result = CliHarness.Ok("--estate", root, "--json", "work", "result", attempt, "--by", builder, "--body", CliHarness.WriteJson(scratch, "result.json", """{"outcome":"completed","summary":"The guide describes the widget.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""")).Id;
+            JsonElement order = CliHarness.Ok("--estate", root, "--json", "work", "brief", "W-3").Json.GetProperty("workOrder");
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"work-order:{order.GetProperty("id").GetString()}:{order.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, "accept-order.json", """{"statement":"W-3 is done.","basis":[],"self":true}"""));
+            CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the work and the guide.", "--verdict", "2:met:The guide describes the widget.", "--read", "2:" + result);
+            Refused(root, "only an operator", "goal", "accept", goal, "--by", builder, "--statement", "My goal is done.");
+            Refused(root, "never accepted by its evaluator", "goal", "accept", goal, "--by", reviewer, "--statement", "Done.");
+            Refused(root, "only an operator", "goal", "accept", goal, "--by", person, "--statement", "Done.");
+            CliHarness.Ok("--estate", root, "--json", "goal", "accept", goal, "--by", op, "--statement", "Accepted for the estate, on the reviewer's evaluation.");
+            Assert.Equal("achieved", CliHarness.Ok("--estate", root, "--json", "goal", "show", goal).Json.GetProperty("status").GetString());
+
+            // A person who sponsors an ordinary goal may delegate its acceptance, and the goal says to whom.
+            string ordinary = CliHarness.Ok(["--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Keep the guide current, again", "--objective", "The guide describes the widget.", "--delegate", person, "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2", .. conditions]).Id;
+            Assert.Contains($"or Contributor ({person}), to whom the sponsor delegated it", CliHarness.Ok("--estate", root, "goal", "show", ordinary).Out, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static string Principal(string root, string scratch, string op, string name, string role) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, name + ".json", $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
 

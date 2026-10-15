@@ -12,14 +12,11 @@ public sealed class GoalStatusType : IRecordType
     /// <summary>The statuses a goal moves through after it is proposed.</summary>
     public static readonly string[] Statuses = ["active", "paused", "budget-limited", "blocked", "impossible", "abandoned"];
 
-    /// <summary>Statuses only the sponsor records: activation and resumption grant the budget, and ending is the sponsor's call.</summary>
-    private static readonly string[] SponsorOnly = ["active", "impossible", "abandoned"];
-
     /// <inheritdoc />
     public string Name => "goal-status";
 
     /// <inheritdoc />
-    public string Summary => "A change in a goal's lifecycle: active (activated or resumed by its sponsor, a person with the authority to spend, which grants its budget), paused, budget-limited, blocked, impossible (the evaluator's verdict, confirmed by the sponsor) or abandoned. Achievement is an acceptance of the goal, never a status.";
+    public string Summary => "A change in a goal's lifecycle: active (activated or resumed by its sponsor, a person with the authority to spend, or by an operator when an agent sponsors it, which grants its budget), paused, budget-limited, blocked, impossible (the evaluator's verdict, confirmed by the sponsor) or abandoned. Achievement is an acceptance of the goal, never a status.";
 
     /// <inheritdoc />
     public string? SubjectType => "goal";
@@ -33,7 +30,7 @@ public sealed class GoalStatusType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its sponsor's activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force; impossible and abandoned by the sponsor.", 2),
+        new("status", string.Join('|', Statuses), true, "The new status of the exact goal revision; a revised goal starts again from its activation. Active is recorded by the sponsor, a person who holds the operator role or a grant of the 'spending' scope in force, or by an operator when an agent sponsors the goal; impossible and abandoned by the sponsor or, for a goal an agent sponsors, an operator.", 2),
         new("note", "string", true, "Why, and what remains.", 2),
     ];
 
@@ -58,15 +55,15 @@ public sealed class GoalStatusType : IRecordType
 
         if (status == "active")
         {
-            // Activation and resumption grant the budget: only the sponsor, a person, within the sponsor's authority to spend.
+            // Activation and resumption grant the budget: the sponsor, a person within the authority to spend, or an operator when an agent sponsors it.
             foreach ((string code, string message) in GoalRules.ActivationRefusals(context.Model, goal, context.Record.By, context.Record.AtTime))
             {
                 context.Error(code, message);
             }
         }
-        else if (Array.IndexOf(SponsorOnly, status) >= 0 && context.Record.By != EstateModel.BodyString(goal, "sponsor"))
+        else if (status is "impossible" or "abandoned" && !GoalRules.MayEnd(context.Model, goal, context.Record.By))
         {
-            context.Error("goal-status.sponsor", $"Only the goal's sponsor records it as {status}.");
+            context.Error("goal-status.sponsor", $"Only the goal's sponsor, or an operator for a goal an agent sponsors, records it as {status}.");
         }
 
         // The statuses before this one that count: a status its author could not record changes nothing.

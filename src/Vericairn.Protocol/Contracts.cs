@@ -239,7 +239,7 @@ public sealed record GoalResponse(string Text, JsonElement Json);
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
 
 /// <summary>Activate, pause, resume or stop a goal.</summary>
-/// <param name="By">The principal acting: the goal's sponsor.</param>
+/// <param name="By">The principal acting: the goal's sponsor, or an operator for a goal an agent sponsors.</param>
 /// <param name="Note">Why, and what remains; a sentence naming the action when omitted.</param>
 public sealed record GoalActionRequest(string By, string? Note = null);
 
@@ -257,7 +257,7 @@ public sealed record GoalEvaluateRequest(string By, string Summary, IReadOnlyLis
 public sealed record GoalVerdict(int Condition, string Verdict, string Reason, IReadOnlyList<string>? Read = null);
 
 /// <summary>Accept a goal at its current revision, relying on its current evaluation.</summary>
-/// <param name="By">The accepting principal: the sponsor when the sponsor is a person, an operator when an agent sponsors it.</param>
+/// <param name="By">The accepting principal: the sponsor when the sponsor is a person, or the principal it delegated an ordinary goal's acceptance to; an operator when an agent sponsors it.</param>
 /// <param name="Statement">What is accepted and on what basis.</param>
 public sealed record GoalAcceptRequest(string By, string Statement);
 

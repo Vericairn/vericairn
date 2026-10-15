@@ -139,9 +139,10 @@ public class GoalEvaluationTests
     internal static string Order(string key, string input) =>
         $$"""{"key":"{{key}}","kind":"ordinary","title":"Order {{key}}","intent":"Work.","scope":["work"],"exitQuestion":"Done?","inputs":[{{input}}],"deliverables":["work"]}""";
 
-    internal static string Goal(TestEstate estate, string plan = """{"policy":"proposed-by-planner","approval":"sponsor-approves"}""", string? sponsor = null) =>
-        """{"title":"Release the widget","objective":"Ship the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"W-1"}}},{"evidence":"The guide describes the widget.","check":"An evaluator reads the guide."}],"constraints":[],"kind":"finite","sponsor":"@SPONSOR@","budget":{"wallMinutes":600,"attemptsPerStep":3},"plan":@PLAN@,"inputs":[]}"""
-            .Replace("@SPONSOR@", sponsor ?? estate.OperatorId, StringComparison.Ordinal).Replace("@PLAN@", plan, StringComparison.Ordinal);
+    internal static string Goal(TestEstate estate, string plan = """{"policy":"proposed-by-planner","approval":"sponsor-approves"}""", string? sponsor = null, string? delegated = null) =>
+        """{"title":"Release the widget","objective":"Ship the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"W-1"}}},{"evidence":"The guide describes the widget.","check":"An evaluator reads the guide."}],"constraints":[],"kind":"finite","sponsor":"@SPONSOR@"@DELEGATE@,"budget":{"wallMinutes":600,"attemptsPerStep":3},"plan":@PLAN@,"inputs":[]}"""
+            .Replace("@SPONSOR@", sponsor ?? estate.OperatorId, StringComparison.Ordinal).Replace("@PLAN@", plan, StringComparison.Ordinal)
+            .Replace("@DELEGATE@", delegated is null ? string.Empty : $",\"delegate\":\"{delegated}\"", StringComparison.Ordinal);
 
     private static string Evaluation(string outcome, string[] conditions, string independence) =>
         $$"""{"independence":"{{independence}}","outcome":"{{outcome}}","summary":"Read the records the conditions name.","findings":[],"conditions":[{{string.Join(",", conditions)}}]}""";
@@ -149,10 +150,10 @@ public class GoalEvaluationTests
     /// <summary>A goal its operator sponsors, the work order that names it, the builder's assignment, attempt and result, and a reviewer.</summary>
     internal sealed record Work(RecordEnvelope Goal, RecordEnvelope Order, RecordEnvelope Assignment, RecordEnvelope Attempt, RecordEnvelope Result, RecordEnvelope Reviewer)
     {
-        public static Work Write(TestEstate estate, string? sponsor = null)
+        public static Work Write(TestEstate estate, string? sponsor = null, string? delegated = null)
         {
             RecordEnvelope reviewer = estate.Add("principal", estate.OperatorId, """{"kind":"agent","name":"Reviewer","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Reviewer"}}""");
-            RecordEnvelope goal = estate.Add("goal", estate.OperatorId, GoalEvaluationTests.Goal(estate, sponsor: sponsor));
+            RecordEnvelope goal = estate.Add("goal", estate.OperatorId, GoalEvaluationTests.Goal(estate, sponsor: sponsor, delegated: delegated));
             RecordEnvelope order = estate.Add("work-order", estate.OperatorId, GoalEvaluationTests.Order("W-1", $$"""{"type":"goal","id":"{{goal.Id}}"}"""));
             RecordEnvelope assignment = estate.Add("assignment", estate.OperatorId, GoalEvaluationTests.Assignment(estate.BuilderId), order.Reference);
             RecordEnvelope attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"example repository, work branch","note":"Build the widget."}""", assignment.Reference);

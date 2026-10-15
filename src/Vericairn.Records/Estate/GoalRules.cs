@@ -22,21 +22,75 @@ public static class GoalRules
     public static readonly string[] Ended = ["impossible", "abandoned"];
 
     /// <summary>
-    /// Who accepts a goal. This function is the one place the rule lives, because the operator's decision on it is pending: the
-    /// goal's sponsor accepts it when the sponsor is a person, and an operator accepts a goal that an agent, or a service, sponsors.
+    /// Who accepts a goal, the one place the rule lives (decision 01M507XV4VBFYWMRN8WCXMXHX4): its sponsor when the sponsor is a
+    /// person, or the principal that sponsor delegates the acceptance of an ordinary goal to, while it holds the 'accept-work' scope;
+    /// and an operator, only an operator, when an agent or a service sponsors it, so that no agent accepts a goal it sponsors. A goal
+    /// that includes a reserved action is never accepted by delegation. Who decides for the goal, the sponsor or, for a goal an agent
+    /// sponsors, an operator, also activates, resumes and ends it. Never the evaluator or a step's author: <see cref="AcceptanceRefusals"/>.
     /// </summary>
-    public static Accepter AccepterOf(EstateModel model, RecordEnvelope goal)
+    public static Accepter AccepterOf(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         string? sponsor = EstateModel.BodyString(goal, "sponsor");
-        if (sponsor is not null && IsPerson(model, sponsor))
+        if (sponsor is null || !IsPerson(model, sponsor))
         {
-            return new Accepter(sponsor, $"its sponsor, {Name(model, sponsor)} ({sponsor})");
+            string kind = sponsor is not null && model.CurrentPrincipal(sponsor) is RecordEnvelope principal ? EstateModel.BodyString(principal, "kind") ?? "unknown" : "unknown";
+            return new Accepter(null, $"an operator, and only an operator, since its sponsor is {(kind == "service" ? "a service" : kind == "agent" ? "an agent" : "not a person")}");
         }
 
-        string kind = sponsor is null ? "unknown" : model.CurrentPrincipal(sponsor) is RecordEnvelope principal ? EstateModel.BodyString(principal, "kind") ?? "unknown" : "unknown";
-        return new Accepter(null, $"an operator, since its sponsor is {(kind == "service" ? "a service" : kind == "agent" ? "an agent" : "not a person")}");
+        string described = $"its sponsor, {Name(model, sponsor)} ({sponsor})";
+        string? named = EstateModel.BodyString(goal, "delegate");
+        if (named is null || named == sponsor)
+        {
+            return new Accepter(sponsor, described);
+        }
+
+        IReadOnlyList<string> reserved = ReservedActions(model, goal, before);
+        return reserved.Count == 0
+            ? new Accepter(sponsor, $"{described}, or {Name(model, named)} ({named}), to whom the sponsor delegated it, while that principal holds the 'accept-work' scope", named)
+            : new Accepter(sponsor, $"{described}: the goal includes a reserved action ({string.Join("; ", reserved)}), so its acceptance is not delegated");
+    }
+
+    /// <summary>
+    /// The reserved actions the records show a goal includes, each in words: a completion condition about a release, whose acceptance
+    /// and publication are the operator's; a completion condition about a milestone work order, or a milestone among its work, whose
+    /// acceptance is the operator's. A goal that includes one is never accepted by delegation (design/goals.md § 5).
+    /// </summary>
+    public static IReadOnlyList<string> ReservedActions(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        var reserved = new List<string>();
+        int index = 0;
+        foreach (JsonElement condition in goal.Body.TryGetProperty("completion", out JsonElement completion) && completion.ValueKind == JsonValueKind.Array ? completion.EnumerateArray() : Enumerable.Empty<JsonElement>())
+        {
+            index++;
+            if (condition.ValueKind != JsonValueKind.Object || !condition.TryGetProperty("record", out JsonElement predicate) || predicate.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            string? type = predicate.TryGetProperty("type", out JsonElement t) ? t.GetString() : null;
+            JsonElement fields = predicate.TryGetProperty("fields", out JsonElement f) && f.ValueKind == JsonValueKind.Object ? f : default;
+            string? kind = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("kind", out JsonElement k) ? k.GetString() : null;
+            string? key = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("key", out JsonElement kk) ? kk.GetString() : null;
+            if (type == "release")
+            {
+                reserved.Add($"condition {index} is about a release, whose acceptance and publication are the operator's");
+            }
+            else if (type == "work-order" && (kind == "milestone" || (key is not null && model.Current("work-order").Any(o => EstateModel.BodyString(o, "key") == key && EstateModel.BodyString(o, "kind") == "milestone"))))
+            {
+                reserved.Add($"condition {index} is about a milestone, whose acceptance is the operator's");
+            }
+        }
+
+        foreach (RecordEnvelope order in Work(model, goal, before).Where(o => EstateModel.BodyString(o, "kind") == "milestone"))
+        {
+            reserved.Add($"work order {EstateModel.BodyString(order, "key")} is a milestone, whose acceptance is the operator's");
+        }
+
+        return reserved;
     }
 
     /// <summary>True when the principal is a person: a human principal.</summary>
@@ -57,28 +111,36 @@ public static class GoalRules
     }
 
     /// <summary>
-    /// Why a principal may not activate or resume a goal at a time, which grants its budget: only its sponsor does, an agent never
-    /// does (an agent's proposed goal is proposed, not authorized or funded), and the sponsor needs the authority to spend. Empty
-    /// when it may.
+    /// Why a principal may not activate or resume a goal at a time, which grants its budget: who decides for the goal does, its
+    /// sponsor when a person, who needs the authority to spend, and an operator for a goal an agent sponsors; an agent never does (an
+    /// agent's proposed goal is proposed, not authorized or funded). Empty when it may.
     /// </summary>
     public static IReadOnlyList<(string Code, string Message)> ActivationRefusals(EstateModel model, RecordEnvelope goal, string by, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        string? sponsor = EstateModel.BodyString(goal, "sponsor");
-        if (by != sponsor)
+        Accepter decider = AccepterOf(model, goal);
+        if (!decider.Decides(model, by))
         {
-            return [("goal-status.sponsor", "Only the goal's sponsor records it as active.")];
-        }
-
-        if (!IsPerson(model, sponsor))
-        {
-            return [("goal-status.person", "A goal is activated by its sponsor, a person: an agent may propose a goal, never activate or fund one. A person who sponsors it revises it, naming themselves its sponsor, and activates the revision.")];
+            return decider.Principal is not null
+                ? [("goal-status.sponsor", "Only the goal's sponsor records it as active.")]
+                : [("goal-status.operator", "A goal an agent sponsors is activated by an operator, who grants its budget: an agent may propose a goal, never activate or fund one.")];
         }
 
         return HoldsSpending(model, by, at)
             ? []
             : [("goal-status.authority", "Activating a goal grants its budget, which is spending: its sponsor holds the operator role or a grant of the 'spending' scope in force.")];
+    }
+
+    /// <summary>
+    /// True when the principal may end a goal as impossible or abandoned: its sponsor, or who decides for it, an operator for a goal
+    /// an agent sponsors.
+    /// </summary>
+    public static bool MayEnd(EstateModel model, RecordEnvelope goal, string by)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        return by == EstateModel.BodyString(goal, "sponsor") || AccepterOf(model, goal).Decides(model, by);
     }
 
     /// <summary>
@@ -156,11 +218,10 @@ public static class GoalRules
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        string? sponsor = EstateModel.BodyString(goal, "sponsor");
         return Ordered(model.About(goal.Id, "goal-status").Where(s => (before is null || Before(s, before)) && EstateModel.BodyString(s, "status") switch
         {
             "active" => ActivationRefusals(model, goal, s.By, s.AtTime).Count == 0,
-            "impossible" or "abandoned" => s.By == sponsor,
+            "impossible" or "abandoned" => MayEnd(model, goal, s.By),
             _ => true,
         }));
     }
@@ -207,8 +268,8 @@ public static class GoalRules
         ArgumentNullException.ThrowIfNull(goal);
         ArgumentNullException.ThrowIfNull(basis);
         var refusals = new List<(string Code, string Message)>();
-        Accepter accepter = AccepterOf(model, goal);
-        if (!accepter.Allows(model, by))
+        Accepter accepter = AccepterOf(model, goal, before);
+        if (!accepter.Allows(model, by, before?.AtTime ?? DateTimeOffset.UtcNow))
         {
             refusals.Add(("acceptance.policy", $"A goal is accepted by {accepter.Description}."));
         }
@@ -310,16 +371,24 @@ public static class GoalRules
     private static string Name(EstateModel model, string principal) =>
         model.CurrentPrincipal(principal) is RecordEnvelope record ? EstateModel.BodyString(record, "name") ?? principal : principal;
 
-    /// <summary>Who accepts a goal: one principal, or any operator when <paramref name="Principal"/> is null.</summary>
-    /// <param name="Principal">The one principal who accepts it, or null for any operator.</param>
-    /// <param name="Description">Who, in words.</param>
-    public sealed record Accepter(string? Principal, string Description)
+    /// <summary>Who decides for a goal and who accepts it: its sponsor, or any operator when <paramref name="Principal"/> is null, and the delegate.</summary>
+    /// <param name="Principal">The sponsor, a person, who decides for the goal and accepts it; null when any operator does.</param>
+    /// <param name="Description">Who accepts it, in words.</param>
+    /// <param name="Delegate">The principal the sponsor delegated the acceptance of an ordinary goal to, when the delegation stands.</param>
+    public sealed record Accepter(string? Principal, string Description, string? Delegate = null)
     {
-        /// <summary>True when the principal may accept the goal.</summary>
-        public bool Allows(EstateModel model, string? by)
+        /// <summary>True when the principal decides for the goal, activating, resuming and ending it: its sponsor, or an operator when an agent sponsors it.</summary>
+        public bool Decides(EstateModel model, string? by)
         {
             ArgumentNullException.ThrowIfNull(model);
             return by is not null && (Principal is null ? model.HasRole(by, Roles.Operator) : by == Principal);
+        }
+
+        /// <summary>True when the principal may accept the goal at a time: who decides for it, or the delegate while it holds the 'accept-work' scope.</summary>
+        public bool Allows(EstateModel model, string? by, DateTimeOffset at)
+        {
+            ArgumentNullException.ThrowIfNull(model);
+            return Decides(model, by) || (by is not null && by == Delegate && model.HasScope(by, Scopes.AcceptWork, at));
         }
     }
 }

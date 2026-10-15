@@ -42,14 +42,15 @@ release and pins the one it runs on.
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `devices`, `release`, `sources`, `check`, `runtime`,
   `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when
-  one serves the estate, the embedded runtime otherwise. `vericairn goal` carries an objective: its sponsor
-  proposes and activates a goal, record predicates and an evaluator who did none of its work judge it condition
-  by condition, and its sponsor, a person, accepts it; no tool a coding agent is given can activate, fund or
-  accept one. There is no conductor yet: people and agents do a goal's steps. `vericairn docs` writes a release's
-  notes from an estate's records, refuses an incomplete documentation set, and keeps the estate's living
-  documents: their declarations, what is due and why, reviews and generated regions. `vericairn mcp serve` is the
-  Model Context Protocol server for coding agents, a client adapter over the API that lists only the tools the
-  connected device may use, documented in [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
+  one serves the estate, the embedded runtime otherwise. `vericairn goal` carries an objective: a goal is
+  proposed and activated, record predicates and an evaluator who did none of its work judge it condition by
+  condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
+  given can activate, fund or accept one. There is no conductor yet: people and agents do a goal's steps.
+  `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
+  and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
+  regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over
+  the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
+  `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
   the runtime: home and attention, products, work orders, assignments, results, review and decisions,
   releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds

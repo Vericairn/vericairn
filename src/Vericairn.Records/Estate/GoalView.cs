@@ -239,7 +239,7 @@ public static class GoalView
                 ["status"] = s.Status,
                 ["assignments"] = new JsonArray(s.Assignments.Select(a => (JsonNode)new JsonObject { ["id"] = a.AssignmentId, ["contributor"] = a.ContributorId, ["outcome"] = a.Outcome, ["state"] = a.State }).ToArray()),
             }).ToArray()),
-            ["accepter"] = new JsonObject { ["principal"] = view.Accepter.Principal, ["description"] = view.Accepter.Description },
+            ["accepter"] = new JsonObject { ["principal"] = view.Accepter.Principal, ["delegate"] = view.Accepter.Delegate, ["description"] = view.Accepter.Description },
             ["ready"] = view.Acceptance is null && view.NotReady.Count == 0,
             ["notReady"] = new JsonArray(view.NotReady.Select(r => (JsonNode)r).ToArray()),
             ["acceptance"] = view.Acceptance is null ? null : new JsonObject { ["id"] = view.Acceptance.Id, ["by"] = view.Acceptance.By, ["at"] = view.Acceptance.At, ["statement"] = EstateModel.BodyString(view.Acceptance, "statement") },

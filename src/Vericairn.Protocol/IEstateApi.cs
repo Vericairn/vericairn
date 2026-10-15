@@ -87,22 +87,22 @@ public interface IEstateApi
     /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);
 
-    /// <summary>Activates a proposed goal: its sponsor, a person with the authority to spend, grants its budget.</summary>
+    /// <summary>Activates a proposed goal, which grants its budget: its sponsor, a person with the authority to spend, or an operator when an agent sponsors it.</summary>
     WriteOutcome GoalActivate(string goal, GoalActionRequest request);
 
-    /// <summary>Pauses an active goal; its sponsor's.</summary>
+    /// <summary>Pauses an active goal; its sponsor's, or an operator's for a goal an agent sponsors.</summary>
     WriteOutcome GoalPause(string goal, GoalActionRequest request);
 
-    /// <summary>Resumes a paused, budget-limited or blocked goal, which grants its budget again; its sponsor's, as activation is.</summary>
+    /// <summary>Resumes a paused, budget-limited or blocked goal, which grants its budget again; by whoever may activate it.</summary>
     WriteOutcome GoalResume(string goal, GoalActionRequest request);
 
-    /// <summary>Stops a goal: its sponsor ends it as abandoned, and nothing follows.</summary>
+    /// <summary>Stops a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned, and nothing follows.</summary>
     WriteOutcome GoalStop(string goal, GoalActionRequest request);
 
     /// <summary>Records the evaluation of a goal's current revision, condition by condition, by a principal other than any step's author.</summary>
     WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request);
 
-    /// <summary>Accepts a goal's current revision once its current evaluation finds every condition met and every record predicate holds; never by its evaluator or a step's author.</summary>
+    /// <summary>Accepts a goal's current revision once its current evaluation finds every condition met and every record predicate holds: its sponsor when a person, or the delegate of an ordinary goal; an operator only when an agent sponsors it; never its evaluator or a step's author.</summary>
     WriteOutcome GoalAccept(string goal, GoalAcceptRequest request);
 
     /// <summary>The provider and adapter implementations available to the runtime on its machine, with their declared settings.</summary>

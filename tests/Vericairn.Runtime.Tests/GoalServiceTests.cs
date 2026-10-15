@@ -50,27 +50,56 @@ public class GoalServiceTests
     }
 
     [Fact]
-    public void AnAgentSponsoredGoalStaysProposedAndARevisionStartsAgain()
+    public void AnOperatorDecidesForAGoalAnAgentSponsorsAndARevisionStartsAgain()
     {
         using var estate = new TestEstate(recordFormat: 2);
         using EstateService service = EstateService.Open(estate.Root);
         string agents = Ok(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.BuilderId))))).Id;
         Refused(service.GoalActivate(agents, new GoalActionRequest(estate.BuilderId)), "an agent may propose a goal, never activate or fund one");
-        Refused(service.GoalActivate(agents, new GoalActionRequest(estate.OperatorId)), "Only the goal's sponsor records it as active.");
-        Assert.Contains("accepted by an operator, since its sponsor is an agent", service.Goal(agents)!.Text, StringComparison.Ordinal);
+        Assert.Contains("accepted by an operator, and only an operator, since its sponsor is an agent", service.Goal(agents)!.Text, StringComparison.Ordinal);
 
-        // A person sponsors it by a revision, which starts from proposed and is found by the id of any revision.
+        // An operator activates it, within the operator's own authority; the agent may pause or stop its goal, never resume it.
+        Ok(service.GoalActivate(agents, new GoalActionRequest(estate.OperatorId)));
+        Ok(service.GoalPause(agents, new GoalActionRequest(estate.BuilderId, "Waiting on the reviewer.")));
+        Refused(service.GoalResume(agents, new GoalActionRequest(estate.BuilderId)), "activated by an operator");
+        Ok(service.GoalResume(agents, new GoalActionRequest(estate.OperatorId)));
+        Assert.Equal("active", Status(service, agents));
+
+        // A revision starts from proposed, is found by the id of any revision, and is the only one a revision supersedes.
         string revised = Ok(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.OperatorId)), agents))).Id;
         Assert.Equal(revised, service.Goal(agents)!.Json.GetProperty("goal").GetProperty("id").GetString());
         Assert.Equal(2, service.Goal(agents)!.Json.GetProperty("goal").GetProperty("revision").GetInt32());
+        Assert.Equal("proposed", Status(service, revised));
+        Refused(service.GoalActivate(agents, new GoalActionRequest(estate.BuilderId)), "Only the goal's sponsor records it as active.");
         Ok(service.GoalActivate(agents, new GoalActionRequest(estate.OperatorId)));
-        Assert.Equal("active", Status(service, revised));
         Refused(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.OperatorId)), agents)), $"was revised by {revised}");
         Assert.Equal("not-found", service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.OperatorId)), "01M4TRNE1GYEK4P8MXQAB3C8Q4")).Problem!.Code);
 
         string again = Ok(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.OperatorId).Replace("Ship the widget.", "Ship the widget sooner.", StringComparison.Ordinal)), revised))).Id;
         Assert.Equal("proposed", Status(service, again));
         Assert.Contains("Budget its activation grants: wallMinutes 600, attemptsPerStep 3; not granted: tokens, concurrency, currency", service.Goal(again)!.Text, StringComparison.Ordinal);
+        Assert.Equal(0, service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheDelegateOfAnOrdinaryGoalAcceptsItWhileItHoldsAcceptWork()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        string delegated = Ok(service.NewRecord(new NewRecordRequest("principal", estate.OperatorId, Json("""{"kind":"human","name":"Delegate","roles":["contributor"]}""")))).Id;
+        string goal = Ok(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.OperatorId).Replace("\"budget\"", $"\"delegate\":\"{delegated}\",\"budget\"", StringComparison.Ordinal))))).Id;
+        (string reviewer, string result) = Work(estate, service, goal);
+        JsonElement order = service.Brief("W-1")!.Json.GetProperty("workOrder");
+        Ok(service.NewRecord(new NewRecordRequest("acceptance", estate.OperatorId, Json("""{"statement":"Accepted.","basis":[],"self":true}"""), $"work-order:{order.GetProperty("id").GetString()}:{order.GetProperty("hash").GetString()}")));
+        Ok(service.GoalEvaluate(goal, new GoalEvaluateRequest(reviewer, "Read the result and the guide.", [new GoalVerdict(2, "met", "The guide covers the widget.", [result])])));
+        Assert.Contains($"to whom the sponsor delegated it", service.Goal(goal)!.Text, StringComparison.Ordinal);
+        Refused(service.GoalAccept(goal, new GoalAcceptRequest(delegated, "Done.")), "while that principal holds the 'accept-work' scope");
+
+        string basis = Ok(service.NewRecord(new NewRecordRequest("decision", estate.BuilderId, Json($$"""{"title":"Accepting work","statement":"Accept ordinary work.","summary":"Accept ordinary work.","synthesis":"A grant to accept.","effects":["accept-work"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[]}""")))).Id;
+        Ok(service.NewRecord(new NewRecordRequest("authority", estate.OperatorId, Json($$"""{"grantee":"{{delegated}}","scope":["accept-work"],"reserved":[],"conditions":[],"basis":"{{basis}}"}"""))));
+        Ok(service.GoalAccept(goal, new GoalAcceptRequest(delegated, "Accepted for the sponsor, on the evaluation.")));
+        Assert.Equal("achieved", Status(service, goal));
+        Assert.Equal(0, service.Check().Errors);
     }
 
     [Fact]
@@ -139,14 +168,21 @@ public class GoalServiceTests
     /// <summary>A goal the builder proposes for the operator, activated; the work order that names it; the builder's result; and a reviewer.</summary>
     private static (string Goal, string Reviewer, string Result) Work(TestEstate estate, EstateService service)
     {
-        string reviewer = Ok(service.NewRecord(new NewRecordRequest("principal", estate.OperatorId, Json("""{"kind":"agent","name":"Reviewer","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Reviewer"}}""")))).Id;
         string goal = Ok(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.OperatorId))))).Id;
+        (string reviewer, string result) = Work(estate, service, goal);
+        return (goal, reviewer, result);
+    }
+
+    /// <summary>Activates a goal the operator sponsors and writes its work: the work order naming it, the builder's result, and a reviewer.</summary>
+    private static (string Reviewer, string Result) Work(TestEstate estate, EstateService service, string goal)
+    {
+        string reviewer = Ok(service.NewRecord(new NewRecordRequest("principal", estate.OperatorId, Json("""{"kind":"agent","name":"Reviewer","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Reviewer"}}""")))).Id;
         Ok(service.GoalActivate(goal, new GoalActionRequest(estate.OperatorId)));
         Ok(service.NewRecord(new NewRecordRequest("work-order", estate.OperatorId, Json(Order("W-1", goal)))));
         string assignment = Ok(service.Assign(new AssignRequest("W-1", estate.BuilderId, estate.OperatorId, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["example repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests pass"],"recovery":"Record a result."}""")))).Id;
         string attempt = Ok(service.Attempt(new AttemptRequest(assignment, estate.BuilderId, "example repository, work branch", "Build it."))).Id;
         string result = Ok(service.Result(new ResultRequest(attempt, estate.BuilderId, Json("""{"outcome":"completed","summary":"Built the widget and its guide.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""")))).Id;
-        return (goal, reviewer, result);
+        return (reviewer, result);
     }
 
     private static string Goal(string sponsor) =>
