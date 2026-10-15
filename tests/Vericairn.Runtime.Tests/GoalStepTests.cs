@@ -355,7 +355,7 @@ public class GoalStepTests
         // Leave the same residue as an abrupt process death, when finally cannot run.
         File.WriteAllBytes(staging, residue);
         RunEstate.Git(run.Estate.Root, "init", "-q");
-        Assert.Equal(".vericairn/record-staging/" + Path.GetFileName(staging), RunEstate.Git(run.Estate.Root, "check-ignore", "--", Path.GetRelativePath(run.Estate.Root, staging)).Trim());
+        Assert.Equal(".vericairn/record-staging/" + Path.GetFileName(staging), RunEstate.Git(run.Estate.Root, "check-ignore", "--", EstateLayout.Relative(run.Estate.Root, staging)).Trim());
         run.Reopen();
         Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
         Assert.Equal(0, run.Service.Check().Errors);
