@@ -62,6 +62,14 @@ internal static class Commands
         });
     }
 
+    /// <summary>The progress report from the records alone, through the API; exit 1 when the check it shows found errors, as status does.</summary>
+    public static int Progress(string root, bool json) => WithApi(root, api =>
+    {
+        ProgressResponse progress = api.Progress();
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : progress.Text);
+        return progress.HasErrors ? HasErrors : Clean;
+    });
+
     public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
         WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
 

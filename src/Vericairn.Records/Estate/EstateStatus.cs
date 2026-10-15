@@ -28,24 +28,27 @@ public static class EstateStatus
         var items = new List<WorkItem>();
         foreach (RecordEnvelope order in model.Current("work-order"))
         {
-            IReadOnlyList<string> chain = model.Chain(order);
-            string status = "planned";
-            RecordEnvelope? latest = chain.SelectMany(id => model.About(id, "work-status")).OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).LastOrDefault();
-            if (latest is not null)
-            {
-                status = EstateModel.BodyString(latest, "status") ?? status;
-            }
-
-            RecordEnvelope? acceptance = chain.SelectMany(id => model.About(id, "acceptance")).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
-            if (acceptance is not null)
-            {
-                status = acceptance.Subject?.Id == order.Id ? "accepted" : "accepted (earlier revision)";
-            }
-
+            RecordEnvelope? basis = StatusRecord(model, order);
+            string status = basis is null ? "planned"
+                : basis.Type == "acceptance" ? basis.Subject?.Id == order.Id ? "accepted" : "accepted (earlier revision)"
+                : EstateModel.BodyString(basis, "status") ?? "planned";
             items.Add(new WorkItem(EstateModel.BodyString(order, "key") ?? "?", EstateModel.BodyString(order, "kind") ?? "?", EstateModel.BodyString(order, "title") ?? "?", status, order.Id));
         }
 
         return items.OrderBy(i => i.Key, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// The record a work order's derived status rests on: the latest acceptance of any of its revisions, else its latest work-status,
+    /// else none, and the work order is planned.
+    /// </summary>
+    public static RecordEnvelope? StatusRecord(EstateModel model, RecordEnvelope order)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        IReadOnlyList<string> chain = model.Chain(order);
+        RecordEnvelope? acceptance = chain.SelectMany(id => model.About(id, "acceptance")).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+        return acceptance ?? chain.SelectMany(id => model.About(id, "work-status")).OrderBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
     /// <summary>Human-readable status.</summary>

@@ -256,6 +256,42 @@ public class McpTests
     }
 
     [Fact]
+    public void TheProgressToolReadsTheReportAsTextOrJsonAndWritesNothing()
+    {
+        string root = CliHarness.TempDirectory("mcp-progress");
+        string scratch = CliHarness.TempDirectory("mcp-progress-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "MCP progress.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Progress.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget"]}"""));
+            using EstateService api = EstateService.Open(root);
+            ToolDefinition tool = Assert.Single(new ToolRegistry(api, null).Visible(), t => t.Name == "estate_progress");
+            Assert.False(tool.Writes);
+            int records = Directory.EnumerateFiles(Path.Combine(root, "records"), "*.json", SearchOption.AllDirectories).Count();
+
+            List<JsonObject> replies = Drive(api, null,
+                """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"estate_progress","arguments":{}}}""",
+                """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"estate_progress","arguments":{"form":"json"}}}""",
+                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"estate_progress","arguments":{"form":"yaml"}}}""");
+            Assert.False(replies[0]["result"]!["isError"]!.GetValue<bool>());
+            Assert.Equal(api.Progress().Text, replies[0]["result"]!["content"]![0]!["text"]!.GetValue<string>());
+            using (JsonDocument json = JsonDocument.Parse(replies[1]["result"]!["content"]![0]!["text"]!.GetValue<string>()))
+            {
+                Assert.Equal("vericairn.progress/1", json.RootElement.GetProperty("format").GetString());
+                Assert.Equal("W-1", json.RootElement.GetProperty("eligible").GetProperty("eligible")[0].GetProperty("key").GetString());
+            }
+
+            Assert.True(replies[2]["result"]!["isError"]!.GetValue<bool>());
+            Assert.Contains("form is text or json", replies[2]["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+            Assert.Equal(records, Directory.EnumerateFiles(Path.Combine(root, "records"), "*.json", SearchOption.AllDirectories).Count());
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void OrientationFilesComeFromTheRecordsAndStateNonClaims()
     {
         string root = CliHarness.TempDirectory("mcp-orientation");

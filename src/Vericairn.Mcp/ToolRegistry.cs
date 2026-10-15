@@ -98,6 +98,13 @@ public sealed class ToolRegistry
                 (api, _) => new ToolCallResult(api.Status().Json.GetRawText(), false)),
             Read("estate_check", "Validation of every record plus the repository cleanliness and portability checks: the findings with their counts.", NoArguments(),
                 (api, _) => Json(api.Check())),
+            Read("estate_progress", "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator, each line naming the records it rests on. As text, or as the canonical JSON when form is json. Reading it changes nothing.", Arguments(("form", "text (the default) or json.")),
+                (api, a) => OptionalArg(a, "form") switch
+                {
+                    null or "text" => new ToolCallResult(api.Progress().Text, false),
+                    "json" => new ToolCallResult(api.Progress().Json.GetRawText(), false),
+                    string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
+                }),
             Read("work_brief", "The brief of a work order, by key or record id: everything a contributor needs, from the records alone, as Markdown; includes the latest result's next step when one exists.", Arguments(("workOrder", "Work-order key, for example M2-API, or its record id.")), "workOrder",
                 (api, a) => { BriefResponse? b = api.Brief(Arg(a, "workOrder")); return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, false); }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",

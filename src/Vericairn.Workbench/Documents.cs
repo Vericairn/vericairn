@@ -28,6 +28,18 @@ public sealed class TextDocument(string title, string text, string kind) : Docum
     public string Text { get; } = text;
 }
 
+/// <summary>The progress report as the runtime renders it from the records alone; the views' refresh renews it in place.</summary>
+public sealed class ProgressDocument() : Document("Progress", "progress")
+{
+    /// <summary>What the page says while the runtime gives no report.</summary>
+    public const string Unavailable = "The runtime did not give the progress report; the estate is unavailable to this client.";
+
+    private string text = Unavailable;
+
+    /// <summary>The report's text, each line naming the records it rests on.</summary>
+    public string Text { get => text; set => Set(ref text, value); }
+}
+
 /// <summary>A product as its record states it.</summary>
 public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces, string? ReleaseProvider = null, IReadOnlyDictionary<string, string>? ReleaseSettings = null);
 

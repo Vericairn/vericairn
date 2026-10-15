@@ -22,6 +22,12 @@
       "accepted",
       "accepted (earlier revision)"
     ],
+    "ask": [
+      "open",
+      "notified",
+      "withdrawn",
+      "answered"
+    ],
     "result-outcome": [
       "none",
       "completed",

@@ -90,6 +90,18 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    public ProgressResponse Progress()
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            FindingList checks = EstateChecks.Run(model);
+            using JsonDocument json = JsonDocument.Parse(ProgressReport.RenderJson(model, checks));
+            return new ProgressResponse(ProgressReport.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
+        }
+    }
+
+    /// <inheritdoc />
     public FindingsResponse Validate()
     {
         lock (gate)

@@ -163,6 +163,17 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   bytes without granting access to them.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.
 
+## What holds a work order
+
+A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
+`design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any
+revision) holds it until it is accepted. A record in its `blockedBy` holds it while it is open: an ask while it is
+`open` or `notified`, until a decision answers it or its asker withdraws it; a work order until it is accepted or
+retired; an operation until its effect is observed (`observed-success`) or it is canceled; a decision while one of the
+obligations it leaves has no discharge. A record the estate does not hold holds it, since nothing shows it free. The
+view reads the records alone, so every machine derives the same one. `vericairn progress` lists the eligible work and,
+for each work order held, every relation with its state; routing by roster and budget is not part of the view yet.
+
 ## Living documents due
 
 `vericairn status` lists every declared living document that is due, and why: each trigger newer than the document's
@@ -192,7 +203,11 @@ A generated region is the content between `<!-- vericairn:generated <id> -->` an
 its own line. For the estate's own files, `vericairn estate check` regenerates every region whose generator is
 installed, and a generated document as a whole, and refuses a hand edit or lost markers (`document.generated-edited`);
 `vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's region generator
-`vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first. `vericairn
+`vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first;
+`vericairn.records/progress`, from 0.6.0, carries the progress report that `vericairn progress` prints, as a fenced text
+block, and takes no inputs. Its check shows the records' own validation and says that it leaves out the repository
+checks, which read the document that carries the region; and since the report follows the records, a new record can
+make the region differ from a fresh generation until `vericairn docs regenerate` renews it. `vericairn
 docs living` lists the declared documents; `vericairn docs declare` records or revises a declaration; and `vericairn
 docs review <path> --by <id> --outcome current|revised|needs-change --summary <text>` (with `--commit <commit>`, and
 optionally `--independence self|independent-agent|operator`, for a document of another repository) records a review in

@@ -69,6 +69,9 @@ public sealed class ShellViewModel : Observable
     /// <summary>Attention items of home.</summary>
     public ObservableCollection<AttentionItem> Attention { get; } = [];
 
+    /// <summary>The progress report's summary on home, one row per section; opening a row opens the whole report.</summary>
+    public ObservableCollection<ProgressRow> Progress { get; } = [];
+
     /// <summary>Work orders.</summary>
     public ObservableCollection<WorkOrderRow> WorkOrders { get; } = [];
 
@@ -252,6 +255,7 @@ public sealed class ShellViewModel : Observable
             estate = EstateView.From(response, now);
             Freshness = $"current as of {now}";
             Replace(Attention, estate.Attention);
+            FillProgress(Try(() => connection.Api.Progress()));
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
@@ -495,6 +499,26 @@ public sealed class ShellViewModel : Observable
         page.Acting = ActingPrincipal;
         HealthResponse? health = connection?.Api is null ? null : Try(() => connection.Api.Health());
         page.Health = health is null ? "No daemon answers." : $"API {health.Api}; Vericairn {health.Vericairn}; estate {health.Estate}; profile {health.Profile}; record format {health.RecordFormat}; started {health.StartedAt}; process {health.ProcessId}.";
+    }
+
+    /// <summary>Opens or refreshes the whole progress report as the runtime renders it (GET /v1/progress), each line naming the records it rests on.</summary>
+    public ProgressDocument OpenProgress()
+    {
+        ProgressDocument page = Documents.OfType<ProgressDocument>().FirstOrDefault() ?? new ProgressDocument();
+        Open(page);
+        FillProgress(connection?.Api is IEstateApi api ? Try(api.Progress) : null);
+        Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The progress report, rendered from the records alone; each line names the records it rests on. F5 refreshes it.";
+        return page;
+    }
+
+    /// <summary>The summary rows of home and an open report from one response of the runtime; without one, both say it is unavailable.</summary>
+    private void FillProgress(ProgressResponse? progress)
+    {
+        Replace(Progress, ProgressView.Summary(progress?.Json ?? default));
+        foreach (ProgressDocument page in Documents.OfType<ProgressDocument>())
+        {
+            page.Text = progress?.Text ?? ProgressDocument.Unavailable;
+        }
     }
 
     /// <summary>Opens or refreshes the Documents page: the declared living documents with their state and a review of one.</summary>
