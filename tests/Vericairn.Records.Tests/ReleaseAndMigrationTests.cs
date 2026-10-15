@@ -42,6 +42,32 @@ public class ReleaseAndMigrationTests
     }
 
     [Fact]
+    public void ARecordAboutAReleaseWithdrawnSinceIsInformationNamingTheWithdrawal()
+    {
+        using var estate = new TestEstate();
+        Grant(estate);
+        RecordEnvelope product = estate.Add("product", estate.OperatorId, Product);
+        var subject = new RecordReference("product", product.Id, null);
+        const string Review = """{"independence":"operator","outcome":"findings","summary":"Reviewed the candidate.","findings":[]}""";
+
+        // A first candidate is reviewed and corrected: the review refers to an earlier revision and needs reconsideration.
+        RecordEnvelope first = estate.Add("release", estate.BuilderId, Candidate, subject);
+        RecordEnvelope ofFirst = estate.Add("review", estate.OperatorId, Review, first.Reference);
+        RecordEnvelope corrected = estate.Add("release", estate.BuilderId, Candidate.Replace("Tests passed.", "Tests passed, corrected.", StringComparison.Ordinal), subject, supersedes: first.Id);
+        RecordEnvelope ofCorrected = estate.Add("review", estate.OperatorId, Review, corrected.Reference);
+        Assert.Contains(estate.Load().Findings, f => f.Code == "record.subject-stale" && f.Severity == Severity.Warning && f.Location == ofFirst.ExpectedPath);
+
+        // Then the correction is withdrawn, which answers both reviews: each is information naming the withdrawal.
+        string withdrawnBody = Candidate.Replace("Tests passed.", "Tests passed, corrected.", StringComparison.Ordinal).Replace("\"status\":\"candidate\"", "\"status\":\"withdrawn\"", StringComparison.Ordinal);
+        RecordEnvelope withdrawn = estate.Add("release", estate.BuilderId, withdrawnBody, subject, supersedes: corrected.Id);
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale");
+        Assert.All(new[] { ofFirst, ofCorrected }, review => Assert.Contains(model.Findings, f =>
+            f.Code == "record.subject-withdrawn" && f.Severity == Severity.Info && f.Location == review.ExpectedPath && f.Message.Contains(withdrawn.Id, StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public void DuplicateVersionsAndBackwardMigrationsAreRejected()
     {
         using var estate = new TestEstate();

@@ -252,7 +252,15 @@ public static class EstateLoader
         // An admission follows its device's identity, so a rename or a rotation of the device leaves it in force.
         if (record.Subject.Hash is not null && latest.Id != target.Id && !ReleaseType.IsPublicationOf(target, latest) && !(record.Type == "admission" && target.Type == "device"))
         {
-            findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
+            // A release withdrawn since answers what was said of its earlier revisions, so the withdrawal is named instead.
+            if (ReleaseType.IsWithdrawalOf(target, latest))
+            {
+                findings.Info("record.subject-withdrawn", record.ExpectedPath, $"The subject, release {EstateModel.BodyString(latest, "version")}, was withdrawn by {latest.Id}; this record refers to an earlier revision, and the withdrawal answers it.");
+            }
+            else
+            {
+                findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
+            }
         }
     }
 }

@@ -158,6 +158,12 @@ is not the effect; `vericairn release submit` and `release observe` write these 
 - Acceptance pins an exact subject hash. Milestones are accepted by the operator; ordinary work may be
   self-accepted only under the `self-accept-ordinary-work` authority scope, or accepted by another principal
   under `accept-work`. If the subject changes afterwards, the acceptance is reported as unresolved, not invalid.
+- A record whose subject is pinned to a revision that has been superseded since is reported as referring to an
+  earlier revision (`record.subject-stale`, a warning), unless the latest revision answers it, as the publication
+  of the exact release candidate and the withdrawal of the release do; an admission follows its device across
+  revisions instead ([record-format-v2.md](record-format-v2.md#a-device-keeps-its-identity)). A record about an
+  earlier revision of a release that was withdrawn since, such as a review of a first candidate that was corrected
+  and then withdrawn, is information naming the withdrawal (`record.subject-withdrawn`).
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
 - Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
@@ -167,7 +173,9 @@ is not the effect; `vericairn release submit` and `release observe` write these 
 - An attempt and its result are authored by the assignment's contributor; one current result exists per
   attempt (a correction supersedes); an output whose file is present in the repository must have the hash
   and size the result claims when the result is authored, and later drift of that path is reported as
-  information; a completed result with a failed check is a warning for the reviewer.
+  information; a completed result with a failed check is a warning for the reviewer (`result.checks`) until a
+  current acceptance recorded after it accepts the result itself or its work order, and from then on information
+  naming that acceptance and whether it was a self-acceptance (`result.checks-accepted`).
 - `vericairn estate check` warns when prose runs a word into a number ("October13"), outside code spans and identifiers.
 - `vericairn estate check` also enforces the repository allowlist, file-size limits, LF endings, UTF-8,
   no symbolic links, no machine-specific absolute paths, and no credential-shaped strings or secret-named keys.
