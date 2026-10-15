@@ -338,11 +338,17 @@ public sealed partial class EstateService
             return new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, []));
         }
 
-        WriteOutcome dispatched = Revise(run, request.By, previous =>
+        WriteOutcome dispatched;
+        try
         {
-            previous["status"] = "dispatched";
-            previous["dispatchedAt"] = RecordParser.FormatTimestamp(supervisor.LaunchedAt);
-        });
+            WorkerOptions.BeforeDispatchRecord?.Invoke();
+            dispatched = RecordDispatch(run, request.By, supervisor.LaunchedAt);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            dispatched = Refuse("The launch was observed but its dispatch could not be persisted; its intent keeps the allowance reserved.");
+        }
+
         var abandon = new CancellationTokenSource();
         supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), abandon.Token)), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
@@ -805,6 +811,19 @@ public sealed partial class EstateService
 
         try
         {
+            lock (gate)
+            {
+                if (AgentRuns.Find(session.Load(), run) is { Status: "not-started" })
+                {
+                    WriteOutcome recovered = RecordDispatch(run, by, outcome.LaunchedAt);
+                    if (!recovered.Ok)
+                    {
+                        supervisor.Settled(null, "The observed dispatch could not be recorded; the allowance remains reserved.");
+                        return;
+                    }
+                }
+            }
+
             string? status = null;
             WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
             supervisor.Settled(settled.Ok ? status : null, settled.Ok ? null : settled.Problem?.Message);
@@ -828,6 +847,12 @@ public sealed partial class EstateService
             supervisor.Settled(null, exception.Message);
         }
     }
+
+    private WriteOutcome RecordDispatch(string run, string by, DateTimeOffset launchedAt) => Revise(run, by, previous =>
+    {
+        previous["status"] = "dispatched";
+        previous["dispatchedAt"] = RecordParser.FormatTimestamp(launchedAt);
+    });
 
     /// <summary>The settlement of a run: its observed effect, its usage unit by unit, the units not reported, and a stop's facts.</summary>
     private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope)
@@ -879,6 +904,7 @@ public sealed partial class EstateService
 
         body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
+        body["dispatchedAt"] ??= RecordParser.FormatTimestamp(outcome.LaunchedAt);
         body["usage"] = usage;
         if (outcome.Liveness is not null)
         {

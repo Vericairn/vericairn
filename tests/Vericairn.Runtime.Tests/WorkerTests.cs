@@ -36,6 +36,26 @@ public class WorkerTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Theory]
+    [InlineData("claude", "observed-success", 1734)]
+    [InlineData("claude-fails", "known-failure", 55)]
+    public void AFailedDispatchWriteIsRecoveredBeforeSettlementSoUsageIsNeverReleasedAsUnstarted(string scenario, string status, long tokens)
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000}""");
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { BeforeDispatchRecord = () => throw new IOException("The stand-in dispatch write failed.") };
+        RunResponse started = run.Start("claude-code", scenario, run.Report("dispatch-recovery"), by: run.Estate.OperatorId);
+        Assert.True(started.Ok, started.Message);
+        Assert.Contains("dispatch could not be recorded", started.Message, StringComparison.Ordinal);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal(status, row.Status);
+        Assert.Equal(tokens, row.Charged.GetProperty("tokens").GetInt64());
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(["not-started", "dispatched", status], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.True(recorded.Dispatched);
+        Assert.All(recorded.Revisions, r => Assert.Equal(run.Estate.OperatorId, r.By));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     [Fact]
     public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
     {
@@ -224,6 +244,7 @@ public class WorkerTests
         WaitUntil(() => File.Exists(report + ".child"));
         int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
         Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
+
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop the whole boundary.", 1));
         RunRow settled = run.Settled(started.Run);
         Assert.NotNull(settled.Stop!.ContainedAt);

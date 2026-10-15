@@ -8,6 +8,8 @@ public sealed record WorkerOptions
 {
     internal Action<bool>? BeforeSignal { get; init; }
 
+    internal Action? BeforeDispatchRecord { get; init; }
+
     /// <summary>The worker's defaults.</summary>
     public static WorkerOptions Default { get; } = new();
 
