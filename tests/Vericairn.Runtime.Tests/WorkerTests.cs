@@ -518,10 +518,10 @@ public class WorkerTests
         RoutingServiceTests.Routed(run);
         string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
 
-        // The sponsor replaces the exception with one that expires a second later, and the preparation outlasts it.
+        // The sponsor replaces the exception with one that expires seconds later, and the preparation outlasts it.
         Func<string?> replace = () =>
         {
-            string expires = Except(run, DateTimeOffset.UtcNow.AddSeconds(1), "Only a moment.", first);
+            string expires = Except(run, Soon(), "Only a moment.", first);
             WaitPast(run, expires);
             return null;
         };
@@ -532,7 +532,7 @@ public class WorkerTests
         Assert.EndsWith("Nothing was recorded.", replaced.Message, StringComparison.Ordinal);
 
         // An exception in force when the preflight read it, and expired before the intent, launches nothing either.
-        string brief = Except(run, DateTimeOffset.UtcNow.AddSeconds(2), "A short window.");
+        string brief = Except(run, Soon(), "A short window.");
         HookedLauncher.Install(run, () =>
         {
             WaitPast(run, brief);
@@ -555,8 +555,8 @@ public class WorkerTests
         RoutingServiceTests.Routed(run);
         string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
 
-        // The intent names the exception in force; then, before the launch, the sponsor replaces it with one that expires at once.
-        HookedLauncher.Install(run, command: () => WaitPast(run, Except(run, DateTimeOffset.UtcNow.AddSeconds(1), "Only a moment.", first)));
+        // The intent names the exception in force; then, before the launch, the sponsor replaces it with one that expires within seconds.
+        HookedLauncher.Install(run, command: () => WaitPast(run, Except(run, Soon(), "Only a moment.", first)));
         RunResponse canceled = run.Start("claude-code", "claude", run.Report("lapsed"));
         Assert.False(canceled.Ok, canceled.Message);
         Assert.Equal("canceled", canceled.Status);
@@ -599,6 +599,12 @@ public class WorkerTests
         string until = RecordParser.FormatTimestamp(expires);
         return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"{{reason}}","expires":"{{until}}"}"""), $"goal:{run.Goal}:{hash}", replaces))).Id;
     }
+
+    /// <summary>
+    /// An expiry a few seconds away. Records keep whole seconds, so an expiry one second away can fall in the same second as the
+    /// record that makes it when the runner is slow, and the estate rightly refuses an exception that expires when it is made.
+    /// </summary>
+    private static DateTimeOffset Soon() => DateTimeOffset.UtcNow.AddSeconds(3);
 
     /// <summary>Waits until a custody exception has expired.</summary>
     private static void WaitPast(RunEstate run, string exception)
