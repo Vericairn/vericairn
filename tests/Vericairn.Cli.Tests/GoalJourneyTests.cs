@@ -246,6 +246,45 @@ public class GoalJourneyTests
         }
     }
 
+    [Fact]
+    public void AskShowsWhatWaitsWithTheRecommendationFirstAndAtMostThreeAtATime()
+    {
+        string root = CliHarness.TempDirectory("ask");
+        string scratch = CliHarness.TempDirectory("ask-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Asks.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = Principal(root, scratch, op, "Builder", "builder");
+            Assert.Equal("Nothing waits on anyone: no ask is open or notified.\n", CliHarness.Ok("--estate", root, "ask").Out);
+            var asks = new List<string>();
+            foreach (string question in new[] { "Publish the guide?", "Raise the budget?", "Name a planner?", "Stop the goal?" })
+            {
+                asks.Add(CliHarness.Ok("--estate", root, "--json", "records", "new", "ask", "--by", builder, "--body", CliHarness.WriteJson(scratch, $"ask-{asks.Count}.json", $$"""{"to":"{{op}}","question":"{{question}}","recommendation":"Yes: {{question}}","consequence":"It waits.","state":"open"}""")).Id);
+            }
+
+            string text = CliHarness.Ok("--estate", root, "ask").Out;
+            Assert.StartsWith($"What waits on Operator [principal {op}]: 4 asks, 3 in this delivery and the rest in order behind them\n  1. Recommendation: Yes: Publish the guide?\n     Asked: Publish the guide? [ask {asks[0]}], by Builder, open\n     If unanswered: It waits.\n", text, StringComparison.Ordinal);
+            Assert.Contains($"  Waiting in order: 1 more ask [ask {asks[3]}]", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("Stop the goal?", text, StringComparison.Ordinal);
+            Assert.Equal(text, CliHarness.Ok("--estate", root, "ask", "--to", op).Out);
+            Assert.StartsWith($"Nothing waits on Builder [principal {builder}]", CliHarness.Ok("--estate", root, "ask", "--to", builder).Out, StringComparison.Ordinal);
+            JsonElement json = CliHarness.Ok("--estate", root, "--json", "ask").Json;
+            Assert.Equal("vericairn.asks/1", json.GetProperty("format").GetString());
+            Assert.Equal(3, Assert.Single(json.GetProperty("principals").EnumerateArray()).GetProperty("delivered").GetArrayLength());
+            Refused(root, "--to names a principal by its ULID", "ask", "--to", "operator");
+
+            // Reading what waits answers nothing; a decision of the principal asked does, and the fourth follows into the delivery.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "answer.json", $$"""{"title":"Publish","statement":"Publish the guide.","summary":"Publish it.","synthesis":"The operator answers.","effects":["the guide is published"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"low","notAuthorized":[],"answers":["{{asks[0]}}"]}"""));
+            text = CliHarness.Ok("--estate", root, "ask").Out;
+            Assert.StartsWith($"What waits on Operator [principal {op}]: 3 asks\n  1. Recommendation: Yes: Raise the budget?", text, StringComparison.Ordinal);
+            Assert.Contains($"[ask {asks[3]}]", text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static string Principal(string root, string scratch, string op, string name, string role) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, name + ".json", $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
 

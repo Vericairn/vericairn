@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
@@ -49,6 +49,12 @@ internal static class CliApp
         var progress = new Command("progress", "Show the progress report, rendered from the records alone: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(progress);
+
+        var ask = new Command("ask", "Show what waits on a principal, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order. Reading them answers nothing; an ask is answered by a decision of the principal it is put to that names it in its answers.");
+        var toOption = new Option<string?>("--to") { Description = "The principal asked (ULID); every principal when omitted." };
+        ask.Options.Add(toOption);
+        ask.SetAction(parseResult => Commands.Ask(parseResult.GetValue(estateOption)!, parseResult.GetValue(toOption), parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(ask);
 
         var decisions = new Command("decisions", "List the estate's current decisions, or show one cleanly.");
         var decisionIdArgument = new Argument<string?>("id") { Description = "Decision record id (any revision); omit to list.", Arity = ArgumentArity.ZeroOrOne };

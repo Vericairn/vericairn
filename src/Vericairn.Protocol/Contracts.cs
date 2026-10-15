@@ -253,6 +253,15 @@ public sealed record GoalResponse(string Text, JsonElement Json);
 public sealed record NextResponse(string Text, JsonElement Json);
 
 /// <summary>
+/// What waits on a principal, or on every principal: the asks still open or notified, oldest first, at most three delivered to each
+/// principal with the recommendation first and the consequence of leaving it unanswered, and the rest waiting in order behind them.
+/// The same on every machine for the same records; reading it answers nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.asks/1.</param>
+public sealed record AsksResponse(string Text, JsonElement Json);
+
+/// <summary>
 /// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
 /// activation. Anyone may propose a new goal; a revision of an existing one is recorded only by its sponsor when the sponsor is a
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).

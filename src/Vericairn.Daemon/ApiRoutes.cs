@@ -44,6 +44,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
         app.MapPost($"{v}/documents/{{id}}/reviews", (string id, DocumentReviewRequest request) => Outcome(service.DocumentReview(id, request)));
+        app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());

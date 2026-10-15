@@ -61,6 +61,13 @@ public class GoalApiTests
         Assert.Equal(host.Service.GoalNext(goal)!.Text, next.Text);
         Assert.Null(api.GoalNext("01M4TRNE1GYEK4P8MXQAB3C8Q4"));
 
+        // What waits on a principal, through the API: the same delivery the runtime renders, for one principal or every one.
+        string ask = Ok(api.NewRecord(new NewRecordRequest("ask", builder, Json($$"""{"to":"{{op}}","question":"Accept the goal?","recommendation":"Accept it on the reviewer's evaluation.","consequence":"The goal stays active.","goal":"{{goal}}","state":"open"}""")))).Id;
+        Assert.Contains($"  1. Recommendation: Accept it on the reviewer's evaluation.\n     Asked: Accept the goal? [ask {ask}]", api.Asks(op).Text, StringComparison.Ordinal);
+        Assert.Equal(CanonicalJson.SerializePretty(host.Service.Asks().Json), CanonicalJson.SerializePretty(api.Asks().Json));
+        Assert.StartsWith("Nothing waits on Test Builder", api.Asks(builder).Text, StringComparison.Ordinal);
+        Assert.Equal(op, api.Asks(op).Json.GetProperty("to").GetString());
+
         Ok(api.GoalAccept(goal, new GoalAcceptRequest(op, "Accepted on the reviewer's evaluation.")));
         Assert.Equal("achieved", Assert.Single(api.Goals()).Status);
         Assert.Contains("Achieved: acceptance", api.Goal(goal)!.Text, StringComparison.Ordinal);

@@ -179,6 +179,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
+    public AsksResponse Asks(string? principal = null) => Get<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal))!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />

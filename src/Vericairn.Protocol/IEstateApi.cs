@@ -81,6 +81,13 @@ public interface IEstateApi
     /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
     WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
 
+    /// <summary>
+    /// What waits on a principal, or on every principal when none is named: the asks still open or notified, at most three in one
+    /// delivery to each with the recommendation first, the rest waiting in order. Reading it answers nothing; an ask is answered by a
+    /// decision of the principal it is put to.
+    /// </summary>
+    AsksResponse Asks(string? principal = null);
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 

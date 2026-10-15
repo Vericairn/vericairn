@@ -863,6 +863,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    public AsksResponse Asks(string? principal = null)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            using JsonDocument json = JsonDocument.Parse(global::Vericairn.Records.Estate.Asks.RenderJson(model, principal));
+            return new AsksResponse(global::Vericairn.Records.Estate.Asks.RenderText(model, principal), json.RootElement.Clone());
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals()
     {
         lock (gate)

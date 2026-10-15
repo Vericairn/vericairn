@@ -42,7 +42,7 @@ release and pins the one it runs on.
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `release`, `sources`, `check`,
-  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `decisions`, `doctor`, `version`; a client of
+  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `doctor`, `version`; a client of
   the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records alone, the same on every machine: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
@@ -59,7 +59,9 @@ release and pins the one it runs on.
   its roster from the machine it runs on: each reaches the first available principal of its role, an agent where a
   launcher for its harness, its admitted key and the goal's budget allow and a person where needed, while a reserved
   action reaches only a person who holds it or an agent under a grant in force; when none is available the sponsor is
-  asked, never another contributor. There is no
+  asked, never another contributor. `vericairn ask` shows what waits on a principal: its open asks, at most three
+  at a time with the recommendation first and the consequence of leaving each unanswered, which a decision of the
+  principal asked answers and waiting never does. There is no
   conductor yet: people choose a goal's next step, and the worker or a person carries it.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated

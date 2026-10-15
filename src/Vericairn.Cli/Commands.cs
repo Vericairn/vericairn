@@ -70,6 +70,19 @@ internal static class Commands
         return progress.HasErrors ? HasErrors : Clean;
     });
 
+    /// <summary>What waits on a principal, or on every principal, through the API: at most three asks in one delivery to each, the recommendation first.</summary>
+    public static int Ask(string root, string? to, bool json) => WithApi(root, api =>
+    {
+        if (to is not null && !Records.Identity.Ulid.IsValid(to))
+        {
+            return Fail($"--to names a principal by its ULID, not '{to}'.");
+        }
+
+        AsksResponse asks = api.Asks(to);
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(asks.Json) : asks.Text);
+        return Clean;
+    });
+
     public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
         WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
 
