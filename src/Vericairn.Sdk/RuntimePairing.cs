@@ -139,25 +139,11 @@ public static class RuntimePairing
             // The screen refuses a certificate that names an address to fetch before this machine's TLS reads it.
             tls = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: false)), leaveInnerStreamOpen: false);
             await tls.AuthenticateAsClientAsync(
-                new SslClientAuthenticationOptions
+                CreateAuthenticationOptions((_, certificate, _, _) =>
                 {
-                    TargetHost = "vericairn-runtime",
-                    AllowTlsResume = false,
-                    ApplicationProtocols = [SslApplicationProtocol.Http11],
-
-                    // TLS 1.2 only, so the runtime's certificate travels in the clear, where the screen reads it first.
-                    EnabledSslProtocols = TlsScreenStream.Protocols,
-                    CipherSuitesPolicy = TlsScreenStream.CipherSuites,
-                    CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
-                    CertificateChainPolicy = LocalNetworkTransport.OfflineChainPolicy(),
-
-                    // Any certificate completes the handshake: the hello's MAC covers it, and the runtime's answer must name it.
-                    RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                    {
-                        presented = certificate?.GetRawCertData();
-                        return certificate is not null;
-                    },
-                },
+                    presented = certificate?.GetRawCertData();
+                    return certificate is not null;
+                }),
                 timeout.Token).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is SocketException or IOException or OperationCanceledException or System.Security.Authentication.AuthenticationException)
@@ -250,6 +236,24 @@ public static class RuntimePairing
 
         return (store, presence);
     }
+
+    private static SslClientAuthenticationOptions CreateAuthenticationOptions(RemoteCertificateValidationCallback validate) =>
+        new SslClientAuthenticationOptions
+        {
+            TargetHost = "vericairn-runtime",
+            AllowTlsResume = false,
+            AllowRenegotiation = false,
+            ApplicationProtocols = [SslApplicationProtocol.Http11],
+
+            // TLS 1.2 only, so the runtime's certificate travels in the clear, where the screen reads it first.
+            EnabledSslProtocols = TlsScreenStream.Protocols,
+            CipherSuitesPolicy = TlsScreenStream.CipherSuites,
+            CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+            CertificateChainPolicy = LocalNetworkTransport.OfflineChainPolicy(),
+
+            // Any certificate completes the handshake: the hello's MAC covers it, and the runtime's answer must name it.
+            RemoteCertificateValidationCallback = validate,
+        };
 
     private static async Task<TResponse> SendAsync<TRequest, TResponse>(Stream tls, string address, string path, TRequest request, CancellationToken cancellationToken)
         where TResponse : class

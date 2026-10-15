@@ -14,6 +14,19 @@ namespace Vericairn.Daemon.Tests;
 /// </summary>
 public class TlsScreenStreamTests
 {
+    [Theory]
+    [InlineData("Vericairn.Sdk.LocalNetworkTransport")]
+    [InlineData("Vericairn.Sdk.RuntimePairing")]
+    public void SdkHandshakesCannotRenegotiateAfterCertificateScreeningEnds(string typeName)
+    {
+        Type type = typeof(RuntimePairing).Assembly.GetType(typeName, throwOnError: true)!;
+        System.Reflection.MethodInfo factory = type.GetMethod("CreateAuthenticationOptions", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+        System.Net.Security.RemoteCertificateValidationCallback validate = (_, _, _, _) => false;
+        object?[] arguments = factory.GetParameters().Length == 2 ? [null, validate] : [validate];
+        var options = Assert.IsType<System.Net.Security.SslClientAuthenticationOptions>(factory.Invoke(null, arguments));
+        Assert.False(options.AllowRenegotiation);
+    }
+
     private const byte ChangeCipherSpec = 20;
     private const byte Alert = 21;
     private const byte Handshake = 22;
