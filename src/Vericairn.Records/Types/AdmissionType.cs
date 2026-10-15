@@ -49,7 +49,7 @@ public sealed class AdmissionType : IRecordType
         {
             context.Error("admission.author", $"Admitting principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.Administer))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
         {
             context.Error("admission.author", "Devices are admitted by the operator or under the 'administer' scope.");
         }

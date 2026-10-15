@@ -31,7 +31,70 @@ public sealed class WorkOrderType : IRecordType
         new("exitQuestion", "string", true, "The question whose honest 'yes' closes the work."),
         new("inputs", "reference[]", true, "Records this work builds on: {type, id}; may be empty."),
         new("deliverables", "string[]", true, "What will exist when the work is done."),
+        new("after", "ulid[]", false, "Work orders this one starts after, so the next eligible work can be derived; never itself, never a cycle.", 2),
+        new("blockedBy", "reference[]", false, "What holds it: asks, decisions, operations or work orders, as {type, id, hash?}.", 2),
     ];
+
+    /// <summary>The records that can hold a work order.</summary>
+    private static readonly string[] Blockers = ["ask", "decision", "operation", "work-order"];
+
+    /// <summary>Checks the work orders this one starts after: each exists, none is this one, and following them never returns here.</summary>
+    private static void After(ValidationContext context, IReadOnlyList<string>? after)
+    {
+        if (after is null || after.Count == 0)
+        {
+            return;
+        }
+
+        string root = context.Model.Chain(context.Record)[0];
+        var pending = new Stack<RecordEnvelope>();
+        foreach (string id in after)
+        {
+            RecordEnvelope? order = context.RequireReference("after", id, "work-order");
+            if (order is null)
+            {
+                continue;
+            }
+
+            if (context.Model.Chain(order)[0] == root)
+            {
+                context.Error("work.after", "A work order does not start after itself.");
+                return;
+            }
+
+            pending.Push(context.Model.Latest(order));
+        }
+
+        if (!context.Model.IsCurrent(context.Record))
+        {
+            return;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.Count > 0)
+        {
+            RecordEnvelope order = pending.Pop();
+            string orderRoot = context.Model.Chain(order)[0];
+            if (orderRoot == root)
+            {
+                context.Error("work.after-cycle", "Following the work orders this one starts after leads back to it; the order of work has a cycle.");
+                return;
+            }
+
+            if (!seen.Add(orderRoot) || !order.Body.TryGetProperty("after", out System.Text.Json.JsonElement next) || next.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (System.Text.Json.JsonElement id in next.EnumerateArray())
+            {
+                if (context.Find(id.GetString()) is { Type: "work-order" } successor)
+                {
+                    pending.Push(context.Model.Latest(successor));
+                }
+            }
+        }
+    }
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -46,7 +109,26 @@ public sealed class WorkOrderType : IRecordType
         body.Text("exitQuestion", true, 2000);
         IReadOnlyList<BodyReader>? inputs = body.NestedArray("inputs", true, allowEmpty: true);
         body.StringArray("deliverables", true, allowEmpty: false, maxItemLength: 2000);
+        IReadOnlyList<string>? after = body.Since(2, "after") ? body.StringArray("after", false, allowEmpty: true, maxItemLength: Identity.Ulid.Length) : null;
+        IReadOnlyList<BodyReader>? blockedBy = body.Since(2, "blockedBy") ? body.NestedArray("blockedBy", false, allowEmpty: true) : null;
         body.NoOtherKeys();
+        After(context, after);
+        foreach (BodyReader blocker in blockedBy ?? [])
+        {
+            RecordReference? reference = RecordParser.ParseReference(blocker.Element, blocker.Location, context.Findings);
+            if (reference is null)
+            {
+                continue;
+            }
+
+            if (Array.IndexOf(Blockers, reference.Type) < 0)
+            {
+                blocker.Error("work.blocked-by", "type", $"A work order is held by an ask, a decision, an operation or another work order, not a {reference.Type}.");
+                continue;
+            }
+
+            context.RequireReference("blockedBy", reference.Id, reference.Type);
+        }
         if (inputs is not null)
         {
             foreach (BodyReader input in inputs)

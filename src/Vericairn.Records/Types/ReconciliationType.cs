@@ -41,7 +41,7 @@ public sealed class ReconciliationType : IRecordType
         {
             context.Error("reconciliation.author", $"Reconciling principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.Administer) && !context.Model.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
         {
             context.Error("reconciliation.author", "Divergent revisions are reconciled by the operator or under the 'administer' or 'local-engineering' scope.");
         }

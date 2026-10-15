@@ -138,7 +138,7 @@ public sealed class ReleaseType : IRecordType
             return;
         }
 
-        if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.LocalEngineering))
+        if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
         {
             context.Error("release.author", "Releases are recorded by the operator or under the 'local-engineering' scope.");
         }

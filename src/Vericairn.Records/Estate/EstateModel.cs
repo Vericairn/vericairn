@@ -105,12 +105,22 @@ public sealed class EstateModel
     /// <summary>True when the principal currently holds the role.</summary>
     public bool HasRole(string? id, string role) => RolesOf(id).Contains(role, StringComparer.Ordinal);
 
-    /// <summary>True when a current authority record grants the principal the scope.</summary>
-    public bool HasScope(string? id, string scope) =>
+    /// <summary>True when a current authority record grants the principal the scope, and, at a given time, has not expired by then.</summary>
+    public bool HasScope(string? id, string scope, DateTimeOffset? asOf = null) =>
         id is not null && Current("authority").Any(a =>
             a.Body.TryGetProperty("grantee", out JsonElement grantee) && grantee.GetString() == id &&
             a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
-            scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope));
+            scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope) &&
+            (asOf is null || !Expired(a, asOf.Value)));
+
+    /// <summary>True when a grant states an expiry (record format 2) at or before the time.</summary>
+    public static bool Expired(RecordEnvelope grant, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(grant);
+        return BodyString(grant, "expires") is { } expires &&
+            DateTimeOffset.TryParseExact(expires, "yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal, out DateTimeOffset end) &&
+            at >= end;
+    }
 
     /// <summary>Records of a type whose subject is the given record id.</summary>
     public IEnumerable<RecordEnvelope> About(string subjectId, string type) => OfType(type).Where(r => r.Subject?.Id == subjectId);

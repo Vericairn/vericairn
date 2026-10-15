@@ -57,7 +57,7 @@ public sealed class MigrationType : IRecordType
         {
             context.Error("migration.author", $"Upgrading principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
         {
             context.Error("migration.author", "Upgrades are applied by the operator or under the 'local-engineering' scope.");
         }

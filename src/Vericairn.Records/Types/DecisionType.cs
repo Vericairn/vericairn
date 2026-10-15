@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
 
@@ -36,6 +37,7 @@ public sealed class DecisionType : IRecordType
         new("decidedAt", "timestamp", true, "When the operator decided."),
         new("stake", string.Join('|', Stakes), true, "How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time.", 2),
         new("notAuthorized", "string[]", true, "What this answer does not authorize, so no one reads more into it; may be empty.", 2),
+        new("answers", "ulid[]", false, "The asks this decision answers; an ask is answered by the principal it was put to, and never by waiting.", 2),
     ];
 
     /// <inheritdoc />
@@ -65,7 +67,25 @@ public sealed class DecisionType : IRecordType
             body.StringArray("notAuthorized", true, allowEmpty: true, maxItemLength: 2000);
         }
 
+        IReadOnlyList<string>? answers = body.Since(2, "answers") ? body.StringArray("answers", false, allowEmpty: false, maxItemLength: Identity.Ulid.Length) : null;
         body.NoOtherKeys();
+        foreach (string id in answers ?? [])
+        {
+            if (context.RequireReference("answers", id, "ask") is not { } ask)
+            {
+                continue;
+            }
+
+            RecordEnvelope latest = context.Model.Latest(ask);
+            if (EstateModel.BodyString(latest, "to") != decidedBy)
+            {
+                context.Error("decision.answers", $"Ask {id} was put to another principal; an ask is answered by the principal it was put to.");
+            }
+            else if (EstateModel.BodyString(latest, "state") == "withdrawn")
+            {
+                context.Error("decision.answers", $"Ask {id} was withdrawn before it was answered.");
+            }
+        }
 
         // From format 2 the operator's words are protected: a revision corrects everything around them, and new words are a new decision.
         if (context.Format >= 2 && context.Find(context.Record.Supersedes) is { Type: "decision" } previous && EstateModel.BodyString(previous, "statement") != EstateModel.BodyString(context.Record, "statement"))

@@ -51,7 +51,52 @@ public sealed class OperationType : IRecordType
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
         new("reconciliation", "string", false, "How an uncertain or failed outcome was settled before a retry; required when a retry is dispatched."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
+        new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts; wallMinutes is required. Units: " + Caps.Units + ".", 2),
+        new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units it did not report (unreported), which are charged at the cap.", 2),
     ];
+
+    /// <summary>The operation kind of a coding agent's run on an assignment, from record format 2.</summary>
+    public const string AgentRun = "agent-run";
+
+    /// <summary>An agent run states its cap before it starts and its observed usage once settled; other operations carry neither.</summary>
+    private static void CheckAgentRun(ValidationContext context, string? action, string? status, BodyReader? cap, BodyReader? usage)
+    {
+        if (action != AgentRun)
+        {
+            if (cap is not null || usage is not null)
+            {
+                context.Error("operation.cap", "A cap and usage describe agent runs (action agent-run).");
+            }
+
+            return;
+        }
+
+        if (cap is null)
+        {
+            context.Error("operation.cap", "An agent run records its cap before it starts, in every revision.");
+        }
+        else
+        {
+            Caps.Read(cap, "wallMinutes");
+        }
+
+        if (usage is not null)
+        {
+            Caps.ReadUsage(usage);
+        }
+        else if (status is "observed-success" or "known-failure")
+        {
+            context.Error("operation.usage", "A settled agent run records its usage; what the harness did not report is listed as unreported and charged at the cap.");
+        }
+
+        foreach (string key in new[] { "assignment", "principal", "workspace" })
+        {
+            if (!context.Record.Body.TryGetProperty("target", out JsonElement target) || target.ValueKind != JsonValueKind.Object || !target.TryGetProperty(key, out _))
+            {
+                context.Error("operation.agent-run", $"An agent run's target names its {key}.");
+            }
+        }
+    }
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -98,7 +143,14 @@ public sealed class OperationType : IRecordType
             evidence.NoOtherKeys();
         }
 
+        BodyReader? cap = body.Since(2, "cap") ? body.Nested("cap", false) : null;
+        BodyReader? usage = body.Since(2, "usage") ? body.Nested("usage", false) : null;
         body.NoOtherKeys();
+        if (context.Format >= 2)
+        {
+            CheckAgentRun(context, EstateModel.BodyString(context.Record, "action"), status, cap, usage);
+        }
+
         if (status is null || identity is null)
         {
             return;
@@ -108,7 +160,7 @@ public sealed class OperationType : IRecordType
         {
             context.Error("operation.author", $"Principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
         {
             context.Error("operation.author", "External operations are recorded by the operator or under the 'local-engineering' scope.");
         }

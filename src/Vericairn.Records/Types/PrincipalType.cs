@@ -76,7 +76,7 @@ public sealed class PrincipalType : IRecordType
             {
                 context.Error("principal.author", $"Authoring principal {context.Record.By} has no principal record.");
             }
-            else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.Administer))
+            else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
             {
                 context.Error("principal.author", "Principals are admitted by the operator or by a principal granted the 'administer' scope.");
             }
