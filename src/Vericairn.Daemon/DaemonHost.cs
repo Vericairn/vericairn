@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Concurrent;
+using System.IO.Pipelines;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -204,7 +205,8 @@ public sealed class DaemonHost : IAsyncDisposable
         }
 
         var host = new DaemonHost(service, file, directory, options, certificates, identity);
-        WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd" });
+        // Always the production environment: what a development environment adds, such as stack traces in answers, never reaches a client.
+        WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd", EnvironmentName = Environments.Production });
         builder.Logging.ClearProviders();
         builder.Services.ConfigureHttpJsonOptions(json =>
         {
@@ -231,8 +233,10 @@ public sealed class DaemonHost : IAsyncDisposable
                 kestrel.Listen(IPAddress.Loopback, 0, listen =>
                 {
                     host.loopbackListener = listen;
-                    listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
+
+                    // Tracked from the moment the connection is accepted, before TLS, so a compromise also closes handshakes under way.
                     listen.Use(host.Track(LoopbackMarker));
+                    listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
                 });
             }
 
@@ -245,14 +249,25 @@ public sealed class DaemonHost : IAsyncDisposable
                 {
                     host.localNetworkListener = listen;
                     listen.Protocols = HttpProtocols.Http1;
+                    listen.Use(host.Track(LocalNetworkMarker));
+
+                    // A client certificate is read for what its device's key signed, never by building its chain: nothing it names, no
+                    // issuer, OCSP or CRL address, is fetched, so no client, paired or not, makes the runtime reach anywhere. The chain
+                    // policy holds where TLS 1.3 encrypts the certificate; macOS asks its trust service about a client certificate
+                    // before any policy applies, so the screen refuses one that names an address while TLS 1.2 still shows it.
+                    listen.Use(Screen);
                     listen.UseHttps(new HttpsConnectionAdapterOptions
                     {
                         ServerCertificateSelector = host.SelectCertificate,
                         ClientCertificateMode = ClientCertificateMode.AllowCertificate,
                         ClientCertificateValidation = (_, _, _) => true,
-                        OnAuthenticate = (_, tls) => tls.AllowTlsResume = false,
+                        CheckCertificateRevocation = false,
+                        OnAuthenticate = (_, tls) =>
+                        {
+                            tls.AllowTlsResume = false;
+                            tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
+                        },
                     });
-                    listen.Use(host.Track(LocalNetworkMarker));
                 });
             }
         });
@@ -466,6 +481,30 @@ public sealed class DaemonHost : IAsyncDisposable
         return current;
     }
 
+    /// <summary>
+    /// Reads a local-network connection through the TLS certificate screen, so a client certificate that names an address to fetch
+    /// is refused before the platform's TLS sees it.
+    /// </summary>
+    private static ConnectionDelegate Screen(ConnectionDelegate next) => async connection =>
+    {
+        IDuplexPipe transport = connection.Transport;
+        var screen = new TlsScreenStream(transport.Input.AsStream(leaveOpen: true), transport.Output.AsStream(leaveOpen: true), leaveOpen: true);
+        PipeReader reader = PipeReader.Create(screen, new StreamPipeReaderOptions(leaveOpen: true));
+        PipeWriter writer = PipeWriter.Create(screen, new StreamPipeWriterOptions(leaveOpen: true));
+        connection.Transport = new ScreenedTransport(reader, writer);
+        try
+        {
+            await next(connection).ConfigureAwait(false);
+        }
+        finally
+        {
+            connection.Transport = transport;
+            await reader.CompleteAsync().ConfigureAwait(false);
+            await writer.CompleteAsync().ConfigureAwait(false);
+            await screen.DisposeAsync().ConfigureAwait(false);
+        }
+    };
+
     /// <summary>Marks a TLS connection with its profile and keeps it in view while it is open, so a compromise can close it.</summary>
     private Func<ConnectionDelegate, ConnectionDelegate> Track(object marker) => next => async connection =>
     {
@@ -543,3 +582,6 @@ public sealed class DaemonHost : IAsyncDisposable
         }
     }
 }
+
+/// <summary>A connection's transport read through the TLS certificate screen.</summary>
+internal sealed record ScreenedTransport(PipeReader Input, PipeWriter Output) : IDuplexPipe;

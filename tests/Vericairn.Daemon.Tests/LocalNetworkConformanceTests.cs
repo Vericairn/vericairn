@@ -162,7 +162,7 @@ public class LocalNetworkConformanceTests
         {
             (HttpStatusCode status, string body) = await unpaired.SendSignedAsync(strangerSigner, HttpMethod.Get, "/v1/health");
             Assert.Equal(HttpStatusCode.Unauthorized, status);
-            Assert.Contains("unknown here", body, StringComparison.Ordinal);
+            Assert.Contains("pairs first", body, StringComparison.Ordinal);
         }
 
         // Through the SDK it is refused while the connection is set up, before any request of its own.
@@ -189,7 +189,7 @@ public class LocalNetworkConformanceTests
         {
             (HttpStatusCode status, string body) = await mismatched.SendSignedAsync(signer, HttpMethod.Get, "/v1/health");
             Assert.Equal(HttpStatusCode.Unauthorized, status);
-            Assert.Contains("client certificate", body, StringComparison.Ordinal);
+            Assert.Contains("pairs first", body, StringComparison.Ordinal);
         }
     }
 

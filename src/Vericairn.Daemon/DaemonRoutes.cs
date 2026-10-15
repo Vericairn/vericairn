@@ -147,12 +147,16 @@ internal static class DaemonRoutes
             ? "A device's name is text without control or formatting characters; nothing was recorded."
             : null;
 
-    /// <summary>The runtime identity's proof for a nonce, over the certificate this connection presented; written with its length, for a client that reads it before any other request.</summary>
+    /// <summary>
+    /// The runtime identity's proof for a nonce, over the certificate this connection presented and the client certificate it was
+    /// presented: over the local network only, to a paired device whose request was authenticated, and only while the connection's
+    /// certificate is the current one. Written with its length, for a client that reads it before any other request.
+    /// </summary>
     private static IResult Prove(DaemonHost host, HttpContext context, string? nonce)
     {
-        if (host.Identity is null)
+        if (host.Identity is null || !DaemonHost.OnLocalNetwork(context) || context.Connection.ClientCertificate is not { } client)
         {
-            return Problem(StatusCodes.Status404NotFound, "not-found", "This runtime has no identity to prove: it serves no local-network profile.");
+            return Problem(StatusCodes.Status404NotFound, "not-found", "The runtime identity proves itself to paired devices over the local network only.");
         }
 
         if (!PairingProtocol.IsNonce(nonce))
@@ -160,7 +164,13 @@ internal static class DaemonRoutes
             return Problem(StatusCodes.Status422UnprocessableEntity, "refused", "A proof answers a nonce of 32 random bytes in base64url.");
         }
 
-        RuntimeIdentityProof proof = host.Identity.Prove(host.Service.Session.Manifest.Estate, host.CertificateOf(context), nonce!);
+        string certificate = host.CertificateOf(context);
+        if (certificate != host.Certificates?.Fingerprint)
+        {
+            return Problem(StatusCodes.Status409Conflict, "refused", "This connection began under a runtime certificate that has since been replaced; connect again.");
+        }
+
+        RuntimeIdentityProof proof = host.Identity.Prove(host.Service.Session.Manifest.Estate, certificate, RuntimeIdentityScheme.CertificateFingerprint(client.RawData), nonce!);
         return Results.Content(JsonSerializer.Serialize(proof, ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status200OK);
     }
 

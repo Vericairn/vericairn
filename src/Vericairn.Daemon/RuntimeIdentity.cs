@@ -85,11 +85,11 @@ public sealed class RuntimeIdentity
         return next;
     }
 
-    /// <summary>The identity's proof for a client's nonce on a connection that presented a certificate.</summary>
-    public RuntimeIdentityProof Prove(string estate, string certificate, string nonce)
+    /// <summary>The identity's proof for a client's nonce on a connection that presented a certificate and was presented a client certificate.</summary>
+    public RuntimeIdentityProof Prove(string estate, string certificate, string client, string nonce)
     {
-        byte[] signature = store.Sign(key, RuntimeIdentityScheme.Digest(estate, certificate, nonce));
-        return new RuntimeIdentityProof(estate, PublicKey, certificate, nonce, Base64Url.EncodeToString(signature));
+        byte[] signature = store.Sign(key, RuntimeIdentityScheme.Digest(estate, certificate, client, nonce));
+        return new RuntimeIdentityProof(estate, PublicKey, certificate, client, nonce, Base64Url.EncodeToString(signature));
     }
 
     private static RuntimeIdentity Create(string directory, IDeviceKeyStore? store)

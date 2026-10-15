@@ -136,7 +136,8 @@ public static class RuntimePairing
         try
         {
             await socket.ConnectAsync(host, port, timeout.Token).ConfigureAwait(false);
-            tls = new SslStream(new NetworkStream(socket, ownsSocket: false), leaveInnerStreamOpen: false);
+            // The screen refuses a certificate that names an address to fetch before this machine's TLS reads it.
+            tls = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: false)), leaveInnerStreamOpen: false);
             await tls.AuthenticateAsClientAsync(
                 new SslClientAuthenticationOptions
                 {

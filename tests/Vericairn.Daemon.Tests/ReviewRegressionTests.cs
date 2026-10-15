@@ -374,6 +374,271 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F4_AnIdentityProofAnswersOnlyTheConnectionThatAskedForIt()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection insider = harness.Pair(harness.Estate.BuilderId, "Insider");
+        RuntimeConnection victim = harness.Pair(harness.Estate.OperatorId, "Victim");
+        DeviceRequestSigner signer = harness.Signer(insider);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(insider.DevicePublicKey), DateTimeOffset.UtcNow);
+        string pinned = harness.Host.Endpoint.Loopback!.Certificate;
+        using var client = new MutualTls(harness.Address, credential, pinned);
+
+        // The insider asks, on its own connection, for a proof of the victim's nonce: the proof names the insider's client certificate,
+        // so it verifies for the insider's connection and for no connection of the victim's.
+        string victimNonce = PairingProtocol.NewNonce();
+        (HttpStatusCode status, string body) = await client.SendSignedAsync(signer, HttpMethod.Get, RuntimeIdentityScheme.Path + "?nonce=" + victimNonce);
+        Assert.Equal(HttpStatusCode.OK, status);
+        RuntimeIdentityProof proof = JsonSerializer.Deserialize<RuntimeIdentityProof>(body, ProtocolJson.Options)!;
+        string insiderClient = RuntimeIdentityScheme.CertificateFingerprint(credential.RawData);
+        Assert.Equal(insiderClient, proof.Client);
+        Assert.True(RuntimeIdentityScheme.Verify(proof, insider.Identity, insider.Estate, pinned, insiderClient, victimNonce));
+        using X509Certificate2 victimCredential = LocalNetworkCredential.Issue(harness.Signer(victim), Base64Url.DecodeFromChars(victim.DevicePublicKey), DateTimeOffset.UtcNow);
+        Assert.False(RuntimeIdentityScheme.Verify(proof, victim.Identity, victim.Estate, pinned, RuntimeIdentityScheme.CertificateFingerprint(victimCredential.RawData), victimNonce));
+        Assert.Equal(ConnectionStates.Current, harness.Connections.Probe(victim).State);
+    }
+
+    [Fact]
+    public async Task F4_NoProofIsGivenOverLoopbackOrTheLocalSocket()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        harness.Pair(harness.Estate.OperatorId, "Victim phone");
+        WriteOutcome local = harness.Socket.DeviceCreate(new DeviceCreateRequest(harness.Estate.BuilderId, "Agent worker", "file"));
+        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(local.Written!.Id, harness.Estate.OperatorId, "Agent.")).Ok);
+        using VericairnClient loopback = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(local.Written.Id)!);
+        Assert.Null(loopback.RuntimeIdentity(PairingProtocol.NewNonce()));
+        Assert.Null(harness.Socket.RuntimeIdentity(PairingProtocol.NewNonce()));
+    }
+
+    [Fact]
+    public async Task F4_AProofIsRefusedOnAConnectionThatBeganUnderAReplacedCertificate()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
+        DeviceRequestSigner signer = harness.Signer(connection);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var open = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, RuntimeIdentityScheme.Path + "?nonce=" + PairingProtocol.NewNonce())).Status);
+
+        // A rotation that is not for a compromise leaves the connection open, but it proves nothing more under the old certificate.
+        Assert.NotNull(harness.Socket.RotateCertificate(new CertificateRotateRequest()).Rotated);
+        (HttpStatusCode status, string body) = await open.SendSignedAsync(signer, HttpMethod.Get, RuntimeIdentityScheme.Path + "?nonce=" + PairingProtocol.NewNonce());
+        Assert.Equal(HttpStatusCode.Conflict, status);
+        Assert.Contains("since been replaced", Message(body), StringComparison.Ordinal);
+        Assert.Equal(1, open.Connections);
+        Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
+    }
+
+    [Fact]
+    public async Task F4_ACompromiseClosesConnectionsStillInTheirHandshake()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        Assert.True(RuntimeConnection.TryParseAddress(harness.Address, out string host, out int port));
+
+        // A connection accepted but not yet through TLS, as one that waits mid-handshake under the old certificate.
+        using var waiting = new Socket(SocketType.Stream, ProtocolType.Tcp);
+        await waiting.ConnectAsync(host, port, TestContext.Current.CancellationToken);
+        await Task.Delay(300, TestContext.Current.CancellationToken);
+        (CertificateRotated? rotated, Problem? problem) = harness.Socket.RotateCertificate(new CertificateRotateRequest(Compromised: true));
+        Assert.True(rotated is not null, problem?.Message);
+        Assert.True(rotated.Closed >= 1, $"closed {rotated.Closed}");
+
+        // The runtime closed it at once, well before any handshake timeout.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        int read;
+        try
+        {
+            read = await waiting.ReceiveAsync(new byte[16], SocketFlags.None, timeout.Token);
+        }
+        catch (SocketException)
+        {
+            read = 0;
+        }
+
+        Assert.Equal(0, read);
+    }
+
+    [Fact]
+    public async Task F5_AClientCertificatesAddressesAreNeverFetched()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        await using AddressListener addresses = AddressListener.Start();
+        using X509Certificate2 leaf = AddressListener.Addressed(addresses.Port, "CN=" + harness.OperatorDevice, client: true);
+
+        // Each handshake is refused before the platform's TLS reads the certificate (macOS, TLS 1.2) or answered "pairs first"
+        // (TLS 1.3, where the offline chain policy holds); none makes this machine fetch what the certificate names. The listener
+        // answers every request at once, so the system's trust service never pauses its fetches after one fails.
+        var outcomes = new List<string>();
+        for (int i = 0; i < 12; i++)
+        {
+            string answer;
+            try
+            {
+                answer = await Raw.ExchangeOfflineAsync(harness.Address, leaf, harness.Host.Endpoint.Loopback!.Certificate, Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\n\r\n"), TimeSpan.FromSeconds(5));
+            }
+            catch (Exception exception) when (exception is IOException or System.Security.Authentication.AuthenticationException)
+            {
+                answer = "refused";
+            }
+
+            Assert.True(answer == "refused" || answer.StartsWith("HTTP/1.1 401", StringComparison.Ordinal), $"handshake {i}: [{answer}]");
+            outcomes.Add(answer == "refused" ? "refused" : "401");
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        Say($"handshakes: {string.Join(", ", outcomes.Distinct())}");
+        Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a client certificate named: {string.Join(", ", addresses.Requests)}");
+    }
+
+    [Fact]
+    public async Task F5_ARuntimeCertificatesAddressesAreNeverFetched()
+    {
+        // Something answering at a runtime's address with a certificate that names an address: the device pairing with it refuses
+        // the handshake before its TLS reads the certificate, and fetches nothing.
+        await using AddressListener addresses = AddressListener.Start();
+        using X509Certificate2 impostor = AddressListener.Addressed(addresses.Port, "CN=vericairn runtime", client: false);
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try
+        {
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            Task serve = Task.Run(
+                async () =>
+                {
+                    using TcpClient client = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+                    await using var tls = new SslStream(client.GetStream());
+                    try
+                    {
+                        await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificateContext = SslStreamCertificateContext.Create(impostor, null, offline: true), AllowTlsResume = false }, TestContext.Current.CancellationToken);
+                        var buffer = new byte[1024];
+                        _ = await tls.ReadAsync(buffer, TestContext.Current.CancellationToken);
+                    }
+                    catch (Exception exception) when (exception is IOException or System.Security.Authentication.AuthenticationException)
+                    {
+                    }
+                },
+                TestContext.Current.CancellationToken);
+            PairingException refused = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }));
+            Say($"{refused.Code}: {refused.Message}");
+            await serve.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            listener.Stop();
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a runtime's certificate named: {string.Join(", ", addresses.Requests)}");
+    }
+
+    [Fact]
+    public async Task F9_BeforeItsCertificateIsShownAClientLearnsNothingOfADevice()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection phone = harness.Pair(harness.Estate.BuilderId, "Phone");
+        RuntimeConnection relay = harness.Pair(harness.Estate.BuilderId, "Relay only", "relay");
+        Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(phone.Device, harness.Estate.OperatorId, "Lost.")).Ok);
+        string pinned = harness.Host.Endpoint.Loopback!.Certificate;
+        var answers = new List<string>();
+        foreach (string device in new[] { harness.OperatorDevice, phone.Device, relay.Device, Records.Identity.Ulid.NewUlid().Value })
+        {
+            string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+            string payload = $"GET /v1/status HTTP/1.1\r\nHost: x\r\n{RequestSigning.DeviceHeader}: {device}\r\n{RequestSigning.SignedAtHeader}: {at}\r\n{RequestSigning.SignatureHeader}: AAAA\r\n\r\n";
+            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(payload), TimeSpan.FromSeconds(3));
+            Assert.StartsWith("HTTP/1.1 401", answer, StringComparison.Ordinal);
+            answers.Add(Message(answer[(answer.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4)..]));
+        }
+
+        // Admitted, revoked, not permitted the profile, or unknown: one answer, which names none of them.
+        Assert.Single(answers.Distinct(StringComparer.Ordinal));
+        Assert.Contains("pairs first", answers[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("revoked", answers[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task F11_AClientCertificateNamesNoDevice()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
+        DeviceRequestSigner signer = harness.Signer(connection);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
+        Assert.Equal(LocalNetworkCredential.SubjectName, credential.Subject);
+        Assert.Equal(LocalNetworkCredential.SubjectName, credential.Issuer);
+        Assert.DoesNotContain(connection.Device, Encoding.ASCII.GetString(credential.RawData), StringComparison.Ordinal);
+        using var client = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        Assert.Equal(HttpStatusCode.OK, (await client.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
+    }
+
+    [Fact]
+    public async Task F13_ADevelopmentEnvironmentShowsAClientNothingMore()
+    {
+        string? before = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT");
+        string? aspnet = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+        Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", "Development");
+        Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
+        try
+        {
+            await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+            byte[] body = "{\"nonce\": [}"u8.ToArray();
+            string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. Encoding.ASCII.GetBytes($"POST /v1/pairing/hello HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TimeSpan.FromSeconds(3));
+            Say(answer.Length > 600 ? answer[..600] : answer);
+            Assert.StartsWith("HTTP/1.1 400", answer, StringComparison.Ordinal);
+            Assert.DoesNotContain("   at ", answer, StringComparison.Ordinal);
+            Assert.DoesNotContain(".cs:line", answer, StringComparison.Ordinal);
+            Assert.DoesNotContain("Exception", answer, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DOTNET_ENVIRONMENT", before);
+            Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", aspnet);
+        }
+    }
+
+    [Fact]
+    public async Task F14_TheSdkFollowsNoRedirect()
+    {
+        // A server on a local socket of its own that answers health with a redirect, and counts whoever follows it.
+        int followed = 0;
+        string socket = OperatingSystem.IsWindows() ? "vericairn-redirect-" + Records.Identity.Ulid.NewUlid().Value : Path.Combine(DaemonHost.SocketDirectory(), Records.Identity.Ulid.NewUlid().Value[^12..] + ".sock");
+        Microsoft.AspNetCore.Builder.WebApplicationBuilder builder = Microsoft.AspNetCore.Builder.WebApplication.CreateSlimBuilder();
+        Microsoft.AspNetCore.Hosting.WebHostBuilderKestrelExtensions.ConfigureKestrel(builder.WebHost, kestrel =>
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                kestrel.ListenNamedPipe(socket);
+            }
+            else
+            {
+                kestrel.ListenUnixSocket(socket);
+            }
+        });
+        await using Microsoft.AspNetCore.Builder.WebApplication app = builder.Build();
+        Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapGet(app, "/v1/health", () => Microsoft.AspNetCore.Http.Results.Redirect("/elsewhere"));
+        Microsoft.AspNetCore.Builder.EndpointRouteBuilderExtensions.MapGet(app, "/elsewhere", () =>
+        {
+            Interlocked.Increment(ref followed);
+            return Microsoft.AspNetCore.Http.Results.Json(new HealthResponse("1", "x", "x", "x", "x", 2, "x", 0), ProtocolJson.Options);
+        });
+        await app.StartAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            using var client = new VericairnClient(new DaemonEndpoint(OperatingSystem.IsWindows() ? "pipe" : "unix", socket, 0, string.Empty, string.Empty, ApiVersion.Current));
+            HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.Health());
+            Assert.Equal(HttpStatusCode.Redirect, refused.StatusCode);
+            Assert.Equal(0, Volatile.Read(ref followed));
+        }
+        finally
+        {
+            await app.StopAsync(TestContext.Current.CancellationToken);
+            if (!OperatingSystem.IsWindows() && File.Exists(socket))
+            {
+                File.Delete(socket);
+            }
+        }
+    }
+
+    [Fact]
     public void F2_EveryRequestTypeOfTheProtocolIsHeldToAPrincipal()
     {
         // A request type an operation could bind that the scope does not know would be refused for every device; this keeps the table whole.
@@ -631,5 +896,98 @@ internal static class Raw
         }
 
         return Encoding.UTF8.GetString(buffer.ToArray());
+    }
+}
+
+/// <summary>
+/// An address a certificate names, on 127.0.0.1: it answers every request at once with 404 and keeps its request line, so a test
+/// sees any fetch, and the system's trust service, which pauses after a fetch fails, keeps fetching.
+/// </summary>
+internal sealed class AddressListener : IAsyncDisposable
+{
+    private readonly TcpListener listener;
+    private readonly Task accepting;
+
+    private AddressListener(TcpListener listener)
+    {
+        this.listener = listener;
+        accepting = Task.Run(AcceptAsync);
+    }
+
+    public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+    public System.Collections.Concurrent.ConcurrentQueue<string> Requests { get; } = new();
+
+    public static AddressListener Start()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        return new AddressListener(listener);
+    }
+
+    /// <summary>A certificate with its key whose authority information access and CRL distribution points name this listener.</summary>
+    public static X509Certificate2 Addressed(int port, string subject, bool client)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        using var caKey = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var caRequest = new CertificateRequest("CN=Review CA " + port.ToString(System.Globalization.CultureInfo.InvariantCulture), caKey, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        using X509Certificate2 ca = caRequest.CreateSelfSigned(now.AddHours(-1), now.AddDays(1));
+        using var leafKey = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        var leafRequest = new CertificateRequest(subject, leafKey, System.Security.Cryptography.HashAlgorithmName.SHA256);
+        leafRequest.CertificateExtensions.Add(new X509AuthorityInformationAccessExtension([$"http://127.0.0.1:{port}/ocsp"], [$"http://127.0.0.1:{port}/ca.cer"]));
+        leafRequest.CertificateExtensions.Add(CertificateRevocationListBuilder.BuildCrlDistributionPointExtension([$"http://127.0.0.1:{port}/crl"]));
+        leafRequest.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new System.Security.Cryptography.Oid(client ? "1.3.6.1.5.5.7.3.2" : "1.3.6.1.5.5.7.3.1")], false));
+        using X509Certificate2 bare = leafRequest.Create(ca, now.AddHours(-1), now.AddDays(1), [1, 2, 3, 4]);
+        using X509Certificate2 withKey = bare.CopyWithPrivateKey(leafKey);
+        return X509CertificateLoader.LoadPkcs12(withKey.Export(X509ContentType.Pkcs12), null);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        listener.Stop();
+        try
+        {
+            await accepting;
+        }
+        catch (Exception exception) when (exception is SocketException or ObjectDisposedException or OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task AcceptAsync()
+    {
+        while (true)
+        {
+            TcpClient client;
+            try
+            {
+                client = await listener.AcceptTcpClientAsync();
+            }
+            catch (Exception exception) when (exception is SocketException or ObjectDisposedException or InvalidOperationException)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                using (client)
+                {
+                    var buffer = new byte[4096];
+                    int read = 0;
+                    try
+                    {
+                        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        read = await client.GetStream().ReadAsync(buffer, wait.Token);
+                        Requests.Enqueue(Encoding.ASCII.GetString(buffer, 0, read).Split("\r\n")[0]);
+                        await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), wait.Token);
+                    }
+                    catch (Exception exception) when (exception is IOException or SocketException or OperationCanceledException)
+                    {
+                        Requests.Enqueue("(connected)");
+                    }
+                }
+            });
+        }
     }
 }

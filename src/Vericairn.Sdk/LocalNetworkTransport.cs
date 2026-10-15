@@ -32,7 +32,8 @@ internal static class LocalNetworkTransport
         try
         {
             await socket.ConnectAsync(connection.Host, connection.Port, cancellationToken).ConfigureAwait(false);
-            tls = new SslStream(new NetworkStream(socket, ownsSocket: true), leaveInnerStreamOpen: false);
+            // The screen refuses a runtime certificate that names an address to fetch before this machine's TLS reads it.
+            tls = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: true)), leaveInnerStreamOpen: false);
             X509Certificate2 own = credential.Current();
             byte[]? presented = null;
             await tls.AuthenticateAsClientAsync(
@@ -53,7 +54,7 @@ internal static class LocalNetworkTransport
                     },
                 },
                 cancellationToken).ConfigureAwait(false);
-            await ProveAsync(tls, connection, signer, RuntimeIdentityScheme.CertificateFingerprint(presented ?? []), cancellationToken).ConfigureAwait(false);
+            await ProveAsync(tls, connection, signer, RuntimeIdentityScheme.CertificateFingerprint(presented ?? []), RuntimeIdentityScheme.CertificateFingerprint(own.RawData), cancellationToken).ConfigureAwait(false);
             return tls;
         }
         catch
@@ -71,8 +72,8 @@ internal static class LocalNetworkTransport
         }
     }
 
-    /// <summary>Asks for the runtime identity's proof of this connection's certificate with a fresh nonce, and verifies it with the pinned identity.</summary>
-    private static async Task ProveAsync(SslStream tls, RuntimeConnection connection, IRequestSigner signer, string certificate, CancellationToken cancellationToken)
+    /// <summary>Asks for the runtime identity's proof of this connection's certificates with a fresh nonce, and verifies it with the pinned identity.</summary>
+    private static async Task ProveAsync(SslStream tls, RuntimeConnection connection, IRequestSigner signer, string certificate, string client, CancellationToken cancellationToken)
     {
         string nonce = PairingProtocol.NewNonce();
         string target = RuntimeIdentityScheme.Path + "?nonce=" + nonce;
@@ -102,7 +103,7 @@ internal static class LocalNetworkTransport
             proof = null;
         }
 
-        if (!RuntimeIdentityScheme.Verify(proof, connection.Identity, connection.Estate, certificate, nonce))
+        if (!RuntimeIdentityScheme.Verify(proof, connection.Identity, connection.Estate, certificate, client, nonce))
         {
             throw new RuntimeConnectionException(ConnectionStates.Unavailable, $"What answered at {connection.Address} did not prove the runtime identity this device paired with ({RuntimeIdentityScheme.Fingerprint(connection.Identity)}) for the certificate it presented, so nothing else was sent to it. If the runtime replaced its identity, this device pairs again.");
         }

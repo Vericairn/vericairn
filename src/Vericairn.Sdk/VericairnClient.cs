@@ -33,6 +33,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         Transport = endpoint.Kind;
         var handler = new SocketsHttpHandler
         {
+            AllowAutoRedirect = false,
             ConnectCallback = async (context, cancellationToken) =>
             {
                 if (endpoint.Kind == "pipe")
@@ -64,8 +65,11 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         Transport = "loopback";
         var handler = new SocketsHttpHandler
         {
+            AllowAutoRedirect = false,
             SslOptions = new SslClientAuthenticationOptions
             {
+                CertificateRevocationCheckMode = X509RevocationMode.NoCheck,
+                CertificateChainPolicy = LocalNetworkTransport.OfflineChainPolicy(),
                 RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is not null && Fingerprint(certificate) == loopback.Certificate,
             },
         };
@@ -81,6 +85,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         LocalNetworkCredential own = credential;
         var handler = new SocketsHttpHandler
         {
+            AllowAutoRedirect = false,
             ConnectTimeout = timeout ?? TimeSpan.FromSeconds(30),
             ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken),
         };

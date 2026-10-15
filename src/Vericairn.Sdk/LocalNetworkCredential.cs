@@ -10,8 +10,8 @@ using Vericairn.Protocol;
 namespace Vericairn.Sdk;
 
 /// <summary>
-/// The TLS client credential of a paired device on the local network, from 0.6.0: a certificate for a fresh P-256 key, named for
-/// the device (CN = its id) and issued, ECDSA with SHA-256, by the device's own key wherever that key is held. The runtime accepts
+/// The TLS client credential of a paired device on the local network, from 0.6.0: a certificate for a fresh P-256 key, under a
+/// subject that names no device, issued, ECDSA with SHA-256, by the device's own key wherever that key is held. The runtime accepts
 /// it only while the device's current key verifies it, so the key its pairing bound to the device record is what the client proves.
 /// The TLS key never leaves memory and is replaced after a day; the device key signs once per credential.
 /// </summary>
@@ -19,6 +19,9 @@ public sealed class LocalNetworkCredential : IDisposable
 {
     /// <summary>How long a credential is valid.</summary>
     public static TimeSpan Validity { get; } = TimeSpan.FromHours(24);
+
+    /// <summary>The subject and issuer of every credential, which names no device.</summary>
+    public const string SubjectName = "CN=vericairn device";
 
     private static readonly TimeSpan RenewBefore = TimeSpan.FromHours(1);
 
@@ -51,15 +54,17 @@ public sealed class LocalNetworkCredential : IDisposable
     }
 
     /// <summary>
-    /// Issues a client certificate for a new TLS key, signed by the device's key: the subject and issuer name the device, the
-    /// validity is a day from a few minutes ago, and its key is usable only for client authentication.
+    /// Issues a client certificate for a new TLS key, signed by the device's key: the subject and issuer are <see cref="SubjectName"/>,
+    /// the validity is a day from a few minutes ago, and its key is usable only for client authentication.
     /// </summary>
     public static X509Certificate2 Issue(IRequestSigner signer, byte[] publicKey, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(signer);
         ArgumentNullException.ThrowIfNull(publicKey);
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        var name = new X500DistinguishedName("CN=" + signer.DeviceId);
+        // The same name for every device: a TLS 1.2 handshake shows the client certificate in clear, and the device is named only
+        // inside the connection, by the requests it signs. What ties the certificate to the device is its signature by the device's key.
+        var name = new X500DistinguishedName(SubjectName);
         var request = new CertificateRequest(name, key, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));

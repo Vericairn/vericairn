@@ -141,18 +141,16 @@ internal sealed class RequestAuthenticator
         string? device = Header(request, RequestSigning.DeviceHeader);
         string? signedAt = Header(request, RequestSigning.SignedAtHeader);
         string? signature = Header(request, RequestSigning.SignatureHeader);
-        if (device is null || signedAt is null || signature is null)
+        // Until the connection's certificate shows the client holds a device's key, every refusal is the same one, so nobody learns
+        // from it whether a device exists, is revoked, or is permitted the profile.
+        DeviceStanding? standing = device is null ? null : service.Standing(device);
+        X509Certificate2? certificate = context.Connection.ClientCertificate;
+        if (device is null || signedAt is null || signature is null || standing is null || certificate is null || !IssuedBy(certificate, standing.PublicKey, DateTimeOffset.UtcNow))
         {
             return Denied($"Local-network requests come from a paired device: present the TLS client certificate its device key issued and sign every request ({RequestSigning.DeviceHeader}, {RequestSigning.SignedAtHeader}, {RequestSigning.SignatureHeader}). A new device pairs first, with a pairing code from an administrator.");
         }
 
         // The device as the records say it is now: revocation counts from the next request on, on an open connection too.
-        DeviceStanding? standing = service.Standing(device);
-        if (standing is null)
-        {
-            return Denied($"Device {device} is unknown here: a device reaches the runtime over the local network once it has paired, with a pairing code from an administrator.");
-        }
-
         if (standing.Admission == "revoked")
         {
             return Denied($"Device {standing.Identity} is revoked, and a revoked device is refused at once on every profile.");
@@ -166,12 +164,6 @@ internal sealed class RequestAuthenticator
         if (!standing.Profiles.Contains(LocalNetworkProfile, StringComparer.Ordinal))
         {
             return Denied($"Device {standing.Identity} is not permitted the local-network profile; its permitted profiles are {(standing.Profiles.Count == 0 ? "none" : string.Join(", ", standing.Profiles))}.");
-        }
-
-        X509Certificate2? certificate = context.Connection.ClientCertificate;
-        if (certificate is null || !IssuedBy(certificate, device, standing.PublicKey, DateTimeOffset.UtcNow))
-        {
-            return Denied($"The connection's TLS client certificate is not one the current key of device {standing.Identity} issued; a paired device presents a certificate its own key issued.");
         }
 
         if (!Fresh(signedAt))
@@ -200,13 +192,12 @@ internal sealed class RequestAuthenticator
     }
 
     /// <summary>
-    /// True when a TLS client certificate names the device, is within its validity, and carries an ECDSA P-256 signature with SHA-256
-    /// by the device's key: a certificate the device's key issued for the TLS key the connection proved it holds.
+    /// True when a TLS client certificate is within its validity and carries an ECDSA P-256 signature with SHA-256 by the device's key:
+    /// a certificate the device's key issued for the TLS key the connection proved it holds. Its subject names no device, and is not read.
     /// </summary>
-    internal static bool IssuedBy(X509Certificate2 certificate, string device, string publicKey, DateTimeOffset now)
+    internal static bool IssuedBy(X509Certificate2 certificate, string publicKey, DateTimeOffset now)
     {
-        if (!string.Equals(certificate.GetNameInfo(X509NameType.SimpleName, forIssuer: false), device, StringComparison.Ordinal)
-            || now < new DateTimeOffset(certificate.NotBefore.ToUniversalTime()) - RequestSigning.MaxSkew
+        if (now < new DateTimeOffset(certificate.NotBefore.ToUniversalTime()) - RequestSigning.MaxSkew
             || now > new DateTimeOffset(certificate.NotAfter.ToUniversalTime()))
         {
             return false;
