@@ -302,6 +302,97 @@ public class LivingDocumentJourneyTests
         }
     }
 
+    /// <summary>
+    /// The estate's records show who revised an estate file but not who wrote a document of another repository, so there docs
+    /// review records the independence its reviewer states, and a builder that states none is taken to review its own work; the
+    /// record type's other rules still hold, and an estate file's revisions still decide its reviewer's independence.
+    /// </summary>
+    [Fact]
+    public void AReviewOfAnotherRepositorysDocumentRecordsTheIndependenceItsReviewerStates()
+    {
+        string root = CliHarness.TempDirectory("living-independence");
+        string repo = CliHarness.TempDirectory("living-independence-widget");
+        string scratch = CliHarness.TempDirectory("living-independence-scratch");
+        try
+        {
+            Git(repo, "init", "-q", "-b", "main");
+            Directory.CreateDirectory(Path.Combine(repo, "docs"));
+            File.WriteAllText(Path.Combine(repo, "README.md"), "# Widget\n\nThe releases page lists every release.\n");
+            File.WriteAllText(Path.Combine(repo, "docs", "guide.md"), "# Guide\n");
+            Git(repo, "add", ".");
+            Git(repo, "commit", "-q", "-m", "First commit");
+            string commit = GitOutput(repo, "rev-parse", "HEAD");
+
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Independence.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string reviewer = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "reviewer.json", """{"kind":"agent","name":"Reviewer","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", repo, "--by", op, "--name", "Widget", "--role", "source of the widget", "--visibility", "public").Json.GetProperty("resource").GetProperty("id").GetString()!;
+            CliHarness.Ok("--estate", root, "sources", "clone", repo, "--resource", resource);
+            foreach ((string path, string clearedBy) in new[] { ("README.md", "any"), ("docs/guide.md", "independent") })
+            {
+                CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, clearedBy + ".json", $$"""{"path":"{{path}}","repository":"{{resource}}","title":"{{path}}","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"decision","level":"warn"}],"clearedBy":"{{clearedBy}}","summary":"Says what the widget is."}"""));
+            }
+
+            string Review(string path, string by, params string[] more) =>
+                Independence(root, CliHarness.Ok(["--estate", root, "--json", "docs", "review", path, "--by", by, "--outcome", "current", "--summary", "Read it.", "--commit", commit, .. more]));
+            CliHarness.Outcome Refused(string path, string by, params string[] more) =>
+                CliHarness.Run(["--estate", root, "--json", "docs", "review", path, "--by", by, "--outcome", "current", "--summary", "Read it.", "--commit", commit, .. more]);
+
+            // The builder wrote the README: stating nothing, its review is its own. A reviewer without the builder role is judged
+            // from the records as before, and each may state its own independence: the builder of what it did not write, the
+            // operator of what he wrote.
+            Assert.Equal("self", Review("README.md", builder));
+            Assert.Equal("independent-agent", Review("README.md", reviewer));
+            Assert.Equal("operator", Review("README.md", op));
+            Assert.Equal("independent-agent", Review("README.md", builder, "--independence", "independent-agent"));
+            Assert.Equal("self", Review("README.md", op, "--independence", "self"));
+
+            // A self review does not clear a document that asks for independence; one its reviewer states independent does.
+            CliHarness.Outcome own = Refused("docs/guide.md", builder);
+            Assert.Equal(1, own.Code);
+            Assert.Contains("document.cleared-by", own.Out, StringComparison.Ordinal);
+            Assert.Equal("independent-agent", Review("docs/guide.md", builder, "--independence", "independent-agent"));
+
+            // The record type's other rules hold for a statement: operator needs the operator role, independent-agent an agent,
+            // and a reviewer who revised the content is self (an editor with no earlier review here, since a revising review counts
+            // for every review of its principal dated in the same second); an unknown independence is refused before anything is read.
+            Assert.Contains("document.independence", Refused("README.md", builder, "--independence", "operator").Out, StringComparison.Ordinal);
+            Assert.Contains("document.independence", Refused("README.md", op, "--independence", "independent-agent").Out, StringComparison.Ordinal);
+            string editor = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "editor.json", """{"kind":"agent","name":"Editor","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            Assert.Equal("self", Independence(root, CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", editor, "--outcome", "revised", "--summary", "Named the releases page.", "--commit", commit)));
+            Assert.Contains("document.independence", Refused("README.md", editor, "--independence", "independent-agent").Out, StringComparison.Ordinal);
+            CliHarness.Outcome unknown = Refused("README.md", builder, "--independence", "nobody");
+            Assert.Equal(2, unknown.Code);
+            Assert.Contains("self, independent-agent, operator", unknown.Err, StringComparison.Ordinal);
+
+            // An estate file's revisions decide: the operator revised the overview, so the builder is independent of it, builder
+            // role or not, and a statement that differs is refused; the operator's own review is self.
+            string overview = Path.Combine(root, "docs", "overview.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(overview)!);
+            File.WriteAllText(overview, "# Overview\n");
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "document-revision", "--by", op, "--body", CliHarness.WriteJson(scratch, "revision.json", $$"""{"path":"docs/overview.md","title":"Overview","hash":"{{ContentHash.Sha256File(overview)}}","bytes":{{new FileInfo(overview).Length}},"mediaType":"text/markdown","revision":1,"summary":"First."}"""));
+            CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "overview.json", """{"path":"docs/overview.md","title":"Overview","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says what the estate is."}"""));
+            string[] estateFile = ["--estate", root, "--json", "docs", "review", "docs/overview.md", "--outcome", "current", "--summary", "Read it."];
+            Assert.Equal("independent-agent", Independence(root, CliHarness.Ok([.. estateFile, "--by", builder])));
+            CliHarness.Outcome stated = CliHarness.Run([.. estateFile, "--by", builder, "--independence", "self"]);
+            Assert.Equal(2, stated.Code);
+            Assert.Contains("docs/overview.md is an estate file, whose revisions in the estate decide its reviewer's independence: independent-agent for this review, not self.", stated.Err, StringComparison.Ordinal);
+            Assert.Equal("self", Independence(root, CliHarness.Ok([.. estateFile, "--by", op, "--independence", "self"])));
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, repo, scratch);
+        }
+    }
+
+    /// <summary>The independence a written document review records.</summary>
+    private static string Independence(string root, CliHarness.Outcome written)
+    {
+        using JsonDocument record = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, written.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar))));
+        return record.RootElement.GetProperty("body").GetProperty("independence").GetString()!;
+    }
+
     private static void Publish(string root, string scratch, FakeReleaseProvider provider, string op, string builder, string product, string version)
     {
         string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", version, "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;

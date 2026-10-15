@@ -110,7 +110,10 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   the `covered` paths' identity (required to clear a `covers` trigger), the triggers it `answers` (each one the
   declaration names), the reviewer's `independence` of the content, and the `checks` that ran. A failed check refuses
   a clearance. The reviewer is `self` when the review revises the content, or when the reviewer recorded the latest
-  revision of the estate file or the latest revising review; a clearance meets the declaration's `clearedBy`.
+  revision of the estate file or the latest revising review; for a document of another repository, whose author the
+  estate's records do not show, a reviewer may also state `self` (see Living documents due). `independent-agent` needs
+  an agent principal and `operator` the operator role. A clearance meets the declaration's `clearedBy`, and a `self`
+  review does not clear a document whose `clearedBy` is `independent`.
 
 ## Fields new in format 2
 
@@ -185,14 +188,29 @@ installed, and a generated document as a whole, and refuses a hand edit or lost 
 `vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's region generator
 `vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first. `vericairn
 docs living` lists the declared documents; `vericairn docs declare` records or revises a declaration; and `vericairn
-docs review <path> --by <id> --outcome current|revised|needs-change --summary <text>` (with `--commit <commit>` for a
-document of another repository) records a review in which the runtime, not the reviewer, states the content's hash, the
-covered paths' identity, the triggers answered and the reviewer's independence, and runs the declared checks:
+docs review <path> --by <id> --outcome current|revised|needs-change --summary <text>` (with `--commit <commit>`, and
+optionally `--independence self|independent-agent|operator`, for a document of another repository) records a review in
+which the runtime, not the reviewer, states the content's hash, the covered paths' identity and the triggers answered,
+records the reviewer's independence (below), and runs the declared checks:
 `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative
 link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed
 check refuses the clearance; a check no installed pack provides is recorded as not performed. A declared estate document
 that is not in the working tree is a `document.absent` warning. Like a `release` trigger, the releases generator takes
 any revision of a product's record as the product.
+
+How independent a reviewer is of a document's content follows what the estate's records can show. An estate file's
+revisions are records, so they decide: the reviewer is `self` when the review revises the file or the reviewer recorded
+its latest revision, and otherwise `operator` for a principal with the operator role and `independent-agent` for any
+other; `docs review` refuses a stated independence that differs. Who wrote a document of another repository is not in
+the estate: that repository's commits are not records, and the estate sees the document's revisions only in reviews
+with outcome `revised`. So the review records the independence its reviewer states (`--independence`, or
+`independence` in the API). Without a statement it records `self` for a principal that holds the builder role, which
+writes the product's documents, and otherwise judges as for an estate file, from the latest review with outcome
+`revised`. The record type holds a stated independence to its other rules: a reviewer who revised the content, by this
+review or the latest revising one, is `self`; `independent-agent` needs an agent principal; `operator` needs the
+operator role. A `self` review, stated or judged, does not clear a document whose `clearedBy` is `independent`.
+Release 0.5.2 judged a document of another repository from the estate's records alone and refused `self` there, so a
+builder's review of a document the builder wrote was recorded as `independent-agent`.
 
 ## A device keeps its identity
 

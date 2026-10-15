@@ -46,7 +46,9 @@ Commands:
 The software pack's living-document source `vericairn.software/git-file` reads a document of an adopted repository at a
 commit from its registered clone, with git's own object ids at that commit as the covered paths' identity: `vericairn
 docs review <path> --commit <commit>` reviews it there, and `vericairn docs living` compares its covered paths at the
-clone's head. Every call is a read-only git command.
+clone's head. Every call is a read-only git command. The estate's records do not show who wrote such a document, so
+`--independence` states the reviewer's independence of it, and a builder that states none is recorded as reviewing its
+own work ([record-format-v2.md](record-format-v2.md#living-documents-due)).
 
 ## Checks as evidence
 

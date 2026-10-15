@@ -116,6 +116,7 @@ internal static class CliApp
         var summaryOption = new Option<string>("--summary") { Description = "What was checked.", Required = true };
         var findingOption = new Option<string[]>("--finding") { Description = "A finding, severity:summary with severity error, warning or info; repeatable.", AllowMultipleArgumentsPerToken = false };
         var commitOption = new Option<string?>("--commit") { Description = "For a document of another repository, the commit reviewed." };
+        var independenceOption = new Option<string?>("--independence") { Description = "For a document of another repository, whose author the estate's records do not show, the reviewer's independence of its content: self (the reviewer wrote or revised it), independent-agent or operator. Default: self for a principal that holds the builder role, else judged from the estate's records. An estate file's revisions decide its reviewer's independence, and a statement that differs is refused." };
         var review = new Command("review", "Record a review of a living document: the runtime reads its content, records the covered paths' identity and the triggers it answers, and runs its declared checks; a failed check refuses the clearance.");
         review.Arguments.Add(pathArgument);
         review.Options.Add(byOption);
@@ -123,7 +124,8 @@ internal static class CliApp
         review.Options.Add(summaryOption);
         review.Options.Add(findingOption);
         review.Options.Add(commitOption);
-        review.SetAction(parseResult => Commands.DocsReview(parseResult.GetValue(estateOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(outcomeOption)!, parseResult.GetValue(summaryOption)!, parseResult.GetValue(findingOption) ?? [], parseResult.GetValue(commitOption), parseResult.GetValue(jsonOption)));
+        review.Options.Add(independenceOption);
+        review.SetAction(parseResult => Commands.DocsReview(parseResult.GetValue(estateOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(outcomeOption)!, parseResult.GetValue(summaryOption)!, parseResult.GetValue(findingOption) ?? [], parseResult.GetValue(commitOption), parseResult.GetValue(independenceOption), parseResult.GetValue(jsonOption)));
         docs.Subcommands.Add(review);
 
         var bodyOption = new Option<string>("--body") { Description = "Path to a JSON file holding the living-document declaration, or '-' for standard input.", Required = true };
