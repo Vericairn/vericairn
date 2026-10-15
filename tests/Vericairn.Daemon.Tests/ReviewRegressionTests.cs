@@ -53,7 +53,7 @@ public class ReviewRegressionTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var lan = new Lan(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string op = harness.Estate.OperatorId;
         string json = "{\"type\":\"work-order\",\"by\":\"" + op + "\",\"body\":" + Order("W-R1") + "}";
 
@@ -131,7 +131,7 @@ public class ReviewRegressionTests
         RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Operator phone");
         DeviceRequestSigner signer = harness.Signer(phone);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(phone.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var lan = new Lan(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string rename = "{\"device\":\"" + harness.OperatorDevice + "\",\"name\":\"Renamed\"}";
         Assert.Equal(HttpStatusCode.Unauthorized, (await lan.SendAsync(HttpMethod.Post, "/v1/devices/rename", signer, Encoding.UTF8.GetBytes(rename), "application/json")).Status);
 
@@ -152,7 +152,7 @@ public class ReviewRegressionTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var lan = new Lan(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string by = harness.Estate.BuilderId;
         string ulid = Records.Identity.Ulid.NewUlid().Value;
         (string Path, string Json)[] refused =
@@ -254,9 +254,9 @@ public class ReviewRegressionTests
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(laptop.DevicePublicKey), DateTimeOffset.UtcNow);
         using X509Certificate2 otherCredential = LocalNetworkCredential.Issue(other, Base64Url.DecodeFromChars(phone.DevicePublicKey), DateTimeOffset.UtcNow);
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
-        using var client = new MutualTls(harness.Address, credential, pinned);
-        using var otherClient = new MutualTls(harness.Address, otherCredential, pinned);
-        (string Device, string SignedAt, string Signature) captured = MutualTls.Sign(signer, "GET", "/v1/status");
+        using var client = new MutualTls(harness, credential, pinned);
+        using var otherClient = new MutualTls(harness, otherCredential, pinned);
+        (string Device, string SignedAt, string Signature) captured = client.Sign(signer, "GET", "/v1/status");
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(HttpMethod.Get, "/v1/status", captured)).Status);
 
         // Another device fills its own window, and is refused beyond it; the laptop's captured signature is still remembered.
@@ -382,7 +382,7 @@ public class ReviewRegressionTests
         DeviceRequestSigner signer = harness.Signer(insider);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(insider.DevicePublicKey), DateTimeOffset.UtcNow);
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
-        using var client = new MutualTls(harness.Address, credential, pinned);
+        using var client = new MutualTls(harness, credential, pinned);
 
         // The insider asks, on its own connection, for a proof of the victim's nonce: the proof names the insider's client certificate,
         // so it verifies for the insider's connection and for no connection of the victim's.
@@ -417,7 +417,7 @@ public class ReviewRegressionTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var open = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var open = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, RuntimeIdentityScheme.Path + "?nonce=" + PairingProtocol.NewNonce())).Status);
 
         // A rotation that is not for a compromise leaves the connection open, but it proves nothing more under the old certificate.
@@ -675,7 +675,7 @@ public class ReviewRegressionTests
         Assert.Equal(LocalNetworkCredential.SubjectName, credential.Subject);
         Assert.Equal(LocalNetworkCredential.SubjectName, credential.Issuer);
         Assert.DoesNotContain(connection.Device, Encoding.ASCII.GetString(credential.RawData), StringComparison.Ordinal);
-        using var client = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var client = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         Assert.Equal(HttpStatusCode.OK, (await client.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
     }
 
@@ -748,6 +748,53 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F17_ALocalNetworkRequestIsSignedForThisEstateAndThisRuntimeOnly()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
+        DeviceRequestSigner signer = harness.Signer(connection);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var client = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        (string estate, string identity) = harness.Binding;
+        Assert.Equal(connection.Identity, identity);
+        using var otherRuntime = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP256);
+        string otherIdentity = Base64Url.EncodeToString(otherRuntime.ExportSubjectPublicKeyInfo());
+        string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+        (string, string, string) Signed(byte[] digest) => (signer.DeviceId, at, Base64Url.EncodeToString(signer.Sign(digest)));
+
+        // Signed as loopback signs (version 1), for another runtime of this estate, or for another estate: each is refused.
+        foreach ((string, string, string) headers in new[]
+        {
+            Signed(RequestSigning.Digest("GET", "/v1/status", at, [])),
+            Signed(RequestSigning.LocalNetworkDigest(estate, otherIdentity, "GET", "/v1/status", at, [])),
+            Signed(RequestSigning.LocalNetworkDigest(Records.Identity.Ulid.NewUlid().Value, identity, "GET", "/v1/status", at, [])),
+        })
+        {
+            (HttpStatusCode status, string body) = await client.SendAsync(HttpMethod.Get, "/v1/status", headers);
+            Assert.Equal(HttpStatusCode.Unauthorized, status);
+            Assert.Contains("does not verify", body, StringComparison.Ordinal);
+        }
+
+        // Signed for this estate and this runtime's identity, it is accepted, and the SDK signs so for the runtime it paired with.
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(HttpMethod.Get, "/v1/status", Signed(RequestSigning.LocalNetworkDigest(estate, identity, "GET", "/v1/status", at, [])))).Status);
+        using (VericairnClient sdk = VericairnClient.LocalNetwork(connection, signer))
+        {
+            Assert.Equal(estate, sdk.Health().Estate);
+        }
+
+        // The identity proof's request alone is signed as on loopback: it comes before the runtime has proven which identity answers.
+        string nonce = PairingProtocol.NewNonce();
+        string proofTarget = RuntimeIdentityScheme.Path + "?nonce=" + nonce;
+        (HttpStatusCode proofStatus, string proofBody) = await client.SendAsync(HttpMethod.Get, proofTarget, Signed(RequestSigning.Digest("GET", proofTarget, at, [])));
+        Assert.Equal(HttpStatusCode.OK, proofStatus);
+        Assert.Equal(nonce, JsonSerializer.Deserialize<RuntimeIdentityProof>(proofBody, ProtocolJson.Options)!.Nonce);
+
+        // Loopback keeps version 1, as API v1 clients sign it.
+        using VericairnClient loopback = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(harness.OperatorDevice)!);
+        Assert.Equal(estate, loopback.Health().Estate);
+    }
+
+    [Fact]
     public void F2_EveryRequestTypeOfTheProtocolIsHeldToAPrincipal()
     {
         // A request type an operation could bind that the scope does not know would be refused for every device; this keeps the table whole.
@@ -763,7 +810,7 @@ public class ReviewRegressionTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId, "Agent laptop");
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var lan = new Lan(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string json = "{\"type\":\"work-order\",\"by\":\"" + harness.Estate.OperatorId + "\",\"body\":" + Order("W-R4") + "}";
         foreach (string type in new[] { "text/plain", "application/x-www-form-urlencoded", "application/octet-stream", "application/vnd.api+json", "text/json", "application/json; charset=us-ascii", "application/json; charset=iso-8859-1" })
         {
@@ -827,7 +874,7 @@ public class ReviewRegressionTests
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
         foreach (string target in new[] { "/V1/SHUTDOWN/", "/v1/./shutdown", "/v1/shutdown?x=1", "/v1/records/../shutdown", "/v1/Runtime/Certificate", "/v1/PAIRINGS/" })
         {
-            string head = Raw.SignedHead(signer, "POST", target, []);
+            string head = Raw.SignedHead(harness, signer, "POST", target, []);
             byte[] payload = Encoding.ASCII.GetBytes($"POST {target} HTTP/1.1\r\nHost: x\r\n{head}Content-Length: 0\r\n\r\n");
             string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, payload, TimeSpan.FromSeconds(3));
             Say($"POST {target} -> {answer.Split("\r\n")[0]}");
@@ -846,7 +893,7 @@ public class ReviewRegressionTests
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
 
-        string payload = "GET /v1/status HTTP/1.1\r\nHost: x\r\n\r\n" + "GET /v1/health HTTP/1.1\r\nHost: x\r\n" + Raw.SignedHead(signer, "GET", "/v1/health", []) + "\r\n";
+        string payload = "GET /v1/status HTTP/1.1\r\nHost: x\r\n\r\n" + "GET /v1/health HTTP/1.1\r\nHost: x\r\n" + Raw.SignedHead(harness, signer, "GET", "/v1/health", []) + "\r\n";
         string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, Encoding.ASCII.GetBytes(payload), TimeSpan.FromSeconds(3));
         int responses = answer.Split("HTTP/1.1 ").Length - 1;
         Say(answer);
@@ -870,9 +917,12 @@ public class ReviewRegressionTests
 internal sealed class Lan : IDisposable
 {
     private readonly HttpClient http;
+    private readonly LocalNetworkHarness harness;
 
-    public Lan(string address, X509Certificate2? certificate, string runtimeCertificate)
+    public Lan(LocalNetworkHarness harness, X509Certificate2? certificate, string runtimeCertificate)
     {
+        this.harness = harness;
+        string address = harness.Address;
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
         var handler = new SocketsHttpHandler
         {
@@ -903,7 +953,7 @@ internal sealed class Lan : IDisposable
         string signedAt = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
         request.Headers.TryAddWithoutValidation(RequestSigning.DeviceHeader, signer.DeviceId);
         request.Headers.TryAddWithoutValidation(RequestSigning.SignedAtHeader, signedAt);
-        request.Headers.TryAddWithoutValidation(RequestSigning.SignatureHeader, Base64Url.EncodeToString(signer.Sign(RequestSigning.Digest(method.Method, target, signedAt, body))));
+        request.Headers.TryAddWithoutValidation(RequestSigning.SignatureHeader, Base64Url.EncodeToString(signer.Sign(harness.Digest(method.Method, target, signedAt, body))));
         using HttpResponseMessage response = await http.SendAsync(request, TestContext.Current.CancellationToken);
         return (response.StatusCode, await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
     }
@@ -914,10 +964,10 @@ internal sealed class Lan : IDisposable
 /// <summary>Raw bytes over mutual TLS: what a test writes is exactly what the runtime reads, with no client-side normalization.</summary>
 internal static class Raw
 {
-    public static string SignedHead(IRequestSigner signer, string method, string target, byte[] body)
+    public static string SignedHead(LocalNetworkHarness harness, IRequestSigner signer, string method, string target, byte[] body)
     {
         string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
-        string signature = Base64Url.EncodeToString(signer.Sign(RequestSigning.Digest(method, target, at, body)));
+        string signature = Base64Url.EncodeToString(signer.Sign(harness.Digest(method, target, at, body)));
         return $"{RequestSigning.DeviceHeader}: {signer.DeviceId}\r\n{RequestSigning.SignedAtHeader}: {at}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n";
     }
 

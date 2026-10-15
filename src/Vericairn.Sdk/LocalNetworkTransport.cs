@@ -78,6 +78,8 @@ internal static class LocalNetworkTransport
         string nonce = PairingProtocol.NewNonce();
         string target = RuntimeIdentityScheme.Path + "?nonce=" + nonce;
         string signedAt = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
+        // Signed as on loopback (version 1): nothing has proven yet which runtime answers, and the proof it asks for is bound to this
+        // connection's own client certificate. Every request after the proof is signed for the identity it proved (version 2).
         string signature = Base64Url.EncodeToString(signer.Sign(RequestSigning.Digest("GET", target, signedAt, [])));
         string request = $"GET {target} HTTP/1.1\r\nHost: {connection.Address}\r\n{RequestSigning.DeviceHeader}: {signer.DeviceId}\r\n{RequestSigning.SignedAtHeader}: {signedAt}\r\n{RequestSigning.SignatureHeader}: {signature}\r\n\r\n";
         await tls.WriteAsync(Encoding.ASCII.GetBytes(request), cancellationToken).ConfigureAwait(false);

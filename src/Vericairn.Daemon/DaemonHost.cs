@@ -90,7 +90,7 @@ public sealed class DaemonHost : IAsyncDisposable
         Identity = identity;
         Time = options.Time ?? TimeProvider.System;
         Pairings = new PairingRegistry(Time);
-        Authenticator = new RequestAuthenticator(service, options.ReplayCapacity);
+        Authenticator = new RequestAuthenticator(service, options.ReplayCapacity, () => Identity?.PublicKey);
         Endpoint = new DaemonEndpoint(string.Empty, string.Empty, Environment.ProcessId, string.Empty, service.Root, ApiVersion.Current);
     }
 

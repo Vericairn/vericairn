@@ -90,8 +90,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
             ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken),
         };
 
-        // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP.
-        http = new HttpClient(new SigningHandler(signer, handler), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
+        // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP,
+        // each signed for this estate and the runtime identity the device paired with.
+        http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
     }
 
     /// <summary>The endpoint this client talks to.</summary>
@@ -404,22 +405,32 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         return (null, null);
     }
 
-    /// <summary>Adds the device, time and signature headers to every request.</summary>
+    /// <summary>
+    /// Adds the device, time and signature headers to every request: version 1 on loopback, and version 2, bound to the estate and the
+    /// pinned runtime identity, over the local network, except for the identity proof's request.
+    /// </summary>
     private sealed class SigningHandler : DelegatingHandler
     {
         private readonly IRequestSigner signer;
+        private readonly RuntimeConnection? connection;
 
-        public SigningHandler(IRequestSigner signer, HttpMessageHandler inner)
+        public SigningHandler(IRequestSigner signer, HttpMessageHandler inner, RuntimeConnection? connection = null)
             : base(inner)
         {
             this.signer = signer;
+            this.connection = connection;
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             byte[] body = request.Content is null ? [] : await request.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             string signedAt = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
-            byte[] digest = RequestSigning.Digest(request.Method.Method, request.RequestUri!.PathAndQuery, signedAt, body);
+            string target = request.RequestUri!.PathAndQuery;
+
+            // The identity proof's request is signed as on loopback: it asks which identity answers, before anything has proven it.
+            byte[] digest = connection is null || request.RequestUri.AbsolutePath == RuntimeIdentityScheme.Path
+                ? RequestSigning.Digest(request.Method.Method, target, signedAt, body)
+                : RequestSigning.LocalNetworkDigest(connection.Estate, connection.Identity, request.Method.Method, target, signedAt, body);
             request.Headers.TryAddWithoutValidation(RequestSigning.DeviceHeader, signer.DeviceId);
             request.Headers.TryAddWithoutValidation(RequestSigning.SignedAtHeader, signedAt);
             request.Headers.TryAddWithoutValidation(RequestSigning.SignatureHeader, Base64Url.EncodeToString(signer.Sign(digest)));

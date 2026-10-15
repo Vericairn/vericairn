@@ -125,7 +125,7 @@ public class LocalNetworkConformanceTests
         // In whatever spelling or repetition the body names the acting principal.
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var raw = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var raw = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string body = Order.Replace("W-9", "W-10", StringComparison.Ordinal);
         foreach (string acting in new[] { $$"""{"type":"work-order","BY":"{{harness.Estate.OperatorId}}","body":{{body}}}""", $$"""{"type":"work-order","by":"{{harness.Estate.BuilderId}}","By":"{{harness.Estate.OperatorId}}","body":{{body}}}""" })
         {
@@ -144,7 +144,7 @@ public class LocalNetworkConformanceTests
         string runtimeCertificate = harness.Host.Endpoint.Loopback!.Certificate;
 
         // Without a certificate or a signature, nothing but the pairing exchange answers.
-        using (var anonymous = new MutualTls(harness.Address, null, runtimeCertificate))
+        using (var anonymous = new MutualTls(harness, null, runtimeCertificate))
         {
             (HttpStatusCode status, string body) = await anonymous.SendAsync(HttpMethod.Get, "/v1/health", null);
             Assert.Equal(HttpStatusCode.Unauthorized, status);
@@ -158,7 +158,7 @@ public class LocalNetworkConformanceTests
         byte[] spki = stranger.Create(id);
         var strangerSigner = new DeviceRequestSigner(stranger, id);
         using (X509Certificate2 own = LocalNetworkCredential.Issue(strangerSigner, spki, DateTimeOffset.UtcNow))
-        using (var unpaired = new MutualTls(harness.Address, own, runtimeCertificate))
+        using (var unpaired = new MutualTls(harness, own, runtimeCertificate))
         {
             (HttpStatusCode status, string body) = await unpaired.SendSignedAsync(strangerSigner, HttpMethod.Get, "/v1/health");
             Assert.Equal(HttpStatusCode.Unauthorized, status);
@@ -177,15 +177,15 @@ public class LocalNetworkConformanceTests
         RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = harness.Signer(paired);
         using (X509Certificate2 genuine = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(paired.DevicePublicKey), DateTimeOffset.UtcNow))
-        using (var borrowed = new MutualTls(harness.Address, genuine, runtimeCertificate))
+        using (var borrowed = new MutualTls(harness, genuine, runtimeCertificate))
         {
-            (HttpStatusCode status, string body) = await borrowed.SendAsync(HttpMethod.Get, "/v1/health", MutualTls.Sign(new KeySigner(stranger, id, paired.Device), "GET", "/v1/health"));
+            (HttpStatusCode status, string body) = await borrowed.SendAsync(HttpMethod.Get, "/v1/health", borrowed.Sign(new KeySigner(stranger, id, paired.Device), "GET", "/v1/health"));
             Assert.Equal(HttpStatusCode.Unauthorized, status);
             Assert.Contains("does not verify", body, StringComparison.Ordinal);
         }
 
         using (X509Certificate2 forged = LocalNetworkCredential.Issue(new KeySigner(stranger, id, paired.Device), spki, DateTimeOffset.UtcNow))
-        using (var mismatched = new MutualTls(harness.Address, forged, runtimeCertificate))
+        using (var mismatched = new MutualTls(harness, forged, runtimeCertificate))
         {
             (HttpStatusCode status, string body) = await mismatched.SendSignedAsync(signer, HttpMethod.Get, "/v1/health");
             Assert.Equal(HttpStatusCode.Unauthorized, status);
@@ -200,7 +200,7 @@ public class LocalNetworkConformanceTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var open = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var open = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
         Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, "/v1/status")).Status);
         Assert.Equal(1, open.Connections);
@@ -240,7 +240,7 @@ public class LocalNetworkConformanceTests
         DeviceRequestSigner signer = DeviceRequestSigner.Find(local.Written.Id)!;
         byte[] spki = new FileKeyStore(VericairnHome.Path()).PublicKey(local.Written.Id)!;
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, spki, DateTimeOffset.UtcNow);
-        using var client = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var client = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         (HttpStatusCode status, string body) = await client.SendSignedAsync(signer, HttpMethod.Get, "/v1/health");
         Assert.Equal(HttpStatusCode.Unauthorized, status);
         Assert.Contains("its permitted profiles are embedded", body, StringComparison.Ordinal);
@@ -253,9 +253,9 @@ public class LocalNetworkConformanceTests
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var client = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var client = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
 
-        (string Device, string SignedAt, string Signature) once = MutualTls.Sign(signer, "GET", "/v1/status");
+        (string Device, string SignedAt, string Signature) once = client.Sign(signer, "GET", "/v1/status");
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(HttpMethod.Get, "/v1/status", once)).Status);
 
         // The same signature again, its base64 padded spelling, and its malleated twin (r, n - s) are all the signature already used,
@@ -268,14 +268,14 @@ public class LocalNetworkConformanceTests
             Assert.Contains("already used", body, StringComparison.Ordinal);
         }
 
-        using (var another = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate))
+        using (var another = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate))
         {
             Assert.Contains("already used", (await another.SendAsync(HttpMethod.Get, "/v1/status", once)).Body, StringComparison.Ordinal);
         }
 
         // A signature older than five minutes is refused as stale, before anything else; a fresh one is accepted.
         string stale = RequestSigning.FormatTime(DateTimeOffset.UtcNow.AddMinutes(-6));
-        string old = Base64Url.EncodeToString(signer.Sign(RequestSigning.Digest("GET", "/v1/status", stale, [])));
+        string old = Base64Url.EncodeToString(signer.Sign(harness.Digest("GET", "/v1/status", stale, [])));
         (HttpStatusCode staleStatus, string staleBody) = await client.SendAsync(HttpMethod.Get, "/v1/status", (signer.DeviceId, stale, old));
         Assert.Equal(HttpStatusCode.Unauthorized, staleStatus);
         Assert.Contains("five minutes", staleBody, StringComparison.Ordinal);
@@ -291,7 +291,7 @@ public class LocalNetworkConformanceTests
         RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Operator phone");
         DeviceRequestSigner signer = harness.Signer(phone);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(phone.DevicePublicKey), DateTimeOffset.UtcNow);
-        using var client = new MutualTls(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        using var client = new MutualTls(harness, credential, harness.Host.Endpoint.Loopback!.Certificate);
         string op = harness.Estate.OperatorId;
         string export = Path.Combine(harness.DeviceHome, "export.zip");
         (string Path, string? Json)[] local =

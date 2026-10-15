@@ -27,8 +27,8 @@ internal sealed record AuthenticatedDevice(string Identity, string Principal, bo
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
 /// the daemon serves, the signing time must be within the permitted skew, the body must be UTF-8 without a byte order mark, the
-/// signature must verify over the method, the request target, the time and the body, and a signature is accepted once, in
-/// whichever of its equivalent forms it comes. On the local network the device must also be permitted that profile and present a
+/// signature must verify over the method, the request target, the time and the body (and, on the local network, the estate and
+/// this runtime's identity), and a signature is accepted once, in whichever of its equivalent forms it comes. On the local network the device must also be permitted that profile and present a
 /// TLS client certificate its own key issued, and the operations on the runtime's own machine are refused. The device it verified
 /// is left on the request, so that once the request is bound <see cref="RequestScope"/> holds it to its own principal.
 /// </summary>
@@ -39,6 +39,9 @@ internal sealed class RequestAuthenticator
 
     /// <summary>The profile name a device must be permitted to use the local network.</summary>
     internal const string LocalNetworkProfile = "local-network";
+
+    /// <summary>The route of the runtime identity's proof, whose request is signed as on loopback.</summary>
+    internal const string ProofRoute = "GET " + RuntimeIdentityScheme.Path;
 
     /// <summary>The routes of the pairing exchange, which a device without a credential reaches; the code authenticates them.</summary>
     internal static readonly IReadOnlySet<string> PairingRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "POST /v1/pairing/hello", "POST /v1/pairing/confirm" };
@@ -72,10 +75,13 @@ internal sealed class RequestAuthenticator
 
     private readonly EstateService service;
     private readonly ReplayCache replays;
+    private readonly Func<string?> identity;
 
-    public RequestAuthenticator(EstateService service, int replayCapacity)
+    /// <summary>An authenticator for the estate a service holds; <paramref name="identity"/> gives the runtime identity's public key now, or null when it has none.</summary>
+    public RequestAuthenticator(EstateService service, int replayCapacity, Func<string?> identity)
     {
         this.service = service;
+        this.identity = identity;
         replays = new ReplayCache(replayCapacity);
     }
 
@@ -103,7 +109,7 @@ internal sealed class RequestAuthenticator
             return Denied("The signing time is malformed or more than five minutes from the runtime's clock.");
         }
 
-        (byte[] digest, byte[] body) = await DigestAsync(context, signedAt).ConfigureAwait(false);
+        (byte[] digest, byte[] body) = await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false);
         if (Encoded(request, body) is Problem encoding)
         {
             return encoding;
@@ -171,7 +177,16 @@ internal sealed class RequestAuthenticator
             return Denied("The signing time is malformed or more than five minutes from the runtime's clock.");
         }
 
-        (byte[] digest, byte[] body) = await DigestAsync(context, signedAt).ConfigureAwait(false);
+        // Signed for this estate and this runtime's identity (version 2), so no other runtime accepts it, nor this one what was
+        // signed for another. The identity proof's request alone is signed as on loopback (version 1): the device sends it before
+        // anything has proven which runtime answers, and the proof is bound to the asking connection's client certificate.
+        if (identity() is not string own)
+        {
+            return Denied("This runtime has no identity to verify local-network requests for.");
+        }
+
+        (string, string)? binding = operation == ProofRoute ? null : (service.Session.Manifest.Estate, own);
+        (byte[] digest, byte[] body) = await DigestAsync(context, signedAt, binding).ConfigureAwait(false);
         if (Encoded(request, body) is Problem encoding)
         {
             return encoding;
@@ -275,7 +290,8 @@ internal sealed class RequestAuthenticator
     private static bool Fresh(string signedAt) =>
         RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) && (DateTimeOffset.UtcNow - at).Duration() <= RequestSigning.MaxSkew;
 
-    private static async Task<(byte[] Digest, byte[] Body)> DigestAsync(HttpContext context, string signedAt)
+    /// <summary>The digest a request's signature covers: version 1 on loopback, version 2 for the estate and runtime identity bound in on the local network.</summary>
+    private static async Task<(byte[] Digest, byte[] Body)> DigestAsync(HttpContext context, string signedAt, (string Estate, string Identity)? binding)
     {
         HttpRequest request = context.Request;
         request.EnableBuffering();
@@ -288,7 +304,10 @@ internal sealed class RequestAuthenticator
 
         request.Body.Position = 0;
         string target = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.ToString() + request.QueryString;
-        return (RequestSigning.Digest(request.Method, target, signedAt, body), body);
+        byte[] digest = binding is { } bound
+            ? RequestSigning.LocalNetworkDigest(bound.Estate, bound.Identity, request.Method, target, signedAt, body)
+            : RequestSigning.Digest(request.Method, target, signedAt, body);
+        return (digest, body);
     }
 
     /// <summary>Verifies a request signature and accepts it once, remembered for its device until it is stale.</summary>

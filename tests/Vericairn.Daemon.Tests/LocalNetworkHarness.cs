@@ -56,6 +56,15 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     /// <summary>Where the local-network profile listens: 127.0.0.1 and the port the daemon was given.</summary>
     public string Address => $"{Host.Endpoint.LocalNetwork!.Host}:{Host.Endpoint.LocalNetwork.Port}";
 
+    /// <summary>What a local-network request is signed for: this estate and the runtime identity now.</summary>
+    public (string Estate, string Identity) Binding => (Host.Service.Session.Manifest.Estate, Host.Identity!.PublicKey);
+
+    /// <summary>The digest a paired device signs for a request to this runtime: version 2, or version 1 for the identity proof's request, as the SDK signs.</summary>
+    public byte[] Digest(string method, string target, string signedAt, ReadOnlySpan<byte> body) =>
+        target.Split('?')[0] == RuntimeIdentityScheme.Path
+            ? RequestSigning.Digest(method, target, signedAt, body)
+            : RequestSigning.LocalNetworkDigest(Binding.Estate, Binding.Identity, method, target, signedAt, body);
+
     public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000)
     {
         DaemonTestHome.Ensure();
@@ -126,10 +135,13 @@ internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
 internal sealed class MutualTls : IDisposable
 {
     private readonly HttpClient http;
+    private readonly LocalNetworkHarness harness;
     private int connections;
 
-    public MutualTls(string address, X509Certificate2? certificate, string runtimeCertificate)
+    public MutualTls(LocalNetworkHarness harness, X509Certificate2? certificate, string runtimeCertificate)
     {
+        this.harness = harness;
+        string address = harness.Address;
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
         var handler = new SocketsHttpHandler
         {
@@ -157,11 +169,11 @@ internal sealed class MutualTls : IDisposable
     /// <summary>How many TLS connections this client opened.</summary>
     public int Connections => Volatile.Read(ref connections);
 
-    /// <summary>The three request-signing headers for a request, signed now by a device.</summary>
-    public static (string Device, string SignedAt, string Signature) Sign(IRequestSigner signer, string method, string target, string? json = null)
+    /// <summary>The three request-signing headers for a request, signed now by a device for this runtime.</summary>
+    public (string Device, string SignedAt, string Signature) Sign(IRequestSigner signer, string method, string target, string? json = null)
     {
         string signedAt = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
-        byte[] digest = RequestSigning.Digest(method, target, signedAt, json is null ? [] : Encoding.UTF8.GetBytes(json));
+        byte[] digest = harness.Digest(method, target, signedAt, json is null ? [] : Encoding.UTF8.GetBytes(json));
         return (signer.DeviceId, signedAt, Base64Url.EncodeToString(signer.Sign(digest)));
     }
 

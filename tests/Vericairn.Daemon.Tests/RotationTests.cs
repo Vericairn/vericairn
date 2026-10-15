@@ -55,12 +55,12 @@ public class RotationTests
         // New connections are shown the new certificate; the replaced one is no longer presented at all.
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
-        using (var current = new MutualTls(harness.Address, credential, rotated.Certificate))
+        using (var current = new MutualTls(harness, credential, rotated.Certificate))
         {
             Assert.Equal(HttpStatusCode.OK, (await current.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
         }
 
-        using (var old = new MutualTls(harness.Address, credential, before))
+        using (var old = new MutualTls(harness, credential, before))
         {
             await Assert.ThrowsAnyAsync<HttpRequestException>(() => old.SendSignedAsync(signer, HttpMethod.Get, "/v1/health"));
         }
@@ -95,7 +95,7 @@ public class RotationTests
         DeviceRequestSigner signer = harness.Signer(connection);
         using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
         string before = harness.Host.Endpoint.Loopback!.Certificate;
-        using var open = new MutualTls(harness.Address, credential, before);
+        using var open = new MutualTls(harness, credential, before);
         Assert.Equal(HttpStatusCode.OK, (await open.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
 
         // Someone copied the certificate and its key, as from the file beside the live store.
