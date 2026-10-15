@@ -60,10 +60,15 @@ public class PortabilityJourneyTests
             Assert.Contains("Only in the other copy: 0", compare, StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.EnumerateFiles(b, "*", SearchOption.AllDirectories), f => f.EndsWith(".p8", StringComparison.Ordinal) || f.EndsWith(".db", StringComparison.Ordinal));
 
-            // The restored copy verifies the operator's signature but cannot sign as the operator: the key stayed on machine A,
-            // so a record authored here under the optional policy is unsigned, and under a required policy it would be refused.
-            CliHarness.Outcome attemptOnB = CliHarness.Ok("--estate", b, "--json", "devices", "admit", device, "--by", op, "--note", "Re-admitted from the restored copy.");
-            Assert.DoesNotContain("\"signatures\"", File.ReadAllText(Path.Combine(b, attemptOnB.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar))), StringComparison.Ordinal);
+            // The restored copy verifies the operator's signature but cannot sign as the operator: the key stayed on machine A. An
+            // admission authored here is refused whatever the policy, because record format 2 signs every admission, and the refusal
+            // names the ways on; an ordinary record authored here under the optional policy is unsigned, and under a required policy
+            // it would be refused.
+            CliHarness.Outcome readmit = CliHarness.Run("--estate", b, "--json", "devices", "admit", device, "--by", op, "--note", "Re-admitted from the restored copy.");
+            Assert.NotEqual(0, readmit.Code);
+            Assert.Contains("--recovery", readmit.Out + readmit.Err, StringComparison.Ordinal);
+            CliHarness.Outcome orderOnB = CliHarness.Ok("--estate", b, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order-b.json", """{"key":"W-2","kind":"ordinary","title":"After the restore","intent":"Portability.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["x"]}"""));
+            Assert.DoesNotContain("\"signatures\"", File.ReadAllText(Path.Combine(b, orderOnB.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar))), StringComparison.Ordinal);
             Assert.Contains("unsigned only", CliHarness.Ok("--estate", b, "recover", "inspect").Out, StringComparison.Ordinal);
 
             // Corrupting an object is detected by verification, never silently served.

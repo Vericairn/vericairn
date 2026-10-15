@@ -23,9 +23,12 @@ public class ActingTests(HeadlessFixture fixture)
         string scratch = Seed.Temp("wb-acting-scratch");
         string op = Seed.Init(root);
         string agent = Seed.Admit(root, op, scratch, "Agent One", "agent", "contributor");
-        string agentDevice = Device(root, agent, "Agent device", op);
+        // The agent's device is made first, so it comes first as the builder's did on the operator's machine; the operator's own
+        // device, the estate's first authority, is admitted before it, because every later admission is signed by an admitted device.
+        string agentDevice = Seed.Id(Seed.Cli("--estate", root, "--json", "devices", "create", "--principal", agent, "--name", "Agent device", "--custody", "file"));
         Thread.Sleep(5);
         string opDevice = Device(root, op, "Operator device", op);
+        Seed.Cli("--estate", root, "--json", "devices", "admit", agentDevice, "--by", op, "--note", "A test device.");
         Assert.True(string.CompareOrdinal(agentDevice, opDevice) < 0, "The agent's device must come first, as the builder's did on the operator's machine.");
         Seed.Cli("--estate", root, "--json", "records", "new", "principal", "--by", op, "--supersedes", op, "--body", Seed.Write(scratch, "renamed.json", """{"kind":"human","name":"Operator Renamed","roles":["operator"]}"""));
 

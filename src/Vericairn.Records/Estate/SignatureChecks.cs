@@ -22,7 +22,11 @@ public static class SignatureChecks
         {
             if (record.Signatures.Count == 0)
             {
-                if (required && string.CompareOrdinal(record.At, estate!.At) > 0)
+                if (!Counts(record))
+                {
+                    findings.Error("signature.admission-unsigned", record.ExpectedPath, "An admission written in record format 2 is signed: by a device already admitted or, for the operator's first device, by the device it admits. Unsigned, it admits and revokes nothing, whatever the estate's signature policy.");
+                }
+                else if (required && string.CompareOrdinal(record.At, estate!.At) > 0)
                 {
                     findings.Error("signature.required", record.ExpectedPath, "This estate requires signed records; author it on an admitted device.");
                 }
@@ -122,13 +126,28 @@ public static class SignatureChecks
             .FirstOrDefault();
     }
 
-    /// <summary>The current admission of a device: the latest admission record about any revision of the device.</summary>
+    /// <summary>The current admission of a device: the latest admission record about any revision of the device that counts.</summary>
     public static RecordEnvelope? AdmissionOf(EstateModel model, RecordEnvelope device)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(device);
         IReadOnlyList<string> chain = model.Chain(model.Latest(device));
-        return chain.SelectMany(id => model.About(id, "admission")).Where(model.IsCurrent).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+        return chain.SelectMany(id => model.About(id, "admission")).Where(Counts).Where(a => CurrentAmongCounting(model, a)).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
+    /// <summary>Current unless superseded by a record that counts: an unsigned format-2 revision cannot unseat an admission either.</summary>
+    private static bool CurrentAmongCounting(EstateModel model, RecordEnvelope admission) =>
+        !model.SupersededBy.TryGetValue(admission.Id, out string? next) || !model.ById.TryGetValue(next, out RecordEnvelope? successor) || !Counts(successor);
+
+    /// <summary>
+    /// Whether a record can admit or revoke: an admission written in record format 2 counts only when it is signed, so that while a
+    /// charter leaves signatures optional nobody who can add records admits a device, or revokes one, by writing an unsigned record.
+    /// Format 1 keeps its own rule, under which an unsigned admission counted while signatures were optional.
+    /// </summary>
+    public static bool Counts(RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return record.Type != "admission" || record.Format < 2 || record.Signatures.Count > 0;
     }
 
     /// <summary>True when the device is currently admitted (and not revoked).</summary>
@@ -166,7 +185,7 @@ public static class SignatureChecks
         string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")))
+        foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")).Where(Counts))
         {
             if (admission.Id != firstAuthority && SelfSigned(model, admission))
             {

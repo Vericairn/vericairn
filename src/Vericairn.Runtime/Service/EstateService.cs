@@ -1681,6 +1681,14 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
         }
 
+        // From record format 2 an admission is signed whatever the signature policy: unsigned, it would admit or revoke nothing.
+        if (draft.Type == "admission" && (model.Manifest?.RecordFormat ?? RecordFormats.First) >= 2)
+        {
+            return draft.By == rootOperator && SignatureChecks.FirstAuthority(model, rootOperator) is null
+                ? "An admission is signed, and the operator has no admitted device yet: create the operator's own device on this machine and admit it from itself first (the estate's first authority); it then signs the admissions of other devices. Nothing was written."
+                : $"An admission is signed by an admitted device of its author, and principal {draft.By} has none whose key this machine holds: admit from a machine that holds one, or with the operator's recovery key (--recovery). Nothing was written.";
+        }
+
         bool required = estate is not null && estate.Body.TryGetProperty("policies", out JsonElement policies) && policies.TryGetProperty("signatures", out JsonElement policy) && policy.GetString() == "required";
         if (required && draft.Type == "admission" && draft.By == rootOperator && SignatureChecks.FirstAuthority(model, rootOperator) is not null)
         {
