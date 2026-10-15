@@ -63,7 +63,6 @@ internal sealed class RequestAuthenticator
         "POST /v1/runs",
     };
 
-    private const int Remembered = 4096;
 
     /// <summary>The OID of ecdsa-with-SHA256, the only signature a device-issued client certificate carries.</summary>
     private const string EcdsaWithSha256 = "1.2.840.10045.4.3.2";
@@ -72,13 +71,12 @@ internal sealed class RequestAuthenticator
     private static readonly BigInteger GroupOrder = BigInteger.Parse("0FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
 
     private readonly EstateService service;
-    private readonly HashSet<string> seen = new(StringComparer.Ordinal);
-    private readonly Queue<string> order = new();
-    private readonly object gate = new();
+    private readonly ReplayCache replays;
 
-    public RequestAuthenticator(EstateService service)
+    public RequestAuthenticator(EstateService service, int replayCapacity)
     {
         this.service = service;
+        replays = new ReplayCache(replayCapacity);
     }
 
     /// <summary>The operation a request reaches, as its method and route pattern, for example POST /v1/shutdown; the path itself when no route matched.</summary>
@@ -117,7 +115,7 @@ internal sealed class RequestAuthenticator
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
         }
 
-        if (Signed(standing.PublicKey, digest, signature) is Problem problem)
+        if (Signed(standing, signedAt, digest, signature) is Problem problem)
         {
             return problem;
         }
@@ -187,7 +185,7 @@ internal sealed class RequestAuthenticator
             return encoding;
         }
 
-        if (Signed(standing.PublicKey, digest, signature) is Problem problem)
+        if (Signed(standing, signedAt, digest, signature) is Problem problem)
         {
             return problem;
         }
@@ -302,30 +300,23 @@ internal sealed class RequestAuthenticator
         return (RequestSigning.Digest(request.Method, target, signedAt, body), body);
     }
 
-    /// <summary>Verifies a request signature and accepts it once.</summary>
-    private Problem? Signed(string publicKey, byte[] digest, string signature)
+    /// <summary>Verifies a request signature and accepts it once, remembered for its device until it is stale.</summary>
+    private Problem? Signed(DeviceStanding standing, string signedAt, byte[] digest, string signature)
     {
-        if (!RecordSigning.Verify(publicKey, digest, signature))
+        if (!RecordSigning.Verify(standing.PublicKey, digest, signature))
         {
             return Denied("The request signature does not verify against the device's key.");
         }
 
-        string key = ReplayKey(signature);
-        lock (gate)
+        // The time was found fresh before the body was read, so it parses; a signature is remembered until it is stale.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expires = (RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) ? at : now) + RequestSigning.MaxSkew;
+        return replays.Accept(standing.Identity, ReplayKey(signature), expires, now) switch
         {
-            if (!seen.Add(key))
-            {
-                return Denied("The request signature was already used; sign each request afresh.");
-            }
-
-            order.Enqueue(key);
-            if (order.Count > Remembered)
-            {
-                seen.Remove(order.Dequeue());
-            }
-        }
-
-        return null;
+            ReplayCache.Outcome.Repeated => Denied("The request signature was already used; sign each request afresh."),
+            ReplayCache.Outcome.Full => Denied($"Device {standing.Identity} has signed more requests in the last five minutes than the runtime remembers for one device; it refuses more until older ones expire."),
+            _ => null,
+        };
     }
 
     /// <summary>

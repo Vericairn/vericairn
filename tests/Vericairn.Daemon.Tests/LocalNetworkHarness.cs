@@ -56,14 +56,14 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     /// <summary>Where the local-network profile listens: 127.0.0.1 and the port the daemon was given.</summary>
     public string Address => $"{Host.Endpoint.LocalNetwork!.Host}:{Host.Endpoint.LocalNetwork.Port}";
 
-    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2)
+    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
         var time = new ManualTime(DateTimeOffset.UtcNow);
         DaemonHost host = await DaemonHost.StartAsync(
             estate.Root,
-            options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = time },
+            options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = time, ReplayCapacity = replayCapacity },
             cancellationToken: TestContext.Current.CancellationToken);
         var socket = new VericairnClient(host.Endpoint);
 

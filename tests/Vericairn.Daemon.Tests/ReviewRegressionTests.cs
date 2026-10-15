@@ -242,6 +242,45 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F8_NoFloodMakesRoomForAReplayAndOneDevicesFloodLeavesAnothersRequestsAlone()
+    {
+        // The reviewer's flood of 4,096 signatures, against a runtime that remembers 64 per device: nothing is evicted to make room.
+        const int Capacity = 64;
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(replayCapacity: Capacity);
+        RuntimeConnection laptop = harness.Pair(harness.Estate.BuilderId, "Laptop");
+        RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Phone");
+        DeviceRequestSigner signer = harness.Signer(laptop);
+        DeviceRequestSigner other = harness.Signer(phone);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(laptop.DevicePublicKey), DateTimeOffset.UtcNow);
+        using X509Certificate2 otherCredential = LocalNetworkCredential.Issue(other, Base64Url.DecodeFromChars(phone.DevicePublicKey), DateTimeOffset.UtcNow);
+        string pinned = harness.Host.Endpoint.Loopback!.Certificate;
+        using var client = new MutualTls(harness.Address, credential, pinned);
+        using var otherClient = new MutualTls(harness.Address, otherCredential, pinned);
+        (string Device, string SignedAt, string Signature) captured = MutualTls.Sign(signer, "GET", "/v1/status");
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(HttpMethod.Get, "/v1/status", captured)).Status);
+
+        // Another device fills its own window, and is refused beyond it; the laptop's captured signature is still remembered.
+        for (int i = 0; i < Capacity; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await otherClient.SendSignedAsync(other, HttpMethod.Get, "/v1/health")).Status);
+        }
+
+        (HttpStatusCode full, string fullBody) = await otherClient.SendSignedAsync(other, HttpMethod.Get, "/v1/health");
+        Assert.Equal(HttpStatusCode.Unauthorized, full);
+        Assert.Contains("more requests in the last five minutes", Message(fullBody), StringComparison.Ordinal);
+        Assert.Contains("already used", Message((await client.SendAsync(HttpMethod.Get, "/v1/status", captured)).Body), StringComparison.Ordinal);
+
+        // The laptop's own flood fills its window and makes no room either: the replay stays refused, as does the next new request.
+        for (int i = 1; i < Capacity; i++)
+        {
+            Assert.Equal(HttpStatusCode.OK, (await client.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Status);
+        }
+
+        Assert.Contains("already used", Message((await client.SendAsync(HttpMethod.Get, "/v1/status", captured)).Body), StringComparison.Ordinal);
+        Assert.Contains("more requests in the last five minutes", Message((await client.SendSignedAsync(signer, HttpMethod.Get, "/v1/health")).Body), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void F2_EveryRequestTypeOfTheProtocolIsHeldToAPrincipal()
     {
         // A request type an operation could bind that the scope does not know would be refused for every device; this keeps the table whole.

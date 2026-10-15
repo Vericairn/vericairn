@@ -45,6 +45,12 @@ public sealed record DaemonOptions
 
     /// <summary>Where the daemon says what it did (pairings, rotations); nowhere when null.</summary>
     public Action<string>? Log { get; init; }
+
+    /// <summary>
+    /// How many signed requests of one device the runtime remembers at once, each until it is stale: within that window a device's
+    /// further requests are refused rather than any remembered signature forgotten.
+    /// </summary>
+    public int ReplayCapacity { get; init; } = 10_000;
 }
 
 /// <summary>
@@ -83,7 +89,7 @@ public sealed class DaemonHost : IAsyncDisposable
         Identity = identity;
         Time = options.Time ?? TimeProvider.System;
         Pairings = new PairingRegistry(Time);
-        Authenticator = new RequestAuthenticator(service);
+        Authenticator = new RequestAuthenticator(service, options.ReplayCapacity);
         Endpoint = new DaemonEndpoint(string.Empty, string.Empty, Environment.ProcessId, string.Empty, service.Root, ApiVersion.Current);
     }
 
