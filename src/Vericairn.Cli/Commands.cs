@@ -262,6 +262,12 @@ internal static class Commands
         Console.Out.WriteLine($"dotnet    {Probe("dotnet", "--version") ?? "not found on PATH (needed only to build from source)"}");
         Console.Out.WriteLine(IsEstate(root) ? $"estate    {Path.GetFullPath(root)} (manifest present)" : $"estate    {Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath})");
         Console.Out.WriteLine($"custody   {DeviceKeyStores.Default().Kind} (default on this platform); per-user state at {VericairnHome.Path()}");
+        if (OperatingSystem.IsMacOS())
+        {
+            Console.Out.WriteLine(SecureEnclaveKeyStore.Available()
+                ? "enclave   Secure Enclave custody available (devices create --custody secure-enclave; --presence asks for Touch ID or the login password at every signature)"
+                : $"enclave   Secure Enclave custody unavailable ({(SecureEnclaveCustody.HelperPath() is null ? $"no {SecureEnclaveCustody.HelperName} helper beside the command line" : "no Secure Enclave available to this process")})");
+        }
         Console.Out.WriteLine($"records   reads record formats {string.Join(", ", RecordFormats.Reads)}; writes an estate's own format, at most {RecordFormats.Current}");
         if (IsEstate(root))
         {
@@ -783,21 +789,23 @@ internal static class Commands
 
     public static int ObjectsVerify(string root, bool json) => WithApi(root, api => ReportFindings(api.ObjectsVerify(), json));
 
-    public static int DevicesCreate(string root, string principal, string name, string? custody, string[] profiles, bool json) =>
-        WithApi(root, api => ReportOutcome(api.DeviceCreate(new DeviceCreateRequest(principal, name, custody, profiles.Length == 0 ? null : profiles)), json));
+    public static int DevicesCreate(string root, string principal, string name, string? custody, bool presence, string[] profiles, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceCreate(new DeviceCreateRequest(principal, name, custody, profiles.Length == 0 ? null : profiles, presence)), json));
 
     public static int DevicesList(string root, bool json) => WithApi(root, api =>
     {
         IReadOnlyList<DeviceRow> rows = api.Devices();
         if (json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => new { id = r.Id, principal = r.Principal, principalName = r.PrincipalName, name = r.Name, platform = r.Platform, custody = r.Custody, admission = r.Admission, heldHere = r.HeldHere })));
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => new { id = r.Id, principal = r.Principal, principalName = r.PrincipalName, name = r.Name, platform = r.Platform, custody = r.Custody, presence = r.Presence, purpose = r.Purpose, admission = r.Admission, heldHere = r.HeldHere })));
         }
         else
         {
             foreach (DeviceRow row in rows)
             {
-                Console.Out.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}");
+                string presence = row.Presence is null ? string.Empty : row.Presence == "required" ? "  presence required" : "  no presence";
+                string purpose = row.Purpose == "recovery" ? "  recovery" : string.Empty;
+                Console.Out.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}{presence}{purpose}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}");
             }
         }
 

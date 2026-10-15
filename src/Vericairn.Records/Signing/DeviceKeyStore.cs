@@ -31,25 +31,54 @@ public interface IDeviceKeyStore
 /// <summary>Chooses the key store for this platform.</summary>
 public static class DeviceKeyStores
 {
-    /// <summary>Custody kinds a device record may claim.</summary>
+    /// <summary>Custody kinds a device record of record format 1 may claim.</summary>
     public static readonly string[] Kinds = ["windows-cng", "macos-keychain", "linux-secret-service", "file-owner-only"];
+
+    /// <summary>Custody kinds a device record of record format 2 may claim: format 1's and the macOS Secure Enclave.</summary>
+    public static readonly string[] Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind];
+
+    /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
+    public static readonly string[] PresenceKinds = [SecureEnclaveCustody.Kind];
 
     /// <summary>The default store for this platform: CNG on Windows (no key file exists), an owner-only file elsewhere.</summary>
     public static IDeviceKeyStore Default() => OperatingSystem.IsWindows() ? new CngKeyStore() : new FileKeyStore(VericairnHome.Path());
 
-    /// <summary>A store by custody name: cng, or file.</summary>
-    public static IDeviceKeyStore Named(string? custody) => custody switch
+    /// <summary>A store by custody name: cng, secure-enclave, or file; presence only where the custody enforces it.</summary>
+    public static IDeviceKeyStore Named(string? custody, bool presence = false)
     {
-        null or "" or "default" => Default(),
-        "file" or "file-owner-only" => new FileKeyStore(VericairnHome.Path()),
-        "cng" or "windows-cng" when OperatingSystem.IsWindows() => new CngKeyStore(),
-        "cng" or "windows-cng" => throw new PlatformNotSupportedException("CNG custody exists on Windows only."),
-        _ => throw new ArgumentException($"Unknown custody '{custody}'. Use file, or cng on Windows.", nameof(custody)),
-    };
+        IDeviceKeyStore store = custody switch
+        {
+            null or "" or "default" => Default(),
+            "file" or "file-owner-only" => new FileKeyStore(VericairnHome.Path()),
+            "cng" or "windows-cng" when OperatingSystem.IsWindows() => new CngKeyStore(),
+            "cng" or "windows-cng" => throw new PlatformNotSupportedException("CNG custody exists on Windows only."),
+            "secure-enclave" or SecureEnclaveCustody.Kind when OperatingSystem.IsMacOS() && SecureEnclaveKeyStore.Available() => new SecureEnclaveKeyStore(VericairnHome.Path(), presence),
+            "secure-enclave" or SecureEnclaveCustody.Kind => throw new PlatformNotSupportedException($"Secure Enclave custody needs a Mac with a Secure Enclave and the {SecureEnclaveCustody.HelperName} helper beside the command line."),
+            _ => throw new ArgumentException($"Unknown custody '{custody}'. Use file, secure-enclave on a Mac, or cng on Windows.", nameof(custody)),
+        };
+        if (presence && Array.IndexOf(PresenceKinds, store.Kind) < 0)
+        {
+            throw new ArgumentException($"{store.Kind} custody cannot enforce its owner's presence, and custody never claims presence it cannot enforce.", nameof(presence));
+        }
+
+        return store;
+    }
 
     /// <summary>Every store that could hold keys on this machine, default first.</summary>
-    public static IReadOnlyList<IDeviceKeyStore> All() =>
-        OperatingSystem.IsWindows() ? [new CngKeyStore(), new FileKeyStore(VericairnHome.Path())] : [new FileKeyStore(VericairnHome.Path())];
+    public static IReadOnlyList<IDeviceKeyStore> All()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return [new CngKeyStore(), new FileKeyStore(VericairnHome.Path())];
+        }
+
+        if (OperatingSystem.IsMacOS() && SecureEnclaveCustody.HelperPath() is not null)
+        {
+            return [new FileKeyStore(VericairnHome.Path()), new SecureEnclaveKeyStore(VericairnHome.Path())];
+        }
+
+        return [new FileKeyStore(VericairnHome.Path())];
+    }
 }
 
 /// <summary>Keys as PKCS#8 files readable by the owner only. The weakest custody: a copied file is usable; recorded as such.</summary>

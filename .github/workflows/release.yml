@@ -34,8 +34,26 @@ jobs:
       - name: Test
         run: dotnet test --no-build --configuration Release
 
+  enclave-helper:
+    # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Build vericairn-enclave for both Mac architectures
+        run: |
+          set -eu
+          mkdir -p enclave/osx-arm64 enclave/osx-x64
+          swiftc -O -target arm64-apple-macos13.0 -o enclave/osx-arm64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
+          swiftc -O -target x86_64-apple-macos13.0 -o enclave/osx-x64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
+          file enclave/osx-arm64/vericairn-enclave enclave/osx-x64/vericairn-enclave
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: enclave-helper
+          path: enclave
+          retention-days: 1
+
   package:
-    needs: verify
+    needs: [verify, enclave-helper]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -54,6 +72,10 @@ jobs:
           fi
       - name: Restore (locked)
         run: dotnet restore --locked-mode
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: enclave-helper
+          path: enclave
       - name: Check the documentation set
         shell: bash
         env:
@@ -77,6 +99,10 @@ jobs:
               -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true -p:RestoreLockedMode=false \
               --output "out/$rid/bin" --nologo --verbosity quiet
             rm -f "out/$rid/bin/"*.pdb "out/$rid/bin/"*.xml
+            # On macOS the Secure Enclave helper ships beside the command line, which calls it for enclave custody.
+            case "$rid" in
+              osx-*) install -m 0755 "enclave/$rid/vericairn-enclave" "out/$rid/bin/vericairn-enclave" ;;
+            esac
             cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out/$rid/"
             # The license and notice texts of every component the command line bundles (THIRD-PARTY-NOTICES.md lists them).
             mkdir -p "out/$rid/licenses"
