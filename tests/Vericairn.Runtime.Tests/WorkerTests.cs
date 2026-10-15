@@ -244,6 +244,10 @@ public class WorkerTests
         WaitUntil(() => File.Exists(report + ".child"));
         int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
         Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>());
+        }
 
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop the whole boundary.", 1));
         RunRow settled = run.Settled(started.Run);

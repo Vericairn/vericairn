@@ -68,16 +68,20 @@ internal sealed class ContainedProcess
     }
 
     // A reparented descendant can remain a zombie until its new parent reaps it. Its kernel exit state is an observed exit,
-    // whereas kill(group, 0) alone still reports that group present. Never mistake an unreadable process for an exited one.
-    private bool UnixMembersExited()
+    // whereas kill(group, 0) alone still reports that group present. Require two stable exited-member inventories so a child
+    // created while its parent exits cannot disappear between enumeration and exit inspection. Unreadable is never exited.
+    private bool UnixMembersExited() => ExitedMembers(out HashSet<int> first) && ExitedMembers(out HashSet<int> second) && first.SetEquals(second);
+
+    private bool ExitedMembers(out HashSet<int> members)
     {
+        members = [];
         if (OperatingSystem.IsMacOS())
         {
-            int[] members = new int[256];
+            int[] ids = new int[256];
             int count;
-            while ((count = proc_listpids(2, (uint)Id, members, members.Length * sizeof(int))) >= (members.Length - 1) * sizeof(int))
+            while ((count = proc_listpids(2, (uint)Id, ids, ids.Length * sizeof(int))) >= (ids.Length - 1) * sizeof(int))
             {
-                members = new int[checked(members.Length * 2)];
+                ids = new int[checked(ids.Length * 2)];
             }
 
             if (count < 0)
@@ -86,8 +90,9 @@ internal sealed class ContainedProcess
             }
 
             byte[] info = new byte[256];
-            foreach (int member in members.Take(count / sizeof(int)).Where(p => p != 0))
+            foreach (int member in ids.Take(count / sizeof(int)).Where(p => p != 0))
             {
+                members.Add(member);
                 int read = proc_pidinfo(member, 3, 0, info, info.Length); // PROC_PIDTBSDINFO; pbi_status follows pbi_flags.
                 if (read < 8)
                 {
@@ -124,9 +129,13 @@ internal sealed class ContainedProcess
                     return false;
                 }
 
-                if (group == Id && fields[0] is not ("Z" or "X"))
+                if (group == Id)
                 {
-                    return false;
+                    members.Add(int.Parse(Path.GetFileName(directory), System.Globalization.CultureInfo.InvariantCulture));
+                    if (fields[0] is not ("Z" or "X"))
+                    {
+                        return false;
+                    }
                 }
             }
             catch (FileNotFoundException)
@@ -199,7 +208,13 @@ internal sealed class ContainedProcess
 
             if (result < 0)
             {
-                throw new Win32Exception(Marshal.GetLastPInvokeError());
+                int error = Marshal.GetLastPInvokeError();
+                if (error == 4) // EINTR: no exit was observed yet.
+                {
+                    return false;
+                }
+
+                throw new Win32Exception(error);
             }
 
             exitCode = (status & 0x7f) == 0 ? (status >> 8) & 0xff : 128 + (status & 0x7f);
@@ -370,7 +385,11 @@ internal sealed class ContainedProcess
             (nint stderr, nint error) = Output();
             (nint stdin, nint input) = Output();
             // An already closed stdin pipe is inherited as a valid read handle.
-            SetHandleInformation(stdin, 1, 1);
+            if (!SetHandleInformation(stdin, 1, 1))
+            {
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
+
             CloseHandle(input);
             handles.Remove(input);
             var startup = new StartupInfo { Size = Marshal.SizeOf<StartupInfo>(), Flags = 0x100, Input = stdin, Output = output, Error = error };
