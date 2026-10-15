@@ -29,6 +29,9 @@ recorded step.
   format 2 is refused in a format-1 record (`record.type-format`, `body.format`), with the upgrade that answers it.
 - `vericairn records describe` and the record reference mark the types and fields format 2 introduced.
 - A new estate starts at the newest format its build writes.
+- A record's `at` is in whole seconds, and its identifier keeps the milliseconds of the moment it was made. Records of
+  one second are ordered by identifier, so a build that writes them sorts them in the order they were made; records a
+  build of 0.4.2 or earlier wrote within one second sort in no particular order among themselves.
 
 ## Moving an estate to format 2
 
@@ -129,6 +132,21 @@ build cannot read.
 - Evidence is named by its exact bytes: a redacted copy is different evidence with its own hash, and a digest names
   bytes without granting access to them.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.
+
+## Living documents due
+
+`vericairn status` lists every declared living document that is due, and why: each trigger newer than the document's
+latest clearance, which is a new revision of the estate file or a review with outcome `current` or `revised`. A
+`release` trigger fires on the newest published release of its product, `upgrade` on the newest migration, `decision`
+on the newest current decision that names the document by path or by declaration, and `accepted` on the newest
+acceptance of a work order with one of its keys. `covers` compares the covered paths' identity in the working tree,
+uncommitted changes included, with the one the latest clearing review recorded; only a review clears it. A document
+is due at the highest level among its reasons: `remind` shows in status; `warn` is also a `document.due` warning of
+`vericairn estate check`; `refuse` also refuses the next `vericairn release submit` of the product, before any intent
+is recorded, naming every such document at once. A declaration that names a source, trigger, check or generator no
+installed pack provides is shown as unavailable (`document.unavailable`) and, when it declares a `refuse` trigger,
+closes its product's release gate until the pack is installed or the declaration is revised. Status in JSON lists
+every declared document with its state, reasons and latest clearance.
 
 ## A device keeps its identity
 

@@ -797,6 +797,14 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return ReleaseProblem(identity, status, "refused", $"The earlier attempt under {identity} is {status}; retry with a reconciliation stating how it was settled under that identity.");
         }
 
+        // The living-document gate: the product's documents due at level refuse, or unavailable while they declare it, refuse the
+        // submission before any intent is recorded, all named at once, so a refused release costs no build.
+        IReadOnlyList<LivingDocuments.State> closing = LivingDocuments.Gate(session.Load(), request.Product);
+        if (closing.Count > 0)
+        {
+            return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", closing.Select(d => d.Describe()))}. Revise each or record a document review (vericairn docs review), then submit again; nothing was recorded.");
+        }
+
         string previousId;
         JsonElement previousBody;
         if (current is null)
