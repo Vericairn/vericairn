@@ -54,6 +54,7 @@ public sealed class OperationType : IRecordType
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts and kept in every revision; wallMinutes is required. A run that names its goal starts only while the goal is active, with the units its budget grants, within what remains of them, its concurrency and its attempts per step. Units: " + Caps.Units + ".", 2),
         new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
+        new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
 
@@ -333,6 +334,28 @@ public sealed class OperationType : IRecordType
         BodyReader? cap = body.Since(2, "cap") ? body.Nested("cap", false) : null;
         BodyReader? usage = body.Since(2, "usage") ? body.Nested("usage", false) : null;
         BodyReader? stop = body.Since(2, "stop") ? body.Nested("stop", false) : null;
+        BodyReader? liveness = body.Since(2, "liveness") ? body.Nested("liveness", false) : null;
+        if (liveness is not null)
+        {
+            if (EstateModel.BodyString(context.Record, "action") != AgentRun)
+            {
+                context.Error("operation.liveness", "Event-stream liveness describes agent runs only.");
+            }
+
+            liveness.Number("stallSeconds", true, 1, 86400);
+            liveness.Timestamp("lastEventAt", true);
+            string? attentionAt = liveness.Timestamp("attentionAt", false);
+            string? attention = liveness.Ulid("attention", false);
+            string? stoppedAt = liveness.Timestamp("stoppedAt", false);
+            context.RequireReference("liveness.attention", attention, "ask");
+            if (stoppedAt is not null && (attentionAt is null || string.CompareOrdinal(stoppedAt, attentionAt) < 0))
+            {
+                context.Error("operation.liveness", "A stall stop follows its worker-observed attention fact.");
+            }
+
+            liveness.NoOtherKeys();
+        }
+
         body.NoOtherKeys();
         if (context.Format >= 2)
         {

@@ -37,6 +37,65 @@ public class WorkerTests
     }
 
     [Fact]
+    public void WorkerObservedSilenceRaisesAttentionThenStopsAndContainsAtTwiceTheGoalLimit()
+    {
+        using var run = new RunEstate();
+        var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
+        goal["limits"] = new JsonObject { ["stallSeconds"] = 1 };
+        string revised = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(run.Estate.OperatorId)));
+        RunResponse started = run.Start("generic", "silent-ignore", run.Report("stalled"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "3" });
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        RunRow attention = run.Row(started.Run);
+        Assert.Equal("dispatched", attention.Status);
+        Assert.Equal(1, attention.Liveness!.StallSeconds);
+        Assert.Null(attention.Stop);
+        Assert.Equal(60, attention.Charged.GetProperty("wallMinutes").GetInt64());
+        RecordEnvelope ask = Assert.Single(run.Estate.Load().Current("ask"));
+        Assert.Equal(started.Run, ask.Subject!.Id);
+        Assert.Equal(run.Estate.OperatorId, EstateModel.BodyString(ask, "to"));
+        Assert.Contains("worker observed", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("known-failure", settled.Status);
+        Assert.NotNull(settled.Liveness!.AttentionAt);
+        Assert.NotNull(settled.Liveness.StoppedAt);
+        Assert.Contains("twice the stall limit of 1 seconds", settled.Stop!.Reason, StringComparison.Ordinal);
+        Assert.NotNull(settled.Stop.EscalatedAt);
+        Assert.NotNull(settled.Stop.ContainedAt);
+        Assert.Equal(ask.Id, settled.Liveness.Attention);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void NewEventsResetSilenceWithoutErasingTheAttentionAlreadyObserved()
+    {
+        using var run = new RunEstate();
+        RunResponse started = run.Start("generic", "silent-recovery", run.Report("recovered"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "1" });
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.NotNull(settled.Liveness!.AttentionAt);
+        Assert.NotNull(settled.Liveness.Attention);
+        Assert.Null(settled.Liveness.StoppedAt);
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheDefaultStallLimitIsTenMinutesAndAnInvalidOverrideLaunchesNothing()
+    {
+        using var run = new RunEstate();
+        RunResponse invalid = run.Start("generic", "generic", run.Report("invalid-stall"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "0" });
+        Assert.False(invalid.Ok);
+        Assert.Empty(run.Service.Records("operation"));
+        RunResponse started = run.Start("generic", "generic", run.Report("default-stall"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal(600, run.Settled(started.Run).Liveness!.StallSeconds);
+    }
+
+    [Fact]
     public void NativeCurrencyLimitAndSoftCapDisclosureAreRecordedBeforeLaunch()
     {
         using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000,"currency":{"amount":1000,"unit":"USD"}}""");

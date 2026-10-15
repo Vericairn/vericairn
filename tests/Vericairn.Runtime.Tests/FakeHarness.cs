@@ -163,6 +163,17 @@ internal static class FakeHarness
                 {
                     return Linger(acknowledge: true);
                 }
+            case "silent-ignore":
+                return Linger(acknowledge: false, output: false);
+            case "silent-recovery":
+                Thread.Sleep(1200);
+                for (int i = 0; i < 6; i++)
+                {
+                    Emit("{\"event\":\"working\"}");
+                    Thread.Sleep(400);
+                }
+
+                return 0;
             case "ignore-stop":
                 return Linger(acknowledge: false);
             case "ack-stop":
@@ -250,7 +261,7 @@ internal static class FakeHarness
     private static string Text(JsonObject reply) => reply["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? reply.ToJsonString();
 
     /// <summary>Works until stopped: acknowledging a stop, by the stop file or SIGTERM, and exiting; or ignoring every stop until killed.</summary>
-    private static int Linger(bool acknowledge)
+    private static int Linger(bool acknowledge, bool output = true)
     {
         using var terminated = new ManualResetEventSlim(false);
         PosixSignalRegistration? registration = null;
@@ -273,7 +284,15 @@ internal static class FakeHarness
             DateTimeOffset until = DateTimeOffset.UtcNow.AddMinutes(2);
             while (DateTimeOffset.UtcNow < until)
             {
-                Emit("working");
+                if (output)
+                {
+                    Emit("working");
+                }
+                else
+                {
+                    Console.Error.WriteLine("stderr activity is not the event stream");
+                }
+
                 if (acknowledge && (terminated.IsSet || (stopFile is not null && File.Exists(stopFile))))
                 {
                     Emit("""{"vericairn":"stop-acknowledged"}""");

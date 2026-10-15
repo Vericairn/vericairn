@@ -41,6 +41,9 @@ public sealed class RunObservedState
     /// <summary>When the harness last wrote to its output.</summary>
     public string? Output { get; set; }
 
+    /// <summary>The worker's event-stream observation.</summary>
+    public RunLiveness? Liveness { get; set; }
+
     /// <summary>The tokens the harness reported so far, when it reported any.</summary>
     public long? Tokens { get; set; }
 

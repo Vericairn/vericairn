@@ -30,6 +30,8 @@ namespace Vericairn.Runtime.Service;
 /// </summary>
 public sealed partial class EstateService
 {
+    private static readonly JsonSerializerOptions RunRecordJson = new(ProtocolJson.Options) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
+
     private readonly ConcurrentDictionary<string, (Task Task, CancellationTokenSource Abandon)> supervisions = new(StringComparer.Ordinal);
 
     /// <summary>How the worker paces and places the runs this service supervises.</summary>
@@ -81,6 +83,11 @@ public sealed partial class EstateService
         {
             string takes = string.Join(", ", launcher.Descriptor.DeclaredSettings.Select(s => s.Name + (s.Required ? " (required)" : string.Empty)).DefaultIfEmpty("none"));
             return RunProblem(pending, "not-started", "refused", $"The launcher '{launcher.Launcher}' takes the settings {takes}{(unknown.Count > 0 ? "; it takes no " + string.Join(", ", unknown) : string.Empty)}{(missing.Count > 0 ? "; this run names no " + string.Join(", ", missing) : string.Empty)}. Nothing was recorded.");
+        }
+
+        if (settings.TryGetValue("stall-seconds", out string? stallSetting) && (!int.TryParse(stallSetting, NumberStyles.None, CultureInfo.InvariantCulture, out int stallValue) || stallValue is < 1 or > 86400))
+        {
+            return RunProblem(pending, "not-started", "refused", "The stall-seconds setting is an integer from 1 through 86400. Nothing was recorded.");
         }
 
         RunPlan plan;
@@ -188,6 +195,7 @@ public sealed partial class EstateService
                 ["goal"] = goal!.Id,
                 ["workOrder"] = plan.Key,
                 ["worker"] = AgentRuns.WorkerContract,
+                ["stallSeconds"] = plan.StallSeconds.ToString(CultureInfo.InvariantCulture),
             };
             target["capMode"] = "soft";
             if (excepted is not null)
@@ -288,7 +296,7 @@ public sealed partial class EstateService
                 lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits);
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness));
                 }
             }
         }
@@ -374,7 +382,8 @@ public sealed partial class EstateService
                     stop,
                     run.InFlight ? observed?.Heartbeat : null,
                     run.InFlight && Fresh(observed),
-                    run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true));
+                    run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
+                    run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness));
             }
 
             var ledgers = new List<LedgerRow>();
@@ -637,7 +646,18 @@ public sealed partial class EstateService
             return (null, $"Run {busy.Id} works on branch {branch} of {repository} and is in flight; one run works in a workspace at a time, so name another branch or wait for it to settle.", null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal)), null, null);
+        int stallSeconds = (int)launcher.StallLimit.TotalSeconds;
+        if (request.Settings?.TryGetValue("stall-seconds", out string? stall) == true)
+        {
+            stallSeconds = int.Parse(stall, CultureInfo.InvariantCulture);
+        }
+
+        if (goal.Body.TryGetProperty("limits", out JsonElement goalLimits) && AgentRuns.Amount(goalLimits, "stallSeconds") is long goalStall)
+        {
+            stallSeconds = (int)goalStall;
+        }
+
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), stallSeconds), null, null);
     }
 
     /// <summary>
@@ -715,6 +735,40 @@ public sealed partial class EstateService
         string note = $"Its agent runs reached its budget: {why} New runs are fenced until its sponsor raises the budget by a revision and activates it, or stops it.";
         var body = new JsonObject { ["status"] = "budget-limited", ["note"] = note.Length > 4000 ? note[..3999] + "…" : note };
         WriteLocked(new RecordDraft("goal-status", by, Element(body), current.Reference), model);
+    }
+
+    /// <summary>Records one attention ask for a worker-observed stall, without claiming the agent is blocked or notifying anyone.</summary>
+    private string? RecordStall(string run, string by, string goalId, RunLiveness liveness)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? existing = model.Current("ask").FirstOrDefault(a => a.Subject?.Type == "operation" && a.Subject.Id == run);
+            if (existing is not null)
+            {
+                return existing.Id;
+            }
+
+            AgentRuns.Run? found = AgentRuns.Find(model, run);
+            RecordEnvelope? goal = AgentRuns.GoalAt(model, goalId);
+            if (found is null || goal is null)
+            {
+                return null;
+            }
+
+            string to = GoalRules.AccepterOf(model, goal).Principal ?? by;
+            var body = new JsonObject
+            {
+                ["to"] = to,
+                ["goal"] = goal.Id,
+                ["state"] = "open",
+                ["question"] = $"Run {run} needs attention: at {liveness.AttentionAt} the worker observed no stdout event for {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds. Inspect the run?",
+                ["recommendation"] = "Inspect the run's locally retained output and its assignment before deciding whether another attempt is needed.",
+                ["consequence"] = "If the event stream stays silent for twice the stall limit, the worker stops and contains the run. Its allowance stays reserved until observed settlement; silence is the worker's observation, never the agent's claim.",
+            };
+            WriteOutcome written = WriteLocked(new RecordDraft("ask", by, Element(body), found.Intent.Reference), model);
+            return written.Ok ? written.Written!.Id : null;
+        }
     }
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
@@ -807,6 +861,11 @@ public sealed partial class EstateService
 
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
         body["usage"] = usage;
+        if (outcome.Liveness is not null)
+        {
+            body["liveness"] = JsonSerializer.SerializeToNode(outcome.Liveness, RunRecordJson);
+        }
+
         JsonArray evidence = body["evidence"] as JsonArray ?? [];
         evidence.Add(new JsonObject { ["summary"] = $"Observed by the worker on the machine that ran it at {outcome.Heartbeats.ToString(CultureInfo.InvariantCulture)} heartbeats every {WorkerOptions.Heartbeat.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds, from {RecordParser.FormatTimestamp(outcome.LaunchedAt)} to its exit at {RecordParser.FormatTimestamp(outcome.ExitedAt)}; its output is kept on that machine." });
         if (outcome.EscalationFailure is string failure)
@@ -932,7 +991,7 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, int StallSeconds);
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

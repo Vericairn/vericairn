@@ -19,6 +19,8 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
 
     public ProviderDescriptor Descriptor => inner.Descriptor;
 
+    public TimeSpan StallLimit => inner.StallLimit;
+
     public string Limitations => inner.Limitations;
 
     public bool Generic => inner.Generic;

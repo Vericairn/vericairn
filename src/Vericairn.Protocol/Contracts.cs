@@ -491,6 +491,14 @@ public sealed record RunResponse(string Run, string Status, string Message, bool
 /// <param name="Problem">Why no stop was asked.</param>
 public sealed record RunStopResponse(string Run, string State, string Message, bool Ok, RunStop? Stop = null, Problem? Problem = null);
 
+/// <summary>Event-stream liveness observed by the worker, never asserted by the harness.</summary>
+/// <param name="StallSeconds">Silence limit; attention at one limit and stop at two.</param>
+/// <param name="LastEventAt">When stdout last produced an event, or launch before any event.</param>
+/// <param name="AttentionAt">When the worker first observed silence reach the limit.</param>
+/// <param name="Attention">The attention ask, once recorded.</param>
+/// <param name="StoppedAt">When the worker stopped the run for twice-limit silence.</param>
+public sealed record RunLiveness(int StallSeconds, string LastEventAt, string? AttentionAt = null, string? Attention = null, string? StoppedAt = null);
+
 /// <summary>One agent run as the records and this machine show it.</summary>
 /// <param name="Run">The run's id: its intent's record id.</param>
 /// <param name="Identity">Its operation's identity.</param>
@@ -506,8 +514,9 @@ public sealed record RunStopResponse(string Run, string State, string Message, b
 /// <param name="Stop">A stop's facts, recorded or observed here.</param>
 /// <param name="Heartbeat">When the worker on this machine last observed it running.</param>
 /// <param name="Observed">Whether a worker on this machine observes it now.</param>
+/// <param name="Liveness">The worker's event-stream observation and any stall attention.</param>
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
-public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic);
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null);
 
 /// <summary>One unit of a goal's ledger.</summary>
 /// <param name="Unit">wallMinutes, tokens or currency.</param>

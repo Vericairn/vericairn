@@ -67,6 +67,9 @@ public interface IAgentLauncher
     /// </summary>
     string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => null;
 
+    /// <summary>The launcher's default silence limit; a goal may override it.</summary>
+    TimeSpan StallLimit => TimeSpan.FromMinutes(10);
+
     /// <summary>Native spending controls used by this launcher; unlisted units have no native enforcement.</summary>
     string Limitations => "No native token or currency limit; the worker uses soft accounting thresholds only.";
 

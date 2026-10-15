@@ -20,9 +20,10 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Tokens">The tokens it reported, when it reported any.</param>
 /// <param name="Price">The price it reported, in minor units, when its launcher reads one.</param>
 /// <param name="PriceUnit">The price's currency.</param>
+/// <param name="Liveness">Worker-observed silence and stall handling.</param>
 /// <param name="EscalationFailure">An escalation failure retained after retry.</param>
 /// <param name="Stop">A stop's facts, when one was asked.</param>
-public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null);
+public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null);
 
 /// <summary>
 /// The worker's supervision of one harness process (the estate's design/goals.md § 7, steps 4 and 6). It observes the process at
@@ -57,8 +58,10 @@ public sealed class RunSupervisor
     private string? priceUnit;
     private DateTimeOffset? transmitted;
     private TimeSpan grace;
+    private readonly Func<RunLiveness, string?>? attention;
+    private long lastEventTick = Stopwatch.GetTimestamp();
 
-    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention)
     {
         this.process = process;
         this.launcher = launcher;
@@ -68,6 +71,8 @@ public sealed class RunSupervisor
         this.wallMinutes = wallMinutes;
         this.tokenCap = tokenCap;
         this.limits = limits;
+        this.attention = attention;
+        state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
         deadline = launchedAt + (limits?.WallTime ?? (options.Minute * wallMinutes));
         grace = options.Grace;
@@ -92,7 +97,7 @@ public sealed class RunSupervisor
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
     /// </summary>
-    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null)
+    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(environment);
@@ -148,7 +153,7 @@ public sealed class RunSupervisor
         };
         try
         {
-            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits);
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention);
             supervisor.Save();
             return supervisor;
         }
@@ -188,6 +193,26 @@ public sealed class RunSupervisor
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
                 state.Heartbeats++;
                 state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
+                TimeSpan silence = Stopwatch.GetElapsedTime(lastEventTick);
+                RunLiveness liveness = state.Liveness!;
+                if (silence.TotalSeconds >= liveness.StallSeconds)
+                {
+                    liveness = liveness with { AttentionAt = liveness.AttentionAt ?? RecordParser.FormatTimestamp(now) };
+                    if (liveness.Attention is null)
+                    {
+                        try
+                        {
+                            liveness = liveness with { Attention = attention?.Invoke(liveness) };
+                        }
+                        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+                        {
+                            // Attention recording is retried; a failed record must never prevent containment.
+                        }
+                    }
+
+                    state.Liveness = liveness;
+                }
+
                 if (state.Stop is null)
                 {
                     if (rootExited)
@@ -197,6 +222,11 @@ public sealed class RunSupervisor
                     else if (directory.ReadStop() is StopRequest asked)
                     {
                         Begin(asked, now);
+                    }
+                    else if (silence.TotalSeconds >= 2L * liveness.StallSeconds)
+                    {
+                        state.Liveness = liveness with { StoppedAt = RecordParser.FormatTimestamp(now) };
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the worker observed the event stream silent for twice the stall limit of {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds"), now);
                     }
                     else if (now >= deadline)
                     {
@@ -220,7 +250,6 @@ public sealed class RunSupervisor
             }
         }
 
-        DateTimeOffset exited = DateTimeOffset.UtcNow;
         foreach (Thread reader in readers)
         {
             reader.Join(TimeSpan.FromSeconds(5));
@@ -228,6 +257,7 @@ public sealed class RunSupervisor
 
         lock (gate)
         {
+            DateTimeOffset exited = DateTimeOffset.UtcNow;
             state.ExitCode = process.ExitCode;
             state.ExitedAt = RecordParser.FormatTimestamp(exited);
             state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
@@ -237,7 +267,7 @@ public sealed class RunSupervisor
             }
 
             Save();
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure);
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness);
             process.Close();
             return outcome;
         }
@@ -323,6 +353,12 @@ public sealed class RunSupervisor
                 if (errors)
                 {
                     continue;
+                }
+
+                lock (gate)
+                {
+                    lastEventTick = Stopwatch.GetTimestamp();
+                    state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
                 }
 
                 if (IsAcknowledgment(line))
