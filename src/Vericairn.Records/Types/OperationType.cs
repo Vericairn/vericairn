@@ -327,6 +327,13 @@ public sealed class OperationType : IRecordType
         else
         {
             string previousStatus = EstateModel.BodyString(previous, "status") ?? "?";
+            if (EstateModel.BodyString(previous, "action") == AgentRun
+                && (EstateModel.BodyString(context.Record, "action") != AgentRun
+                    || (status == "dispatched" && previousStatus != "not-started")))
+            {
+                context.Error("operation.agent-run-relaunch", "Every physical agent launch needs a new agent-run intent and budget admission; an existing run identity is never dispatched again.");
+            }
+
             if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider"))
             {
                 context.Error("operation.identity", "A revision keeps the operation's identity and provider; a different effect is a different operation.");

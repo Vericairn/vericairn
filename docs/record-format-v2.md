@@ -522,3 +522,5 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   as such, never a silent self-admission.
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
+
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.

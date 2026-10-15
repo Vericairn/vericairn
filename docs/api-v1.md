@@ -169,3 +169,5 @@ API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a s
 record format 2 anchors, and is `null` otherwise.
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
+
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.

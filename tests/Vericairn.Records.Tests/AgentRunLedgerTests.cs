@@ -14,6 +14,23 @@ namespace Vericairn.Records.Tests;
 /// </summary>
 public class AgentRunLedgerTests
 {
+    [Theory]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
+    [InlineData("uncertain")]
+    public void AnAgentRunIdentityCannotBeDispatchedAgainEvenWithReconciliation(string status)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("one-launch", Small, status == "uncertain" ? null : Usage, status: status);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = "dispatched";
+        body["reconciliation"] = "The earlier process exited; try again.";
+        body.Remove("observed");
+        body.Remove("usage");
+        RecordEnvelope retried = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == retried.ExpectedPath && f.Code == "operation.agent-run-relaunch");
+    }
+
     [Fact]
     public void ARunIsChargedWhatItsUsageReportsAndItsCapForWhatWasNotReported()
     {

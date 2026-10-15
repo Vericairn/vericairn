@@ -314,3 +314,5 @@ once every step succeeded, a failing migration changes nothing, and a manifest b
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
+
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
