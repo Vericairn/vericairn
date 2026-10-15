@@ -19,6 +19,8 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 internal static class FakeHarness
 {
+    private static readonly string[] GitIdentity = ["-c", "user.name=Stand-in", "-c", "user.email=stand-in@example.invalid", "-c", "commit.gpgsign=false"];
+
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
     public const string Marker = "--vericairn-stand-in-harness";
 
@@ -160,8 +162,8 @@ internal static class FakeHarness
                 File.WriteAllText("outside.txt", "untracked and outside scope");
                 File.WriteAllText("committed.txt", "committed and outside scope");
                 File.Move("README.md", "README-old.md");
-                RunEstate.Git(Directory.GetCurrentDirectory(), "add", "README.md", "README-old.md", "src", "docs", ".gitignore", "committed.txt");
-                RunEstate.Git(Directory.GetCurrentDirectory(), "commit", "-q", "-m", "Stand-in changes");
+                Git( "add", "README.md", "README-old.md", "src", "docs", ".gitignore", "committed.txt");
+                Git( "commit", "-q", "-m", "Stand-in changes");
                 return 0;
             case "generic":
                 Emit("The generic harness ran.");
@@ -270,6 +272,29 @@ internal static class FakeHarness
 
         Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100}}""");
         return 0;
+    }
+
+    private static void Git(params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in GitIdentity.Concat(arguments))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using Process git = Process.Start(info) ?? throw new IOException("The stand-in could not start git.");
+        Task<string> output = git.StandardOutput.ReadToEndAsync();
+        Task<string> error = git.StandardError.ReadToEndAsync();
+        if (!git.WaitForExit(30_000))
+        {
+            git.Kill(entireProcessTree: true);
+            throw new IOException("The stand-in git command timed out.");
+        }
+
+        if (git.ExitCode != 0)
+        {
+            throw new IOException("The stand-in git command failed: " + error.Result + output.Result);
+        }
     }
 
     private static string Text(JsonObject reply) => reply["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? reply.ToJsonString();

@@ -39,7 +39,10 @@ internal sealed class RunEstate : IDisposable
         registry.Register(new GenericLauncher());
         registry.Register(new GitWorktreeWorkspaces());
         Service.Providers = registry;
-        Service.WorkerOptions = options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
+        Service.WorkerOptions = (options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) }) with
+        {
+            Environment = options?.Environment ?? new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CODEX_HOME"] = Path.Combine(Scratch, "stand-in-login") },
+        };
 
         OperatorDevice = Ok(Service.DeviceCreate(new DeviceCreateRequest(Estate.OperatorId, "Operator's laptop", "file"))).Id;
         Ok(Service.DeviceAdmit(new AdmitRequest(OperatorDevice, Estate.OperatorId, "The first authority.")));
