@@ -32,16 +32,18 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Build the Secure Enclave helper
-        # As in continuous integration: the release's own test run exercises real key custody on every platform it qualifies.
-        # The Apple-silicon runners expose a Secure Enclave, so the store's test creates, signs with and removes a real enclave
-        # key there (one without presence, so nothing waits for a person).
+        # The release's own test run exercises real key custody on every platform it qualifies. Unlike continuous integration, it
+        # requires the Apple-silicon runner's Secure Enclave: the helper must find one, and the enclave tests fail rather than skip
+        # (VERICAIRN_EXPECT_ENCLAVE), so the run's success means the store's test made, signed with and removed a real enclave key
+        # (one without presence, so nothing waits for a person).
         if: runner.os == 'macOS'
         run: |
           set -eu
           mkdir -p artifacts/enclave
           swiftc -O -o artifacts/enclave/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
-          artifacts/enclave/vericairn-enclave available || test $? -eq 3
+          artifacts/enclave/vericairn-enclave available
           echo "VERICAIRN_ENCLAVE_HELPER=$PWD/artifacts/enclave/vericairn-enclave" >> "$GITHUB_ENV"
+          echo "VERICAIRN_EXPECT_ENCLAVE=1" >> "$GITHUB_ENV"
       - name: Install a secret service
         # GNOME Keyring and secret-tool, so the Linux tests run the secret-service store in a D-Bus session with a keyring
         # unlocked by a throwaway password.
@@ -82,9 +84,8 @@ jobs:
         run: |
           set -eu
           helper=enclave/osx-arm64/vericairn-enclave
-          set +e; "$helper" available; code=$?; set -e
-          if [ "$code" -eq 3 ]; then echo "no Secure Enclave on this runner: the shipped helper reports it (exit 3)"; exit 0; fi
-          test "$code" -eq 0
+          # The release requires the runner's Secure Enclave: a helper that finds none fails the run instead of passing silently.
+          "$helper" available
           dir=$(mktemp -d)
           "$helper" create "$dir/key.blob" > "$dir/public.txt"
           test -s "$dir/public.txt"

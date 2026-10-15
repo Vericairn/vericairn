@@ -178,8 +178,15 @@ public static class EstateLoader
             type.Validate(new ValidationContext(model, record, findings));
         }
 
+        // The manifest is read before the signatures are checked, because which unsigned admissions count depends on the estate's
+        // record format; its findings keep their place after the signatures'.
+        var manifestFindings = new FindingList();
+        model.Manifest = EstateManifest.Load(root, manifestFindings);
         SignatureChecks.Run(model, findings);
-        model.Manifest = EstateManifest.Load(root, findings);
+        foreach (Finding finding in manifestFindings)
+        {
+            findings.Add(finding);
+        }
 
         // A record is never ahead of its estate: an estate at format 1 holds only format-1 records, and moves to a later format by
         // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.

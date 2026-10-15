@@ -182,6 +182,7 @@ public class SigningJourneyTests
     {
         if (!OperatingSystem.IsMacOS() || !SecureEnclaveKeyStore.Available())
         {
+            Assert.False(Environment.GetEnvironmentVariable("VERICAIRN_EXPECT_ENCLAVE") == "1", "A Secure Enclave was expected here, and none answers.");
             Assert.Skip("Secure Enclave custody needs a Mac with an enclave and the vericairn-enclave helper (VERICAIRN_ENCLAVE_HELPER).");
         }
 

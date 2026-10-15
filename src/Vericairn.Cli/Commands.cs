@@ -618,6 +618,11 @@ internal static class Commands
                 Console.Out.WriteLine($"  {platform}  {hash}");
             }
 
+            if (plan.Anchored is { Count: > 0 } anchored)
+            {
+                Console.Out.WriteLine($"{(plan.Applied ? "anchored" : "anchors")} the admissions recorded without a signature, which count after the move only because the signed migration lists them: {string.Join(", ", anchored)}");
+            }
+
             if (plan.Migration is not null)
             {
                 Console.Out.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");

@@ -11,7 +11,8 @@ namespace Vericairn.Records.Tests;
 /// <summary>
 /// macOS custody: keys generated inside the Secure Enclave and kept as enclave-wrapped blobs through the vericairn-enclave helper.
 /// Skipped where there is no helper or no enclave (other platforms, and Macs without one); the Apple-silicon runners of continuous
-/// integration have one. A key without presence is used, so the test never asks anyone for Touch ID or a password.
+/// integration have one, and the release workflow sets VERICAIRN_EXPECT_ENCLAVE, so there the test must run rather than skip. A key
+/// without presence is used, so the test never asks anyone for Touch ID or a password.
 /// </summary>
 public class SecureEnclaveKeyStoreTests : IDisposable
 {
@@ -23,6 +24,7 @@ public class SecureEnclaveKeyStoreTests : IDisposable
     {
         if (!OperatingSystem.IsMacOS() || !SecureEnclaveKeyStore.Available())
         {
+            Assert.False(Environment.GetEnvironmentVariable("VERICAIRN_EXPECT_ENCLAVE") == "1", "A Secure Enclave was expected here, and none answers.");
             Assert.Skip("Secure Enclave custody needs a Mac with an enclave and the vericairn-enclave helper (VERICAIRN_ENCLAVE_HELPER).");
         }
 
@@ -57,6 +59,7 @@ public class SecureEnclaveKeyStoreTests : IDisposable
     {
         if (!OperatingSystem.IsMacOS() || !SecureEnclaveKeyStore.Available())
         {
+            Assert.False(Environment.GetEnvironmentVariable("VERICAIRN_EXPECT_ENCLAVE") == "1", "A Secure Enclave was expected here, and none answers.");
             Assert.Skip("Secure Enclave custody needs a Mac with an enclave and the vericairn-enclave helper (VERICAIRN_ENCLAVE_HELPER).");
         }
 

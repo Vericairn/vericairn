@@ -319,7 +319,8 @@ public sealed record UpgradeRequest(string Version, string? By, bool Check);
 /// <param name="Artifacts">Artifact hash per platform.</param>
 /// <param name="Applied">Whether applied.</param>
 /// <param name="Migration">The migration record, when applied.</param>
-public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration);
+/// <param name="Anchored">The admissions recorded without a signature that the move to record format 2 anchors, by id; the migration that lists them is signed by the operator or a principal with the 'administer' scope.</param>
+public sealed record UpgradeResponse(string FromPin, string ToPin, long FromFormat, long ToFormat, IReadOnlyList<string> Migrations, string Release, IReadOnlyDictionary<string, string> Artifacts, bool Applied, RecordWritten? Migration, IReadOnlyList<string>? Anchored = null);
 
 /// <summary>A reconcile task.</summary>
 /// <param name="Code">Code.</param>
