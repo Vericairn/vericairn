@@ -64,7 +64,7 @@ public static class GoalView
 
         if (status == "proposed")
         {
-            reasons.Add("its sponsor has not activated it");
+            reasons.Add("it has not been activated");
         }
         else if (Array.IndexOf(GoalRules.Ended, status) >= 0)
         {

@@ -189,6 +189,19 @@ public class GoalAcceptanceTests
         Assert.Contains(later.Load().Findings, f => f.Code == "acceptance.policy" && f.Location == withdrawn.ExpectedPath && f.Message.Contains("not delegated", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void AStatusItsAuthorCouldNotRecordChangesNothing()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope goal = estate.Add("goal", estate.BuilderId, Goal(estate));
+        RecordEnvelope ended = estate.Add("goal-status", estate.BuilderId, Status("abandoned"), goal.Reference);
+        RecordEnvelope started = estate.Add("goal-status", estate.OperatorId, Status("active"), goal.Reference);
+        List<Finding> findings = estate.Load().Findings.Where(f => f.Severity == Severity.Error).ToList();
+        Assert.Contains(findings, f => f.Code == "goal-status.sponsor" && f.Location == ended.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Location == started.ExpectedPath);
+        Assert.Equal("active", GoalRules.Status(estate.Load(), goal));
+    }
+
     private static string Status(string status) => $$"""{"status":"{{status}}","note":"The sponsor's call."}""";
 
     private static string GoalReleasing(TestEstate estate, string product, string delegated) =>
