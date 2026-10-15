@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-15T00:57:09Z",
+  "body": {
+    "affects": [],
+    "decidedAt": "2026-10-15T00:00:00Z",
+    "decidedBy": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+    "effects": [
+      "the builder self-accepts ordinary work"
+    ],
+    "statement": "Build and accept ordinary work yourself.",
+    "summary": "The builder engineers and self-accepts ordinary work.",
+    "synthesis": "A standing delegation, written in format 1.",
+    "title": "Delegate"
+  },
+  "by": "01M4YH07M8PBFQRP3A4PJBD6PR",
+  "format": "vericairn.record/1",
+  "hash": "sha256:eba01be1d0a445911dfec1b16037d5a803ea717cef77fe80e5efc6e7b32ef2bc",
+  "id": "01M4YH07M8PNE3HPWH9W02EV5D",
+  "type": "decision"
+}

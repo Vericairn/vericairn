@@ -1,0 +1,27 @@
+{
+  "at": "2026-10-15T00:57:10Z",
+  "body": {
+    "editions": [
+      {
+        "name": "Community",
+        "slug": "community",
+        "summary": "Free."
+      }
+    ],
+    "name": "Example",
+    "slug": "example",
+    "summary": "A product.",
+    "surfaces": [
+      {
+        "name": "CLI",
+        "slug": "cli",
+        "summary": "Command line."
+      }
+    ]
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:e0cbb7b0f19f71d581c4e144a42681e75fe11c93ae3f636624241ddf08e4be7d",
+  "id": "01M4YH08KGKMS8CXHGHBC6KEM1",
+  "type": "product"
+}

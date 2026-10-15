@@ -99,6 +99,10 @@ public class SoftwareJourneyTests
             Assert.DoesNotContain(repo, verification, StringComparison.Ordinal);
             Assert.Contains("\"method\": \"command\"", verification, StringComparison.Ordinal);
 
+            // In a format-2 estate the verification says how its evidence was obtained: the command ran here and was seen to finish.
+            Assert.Contains("\"evidenceClass\": \"observation\"", verification, StringComparison.Ordinal);
+            Assert.Contains("\"observer\": \"automation\"", verification, StringComparison.Ordinal);
+
             // The exact widget is stored as an object and named by the result; the acceptance is separate.
             string widget = Path.Combine(repo, "widget.txt");
             string hash = ContentHash.Sha256File(widget);
@@ -165,6 +169,9 @@ public class SoftwareJourneyTests
             // Automation's verification of the run is recorded from the host's own report.
             CliHarness.Outcome ci = CliHarness.Ok("--estate", root, "--json", "check", "observe", "--resource", resource, "--repository", "Example/widget", "--run", run, "--workflow", "release.yml", "--by", builder);
             Assert.Equal("success", ci.Json.GetProperty("conclusion").GetString());
+            string reported = File.ReadAllText(Path.Combine(root, ci.Json.GetProperty("verification").GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains("\"evidenceClass\": \"report\"", reported, StringComparison.Ordinal);
+            Assert.Contains("\"observer\": \"provider\"", reported, StringComparison.Ordinal);
 
             // Still a draft: observing records nothing; publication is the operator's manual step after accepting the candidate.
             Assert.Contains("a draft", CliHarness.Ok("--estate", root, "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Out, StringComparison.Ordinal);

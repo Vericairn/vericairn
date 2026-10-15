@@ -1,0 +1,20 @@
+{
+  "at": "2026-10-15T00:57:09Z",
+  "body": {
+    "basis": "01M4YH07M8PNE3HPWH9W02EV5D",
+    "conditions": [],
+    "grantee": "01M4YH07M8PBFQRP3A4PJBD6PR",
+    "reserved": [
+      "publication"
+    ],
+    "scope": [
+      "local-engineering",
+      "self-accept-ordinary-work"
+    ]
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:248013845d4e90bd0470955ca9da676e1e89dc69a8ef59b66becc2cf467315fc",
+  "id": "01M4YH07M81JRJYEACN8C3C82Y",
+  "type": "authority"
+}

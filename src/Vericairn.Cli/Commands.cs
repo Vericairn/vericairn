@@ -1044,6 +1044,13 @@ internal static class Commands
 
             string text = summary ?? run.Summary;
             Json.JsonObject body = Checks.VerificationBody("command", observation.Commit, run.Command, Checks.LocalEnvironment(), role, run.Outcome, text, run.ExitCode, run.DurationMs, run.StartedAt, run.FinishedAt, evidence, limitations);
+            if (api.Health().RecordFormat >= 2)
+            {
+                // The command ran here and was seen to finish: an observation by a tool.
+                body["evidenceClass"] = "observation";
+                body["observer"] = "automation";
+            }
+
             WriteOutcome outcome = api.NewRecord(new NewRecordRequest("verification", by, Element(body), $"resource:{resource.Id}:{resource.Hash}"));
             if (!outcome.Ok)
             {
@@ -1122,7 +1129,15 @@ internal static class Commands
                 return Fail($"No run {runId} is observable in {destination}.");
             }
 
-            WriteOutcome outcome = api.NewRecord(new NewRecordRequest("verification", by, Element(Checks.VerificationOfRun(run, workflow)), $"resource:{resource.Id}:{resource.Hash}"));
+            Json.JsonObject observed = Checks.VerificationOfRun(run, workflow);
+            if (api.Health().RecordFormat >= 2)
+            {
+                // A workflow run's conclusion is the host's report of it, not an observation made here.
+                observed["evidenceClass"] = "report";
+                observed["observer"] = "provider";
+            }
+
+            WriteOutcome outcome = api.NewRecord(new NewRecordRequest("verification", by, Element(observed), $"resource:{resource.Id}:{resource.Hash}"));
             if (!outcome.Ok)
             {
                 return ReportOutcome(outcome, json);

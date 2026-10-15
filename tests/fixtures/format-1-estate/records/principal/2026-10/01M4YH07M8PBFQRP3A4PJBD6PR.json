@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-15T00:57:09Z",
+  "body": {
+    "agent": {
+      "product": "Example Agent",
+      "vendor": "Example"
+    },
+    "kind": "agent",
+    "name": "Fixture Builder",
+    "roles": [
+      "builder"
+    ]
+  },
+  "by": "01M4YGZSCHYYYDRY9J2FVZ8VDS",
+  "format": "vericairn.record/1",
+  "hash": "sha256:3032b6eede0e02d960a4b643e6c1edf17b12cea4ce888f57a9cd17d32b84131c",
+  "id": "01M4YH07M8PBFQRP3A4PJBD6PR",
+  "type": "principal"
+}
