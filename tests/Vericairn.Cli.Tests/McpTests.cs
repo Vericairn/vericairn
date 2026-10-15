@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.ComponentModel;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
@@ -193,6 +195,43 @@ public class McpTests
     }
 
     [Fact]
+    public void TheAgentMatrixShowsTheEstatesQualificationsOfAgentHarnesses()
+    {
+        // In 0.5.2 nothing passed recorded observations to the generator, so every harness stayed a non-claim whatever was recorded.
+        string root = CliHarness.TempDirectory("mcp-matrix");
+        string output = CliHarness.TempDirectory("mcp-matrix-out");
+        string bodies = CliHarness.TempDirectory("mcp-matrix-bodies");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example Estate", "--slug", "example", "--purpose", "Orientation.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(bodies, "product.json", """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
+            CliHarness.Outcome release = CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--body", CliHarness.WriteJson(bodies, "release.json", $$"""{"version":"0.9.0","repository":"Example/example","commit":"{{Commit}}","status":"candidate","artifacts":[],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}"""));
+            string session = CliHarness.Ok("--estate", root, "--json", "records", "new", "verification", "--by", op, "--subject", $"release:{release.Id}:{release.Hash}", "--body", CliHarness.WriteJson(bodies, "session.json", $$"""{"method":"manual","commit":"{{Commit}}","environment":{"harness":"Claude Code"},"role":"operator","outcome":"passed","summary":"A Claude Code session read a brief and recorded an attempt through the server.","evidence":[],"limitations":[]}""")).Id;
+            string claude = CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "claude.json", $$"""{"profile":"Claude Code over MCP","outcome":"qualified","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Observed in one session.","limitations":[]}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "opencode.json", """{"profile":"OpenCode over MCP","outcome":"non-claim","evidence":[],"summary":"Not observed.","limitations":[]}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "platform.json", """{"profile":"linux-x64","outcome":"non-claim","evidence":[],"summary":"Not a harness.","limitations":[]}"""));
+
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
+            string agents = File.ReadAllText(Path.Combine(output, "AGENTS.md"));
+            Assert.Contains("| Claude Code | qualified for release 0.9.0 |", agents, StringComparison.Ordinal);
+            Assert.Contains("| Codex | non-claim: not observed |", agents, StringComparison.Ordinal);
+            // A harness the build does not name still gets its row, after those it names; a platform profile is not a harness.
+            Assert.Contains("| Cline | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 |\n", agents, StringComparison.Ordinal);
+            Assert.DoesNotContain("linux-x64", agents, StringComparison.Ordinal);
+
+            // A revised qualification replaces the one it supersedes, and a copy generated before it is out of date.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--supersedes", claude, "--body", CliHarness.WriteJson(bodies, "claude-revised.json", $$"""{"profile":"Claude Code over MCP","outcome":"measured-in-part","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Writes were not observed.","limitations":["No result was recorded."]}"""));
+            Assert.Equal(1, CliHarness.Run("--estate", root, "mcp", "orientation", "--out", output, "--check").Code);
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
+            Assert.Contains("| Claude Code | measured-in-part for release 0.9.0 |", File.ReadAllText(Path.Combine(output, "AGENTS.md")), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, output, bodies);
+        }
+    }
+
+    [Fact]
     public void OrientationCheckNamesEveryMissingOrChangedFileAndWritesNothing()
     {
         string root = CliHarness.TempDirectory("mcp-orientation-check");
@@ -227,8 +266,11 @@ public class McpTests
     [Fact]
     public void TheRepositorysOrientationFilesAreCurrent()
     {
-        // The committed files describe the Vericairn estate. Everything in them but the estate's name comes from this build, so an
-        // estate of that name reproduces them exactly; a new tool or a change to the generator's text without regenerating fails here.
+        // The committed files describe the Vericairn estate. Everything in them but the estate's name and the agent matrix comes from
+        // this build, and the matrix comes from the estate's qualifications of agent harnesses, of which the Vericairn estate has
+        // recorded none; so an estate of that name with none reproduces them exactly, and a new tool or a change to the generator's
+        // text without regenerating fails here. Once the Vericairn estate qualifies a harness, this estate records the same
+        // qualification (its profile and outcome, about a release of the same version), since the matrix names no record id.
         string root = CliHarness.TempDirectory("mcp-orientation-repository");
         try
         {
@@ -240,6 +282,89 @@ public class McpTests
         {
             CliHarness.Delete(root);
         }
+    }
+
+    [Fact]
+    public async Task ThePythonPeerRunsAgainstAnEstateWithoutWorkOrderMcp01()
+    {
+        // In 0.5.2 one of the peer's checks read work order MCP-01, so the documented command failed against any estate but Vericairn's.
+        string? python = Python();
+        Assert.SkipWhen(python is null, "The peer is a Python 3 script, and no Python 3 is on the path (python3, or python).");
+        string root = CliHarness.TempDirectory("mcp-peer");
+        string bodies = CliHarness.TempDirectory("mcp-peer-bodies");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "The peer.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            (int code, string output) = await Peer(python!, root);
+            Assert.True(code == 0, output);
+            Assert.Contains("SKIP work_brief returns markdown: the estate has no work order, so there is no brief to read", output, StringComparison.Ordinal);
+            Assert.Contains("13 of 13 checks passed, 1 skipped", output, StringComparison.Ordinal);
+
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(bodies, "order.json", """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"The peer.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}"""));
+            (code, output) = await Peer(python!, root);
+            Assert.True(code == 0, output);
+            Assert.Contains("PASS work_brief W-1 returns markdown: the estate has no work order MCP-01, so the first one its status lists stands in", output, StringComparison.Ordinal);
+            Assert.Contains("14 of 14 checks passed", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, bodies);
+        }
+    }
+
+    // The peer drives the built command line, the executable beside these tests, exactly as the documented command drives the release build.
+    private static async Task<(int Code, string Output)> Peer(string python, string root)
+    {
+        var info = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in new[] { "-I", Path.Combine(RepositoryRoot(), "tests", "mcp-peer", "mcp_peer.py"), Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"), root })
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(info)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
+        Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        Task both = Task.WhenAll(output, error);
+        if (await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(120), TestContext.Current.CancellationToken)) != both)
+        {
+            process.Kill(entireProcessTree: true);
+            Assert.Fail("The peer did not finish within 120 seconds.");
+        }
+
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        return (process.ExitCode, await output + await error);
+    }
+
+    // The first of python3 and python that runs Python 3; an installation on Windows usually names it python.
+    private static string? Python()
+    {
+        foreach (string candidate in new[] { "python3", "python" })
+        {
+            try
+            {
+                var info = new ProcessStartInfo(candidate) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
+                info.ArgumentList.Add("-I");
+                info.ArgumentList.Add("-c");
+                info.ArgumentList.Add("import sys; print(sys.version_info[0])");
+                using Process process = Process.Start(info)!;
+                if (!process.WaitForExit(30_000))
+                {
+                    process.Kill(entireProcessTree: true);
+                    continue;
+                }
+
+                if (process.ExitCode == 0 && process.StandardOutput.ReadToEnd().Trim() == "3")
+                {
+                    return candidate;
+                }
+            }
+            catch (Win32Exception)
+            {
+                // Not on the path.
+            }
+        }
+
+        return null;
     }
 
     private static string RepositoryRoot()

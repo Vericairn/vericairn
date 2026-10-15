@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Jason Furr
 """A genuinely different peer: drives the built vericairn MCP server over stdio with JSON-RPC 2.0 and checks the protocol
-subset end to end. Read-only: it never calls a write tool. Usage: mcp_peer.py <vericairn binary or vericairn.dll> <estate root> [--as id]"""
+subset end to end. Read-only: it never calls a write tool. Usage: mcp_peer.py <vericairn binary or vericairn.dll> <estate root> [--as id]
+Any estate will do: the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, and otherwise the
+first work order the estate's status lists; in an estate without work orders it is skipped, and the output says which."""
 import json, subprocess, sys, time
 
 def main():
@@ -23,9 +25,11 @@ def main():
         reply = json.loads(line)
         assert reply.get("jsonrpc") == "2.0" and reply.get("id") == n, reply
         return reply
-    checks = []
+    checks, skipped = [], []
     def check(name, ok, detail=""):
         checks.append((name, ok, detail)); print(("PASS " if ok else "FAIL ") + name + (": " + detail if detail else ""))
+    def skip(name, why):
+        skipped.append(name); print("SKIP " + name + ": " + why)
     t0 = time.time()
     init = call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcp_peer.py", "version": "1"}})
     check("initialize negotiates 2025-06-18", init["result"]["protocolVersion"] == "2025-06-18", init["result"]["serverInfo"]["version"])
@@ -40,8 +44,13 @@ def main():
     status = call("tools/call", {"name": "estate_status", "arguments": {}})["result"]
     doc = json.loads(status["content"][0]["text"])
     check("estate_status returns the canonical document", (not status.get("isError")) and "workOrders" in doc and "records" in doc, f"{doc.get('records')} records")
-    brief = call("tools/call", {"name": "work_brief", "arguments": {"workOrder": "MCP-01"}})["result"]
-    check("work_brief MCP-01 returns markdown", (not brief.get("isError")) and "MCP-01" in brief["content"][0]["text"])
+    keys = [w["key"] for w in doc.get("workOrders", []) if isinstance(w, dict) and isinstance(w.get("key"), str)]
+    if not keys:
+        skip("work_brief returns markdown", "the estate has no work order, so there is no brief to read")
+    else:
+        key = "MCP-01" if "MCP-01" in keys else keys[0]
+        brief = call("tools/call", {"name": "work_brief", "arguments": {"workOrder": key}})["result"]
+        check(f"work_brief {key} returns markdown", (not brief.get("isError")) and key in brief["content"][0]["text"], "" if key == "MCP-01" else "the estate has no work order MCP-01, so the first one its status lists stands in")
     missing = call("tools/call", {"name": "work_brief", "arguments": {"workOrder": "NO-SUCH"}})["result"]
     check("unknown work order is an error result, not a crash", missing.get("isError") is True)
     unknown = call("tools/call", {"name": "work_attempt", "arguments": {}})
@@ -55,7 +64,7 @@ def main():
     err = proc.stderr.read()
     check("diagnostics go to stderr only", "vericairn mcp: serving" in err)
     failed = [c for c in checks if not c[1]]
-    print(f"{len(checks) - len(failed)} of {len(checks)} checks passed in {time.time() - t0:.1f}s")
+    print(f"{len(checks) - len(failed)} of {len(checks)} checks passed" + (f", {len(skipped)} skipped" if skipped else "") + f" in {time.time() - t0:.1f}s")
     sys.exit(1 if failed else 0)
 
 main()

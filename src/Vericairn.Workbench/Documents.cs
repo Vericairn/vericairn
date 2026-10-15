@@ -629,9 +629,10 @@ public sealed class SettingField(ProviderSettingRow setting, string? declared) :
 
 /// <summary>
 /// The release workspace over a provider's intent-then-effect flow: the provider and its declared settings (the product's
-/// declared destination preselects them; nothing is selected for a product that declares none), submit (the intent is recorded
-/// before the dispatch), observe (the run, the draft, the publication), accept the exact candidate, and the operator's manual
-/// publication shown as a command the client never runs.
+/// declared destination preselects them; nothing is selected for a product that declares none, or one the runtime cannot reach,
+/// even after another product's provider was selected), submit (the intent is recorded before the dispatch), observe (the run,
+/// the draft, the publication), accept the exact candidate, and the operator's manual publication shown as a command the client
+/// never runs.
 /// </summary>
 public sealed class ReleaseWorkspace : Document
 {
@@ -666,7 +667,10 @@ public sealed class ReleaseWorkspace : Document
     /// <summary>The settings the selected provider declares, filled from the product's declaration.</summary>
     public ObservableCollection<SettingField> Settings { get; } = [];
 
-    /// <summary>The product; its declared destination selects its provider.</summary>
+    /// <summary>
+    /// The product; its declared destination selects its provider. A product that declares none, or one the runtime cannot reach,
+    /// clears the selection and its setting fields, so that no provider chosen for another product carries over to this one.
+    /// </summary>
     public ProductRow? Product
     {
         get => product;
@@ -674,11 +678,7 @@ public sealed class ReleaseWorkspace : Document
         {
             if (Set(ref product, value))
             {
-                if (value?.ReleaseProvider is string declared && Providers.FirstOrDefault(p => p.Provider == declared) is ProviderRow match)
-                {
-                    SelectedProvider = match;
-                }
-
+                SelectedProvider = value?.ReleaseProvider is string declared ? Providers.FirstOrDefault(p => p.Provider == declared) : null;
                 RebuildSettings();
             }
         }
@@ -742,7 +742,9 @@ public sealed class ReleaseWorkspace : Document
 
         if (SelectedProvider is null)
         {
-            Status = "Choose the provider the release goes through; the product declares none, and nothing is selected for you.";
+            Status = Product.ReleaseProvider is null
+                ? "Choose the provider the release goes through; the product declares none, and nothing is selected for you."
+                : $"Choose the provider the release goes through; the product declares {Product.ReleaseProvider}, which the runtime cannot reach, and nothing is selected for you.";
             return;
         }
 

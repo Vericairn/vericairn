@@ -1072,8 +1072,9 @@ internal static class Commands
     });
 
     /// <summary>
-    /// Writes the agent orientation files from the estate's identity and the tool registry; with <paramref name="check"/>,
-    /// compares the copies in the directory with a fresh generation instead and names every file that is missing or differs.
+    /// Writes the agent orientation files from the estate's identity, its qualifications of agent harnesses and the tool registry;
+    /// with <paramref name="check"/>, compares the copies in the directory with a fresh generation instead and names every file
+    /// that is missing or differs.
     /// </summary>
     public static int McpOrientation(string root, string output, string? actingAs, bool check, bool json) => WithApi(root, api =>
     {
