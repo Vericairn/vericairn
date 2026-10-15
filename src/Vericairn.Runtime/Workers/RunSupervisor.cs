@@ -150,8 +150,9 @@ public sealed class RunSupervisor
             LaunchedAt = RecordParser.FormatTimestamp(launchedAt),
             Heartbeat = RecordParser.FormatTimestamp(launchedAt),
         };
-        directory.Write(state);
-        return new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap);
+        var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap);
+        supervisor.Save();
+        return supervisor;
     }
 
     /// <summary>

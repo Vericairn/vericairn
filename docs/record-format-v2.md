@@ -520,3 +520,5 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said
   as such, never a silent self-admission.
+
+A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.

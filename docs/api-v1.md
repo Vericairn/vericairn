@@ -167,3 +167,5 @@ person.
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
+
+A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.

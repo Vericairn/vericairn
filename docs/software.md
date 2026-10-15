@@ -312,3 +312,5 @@ upgrade path is proven by a synthetic migration in the tests: a step from format
 file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
 once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+
+A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.

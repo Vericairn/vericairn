@@ -20,6 +20,28 @@ namespace Vericairn.Runtime.Tests;
 public class WorkerTests
 {
     [Fact]
+    public void AFailedInitialStateWriteKeepsTheLaunchedRunsAllowanceAndSupervision()
+    {
+        using var run = new RunEstate();
+        HookedLauncher.Install(run, command: () =>
+        {
+            string id = Assert.Single(run.Service.Records("operation")).Id;
+            var directory = new RunDirectory(run.Service.Session.Manifest.Estate, id);
+            Directory.CreateDirectory(directory.StateFile);
+        });
+        RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("state-failure"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("dispatched", run.Row(started.Run).Status);
+        Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        Assert.Equal(run.Estate.OperatorId, AgentRuns.Find(run.Estate.Load(), started.Run)!.Intent.By);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        Directory.Delete(files.StateFile);
+        WaitUntil(() => run.Row(started.Run).Observed);
+        Assert.Equal("contained", run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in.", 0)).State);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+    }
+
+    [Fact]
     public void ClaudeCodeCarriesTheAssignmentWithItsCapRecordedBeforeItStartsAndItsUsageAfter()
     {
         using var run = new RunEstate();
