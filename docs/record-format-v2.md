@@ -110,10 +110,11 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   the `covered` paths' identity (required to clear a `covers` trigger), the triggers it `answers` (each one the
   declaration names), the reviewer's `independence` of the content, and the `checks` that ran. A failed check refuses
   a clearance. The reviewer is `self` when the review revises the content, or when the reviewer recorded the latest
-  revision of the estate file or the latest revising review; for a document of another repository, whose author the
-  estate's records do not show, a reviewer may also state `self` (see Living documents due). `independent-agent` needs
-  an agent principal and `operator` the operator role. A clearance meets the declaration's `clearedBy`, and a `self`
-  review does not clear a document whose `clearedBy` is `independent`.
+  revision of the estate file or the latest revising review made before the review (by time, and records of one second
+  by identifier); for a document of another repository, whose author the estate's records do not show, a reviewer may
+  also state `self` (see Living documents due). `independent-agent` needs an agent principal and `operator` the operator
+  role. A clearance meets the declaration's `clearedBy`, and a `self` review does not clear a document whose
+  `clearedBy` is `independent`.
 
 ## Fields new in format 2
 

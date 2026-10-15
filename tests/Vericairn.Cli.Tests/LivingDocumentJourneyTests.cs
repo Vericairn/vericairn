@@ -5,6 +5,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using Vericairn.Cli;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Identity;
+using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Cli.Tests;
@@ -354,13 +356,11 @@ public class LivingDocumentJourneyTests
             Assert.Equal("independent-agent", Review("docs/guide.md", builder, "--independence", "independent-agent"));
 
             // The record type's other rules hold for a statement: operator needs the operator role, independent-agent an agent,
-            // and a reviewer who revised the content is self (an editor with no earlier review here, since a revising review counts
-            // for every review of its principal dated in the same second); an unknown independence is refused before anything is read.
+            // and a reviewer who revised the content is self; an unknown independence is refused before anything is read.
             Assert.Contains("document.independence", Refused("README.md", builder, "--independence", "operator").Out, StringComparison.Ordinal);
             Assert.Contains("document.independence", Refused("README.md", op, "--independence", "independent-agent").Out, StringComparison.Ordinal);
-            string editor = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "editor.json", """{"kind":"agent","name":"Editor","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
-            Assert.Equal("self", Independence(root, CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", editor, "--outcome", "revised", "--summary", "Named the releases page.", "--commit", commit)));
-            Assert.Contains("document.independence", Refused("README.md", editor, "--independence", "independent-agent").Out, StringComparison.Ordinal);
+            Assert.Equal("self", Independence(root, CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", reviewer, "--outcome", "revised", "--summary", "Named the releases page.", "--commit", commit)));
+            Assert.Contains("document.independence", Refused("README.md", reviewer, "--independence", "independent-agent").Out, StringComparison.Ordinal);
             CliHarness.Outcome unknown = Refused("README.md", builder, "--independence", "nobody");
             Assert.Equal(2, unknown.Code);
             Assert.Contains("self, independent-agent, operator", unknown.Err, StringComparison.Ordinal);
@@ -379,6 +379,79 @@ public class LivingDocumentJourneyTests
             Assert.Contains("docs/overview.md is an estate file, whose revisions in the estate decide its reviewer's independence: independent-agent for this review, not self.", stated.Err, StringComparison.Ordinal);
             Assert.Equal("self", Independence(root, CliHarness.Ok([.. estateFile, "--by", op, "--independence", "self"])));
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, repo, scratch);
+        }
+    }
+
+    /// <summary>
+    /// Records of one second are ordered by identifier, as record format 2 orders them, and so is a principal's earlier revising
+    /// review or revision when its independence is judged: a revising review, or a revision of an estate file, that a principal
+    /// makes later in the same second as one of its own reviews leaves that review independent, and is accepted. Before 0.6.0 the
+    /// rules counted it as earlier, the earlier review became the principal's own, and the write was refused.
+    /// </summary>
+    [Fact]
+    public void ARevisionLaterInTheSameSecondLeavesItsAuthorsEarlierReviewIndependent()
+    {
+        string root = CliHarness.TempDirectory("living-second");
+        string repo = CliHarness.TempDirectory("living-second-widget");
+        string scratch = CliHarness.TempDirectory("living-second-scratch");
+        try
+        {
+            Git(repo, "init", "-q", "-b", "main");
+            string readme = Path.Combine(repo, "README.md");
+            File.WriteAllText(readme, "# Widget\n\nThe releases page lists every release.\n");
+            Git(repo, "add", ".");
+            Git(repo, "commit", "-q", "-m", "First commit");
+            string commit = GitOutput(repo, "rev-parse", "HEAD");
+
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "One second.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string editor = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "editor.json", """{"kind":"agent","name":"Editor","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", repo, "--by", op, "--name", "Widget", "--role", "source of the widget", "--visibility", "public").Json.GetProperty("resource").GetProperty("id").GetString()!;
+            CliHarness.Ok("--estate", root, "sources", "clone", repo, "--resource", resource);
+            CliHarness.Outcome readmeDeclared = CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "readme.json", $$"""{"path":"README.md","repository":"{{resource}}","title":"Readme","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says what the widget is."}"""));
+            string guide = Path.Combine(root, "docs", "guide.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(guide)!);
+            File.WriteAllText(guide, "# Guide\n");
+            string firstRevision = CliHarness.Ok("--estate", root, "--json", "records", "new", "document-revision", "--by", op, "--body", CliHarness.WriteJson(scratch, "revision-1.json", $$"""{"path":"docs/guide.md","title":"Guide","hash":"{{ContentHash.Sha256File(guide)}}","bytes":{{new FileInfo(guide).Length}},"mediaType":"text/markdown","revision":1,"summary":"First."}""")).Id;
+            CliHarness.Outcome guideDeclared = CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "guide.json", """{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says how to use the widget."}"""));
+
+            // One second, and identifiers in the order the editor makes its records within it.
+            DateTimeOffset second = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.AddMinutes(1).ToUnixTimeSeconds());
+            string at = RecordParser.FormatTimestamp(second);
+            string readmeContent = $$"""{"hash":"{{ContentHash.Sha256File(readme)}}","bytes":{{new FileInfo(readme).Length}},"commit":"{{commit}}"}""";
+            CliHarness.Outcome Write(string type, int milliseconds, string subject, string body, params string[] more) =>
+                CliHarness.Run(["--estate", root, "--json", "records", "new", type, "--by", editor, "--at", at, "--id", Ulid.NewUlid(second.AddMilliseconds(milliseconds)).Value, "--subject", subject, "--body", CliHarness.WriteJson(scratch, $"{type}-{milliseconds}.json", body), .. more]);
+            string ReviewBody(string outcome, string independence, string content) =>
+                $$"""{"outcome":"{{outcome}}","content":{{content}},"answers":[],"independence":"{{independence}}","summary":"Read it.","findings":[],"checks":[]}""";
+            string readmeSubject = $"living-document:{readmeDeclared.Id}:{readmeDeclared.Hash}";
+
+            // Another repository's README: the editor's independent review, then its revising review later in that second.
+            CliHarness.Outcome independent = Write("document-review", 100, readmeSubject, ReviewBody("current", "independent-agent", readmeContent));
+            Assert.Equal(0, independent.Code);
+            CliHarness.Outcome revising = Write("document-review", 200, readmeSubject, ReviewBody("revised", "self", readmeContent));
+            Assert.True(revising.Code == 0, revising.Out + revising.Err);
+
+            // A review the editor makes after its revising review in the same second is its own.
+            CliHarness.Outcome claimed = Write("document-review", 300, readmeSubject, ReviewBody("current", "independent-agent", readmeContent));
+            Assert.Equal(1, claimed.Code);
+            Assert.Contains("document.independence", claimed.Out, StringComparison.Ordinal);
+            Assert.Equal(0, Write("document-review", 400, readmeSubject, ReviewBody("current", "self", readmeContent)).Code);
+
+            // An estate file: the editor's independent review of the operator's guide, then the editor's revision of the guide
+            // later in that second.
+            string guideContent = $$"""{"hash":"{{ContentHash.Sha256File(guide)}}","bytes":{{new FileInfo(guide).Length}}}""";
+            Assert.Equal(0, Write("document-review", 500, $"living-document:{guideDeclared.Id}:{guideDeclared.Hash}", ReviewBody("current", "independent-agent", guideContent)).Code);
+            File.WriteAllText(guide, "# Guide\n\nRevised by the editor.\n");
+            CliHarness.Outcome revision = CliHarness.Run(["--estate", root, "--json", "records", "new", "document-revision", "--by", editor, "--at", at, "--id", Ulid.NewUlid(second.AddMilliseconds(600)).Value, "--supersedes", firstRevision, "--body", CliHarness.WriteJson(scratch, "revision-2.json", $$"""{"path":"docs/guide.md","title":"Guide","hash":"{{ContentHash.Sha256File(guide)}}","bytes":{{new FileInfo(guide).Length}},"mediaType":"text/markdown","revision":2,"summary":"Revised by the editor."}""")]);
+            Assert.True(revision.Code == 0, revision.Out + revision.Err);
+
+            // Every review stays valid: the estate checks clean.
+            CliHarness.Outcome check = CliHarness.Run("--estate", root, "--json", "estate", "check");
+            Assert.True(check.Code == 0, check.Out);
+            Assert.Equal(0, check.Json.GetProperty("errors").GetInt32());
         }
         finally
         {

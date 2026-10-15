@@ -162,9 +162,9 @@ public sealed class DocumentReviewType : IRecordType
 
     /// <summary>
     /// The reviewer's independence of the content: self when this review revised it, or when the reviewer recorded the estate file's
-    /// latest revision or the latest revising review. The estate's records show who revised an estate file but not who wrote a
-    /// document of another repository, so there a reviewer may also state self. And the declaration's clearedBy, which only a
-    /// clearing review must meet: a self review does not clear a document that asks for independence.
+    /// latest revision or the latest revising review before this review. The estate's records show who revised an estate file but
+    /// not who wrote a document of another repository, so there a reviewer may also state self. And the declaration's clearedBy,
+    /// which only a clearing review must meet: a self review does not clear a document that asks for independence.
     /// </summary>
     private static void Independence(ValidationContext context, RecordEnvelope declaration, RecordEnvelope reviewer, string outcome, string? independence)
     {
@@ -172,8 +172,8 @@ public sealed class DocumentReviewType : IRecordType
         bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;
         IReadOnlyList<string> chain = context.Model.Chain(context.Model.Latest(declaration));
         RecordEnvelope? reviser = elsewhere
-            ? context.Model.OfType("document-review").Where(r => r.Id != context.Record.Id && r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised" && string.CompareOrdinal(r.At, context.Record.At) <= 0).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
-            : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && string.CompareOrdinal(r.At, context.Record.At) <= 0).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+            ? context.Model.OfType("document-review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised" && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
+            : context.Model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path && Before(r, context.Record)).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         bool revised = outcome == "revised" || reviser?.By == context.Record.By;
         bool self = revised || (elsewhere && independence == "self");
         string kind = EstateModel.BodyString(reviewer, "kind") ?? string.Empty;
@@ -212,4 +212,8 @@ public sealed class DocumentReviewType : IRecordType
                 break;
         }
     }
+
+    /// <summary>Record order: by authoring time, and by identifier within the same second, as record format 2 orders records of one second.</summary>
+    private static bool Before(RecordEnvelope a, RecordEnvelope b) =>
+        string.CompareOrdinal(a.At, b.At) < 0 || (a.At == b.At && string.CompareOrdinal(a.Id, b.Id) < 0);
 }
