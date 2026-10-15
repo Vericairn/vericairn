@@ -124,11 +124,7 @@ public sealed partial class EstateService
         try
         {
             workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces", Slug(plan.Branch)));
-            string own = Path.Combine(workspace.Path, ".vericairn");
-            Directory.CreateDirectory(own);
-            File.WriteAllText(Path.Combine(own, ".gitignore"), "*\n");
-            brief = Path.Combine(own, "brief.md");
-            File.WriteAllText(brief, plan.Brief);
+            brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
         }
         catch (ProviderRefusedException exception)
         {
