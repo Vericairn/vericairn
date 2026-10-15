@@ -303,6 +303,7 @@ public class LocalNetworkConformanceTests
             ("/v1/devices/recovery", $$"""{"principal":"{{op}}","name":"Recovery","output":{{JsonSerializer.Serialize(export)}},"passphrase":"a long passphrase"}"""),
             ("/v1/estate/export", $$"""{"output":{{JsonSerializer.Serialize(export)}},"by":"{{op}}"}"""),
             ("/v1/pairings", $$"""{"principal":"{{op}}","by":"{{op}}"}"""),
+            ("/v1/runtime/certificate", """{"compromised":true}"""),
         ];
         foreach ((string path, string? json) in local)
         {

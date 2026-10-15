@@ -13,8 +13,8 @@ using Vericairn.Runtime.Service;
 namespace Vericairn.Daemon;
 
 /// <summary>
-/// The routes only a running daemon can serve, from 0.6.0: pairing codes and the pairing exchange, and the runtime identity's
-/// proof. They need the daemon's listeners and memory, so the embedded runtime has none of them.
+/// The routes only a running daemon can serve, from 0.6.0: pairing codes and the pairing exchange, the runtime identity's proof
+/// and the certificate's rotation. They need the daemon's listeners and memory, so the embedded runtime has none of them.
 /// </summary>
 internal static class DaemonRoutes
 {
@@ -26,6 +26,7 @@ internal static class DaemonRoutes
         app.MapPost($"{v}/pairing/hello", (HttpContext context, PairingHello hello) => Hello(host, context, hello));
         app.MapPost($"{v}/pairing/confirm", (HttpContext context, PairingConfirm confirm) => Confirm(host, context, confirm));
         app.MapGet(RuntimeIdentityScheme.Path, (HttpContext context, string? nonce) => Prove(host, context, nonce));
+        app.MapPost($"{v}/runtime/certificate", (HttpContext context, CertificateRotateRequest request) => Rotate(host, context, request));
     }
 
     /// <summary>Issues a pairing code under an administrator's authority, for a principal and the profiles it will be permitted.</summary>
@@ -141,6 +142,29 @@ internal static class DaemonRoutes
 
         RuntimeIdentityProof proof = host.Identity.Prove(host.Service.Session.Manifest.Estate, host.CertificateOf(context), nonce!);
         return Results.Content(JsonSerializer.Serialize(proof, ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status200OK);
+    }
+
+    /// <summary>Replaces the runtime certificate now; for a compromise also closes every other open connection, and with identity replaces the runtime identity too.</summary>
+    private static IResult Rotate(DaemonHost host, HttpContext context, CertificateRotateRequest request)
+    {
+        request ??= new CertificateRotateRequest();
+        if (host.Certificates is null)
+        {
+            return Problem(StatusCodes.Status409Conflict, "refused", "This daemon serves no TLS profile, so it presents no certificate to rotate; the certificate file is replaced at the next start.");
+        }
+
+        if (request.Identity && host.Identity is null)
+        {
+            return Problem(StatusCodes.Status409Conflict, "refused", "This daemon serves no local-network profile, so it has no identity to replace.");
+        }
+
+        CertificateRotated rotated = host.RotateCertificate(request.Compromised || request.Identity, request.Reason, request.Identity, context.Connection.Id);
+        if (rotated.Compromised && context.Connection.LocalIpAddress is not null)
+        {
+            context.Response.Headers.Connection = "close";
+        }
+
+        return Results.Json(rotated, ProtocolJson.Options);
     }
 
     /// <summary>A problem with its length stated.</summary>

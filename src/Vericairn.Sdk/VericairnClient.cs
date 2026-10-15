@@ -300,6 +300,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     /// </summary>
     public (PairingIssued? Issued, Problem? Problem) IssuePairing(PairingIssueRequest request) => PostOrProblem<PairingIssueRequest, PairingIssued>("/v1/pairings", request);
 
+    /// <summary>Replaces the runtime certificate now, from 0.6.0; on the runtime's own machine. A problem when the daemon serves no TLS profile.</summary>
+    public (CertificateRotated? Rotated, Problem? Problem) RotateCertificate(CertificateRotateRequest request) => PostOrProblem<CertificateRotateRequest, CertificateRotated>("/v1/runtime/certificate", request);
+
     /// <summary>The runtime identity's proof for a nonce over this connection's certificate, from 0.6.0; null when the runtime has no identity.</summary>
     public RuntimeIdentityProof? RuntimeIdentity(string nonce)
     {

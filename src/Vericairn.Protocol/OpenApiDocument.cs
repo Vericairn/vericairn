@@ -62,6 +62,7 @@ public static class OpenApiDocument
         ("POST", "/v1/pairing/hello"),
         ("POST", "/v1/pairing/confirm"),
         ("GET", "/v1/runtime/identity"),
+        ("POST", "/v1/runtime/certificate"),
     ];
 
     /// <summary>The path of the document itself.</summary>
@@ -167,7 +168,7 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity")
+        if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
             DaemonResponses(path, responses);
         }
@@ -220,10 +221,14 @@ public static class OpenApiDocument
                 responses["401"] = new JsonObject { ["description"] = "No such exchange is open, the code expired or was used, or the confirmation does not match the code (Problem with code denied); nothing is recorded." };
                 responses["422"] = new JsonObject { ["description"] = "The device's signature does not verify, or the estate refused its records (Problem, with findings when rejected); nothing is recorded." };
                 break;
-            default:
+            case "/v1/runtime/identity":
                 responses["200"] = new JsonObject { ["description"] = "RuntimeIdentityProof: the identity key's signature over the estate, the certificate on this connection and the nonce." };
                 responses["404"] = new JsonObject { ["description"] = "The runtime has no identity: it serves no local-network profile (Problem)." };
                 responses["422"] = new JsonObject { ["description"] = "No nonce of 16 to 64 bytes (Problem)." };
+                break;
+            default:
+                responses["200"] = new JsonObject { ["description"] = "CertificateRotated: the new certificate's fingerprint and expiry, the replaced one's, whether open connections were closed, and the new identity's fingerprint when it was replaced." };
+                responses["409"] = new JsonObject { ["description"] = "The daemon serves no TLS profile, or no identity to replace (Problem)." };
                 break;
         }
     }
@@ -269,6 +274,7 @@ public static class OpenApiDocument
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
             ["PairingHello"] = Object(("handle", "string"), ("nonce", "string")),
             ["PairingConfirm"] = Object(("handle", "string"), ("runtimeNonce", "string"), ("device", "object"), ("signature", "string"), ("mac", "string")),
+            ["CertificateRotateRequest"] = Object(("compromised", "boolean"), ("reason", "string"), ("identity", "boolean")),
             ["ObjectBytes"] = new JsonObject { ["type"] = "string", ["format"] = "binary" },
             ["WriteOutcome"] = Object(("written", "object"), ("problem", "object")),
             ["Problem"] = Object(("code", "string"), ("message", "string"), ("findings", "array")),
@@ -301,6 +307,7 @@ public static class OpenApiDocument
         "/v1/pairings" => "PairingIssueRequest",
         "/v1/pairing/hello" => "PairingHello",
         "/v1/pairing/confirm" => "PairingConfirm",
+        "/v1/runtime/certificate" => "CertificateRotateRequest",
         _ => "Problem",
     };
 
@@ -359,6 +366,7 @@ public static class OpenApiDocument
         ("POST", "/v1/pairing/hello") => "Start a pairing over the local network with a code's handle and a nonce: the runtime answers with its identity, the certificate on this connection, the device record it will write, and its MAC with the code's runtime key.",
         ("POST", "/v1/pairing/confirm") => "Complete a pairing: the device's key, descriptive identity and signature of its record, with its MAC with the code's device key; the runtime records the device and its admission, and answers with its MAC over the whole exchange.",
         ("GET", "/v1/runtime/identity") => "The runtime identity's proof for a nonce: its signature over the estate, the certificate this connection presented and the nonce, which a paired device checks before any other request.",
+        ("POST", "/v1/runtime/certificate") => "Replace the runtime certificate now: paired devices keep working, since the runtime identity signs the new one; for a compromise every other open connection is closed too, and identity replaces the runtime identity as well, after which every device pairs again. On the runtime's own machine only.",
         _ => string.Empty,
     };
 }

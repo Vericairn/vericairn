@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -39,10 +40,10 @@ public sealed record DaemonOptions
     /// <summary>Where the runtime identity's key is made and held; the strongest custody this machine offers when null.</summary>
     public IDeviceKeyStore? IdentityStore { get; init; }
 
-    /// <summary>The clock that pairing codes are judged by; the system's when null.</summary>
+    /// <summary>The clock that pairing codes and the certificate's schedule are judged by; the system's when null.</summary>
     public TimeProvider? Time { get; init; }
 
-    /// <summary>Where the daemon says what it did (pairings); nowhere when null.</summary>
+    /// <summary>Where the daemon says what it did (pairings, rotations); nowhere when null.</summary>
     public Action<string>? Log { get; init; }
 }
 
@@ -57,19 +58,26 @@ public sealed class DaemonHost : IAsyncDisposable
     private static readonly object LoopbackMarker = new();
     private static readonly object LocalNetworkMarker = new();
     private static readonly object CertificateMarker = new();
+    private static readonly TimeSpan ScheduleCheck = TimeSpan.FromHours(1);
 
     private readonly string endpointFile;
+    private readonly string directory;
     private readonly DaemonOptions options;
+    private readonly ConcurrentDictionary<string, ConnectionContext> open = new(StringComparer.Ordinal);
     private readonly object gate = new();
+    private readonly object rotation = new();
+    private readonly CancellationTokenSource schedule = new();
     private WebApplication? app;
+    private Task? scheduled;
     private Task? stopping;
     private ListenOptions? loopbackListener;
     private ListenOptions? localNetworkListener;
 
-    private DaemonHost(EstateService service, string endpointFile, DaemonOptions options, RuntimeCertificates? certificates, RuntimeIdentity? identity)
+    private DaemonHost(EstateService service, string endpointFile, string directory, DaemonOptions options, RuntimeCertificates? certificates, RuntimeIdentity? identity)
     {
         Service = service;
         this.endpointFile = endpointFile;
+        this.directory = directory;
         this.options = options;
         Certificates = certificates;
         Identity = identity;
@@ -82,7 +90,7 @@ public sealed class DaemonHost : IAsyncDisposable
     /// <summary>The service this daemon owns.</summary>
     public EstateService Service { get; }
 
-    /// <summary>Where clients connect.</summary>
+    /// <summary>Where clients connect, as last published: a rotation publishes the new certificate's fingerprint.</summary>
     public DaemonEndpoint Endpoint { get; private set; }
 
     /// <summary>The runtime identity's public key (base64url SubjectPublicKeyInfo) that paired devices pin; null without the local-network profile.</summary>
@@ -90,7 +98,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
     internal RuntimeCertificates? Certificates { get; }
 
-    internal RuntimeIdentity? Identity { get; }
+    internal RuntimeIdentity? Identity { get; private set; }
 
     internal PairingRegistry Pairings { get; }
 
@@ -189,7 +197,7 @@ public sealed class DaemonHost : IAsyncDisposable
             throw;
         }
 
-        var host = new DaemonHost(service, file, options, certificates, identity);
+        var host = new DaemonHost(service, file, directory, options, certificates, identity);
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd" });
         builder.Logging.ClearProviders();
         builder.Services.ConfigureHttpJsonOptions(json =>
@@ -218,7 +226,7 @@ public sealed class DaemonHost : IAsyncDisposable
                 {
                     host.loopbackListener = listen;
                     listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
-                    listen.Use(Mark(LoopbackMarker));
+                    listen.Use(host.Track(LoopbackMarker));
                 });
             }
 
@@ -238,7 +246,7 @@ public sealed class DaemonHost : IAsyncDisposable
                         ClientCertificateValidation = (_, _, _) => true,
                         OnAuthenticate = (_, tls) => tls.AllowTlsResume = false,
                     });
-                    listen.Use(Mark(LocalNetworkMarker));
+                    listen.Use(host.Track(LocalNetworkMarker));
                 });
             }
         });
@@ -256,6 +264,7 @@ public sealed class DaemonHost : IAsyncDisposable
             await app.DisposeAsync().ConfigureAwait(false);
             certificates?.Dispose();
             service.Dispose();
+            host.schedule.Dispose();
             throw;
         }
 
@@ -271,6 +280,11 @@ public sealed class DaemonHost : IAsyncDisposable
             ? new LocalNetworkEndpoint(served.Address.ToString(), served.Port, identity!.Fingerprint)
             : null;
         host.Publish(new DaemonEndpoint(pipe ? "pipe" : "unix", address, Environment.ProcessId, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), root, ApiVersion.Current, loopbackEndpoint, localNetworkEndpoint));
+        if (certificates is not null)
+        {
+            host.scheduled = Task.Run(() => host.RunScheduleAsync(host.schedule.Token), CancellationToken.None);
+        }
+
         return host;
     }
 
@@ -294,6 +308,25 @@ public sealed class DaemonHost : IAsyncDisposable
     public IReadOnlyList<string> Addresses() =>
         App.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()?.Addresses.ToList() ?? [];
 
+    /// <summary>
+    /// Replaces the runtime certificate now. Paired devices keep working, since they pin the runtime identity, which signs the new
+    /// certificate's fingerprint; loopback clients read it from the endpoint file. For a compromise every open connection is closed
+    /// too, and with <paramref name="identity"/> the runtime identity is replaced as well, after which every paired device pairs again.
+    /// </summary>
+    public CertificateRotated RotateCertificate(bool compromised = false, string? reason = null, bool identity = false) => RotateCertificate(compromised, reason, identity, keep: null);
+
+    /// <summary>Replaces the certificate when it expires within <see cref="RuntimeCertificate.RenewBefore"/> of a moment: the schedule a running daemon keeps.</summary>
+    public bool RotateIfDue(DateTimeOffset now)
+    {
+        if (Certificates is null || !RuntimeCertificate.IsDue(Certificates.Current, now))
+        {
+            return false;
+        }
+
+        RotateCertificate(compromised: false, reason: "on schedule, before it expires", identity: false, keep: null);
+        return true;
+    }
+
     /// <summary>Waits until the daemon is asked to stop.</summary>
     public Task WaitForShutdownAsync(CancellationToken cancellationToken = default) => App.WaitForShutdownAsync(cancellationToken);
 
@@ -313,6 +346,56 @@ public sealed class DaemonHost : IAsyncDisposable
         await StopAsync().ConfigureAwait(false);
         await App.DisposeAsync().ConfigureAwait(false);
         Certificates?.Dispose();
+        schedule.Dispose();
+    }
+
+    internal CertificateRotated RotateCertificate(bool compromised, string? reason, bool identity, string? keep)
+    {
+        lock (rotation)
+        {
+            if (Certificates is null)
+            {
+                throw new InvalidOperationException("This daemon serves no TLS profile, so it presents no certificate to rotate.");
+            }
+
+            if (identity && Identity is null)
+            {
+                throw new InvalidOperationException("This daemon serves no local-network profile, so it has no identity to replace.");
+            }
+
+            (string previous, X509Certificate2 next) = Certificates.Rotate();
+            if (identity)
+            {
+                Identity = Identity!.Replace(directory, options.IdentityStore);
+            }
+
+            string fingerprint = RuntimeCertificate.Fingerprint(next);
+            DaemonEndpoint published = Endpoint;
+            Publish(published with
+            {
+                Loopback = published.Loopback is null ? null : published.Loopback with { Certificate = fingerprint },
+                LocalNetwork = published.LocalNetwork is null || Identity is null ? published.LocalNetwork : published.LocalNetwork with { Identity = Identity.Fingerprint },
+            });
+
+            // After a compromise nothing continues on a connection that began under the old certificate: every client connects
+            // again, sees the new certificate and, on the local network, has the runtime identity prove it.
+            bool close = compromised || identity;
+            int closed = 0;
+            if (close)
+            {
+                foreach ((string id, ConnectionContext connection) in open)
+                {
+                    if (id != keep)
+                    {
+                        connection.Abort(new ConnectionAbortedException("The runtime certificate was replaced after a compromise."));
+                        closed++;
+                    }
+                }
+            }
+
+            options.Log?.Invoke($"runtime certificate {previous} replaced by {fingerprint}{(close ? $" after a compromise; {closed} open connections closed" : string.Empty)}{(identity ? $"; runtime identity replaced by {Identity!.Fingerprint}, and every paired device pairs again" : string.Empty)}{(string.IsNullOrWhiteSpace(reason) ? string.Empty : ": " + reason)}");
+            return new CertificateRotated(fingerprint, previous, RecordParser.FormatTimestamp(new DateTimeOffset(next.NotAfter.ToUniversalTime())), close, closed, identity ? Identity!.Fingerprint : null);
+        }
     }
 
     /// <summary>Whether a request came over the local-network profile.</summary>
@@ -374,11 +457,19 @@ public sealed class DaemonHost : IAsyncDisposable
         return current;
     }
 
-    /// <summary>Marks a TLS connection with the profile it came over.</summary>
-    private static Func<ConnectionDelegate, ConnectionDelegate> Mark(object marker) => next => connection =>
+    /// <summary>Marks a TLS connection with its profile and keeps it in view while it is open, so a compromise can close it.</summary>
+    private Func<ConnectionDelegate, ConnectionDelegate> Track(object marker) => next => async connection =>
     {
         connection.Items[marker] = true;
-        return next(connection);
+        open[connection.ConnectionId] = connection;
+        try
+        {
+            await next(connection).ConfigureAwait(false);
+        }
+        finally
+        {
+            open.TryRemove(connection.ConnectionId, out _);
+        }
     };
 
     private void Publish(DaemonEndpoint endpoint)
@@ -393,11 +484,39 @@ public sealed class DaemonHost : IAsyncDisposable
         }
     }
 
+    private async Task RunScheduleAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(ScheduleCheck, Time);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    RotateIfDue(Time.GetUtcNow());
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CryptographicException or InvalidOperationException)
+                {
+                    Log($"the runtime certificate could not be replaced on schedule: {exception.Message}");
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Stopping.
+        }
+    }
+
     private async Task StopCoreAsync()
     {
+        await schedule.CancelAsync().ConfigureAwait(false);
         try
         {
             await App.StopAsync().ConfigureAwait(false);
+            if (scheduled is not null)
+            {
+                await scheduled.ConfigureAwait(false);
+            }
         }
         finally
         {

@@ -19,10 +19,26 @@ namespace Vericairn.Protocol;
 /// <param name="Signature">ECDSA P-256 signature by the identity key over the proof's digest, IEEE P1363, base64url.</param>
 public sealed record RuntimeIdentityProof(string Estate, string Identity, string Certificate, string Nonce, string Signature);
 
+/// <summary>Replace the runtime certificate now; from 0.6.0.</summary>
+/// <param name="Compromised">The certificate's key may be known to someone else: every open connection is closed too, so nothing continues under it.</param>
+/// <param name="Reason">Why, for the daemon's log.</param>
+/// <param name="Identity">The runtime identity's key may be known to someone else: it is replaced as well, and every paired device pairs again; implies Compromised.</param>
+public sealed record CertificateRotateRequest(bool Compromised = false, string? Reason = null, bool Identity = false);
+
+/// <summary>A rotation of the runtime certificate.</summary>
+/// <param name="Certificate">The new certificate's fingerprint, sha256:hex.</param>
+/// <param name="Previous">The replaced certificate's fingerprint.</param>
+/// <param name="NotAfter">When the new certificate expires; it is replaced before then.</param>
+/// <param name="Compromised">Whether the rotation was for a compromise, which closed the open connections.</param>
+/// <param name="Closed">How many open connections were closed.</param>
+/// <param name="Identity">The new runtime identity's fingerprint when the identity was replaced too; null otherwise.</param>
+public sealed record CertificateRotated(string Certificate, string Previous, string NotAfter, bool Compromised, int Closed, string? Identity = null);
+
 /// <summary>
 /// The runtime identity scheme, version 1: a long-lived P-256 key of the runtime, separate from its TLS certificate and never used
 /// by TLS, signs SHA-256 over the scheme, the estate, the certificate fingerprint and the client's nonce joined by line feeds.
-/// A client accepts a connection only when the identity it pinned signed the certificate its own handshake showed.
+/// Rotating the certificate keeps the identity, so paired devices keep working; the identity signs only the current certificate,
+/// so a replaced one is refused by every client.
 /// </summary>
 public static class RuntimeIdentityScheme
 {

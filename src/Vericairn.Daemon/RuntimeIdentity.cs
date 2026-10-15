@@ -13,7 +13,8 @@ namespace Vericairn.Daemon;
 /// <summary>
 /// The runtime's own identity on this machine, from 0.6.0: a P-256 key held in the strongest custody the machine offers, as a
 /// device key is, separate from the runtime certificate and never handed to TLS. A device pins its public key when it pairs; on
-/// every connection the identity signs the fingerprint of the certificate in use. The file beside the live store names the key and
+/// every connection the identity signs the fingerprint of the certificate in use, so the certificate can be replaced without
+/// pairing again, and a replaced certificate is refused by every paired device. The file beside the live store names the key and
 /// its custody, never the key itself.
 /// </summary>
 public sealed class RuntimeIdentity
@@ -63,6 +64,25 @@ public sealed class RuntimeIdentity
         }
 
         return Create(directory, store);
+    }
+
+    /// <summary>
+    /// Replaces the identity: for a key that may be known to someone else. The old key is removed from custody and a new one made;
+    /// no paired device accepts the runtime afterwards until it pairs again.
+    /// </summary>
+    public RuntimeIdentity Replace(string directory, IDeviceKeyStore? store = null)
+    {
+        RuntimeIdentity next = Create(directory, store ?? this.store);
+        try
+        {
+            this.store.Remove(key);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
+        {
+            // The replaced key is no longer named anywhere; removing it is tidiness, not the protection.
+        }
+
+        return next;
     }
 
     /// <summary>The identity's proof for a client's nonce on a connection that presented a certificate.</summary>
