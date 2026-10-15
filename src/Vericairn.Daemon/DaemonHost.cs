@@ -181,7 +181,9 @@ public sealed class DaemonHost : IAsyncDisposable
         string address = endpoint ?? DefaultEndpoint(root);
         string file = EndpointFilePath(root);
         string directory = Path.GetDirectoryName(file)!;
-        Directory.CreateDirectory(directory);
+
+        // The live store's directory holds the runtime's certificate and key, its identity and settings, and the local-network ledger.
+        RuntimeCertificate.OwnerOnly(directory);
         bool pipe = OperatingSystem.IsWindows();
         if (!pipe && File.Exists(address))
         {

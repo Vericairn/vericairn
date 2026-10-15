@@ -557,6 +557,115 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F10_TheRuntimeCertificateAndItsDirectoryAreOwnerOnlyFromTheStart()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        string live = Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!;
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(live));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(live, RuntimeCertificate.FileName)));
+        }
+
+        // A temporary file an interrupted write left, readable by anyone, is removed and never written into.
+        string directory = Path.Combine(harness.DeviceHome, "certificate");
+        Directory.CreateDirectory(directory);
+        string stale = Path.Combine(directory, RuntimeCertificate.FileName + ".tmp");
+        File.WriteAllText(stale, "left by an interrupted write");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+            File.SetUnixFileMode(stale, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        }
+
+        using X509Certificate2 replaced = RuntimeCertificate.Replace(directory);
+        Assert.True(replaced.HasPrivateKey);
+        Assert.False(File.Exists(stale));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(directory));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(directory, RuntimeCertificate.FileName)));
+        }
+
+        // The key is in memory only where the platform's TLS allows it.
+        Assert.Equal(OperatingSystem.IsLinux() ? X509KeyStorageFlags.EphemeralKeySet : X509KeyStorageFlags.DefaultKeySet, RuntimeCertificate.KeyStorage);
+    }
+
+    [Fact]
+    public void F10_ACredentialIsDisposedWithItsKeyOnceItsSuccessorIsReplaced()
+    {
+        string home = Path.Combine(Path.GetTempPath(), "vericairn-credential-" + Records.Identity.Ulid.NewUlid().Value);
+        try
+        {
+            var store = new FileKeyStore(home);
+            string id = Records.Identity.Ulid.NewUlid().Value;
+            byte[] publicKey = store.Create(id);
+            var time = new ManualTime(DateTimeOffset.UtcNow);
+            using var credential = new LocalNetworkCredential(new DeviceRequestSigner(store, id), publicKey, time);
+            X509Certificate2 first = credential.Current();
+            Assert.Same(first, credential.Current());
+
+            // Renewed within its last hour: the one replaced stays usable for a handshake that began with it.
+            time.Advance(TimeSpan.FromHours(23.5));
+            X509Certificate2 second = credential.Current();
+            Assert.NotSame(first, second);
+            Assert.True(first.HasPrivateKey);
+
+            // Renewed again: the first is disposed, and its key with it.
+            time.Advance(TimeSpan.FromHours(23.5));
+            X509Certificate2 third = credential.Current();
+            Assert.Equal(IntPtr.Zero, first.Handle);
+            Assert.NotEqual(IntPtr.Zero, second.Handle);
+            credential.Dispose();
+            Assert.Equal(IntPtr.Zero, second.Handle);
+            Assert.Equal(IntPtr.Zero, third.Handle);
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void F12_OnlyAPrivateAddressIsTakenWithoutTheOperatorsLeave()
+    {
+        foreach (string address in new[] { "127.0.0.1", "127.8.9.10", "::1", "10.0.0.1", "172.16.0.1", "172.31.255.254", "192.168.1.20", "169.254.10.1", "fe80::1", "fd12:3456::1", "::ffff:192.168.1.20" })
+        {
+            Assert.True(RuntimeSettings.Exposure(IPAddress.Parse(address)) is null, address);
+        }
+
+        foreach (string address in new[] { "0.0.0.0", "::" })
+        {
+            Assert.Contains("wildcard", RuntimeSettings.Exposure(IPAddress.Parse(address)), StringComparison.Ordinal);
+        }
+
+        foreach (string address in new[] { "8.8.8.8", "172.32.0.1", "100.64.0.1", "192.169.0.1", "2001:db8::1", "::ffff:8.8.8.8" })
+        {
+            Assert.Contains("other networks", RuntimeSettings.Exposure(IPAddress.Parse(address)), StringComparison.Ordinal);
+        }
+
+        // Settings that name such an address without the operator's leave, as when edited by hand, are refused; with it, kept.
+        Assert.Contains("--allow-public", Assert.Throws<InvalidOperationException>(() => new RuntimeSettings("0.0.0.0:7443").LocalNetworkEndPoint()).Message, StringComparison.Ordinal);
+        Assert.Contains("--allow-public", Assert.Throws<InvalidOperationException>(() => new RuntimeSettings("8.8.8.8:7443").LocalNetworkEndPoint()).Message, StringComparison.Ordinal);
+        Assert.Equal(new IPEndPoint(IPAddress.Any, 7443), new RuntimeSettings("0.0.0.0:7443", AllowPublic: true).LocalNetworkEndPoint());
+        Assert.Equal(new IPEndPoint(IPAddress.Parse("192.168.1.20"), 7443), new RuntimeSettings("192.168.1.20:7443").LocalNetworkEndPoint());
+    }
+
+    [Fact]
+    public async Task F12_TheDaemonDoesNotStartOnAWildcardItWasNotAllowed()
+    {
+        // runtime.json edited by hand to a wildcard address: the daemon refuses to start, before anything listens.
+        using var estate = new Records.Tests.TestEstate(2);
+        string live = Path.GetDirectoryName(DaemonHost.EndpointFilePath(estate.Root))!;
+        Directory.CreateDirectory(live);
+        File.WriteAllText(Path.Combine(live, RuntimeSettings.FileName), "{\"format\":\"vericairn.runtime-settings/1\",\"localNetwork\":\"0.0.0.0:0\"}\n");
+        InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(() => DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Contains("--allow-public", refused.Message, StringComparison.Ordinal);
+        Assert.Null(DaemonHost.Discover(estate.Root));
+        Assert.False(RuntimeSettings.Load(live).AllowPublic);
+    }
+
+    [Fact]
     public async Task F11_AClientCertificateNamesNoDevice()
     {
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();

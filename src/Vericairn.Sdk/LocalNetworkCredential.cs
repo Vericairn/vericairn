@@ -13,7 +13,8 @@ namespace Vericairn.Sdk;
 /// The TLS client credential of a paired device on the local network, from 0.6.0: a certificate for a fresh P-256 key, under a
 /// subject that names no device, issued, ECDSA with SHA-256, by the device's own key wherever that key is held. The runtime accepts
 /// it only while the device's current key verifies it, so the key its pairing bound to the device record is what the client proves.
-/// The TLS key never leaves memory and is replaced after a day; the device key signs once per credential.
+/// The TLS key is made afresh for each credential, which is replaced after a day; the device key signs once per credential. Where
+/// the TLS key is held while in use depends on the platform's TLS: see <see cref="KeyStorage"/>.
 /// </summary>
 public sealed class LocalNetworkCredential : IDisposable
 {
@@ -27,26 +28,49 @@ public sealed class LocalNetworkCredential : IDisposable
 
     private readonly IRequestSigner signer;
     private readonly byte[] publicKey;
+    private readonly TimeProvider time;
     private readonly object gate = new();
-    private readonly List<X509Certificate2> issued = [];
     private X509Certificate2? current;
+    private X509Certificate2? previous;
 
     /// <summary>A credential issued by a device's key, whose public key (SubjectPublicKeyInfo) the device record names.</summary>
     public LocalNetworkCredential(IRequestSigner signer, byte[] publicKey)
+        : this(signer, publicKey, TimeProvider.System)
+    {
+    }
+
+    /// <summary>A credential issued by a device's key, renewed by the given clock.</summary>
+    public LocalNetworkCredential(IRequestSigner signer, byte[] publicKey, TimeProvider time)
     {
         this.signer = signer ?? throw new ArgumentNullException(nameof(signer));
         this.publicKey = publicKey ?? throw new ArgumentNullException(nameof(publicKey));
+        this.time = time ?? throw new ArgumentNullException(nameof(time));
     }
 
-    /// <summary>The certificate to present now, issued afresh when there is none or it expires within the hour.</summary>
+    /// <summary>
+    /// How a credential's TLS key is loaded for this platform's TLS. On Linux it stays in this process's memory. macOS's TLS uses a
+    /// key only from a keychain, so .NET holds it in a temporary keychain file in the user's owner-only temporary directory, which
+    /// disposing the certificate deletes; Windows' TLS does not use an ephemeral key, so it is held in the user's key store until the
+    /// certificate is disposed. A process that ends without disposing it, in a crash, leaves that file or stored key behind: a key
+    /// that authenticates TLS for a day and signs no request.
+    /// </summary>
+    public static X509KeyStorageFlags KeyStorage => OperatingSystem.IsLinux() ? X509KeyStorageFlags.EphemeralKeySet : X509KeyStorageFlags.DefaultKeySet;
+
+    /// <summary>
+    /// The certificate to present now, issued afresh when there is none or it expires within the hour. The one it replaces stays
+    /// usable for a handshake that may have begun with it; the one before that is disposed, and its key with it.
+    /// </summary>
     public X509Certificate2 Current()
     {
         lock (gate)
         {
-            if (current is null || new DateTimeOffset(current.NotAfter.ToUniversalTime()) - DateTimeOffset.UtcNow < RenewBefore)
+            DateTimeOffset now = time.GetUtcNow();
+            if (current is null || new DateTimeOffset(current.NotAfter.ToUniversalTime()) - now < RenewBefore)
             {
-                current = Issue(signer, publicKey, DateTimeOffset.UtcNow);
-                issued.Add(current);
+                X509Certificate2 next = Issue(signer, publicKey, now);
+                previous?.Dispose();
+                previous = current;
+                current = next;
             }
 
             return current;
@@ -74,12 +98,12 @@ public sealed class LocalNetworkCredential : IDisposable
         using X509Certificate2 certificate = request.Create(name, new DeviceKeySignature(signer, publicKey), now.AddMinutes(-5), now.Add(Validity), serial);
         using X509Certificate2 withKey = certificate.CopyWithPrivateKey(key);
 
-        // A round trip through PKCS#12 gives the key the form each platform's TLS needs for a client certificate (SChannel on
-        // Windows does not use an ephemeral key); nothing is written to disk.
+        // A round trip through PKCS#12 gives the key the form each platform's TLS needs for a client certificate; where that puts
+        // the key, in memory, a temporary keychain or the user's key store, is what KeyStorage says. Vericairn writes no file of it.
         byte[] pkcs12 = withKey.Export(X509ContentType.Pkcs12);
         try
         {
-            return X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.DefaultKeySet);
+            return X509CertificateLoader.LoadPkcs12(pkcs12, null, KeyStorage);
         }
         finally
         {
@@ -92,13 +116,10 @@ public sealed class LocalNetworkCredential : IDisposable
     {
         lock (gate)
         {
-            foreach (X509Certificate2 certificate in issued)
-            {
-                certificate.Dispose();
-            }
-
-            issued.Clear();
+            current?.Dispose();
+            previous?.Dispose();
             current = null;
+            previous = null;
         }
     }
 

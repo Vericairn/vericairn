@@ -4,13 +4,15 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Vericairn.Sdk;
 
 namespace Vericairn.Daemon;
 
 /// <summary>
-/// The runtime's own certificate for its TLS profiles: self-signed, ECDSA P-256, kept owner-only beside the estate's live state on
-/// this machine, replaced on a schedule before it expires and at once on demand. Loopback clients pin its SHA-256 fingerprint from
-/// the endpoint file; paired devices accept it when the runtime identity signs its fingerprint. No trust store is consulted.
+/// The runtime's own certificate for its TLS profiles: self-signed, ECDSA P-256, kept with its key in an owner-only PKCS#12 file
+/// in the owner-only directory of the estate's live state on this machine, replaced on a schedule before it expires and at once on
+/// demand. Loopback clients pin its SHA-256 fingerprint from the endpoint file; paired devices accept it when the runtime identity
+/// signs its fingerprint. No trust store is consulted. While a daemon presents it, its key is also where <see cref="KeyStorage"/> says.
 /// </summary>
 public static class RuntimeCertificate
 {
@@ -23,17 +25,23 @@ public static class RuntimeCertificate
     /// <summary>A certificate with less than this left is replaced: at the next start, and by a running daemon on its schedule.</summary>
     public static TimeSpan RenewBefore { get; } = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// How the key is loaded while a daemon presents the certificate, as for a client's credential (<see cref="LocalNetworkCredential.KeyStorage"/>):
+    /// in memory on Linux, in a temporary keychain on macOS, in the user's key store on Windows, until the daemon stops.
+    /// </summary>
+    public static X509KeyStorageFlags KeyStorage => LocalNetworkCredential.KeyStorage;
+
     /// <summary>Loads the certificate kept in a directory, creating or renewing it when absent, unreadable or close to expiry.</summary>
     public static X509Certificate2 Load(string directory, string subject = "vericairn runtime")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        Directory.CreateDirectory(directory);
+        OwnerOnly(directory);
         string path = Path.Combine(directory, FileName);
         if (File.Exists(path))
         {
             try
             {
-                X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, X509KeyStorageFlags.DefaultKeySet);
+                X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, KeyStorage);
                 if (existing.HasPrivateKey && !IsDue(existing, DateTimeOffset.UtcNow))
                 {
                     return existing;
@@ -54,8 +62,19 @@ public static class RuntimeCertificate
     public static X509Certificate2 Replace(string directory, string subject = "vericairn runtime")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        Directory.CreateDirectory(directory);
+        OwnerOnly(directory);
         return Create(Path.Combine(directory, FileName), subject);
+    }
+
+    /// <summary>Creates a directory, or keeps the one there, readable and writable by its owner only on Linux and macOS.</summary>
+    public static void OwnerOnly(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
     }
 
     /// <summary>Whether a certificate is due for replacement at a moment: it expires within <see cref="RenewBefore"/>.</summary>
@@ -89,20 +108,23 @@ public static class RuntimeCertificate
         byte[] pkcs12 = created.Export(X509ContentType.Pkcs12);
         try
         {
-            // Written beside the file and moved over it, so the old certificate is gone the moment the new one is there.
+            // Written beside the file, owner-only from the moment it exists (a file left from an interrupted write is removed, never
+            // reused with its mode), and moved over it, so the old certificate is gone the moment the new one is there.
             string temporary = path + ".tmp";
-            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            File.Delete(temporary);
+            var create = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                create.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            using (var stream = new FileStream(temporary, create))
             {
                 stream.Write(pkcs12);
             }
 
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-
             File.Move(temporary, path, overwrite: true);
-            return X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.DefaultKeySet);
+            return X509CertificateLoader.LoadPkcs12(pkcs12, null, KeyStorage);
         }
         finally
         {

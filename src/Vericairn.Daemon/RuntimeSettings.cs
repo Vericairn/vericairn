@@ -10,10 +10,12 @@ namespace Vericairn.Daemon;
 
 /// <summary>
 /// How the operator configured the runtime of an estate on this machine, kept owner-only beside its live store: machine
-/// configuration, never a record. The local-network profile is off unless it names an address.
+/// configuration, never a record. The local-network profile is off unless it names an address, and listens on a wildcard or
+/// public address only when the operator allowed that address explicitly.
 /// </summary>
 /// <param name="LocalNetwork">The address and port the local-network profile listens on, for example 192.168.1.20:7443; null when off.</param>
-public sealed record RuntimeSettings(string? LocalNetwork = null)
+/// <param name="AllowPublic">The operator allowed an address that is a wildcard or reachable from other networks (--allow-public).</param>
+public sealed record RuntimeSettings(string? LocalNetwork = null, bool AllowPublic = false)
 {
     /// <summary>File name beside the live store.</summary>
     public const string FileName = "runtime.json";
@@ -34,7 +36,8 @@ public sealed record RuntimeSettings(string? LocalNetwork = null)
         {
             JsonNode? node = JsonNode.Parse(File.ReadAllText(path));
             string? address = node?["localNetwork"]?.GetValue<string>();
-            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address);
+            bool allowPublic = node?["allowPublic"]?.GetValue<bool>() ?? false;
+            return new RuntimeSettings(string.IsNullOrWhiteSpace(address) ? null : address, allowPublic);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException)
         {
@@ -48,7 +51,7 @@ public sealed record RuntimeSettings(string? LocalNetwork = null)
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, FileName);
-        var node = new JsonObject { ["format"] = Format, ["localNetwork"] = LocalNetwork };
+        var node = new JsonObject { ["format"] = Format, ["localNetwork"] = LocalNetwork, ["allowPublic"] = AllowPublic };
         string temporary = path + ".tmp";
         File.WriteAllText(temporary, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
         if (!OperatingSystem.IsWindows())
@@ -59,9 +62,67 @@ public sealed record RuntimeSettings(string? LocalNetwork = null)
         File.Move(temporary, path, overwrite: true);
     }
 
-    /// <summary>The configured local-network address, or null when the profile is off.</summary>
-    public IPEndPoint? LocalNetworkEndPoint() =>
-        LocalNetwork is null ? null : TryParseAddress(LocalNetwork, out IPEndPoint? endpoint, out string? problem) ? endpoint : throw new InvalidOperationException(problem);
+    /// <summary>
+    /// The configured local-network address, or null when the profile is off; refused when it is a wildcard or public address the
+    /// operator did not allow, as when the settings were edited by hand.
+    /// </summary>
+    public IPEndPoint? LocalNetworkEndPoint()
+    {
+        if (LocalNetwork is null)
+        {
+            return null;
+        }
+
+        if (!TryParseAddress(LocalNetwork, out IPEndPoint? endpoint, out string? problem))
+        {
+            throw new InvalidOperationException(problem);
+        }
+
+        string? exposure = Exposure(endpoint!.Address);
+        if (exposure is not null && !AllowPublic)
+        {
+            throw new InvalidOperationException($"The runtime settings name {LocalNetwork} for the local-network profile, which is {exposure}, and the operator did not allow that: give a private address with 'vericairn runtime configure --local-network <address:port>', or allow this one with --allow-public.");
+        }
+
+        return endpoint;
+    }
+
+    /// <summary>
+    /// What makes an address unfit for the local-network profile without the operator's explicit leave, or null when it is private:
+    /// loopback, 10/8, 172.16/12, 192.168/16 or link-local for IPv4, and loopback, link-local or unique local (fc00::/7) for IPv6.
+    /// </summary>
+    public static string? Exposure(IPAddress address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        if (address.IsIPv4MappedToIPv6)
+        {
+            address = address.MapToIPv4();
+        }
+
+        if (address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any))
+        {
+            return "a wildcard address, every interface of this machine and every network they reach";
+        }
+
+        if (IPAddress.IsLoopback(address))
+        {
+            return null;
+        }
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            byte[] bytes = address.GetAddressBytes();
+            bool privateRange = bytes[0] == 10 || (bytes[0] == 172 && (bytes[1] & 0xF0) == 16) || (bytes[0] == 192 && bytes[1] == 168) || (bytes[0] == 169 && bytes[1] == 254);
+            return privateRange ? null : "an address other networks may reach";
+        }
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6 && (address.IsIPv6LinkLocal || address.IsIPv6UniqueLocal))
+        {
+            return null;
+        }
+
+        return "an address other networks may reach";
+    }
 
     /// <summary>Reads an address the local-network profile can listen on: an IP address and a port, 192.168.1.20:7443 or [fe80::1]:7443; port 0 asks for any free port.</summary>
     public static bool TryParseAddress(string? text, out IPEndPoint? endpoint, out string? problem)

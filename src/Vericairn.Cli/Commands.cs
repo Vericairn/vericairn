@@ -1590,7 +1590,7 @@ internal static class Commands
         }
     }
 
-    public static int RuntimeConfigure(string root, string? localNetwork, bool json)
+    public static int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json)
     {
         try
         {
@@ -1599,8 +1599,14 @@ internal static class Commands
                 return Fail(NotAnEstate(root));
             }
 
+            if (allowPublic && localNetwork is null)
+            {
+                return Fail("--allow-public allows the address --local-network gives; give both.");
+            }
+
             string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
             RuntimeSettings settings;
+            string? exposure = null;
             if (localNetwork is null)
             {
                 settings = RuntimeSettings.Load(directory);
@@ -1615,10 +1621,17 @@ internal static class Commands
                         return Fail(problem!);
                     }
 
-                    address = endpoint!.ToString();
+                    // The profile is for a private network: a wildcard or public address is the operator's explicit choice.
+                    exposure = RuntimeSettings.Exposure(endpoint!.Address);
+                    if (exposure is not null && !allowPublic)
+                    {
+                        return Fail($"{endpoint} is {exposure}, and the local-network profile is for a private network: give this machine's address on it (in 10/8, 172.16/12, 192.168/16, link-local or fc00::/7), or add --allow-public to listen there anyway. Nothing was changed.");
+                    }
+
+                    address = endpoint.ToString();
                 }
 
-                settings = new RuntimeSettings(address);
+                settings = new RuntimeSettings(address, AllowPublic: exposure is not null);
                 settings.Save(directory);
             }
 
@@ -1627,13 +1640,17 @@ internal static class Commands
             string? served = running?.LocalNetwork is LocalNetworkEndpoint lan ? new System.Net.IPEndPoint(System.Net.IPAddress.Parse(lan.Host), lan.Port).ToString() : null;
             if (json)
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { localNetwork = settings.LocalNetwork, served = alive ? served : null, restart = alive && localNetwork is not null }, ProtocolJson.Options));
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, served = alive ? served : null, restart = alive && localNetwork is not null }, ProtocolJson.Options));
                 return Clean;
             }
 
             Console.Out.WriteLine(settings.LocalNetwork is null
                 ? "the local-network profile is off: the runtime listens on its local socket and loopback only"
                 : $"the runtime serves the local-network profile at {settings.LocalNetwork}, to devices that pair with it, from its next start");
+            if (settings.AllowPublic)
+            {
+                Console.Out.WriteLine("  allowed with --allow-public: a wildcard or public address, where every device that reaches it may try to pair");
+            }
             if (alive)
             {
                 Console.Out.WriteLine(served is null ? $"  daemon {running!.ProcessId} serves no local-network profile now" : $"  daemon {running!.ProcessId} serves it now at {served}");

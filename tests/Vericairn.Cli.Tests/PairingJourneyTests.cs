@@ -36,7 +36,18 @@ public class PairingJourneyTests
             Assert.Contains("the local-network profile is off", CliHarness.Ok("--estate", root, "runtime", "configure").Out, StringComparison.Ordinal);
             Assert.Contains("needs one", CliHarness.Run("--estate", root, "devices", "pair", "--principal", builder, "--by", op).Err, StringComparison.Ordinal);
             Assert.Contains("no port", CliHarness.Run("--estate", root, "runtime", "configure", "--local-network", "127.0.0.1").Err, StringComparison.Ordinal);
-            Assert.Equal("127.0.0.1:0", CliHarness.Ok("--estate", root, "--json", "runtime", "configure", "--local-network", "127.0.0.1:0").Json.GetProperty("localNetwork").GetString());
+
+            // A wildcard or public address is the operator's explicit choice; a private one needs none. Only configured here: the
+            // runtime starts below on loopback, configured last.
+            Assert.Contains("--allow-public", CliHarness.Run("--estate", root, "runtime", "configure", "--local-network", "0.0.0.0:7443").Err, StringComparison.Ordinal);
+            Assert.Contains("the local-network profile is off", CliHarness.Ok("--estate", root, "runtime", "configure").Out, StringComparison.Ordinal);
+            Assert.True(CliHarness.Ok("--estate", root, "--json", "runtime", "configure", "--local-network", "0.0.0.0:7443", "--allow-public").Json.GetProperty("allowPublic").GetBoolean());
+            Assert.Contains("allowed with --allow-public", CliHarness.Ok("--estate", root, "runtime", "configure").Out, StringComparison.Ordinal);
+            Assert.Contains("--allow-public allows", CliHarness.Run("--estate", root, "runtime", "configure", "--allow-public").Err, StringComparison.Ordinal);
+            Assert.False(CliHarness.Ok("--estate", root, "--json", "runtime", "configure", "--local-network", "192.168.1.20:7443").Json.GetProperty("allowPublic").GetBoolean());
+            JsonElement loopbackOnly = CliHarness.Ok("--estate", root, "--json", "runtime", "configure", "--local-network", "127.0.0.1:0").Json;
+            Assert.Equal("127.0.0.1:0", loopbackOnly.GetProperty("localNetwork").GetString());
+            Assert.False(loopbackOnly.GetProperty("allowPublic").GetBoolean());
             Assert.Contains("configured at 127.0.0.1:0", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
 
             await using DaemonHost host = await DaemonHost.StartAsync(root, options: new DaemonOptions { IdentityStore = new FileKeyStore(home) }, cancellationToken: TestContext.Current.CancellationToken);
