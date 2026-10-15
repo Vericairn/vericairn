@@ -104,7 +104,7 @@ internal static class FakeHarness
             case "claude-fails":
                 Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}}""");
                 return 1;
-            case "codex" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" when listing:
+            case "codex" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" or "codex-headroom" when listing:
                 Emit("apps                                     stable             true");
                 Emit("goals                                    stable             true");
                 Emit("hooks                                    stable             true");
@@ -133,6 +133,9 @@ internal static class FakeHarness
             case "claude-incomplete":
                 Emit("""{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}""");
                 return 0;
+            case "codex-headroom":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":800,"output_tokens":150}}""");
+                return Linger(acknowledge: true);
             case "codex-spender":
                 Emit("""{"type":"thread.started","thread_id":"stand-in"}""");
                 Emit("""{"type":"turn.completed","usage":{"input_tokens":900,"cached_input_tokens":0,"output_tokens":150}}""");

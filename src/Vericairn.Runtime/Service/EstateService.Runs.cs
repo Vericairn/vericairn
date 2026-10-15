@@ -101,6 +101,12 @@ public sealed partial class EstateService
             plan = planned;
         }
 
+        RunLimits limits = RunLimits.For(Element(plan.Cap), WorkerOptions);
+        if (limits.Tokens is <= 0 || limits.Currency is <= 0)
+        {
+            return RunProblem(pending, "not-started", "refused", "The remaining allowance cannot cover one unit plus in-flight headroom. Nothing was recorded.");
+        }
+
         // The launcher's own check comes before anything is recorded or prepared: Codex's goals feature, for one.
         Dictionary<string, string> environment = WorkerEnvironment.Build(WorkerOptions.Environment ?? WorkerEnvironment.Current(), launcher.EnvironmentNames);
         string? unverified;
@@ -183,6 +189,7 @@ public sealed partial class EstateService
                 ["workOrder"] = plan.Key,
                 ["worker"] = AgentRuns.WorkerContract,
             };
+            target["capMode"] = "soft";
             if (excepted is not null)
             {
                 target["custodyException"] = excepted.Id;
@@ -198,6 +205,8 @@ public sealed partial class EstateService
                 ["evidence"] = new JsonArray(new JsonObject { ["summary"] = $"The brief of work order {plan.Key}, exported into the workspace as .vericairn/brief.md.", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(plan.Brief)) }),
                 ["cap"] = plan.Cap.DeepClone(),
             };
+            ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = limits.Describe(Element(plan.Cap)) });
+            ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = launcher.Limitations });
             if (excepted is not null)
             {
                 ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = $"Launched unattended under the sponsor's custody exception {excepted.Id}, in force until {excepted.Expires}, while {(excepted.Exposed.Count == 1 ? "device" : "devices")} {string.Join(", ", excepted.Exposed.Select(e => e.Device))} of an operator or of the goal's sponsor {(excepted.Exposed.Count == 1 ? "signs" : "sign")} without {(excepted.Exposed.Count == 1 ? "its" : "their")} owner's presence on the machine that ran the worker." });
@@ -268,7 +277,7 @@ public sealed partial class EstateService
                 },
             };
             File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-            LaunchContext launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment));
+            LaunchContext launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits));
             environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
             IReadOnlyList<string> command = launcher.Command(launch);
 
@@ -279,7 +288,7 @@ public sealed partial class EstateService
                 lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"));
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits);
                 }
             }
         }

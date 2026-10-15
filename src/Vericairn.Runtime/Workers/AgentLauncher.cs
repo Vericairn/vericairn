@@ -13,8 +13,9 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="McpServer">The MCP server's command line: the vericairn command, then --estate and the estate's root, mcp serve, --as and the agent.</param>
 /// <param name="McpEnvironment">The variables the MCP server needs to find the agent's key, which its configuration passes it.</param>
 /// <param name="Settings">The launcher's settings for this run, as the request names them.</param>
+/// <param name="Limits">Operational thresholds below the reserved cap, passed to supported native harness controls.</param>
 /// <param name="Environment">The environment the harness is started with, built from the allowlist.</param>
-public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment);
+public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment, RunLimits? Limits = null);
 
 /// <summary>What one line of a harness's output told the worker; a field left null told nothing.</summary>
 /// <param name="Tokens">The tokens the run has spent, as a total that replaces the tally.</param>
@@ -65,6 +66,9 @@ public interface IAgentLauncher
     /// or that could not be verified. Null when it can run.
     /// </summary>
     string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => null;
+
+    /// <summary>Native spending controls used by this launcher; unlisted units have no native enforcement.</summary>
+    string Limitations => "No native token or currency limit; the worker uses soft accounting thresholds only.";
 
     /// <summary>Builds the run-specific harness configuration and environment outside the workspace before launch.</summary>
     LaunchContext Prepare(LaunchContext context) => context;

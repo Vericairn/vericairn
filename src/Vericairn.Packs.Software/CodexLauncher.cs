@@ -27,6 +27,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public string Launcher => LauncherId;
 
     /// <inheritdoc />
+    public string Limitations => "Codex receives native rollout budget tracking at its token threshold below the reservation; tracking is not a hard limit. There is no native currency cap; unreported currency is charged in full.";
+
+    /// <inheritdoc />
     public string? Harness => "Codex";
 
     /// <inheritdoc />
@@ -122,10 +125,16 @@ public sealed class CodexLauncher : IAgentLauncher
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        var limits = new List<string>();
+        if (context.Limits?.Tokens is long tokens)
+        {
+            limits.AddRange(["-c", "features.rollout_budget.enabled=true", "-c", "features.rollout_budget.limit_tokens=" + tokens.ToString(CultureInfo.InvariantCulture)]);
+        }
+
         return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
             "-c", "mcp_servers=" + Mcp(context),
             "-c", "projects." + Toml(context.Workspace) + ".trust_level=\"untrusted\"",
-            "/goal " + context.Condition];
+            .. limits, "/goal " + context.Condition];
     }
 
     private static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";

@@ -37,6 +37,40 @@ public class WorkerTests
     }
 
     [Fact]
+    public void NativeCurrencyLimitAndSoftCapDisclosureAreRecordedBeforeLaunch()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000,"currency":{"amount":1000,"unit":"USD"}}""");
+        string report = run.Report("native-budget");
+        RunResponse started = run.Start("claude-code", "claude", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        List<string> args = Assert.Single(FakeHarness.Reports(report))["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal("9.00", args[args.IndexOf("--max-budget-usd") + 1]);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal("soft", recorded.Target("capMode"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.Contains("token threshold 4500 of 5000; currency threshold 900 of 1000", StringComparison.Ordinal));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.Contains("no native total-token cap", StringComparison.Ordinal));
+        Assert.Equal(1000, row.Charged.GetProperty("currency").GetProperty("amount").GetInt64());
+    }
+
+    [Fact]
+    public void TokenHeadroomStopsBelowTheReservationAndPassesTheNativeTrackingLimit()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":1000}""");
+        string report = run.Report("headroom");
+        RunResponse started = run.Start("codex", "codex-headroom", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal(1000, row.Cap.GetProperty("tokens").GetInt64());
+        Assert.Equal(950, row.Charged.GetProperty("tokens").GetInt64());
+        Assert.Contains("threshold of 900", row.Stop!.Reason, StringComparison.Ordinal);
+        List<string> args = FakeHarness.Reports(report)[1]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Contains("features.rollout_budget.enabled=true", args);
+        Assert.Contains("features.rollout_budget.limit_tokens=900", args);
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+    }
+
+    [Fact]
     public void CodexGetsAFreshConfigurationWithoutAmbientServersPluginsOrHooks()
     {
         using var run = new RunEstate();
@@ -437,7 +471,7 @@ public class WorkerTests
     }
 
     [Fact]
-    public void TheWallMinutesCapStopsARunAndCrossingItMarksTheGoalBudgetLimited()
+    public void TheWorkerReservesShutdownHeadroomBeforeTheWallMinutesAllowanceEnds()
     {
         var options = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
         using var run = new RunEstate("""{"wallMinutes":3,"attemptsPerStep":3}""", options: options);
@@ -447,18 +481,12 @@ public class WorkerTests
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
         Assert.Equal("worker", row.Stop!.RequestedBy);
-        Assert.Contains("reached its cap of 3 wall minutes", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.Contains("shutdown headroom", row.Stop.Reason, StringComparison.Ordinal);
         Assert.NotNull(row.Stop.ContainedAt);
-        Assert.True(row.Usage!.Value.GetProperty("wallMinutes").GetInt64() >= 3);
+        Assert.True(row.Usage!.Value.GetProperty("wallMinutes").GetInt64() <= 3);
 
-        // The cap crossed fences new runs: the goal is budget-limited, an ask to its sponsor to raise the budget or stop.
-        JsonElement goal = run.Service.Goal(run.Goal)!.Json;
-        Assert.Equal("budget-limited", goal.GetProperty("status").GetString());
-        RecordResponse status = run.Service.Records("goal-status").OrderBy(s => s.Id, StringComparer.Ordinal).Last();
-        Assert.Equal(run.Estate.OperatorId, status.Envelope.GetProperty("by").GetString());
-        Assert.Contains("wallMinutes", status.Envelope.GetProperty("body").GetProperty("note").GetString(), StringComparison.Ordinal);
-        RunResponse fenced = run.Start("generic", "ack-stop", run.Report("fenced"));
-        Assert.Contains("is budget-limited", fenced.Message, StringComparison.Ordinal);
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+        Assert.True(Assert.Single(Assert.Single(run.Service.Runs().Goals).Units).Remaining > 0);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -472,7 +500,7 @@ public class WorkerTests
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
         Assert.Equal("worker", row.Stop!.RequestedBy);
-        Assert.Contains("crossed the run's cap of 1000", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.Contains("threshold of 900, below the reserved cap of 1000", row.Stop.Reason, StringComparison.Ordinal);
         Assert.NotNull(row.Stop.AcknowledgedAt);
         Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
         Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text.Json;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
@@ -19,6 +20,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
 
     /// <inheritdoc />
     public string Launcher => LauncherId;
+
+    /// <inheritdoc />
+    public string Limitations => "Claude Code receives --max-budget-usd for USD at the currency threshold below its reservation. This is an estimated-spend soft limit that can overshoot; no native total-token cap is available. Other currencies have no native cap.";
 
     /// <inheritdoc />
     public string? Harness => "Claude Code";
@@ -47,7 +51,13 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config"];
+        var limits = new List<string>();
+        if (context.Limits is { Currency: long amount, CurrencyUnit: "USD" })
+        {
+            limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
+        }
+
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>

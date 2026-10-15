@@ -47,6 +47,7 @@ public sealed class RunSupervisor
     private readonly DateTimeOffset? deadline;
     private readonly long wallMinutes;
     private readonly long? tokenCap;
+    private readonly RunLimits? limits;
     private readonly Thread[] readers;
     private long written;
     private long? tokens;
@@ -57,7 +58,7 @@ public sealed class RunSupervisor
     private DateTimeOffset? transmitted;
     private TimeSpan grace;
 
-    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits)
     {
         this.process = process;
         this.launcher = launcher;
@@ -66,8 +67,9 @@ public sealed class RunSupervisor
         this.state = state;
         this.wallMinutes = wallMinutes;
         this.tokenCap = tokenCap;
+        this.limits = limits;
         LaunchedAt = launchedAt;
-        deadline = launchedAt + (options.Minute * wallMinutes);
+        deadline = launchedAt + (limits?.WallTime ?? (options.Minute * wallMinutes));
         grace = options.Grace;
         readers =
         [
@@ -90,7 +92,7 @@ public sealed class RunSupervisor
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
     /// </summary>
-    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap)
+    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(environment);
@@ -146,7 +148,7 @@ public sealed class RunSupervisor
         };
         try
         {
-            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap);
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits);
             supervisor.Save();
             return supervisor;
         }
@@ -198,11 +200,15 @@ public sealed class RunSupervisor
                     }
                     else if (now >= deadline)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its cap of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its wall-time stop threshold below its allowance of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes, reserving shutdown headroom"), now);
                     }
-                    else if (tokenCap is long cap && tokens > cap)
+                    else if ((limits?.Tokens ?? tokenCap) is long cap && tokens >= cap)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported crossed the run's cap of {cap.ToString(CultureInfo.InvariantCulture)}"), now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported reached the operational threshold of {cap.ToString(CultureInfo.InvariantCulture)}, below the reserved cap of {tokenCap?.ToString(CultureInfo.InvariantCulture)}"), now);
+                    }
+                    else if (limits?.Currency is long currency && priceUnit == limits.CurrencyUnit && price >= currency)
+                    {
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"), now);
                     }
                 }
                 else if (transmitted is DateTimeOffset at && now - at >= grace)

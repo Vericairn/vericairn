@@ -213,8 +213,7 @@ its leading arguments. No launcher reads a price, so a cap in currency is charge
    told `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
 5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and its exit. Only
    the exit ends a run: output that closes, or a worker that stops observing, is no stop, and the run stays in flight,
-   charged at its cap. A run that reaches its wall minutes, or whose reported tokens cross its cap, is stopped by the
-   worker.
+   charged at its cap. A run approaching its wall or reported-token allowance is stopped by the worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
@@ -326,3 +325,5 @@ Workspace export refuses symbolic links and Windows reparse points anywhere in `
 Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns). Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the whole token unit unreported, even if another turn reported valid usage. Settlement charges that unit at its reserved cap; complete explicit zero counts remain known zero.
 
 Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously recorded stop property, including the request and explanatory text, is immutable across revisions (`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
+
+New worker intents state `target.capMode: "soft"` and evidence describing each operational threshold and the launcher's native controls. The ledger reserves the full cap. The worker subtracts grace plus one heartbeat from wall time, and ten percent (rounded up) from tokens and currency, to leave headroom for shutdown and usage in flight. It refuses an allowance too small to leave any active token or currency unit. Claude Code receives `--max-budget-usd` for USD at the reduced currency threshold; other currencies and total tokens have no native cap. Codex receives `features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation. Unknown units are still charged at their full cap.

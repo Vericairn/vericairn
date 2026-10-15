@@ -40,6 +40,21 @@ public class LauncherTests
     }
 
     [Fact]
+    public void NativeControlsReceiveTheOperationalAllowanceAndUnsupportedUnitsStaySoft()
+    {
+        using var cap = System.Text.Json.JsonDocument.Parse("""{"wallMinutes":1,"tokens":1001,"currency":{"amount":1001,"unit":"USD"}}""");
+        RunLimits limits = RunLimits.For(cap.RootElement, WorkerOptions.Default);
+        Assert.Equal(TimeSpan.FromSeconds(48), limits.WallTime);
+        Assert.Equal(900, limits.Tokens);
+        Assert.Equal(900, limits.Currency);
+        LaunchContext context = Context(NoSettings) with { Limits = limits };
+        Assert.Equal(["--max-budget-usd", "9.00"], new ClaudeCodeLauncher().Command(context).TakeLast(2));
+        Assert.DoesNotContain("--max-budget-usd", new ClaudeCodeLauncher().Command(context with { Limits = limits with { CurrencyUnit = "EUR" } }));
+        Assert.Contains("features.rollout_budget.limit_tokens=900", new CodexLauncher().Command(context));
+        Assert.Contains("No native token or currency limit", ((IAgentLauncher)new GenericLauncher()).Limitations, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void CompleteZeroUsageIsKnownAndClaudeRequiresItsCacheCounts()
     {
         var launcher = new ClaudeCodeLauncher();

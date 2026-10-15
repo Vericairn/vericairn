@@ -458,8 +458,8 @@ later record never unmakes it):
 - the step, the assignment, has had fewer runs than the goal's `attemptsPerStep` (`operation.budget`).
 
 The worker takes a run's cap from the goal's budget: the wall minutes asked for or what remains, whichever is less, the
-goal's attempts per step, and what remains of `tokens` and `currency` where the budget states them. A cap is enforced as
-the run goes: the worker stops a run that reaches its wall minutes, or whose reported tokens cross its cap. When the
+goal's attempts per step, and what remains of `tokens` and `currency` where the budget states them. A cap is reserved as
+the run goes; operational thresholds leave headroom for shutdown and usage in flight, with spending controls explicitly soft. When the
 settled runs' charges reach the budget in a unit, or a run is asked for a step whose attempts are used up, the worker
 records the goal `budget-limited`, which fences new runs and asks the sponsor to raise the budget or stop. Resuming a
 budget-limited goal grants its budget again but does not refill it: the spend still counts every run, so the budget is
@@ -534,3 +534,5 @@ Workspace export refuses symbolic links and Windows reparse points anywhere in `
 Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns). Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the whole token unit unreported, even if another turn reported valid usage. Settlement charges that unit at its reserved cap; complete explicit zero counts remain known zero.
 
 Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously recorded stop property, including the request and explanatory text, is immutable across revisions (`operation.stop-kept`); out-of-order facts are refused (`operation.stop-order`).
+
+New worker intents state `target.capMode: "soft"` and evidence describing each operational threshold and the launcher's native controls. The ledger reserves the full cap. The worker subtracts grace plus one heartbeat from wall time, and ten percent (rounded up) from tokens and currency, to leave headroom for shutdown and usage in flight. It refuses an allowance too small to leave any active token or currency unit. Claude Code receives `--max-budget-usd` for USD at the reduced currency threshold; other currencies and total tokens have no native cap. Codex receives `features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation. Unknown units are still charged at their full cap.
