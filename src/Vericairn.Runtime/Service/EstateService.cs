@@ -1177,7 +1177,8 @@ public sealed class EstateService : IEstateApi, IDisposable
 
         RecordEnvelope? estate = model.CurrentEstate;
         string? rootOperator = estate is null ? null : EstateModel.BodyString(estate, "operator");
-        if (draft.Type == "admission" && draft.Subject is not null && draft.By == rootOperator)
+        // The first authority: the root operator's first device admits itself, once in the estate's history.
+        if (draft.Type == "admission" && draft.Subject is not null && draft.By == rootOperator && SignatureChecks.FirstAuthority(model, rootOperator) is null)
         {
             RecordEnvelope? own = devices.FirstOrDefault(d => d.Id == draft.Subject.Id);
             IDeviceKeyStore? store = own is null ? null : stores.FirstOrDefault(s => s.Has(own.Id));
@@ -1189,6 +1190,11 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
 
         bool required = estate is not null && estate.Body.TryGetProperty("policies", out JsonElement policies) && policies.TryGetProperty("signatures", out JsonElement policy) && policy.GetString() == "required";
+        if (required && draft.Type == "admission" && draft.By == rootOperator && SignatureChecks.FirstAuthority(model, rootOperator) is not null)
+        {
+            return "The operator's first device is already admitted, and a device admits itself only once in an estate's history: admit this one from a device already admitted, held on this machine.";
+        }
+
         return required
             ? $"This copy is read-only for principal {draft.By}: no admitted device key is held on this machine. Create a device with 'vericairn devices create' and have an administrator admit it."
             : null;

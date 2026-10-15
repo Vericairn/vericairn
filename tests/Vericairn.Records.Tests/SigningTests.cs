@@ -44,6 +44,33 @@ public class SigningTests : IDisposable
     }
 
     [Fact]
+    public void TheOperatorAdmitsItsOwnDeviceOnceAndEveryLaterDeviceUnderAnAdmittedOne()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope first = CreateDevice(estate, estate.OperatorId, "First laptop");
+        RecordEnvelope root = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", first.Reference, signer: Signer(first));
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.Equal(root.Id, SignatureChecks.FirstAuthority(model, estate.OperatorId)?.Id);
+
+        // Anyone able to add records could mint a device for the operator and admit it with its own key; a second self-admission is refused.
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted");
+        RecordEnvelope self = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Admits itself."}""", minted.Reference, signer: Signer(minted));
+        RecordEnvelope forged = estate.Add("work-order", estate.OperatorId, OrderBody, signer: Signer(minted));
+        model = estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(self.Id, StringComparison.Ordinal));
+        Assert.Contains(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+
+        // Admitted under the first device's signature, a later device signs like any admitted one.
+        RecordEnvelope second = CreateDevice(estate, estate.OperatorId, "Second laptop");
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Admitted by the first device."}""", second.Reference, signer: Signer(first));
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, OrderBody.Replace("W-1", "W-9", StringComparison.Ordinal), signer: Signer(second));
+        model = estate.Load();
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.Contains(order.Id, StringComparison.Ordinal));
+        Assert.Single(model.Findings, f => f.Code == "signature.self-admission");
+    }
+
+    [Fact]
     public void TamperedForeignUnadmittedAndRevokedSignaturesAreRejected()
     {
         using var estate = new TestEstate();
