@@ -33,8 +33,9 @@ release and pins the one it runs on.
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
   an estate's live state and serves it over a local socket, pinned loopback TLS and, when the operator
-  configures an address, the local network to paired devices with mutual TLS, and the typed client with the
-  device's side of pairing and its connections, documented in [docs/api-v1.md](docs/api-v1.md).
+  configures a private address, the local network to paired devices with mutual TLS and requests signed for that
+  runtime, and the typed client with the device's side of pairing and its connections, documented in
+  [docs/api-v1.md](docs/api-v1.md) with the threat model of pairing.
 - The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
   verification evidence, and the coding-agent launchers and git worktree workspaces the worker uses),
   `Vericairn.Adapters.Git` (read-only observation of a repository) and
@@ -60,7 +61,8 @@ release and pins the one it runs on.
   goal's next step, and the worker or a person carries it. `vericairn devices pair` issues a short-lived pairing
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
-  its next request.
+  its next request, a device acts only for its own principal, and `vericairn devices writes` shows what paired
+  devices wrote through the runtime, whose own devices sign those records until paired devices sign their own.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over

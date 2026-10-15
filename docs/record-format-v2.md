@@ -430,14 +430,25 @@ own format, and adds no type and no field:
   descriptive name, platform, custody and presence as the device stated them, and the profiles the
   administrator permitted (`local-network` unless others were named). It is signed by that key over its
   content hash, a signature the device made on its own machine, which proves possession as every device's
-  first record does.
+  first record does. The name, platform, custody and presence are the device's own statement, which the
+  runtime cannot verify; a name with control or formatting characters is refused.
 - The admission is the administrator's, the operator's or a principal's holding `administer`, signed by the
-  administrator's admitted device on the runtime's machine like every admission in format 2.
+  administrator's admitted device on the runtime's machine like every admission in format 2. Its note says
+  that the device's descriptive fields are its own statement.
 
 The runtime writes both or neither. The key a paired device proves on the local network, on every connection
 and every request, is the one its device record names, and `profiles` decides where it connects: the local
 network admits only a device whose current record permits `local-network`. A paired device's key stays on its
 own machine, so `vericairn devices list` on the runtime's machine does not show it as held there.
+
+A paired device's key signs no record after its own. A record it asks for over the local network is authored
+by its principal and signed, as every API write is, by an admitted device of that principal whose key the
+runtime's machine holds, or written unsigned where the charter allows it; the runtime refuses the write when
+that device's every signature needs its owner's presence. So a record's signature names a device on the
+runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
+such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
+writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). Records signed by the paired device itself,
+on its own machine, are the design to come: the Remote profile, planned for 0.7.0, needs them.
 
 ## Emergency access
 
