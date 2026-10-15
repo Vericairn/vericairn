@@ -187,6 +187,7 @@ public sealed partial class EstateService
                 return RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded.");
             }
 
+            plan = plan with { StallSeconds = StallSeconds(goal!, settings, launcher) };
             var target = new JsonObject
             {
                 ["assignment"] = plan.Assignment.Id,
@@ -655,18 +656,19 @@ public sealed partial class EstateService
             return (null, $"Run {busy.Id} works on branch {branch} of {repository} and is in flight; one run works in a workspace at a time, so name another branch or wait for it to settle.", null);
         }
 
-        int stallSeconds = (int)launcher.StallLimit.TotalSeconds;
-        if (request.Settings?.TryGetValue("stall-seconds", out string? stall) == true)
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), StallSeconds(goal, request.Settings, launcher)), null, null);
+    }
+
+    private static int StallSeconds(RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)
+    {
+        if (goal.Body.TryGetProperty("limits", out JsonElement limits) && AgentRuns.Amount(limits, "stallSeconds") is long goalStall)
         {
-            stallSeconds = int.Parse(stall, CultureInfo.InvariantCulture);
+            return (int)goalStall;
         }
 
-        if (goal.Body.TryGetProperty("limits", out JsonElement goalLimits) && AgentRuns.Amount(goalLimits, "stallSeconds") is long goalStall)
-        {
-            stallSeconds = (int)goalStall;
-        }
-
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), stallSeconds), null, null);
+        return settings?.TryGetValue("stall-seconds", out string? stall) == true
+            ? int.Parse(stall, CultureInfo.InvariantCulture)
+            : (int)launcher.StallLimit.TotalSeconds;
     }
 
     /// <summary>

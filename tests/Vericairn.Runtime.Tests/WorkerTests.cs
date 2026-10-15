@@ -57,6 +57,27 @@ public class WorkerTests
     }
 
     [Fact]
+    public void TheStallLimitIsPinnedFromTheGoalCurrentWhenTheIntentIsRecorded()
+    {
+        using var run = new RunEstate();
+        HookedLauncher.Install(run, verify: () =>
+        {
+            var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
+            goal["limits"] = new JsonObject { ["stallSeconds"] = 1 };
+            string revision = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
+            RunEstate.Ok(run.Service.GoalActivate(revision, new GoalActionRequest(run.Estate.OperatorId)));
+            return null;
+        });
+        RunResponse started = run.Start("claude-code", "silent-ignore", run.Report("revised-stall"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal(1, settled.Liveness!.StallSeconds);
+        Assert.Equal("1", AgentRuns.Find(run.Estate.Load(), started.Run)!.Target("stallSeconds"));
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
     {
         using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"the widget\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));

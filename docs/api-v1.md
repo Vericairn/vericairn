@@ -128,7 +128,7 @@ charged at its cap.
 
 - `liveness`: `stallSeconds`, `lastEventAt`, optional `attentionAt`, `attention` (ask id) and `stoppedAt`. The worker
   observes stdout events with a monotonic clock. The launcher default is 600 seconds, changed by its `stall-seconds`
-  setting (1–86400), with the goal's `limits.stallSeconds` taking precedence. One limit of silence raises an attention
+  setting (1–86400), with the goal's `limits.stallSeconds` taking precedence. The current goal is read again when the intent pins the limit. One limit of silence raises an attention
   ask; twice the limit stops and contains the run. Events reset silence but never erase attention. An in-flight row
   reads local observations; settlement records them in the operation.
 

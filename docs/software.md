@@ -361,8 +361,8 @@ Unknown units are still charged at their full cap.
 
 The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
-that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit in
-`target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
+that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
+in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
 principal, about the run (no notification is sent). At twice the limit it transmits a stop and contains the whole
 launch boundary. New stdout events reset the silence timer but never erase an earlier attention fact. A failed
 attention write is retried and does not prevent containment. Settlement records `liveness`: `stallSeconds`,
