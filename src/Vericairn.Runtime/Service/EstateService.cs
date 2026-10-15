@@ -2028,12 +2028,40 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs, stores and validates; a record that would make the estate invalid is removed again. Caller holds the gate.</summary>
     private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
+        if (record is null)
+        {
+            return Refuse(refusal!);
+        }
+
+        try
+        {
+            session.Write(record);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return Refuse(exception.Message);
+        }
+
+        FindingList relevant = Invalid(session.Load(), [record]);
+        if (relevant.HasErrors)
+        {
+            session.Discard(record);
+            return WriteOutcome.Fail(new Problem("rejected", $"Not written: the estate would be invalid with this record ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
+        }
+
+        return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+    }
+
+    /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
+    private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
+    {
         if (signers is null)
         {
             string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
             if (refusal is not null)
             {
-                return Refuse(refusal);
+                return (null, refusal);
             }
 
             signers = signer is null ? [] : [signer];
@@ -2051,41 +2079,82 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             draft = draft with { At = predecessor.AtTime };
         }
 
-        AuthoredRecord record;
         try
         {
-            record = RecordAuthor.Create(draft, signers);
-            session.Write(record);
+            return (RecordAuthor.Create(draft, signers), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return Refuse(exception.Message);
+            return (null, exception.Message);
+        }
+    }
+
+    /// <summary>
+    /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
+    /// The estate is judged with all of them before any is stored, so none is stored when any would make it invalid, and none is
+    /// removed once stored: a store that fails part-way returns what it stored with the problem. Caller holds the gate.
+    /// </summary>
+    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records)
+    {
+        FindingList relevant = Invalid(LoadWith(records), records);
+        if (relevant.HasErrors)
+        {
+            return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
         }
 
-        EstateModel model = session.Load();
+        var written = new List<RecordWritten>();
+        foreach (AuthoredRecord record in records)
+        {
+            try
+            {
+                session.Write(record);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                return (written, new Problem("refused", exception.Message, []));
+            }
+
+            written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+        }
+
+        return (written, null);
+    }
+
+    /// <summary>The estate as it would be with records added that are not stored yet; as it is without any. Caller holds the gate.</summary>
+    private EstateModel LoadWith(IReadOnlyList<AuthoredRecord> records)
+    {
+        if (records.Count == 0)
+        {
+            return session.Load();
+        }
+
+        List<RecordFile> files = session.Files().Concat(records.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+        return EstateLoader.Load(session.Root, files);
+    }
+
+    /// <summary>
+    /// The errors that keep records out of an estate: every error the estate has with them, the checks' errors about the records
+    /// themselves, and a result whose output no longer has the bytes it claims.
+    /// </summary>
+    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
+    {
         var relevant = new FindingList();
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
         {
             relevant.Add(finding);
         }
 
-        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(finding);
         }
 
-        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && f.Location.StartsWith(record.RelativePath, StringComparison.Ordinal)))
+        foreach (Finding finding in model.Findings.Where(f => f.Code == "result.output-changed" && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))
         {
             relevant.Add(new Finding(Severity.Error, "result.output-hash", finding.Location, "The file present does not have the hash or size this result claims; name the bytes actually produced."));
         }
 
-        if (relevant.HasErrors)
-        {
-            session.Discard(record);
-            return WriteOutcome.Fail(new Problem("rejected", $"Not written: the estate would be invalid with this record ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
-        }
-
-        return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
+        return relevant;
     }
 
     /// <summary>Chooses the device that signs a record for its author on this machine, or explains why none can.</summary>

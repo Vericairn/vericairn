@@ -51,7 +51,7 @@ public sealed partial class EstateService
             return StepProblem(goal, "refused", "The recording principal and the repository are named by ULIDs; nothing was recorded.");
         }
 
-        RecordWritten? assignment = null;
+        AuthoredRecord? routed = null;
         RunStartRequest run;
         string key;
         NextEligible.Route route;
@@ -108,27 +108,35 @@ public sealed partial class EstateService
                 return StepProblem(goalId, "refused", $"{key} is routed to {agentName} through {route.Launcher}, and its run cannot start: {string.Join(" ", refusals)} Nothing was recorded.", key, route);
             }
 
-            // Routing produces the assignment to the chosen agent when none holds the step; a step its assignment holds goes on with it.
+            // Routing produces the assignment to the chosen agent when none holds the step: signed now and stored only with the run's
+            // intent, after the worker's whole preflight. A step its assignment holds goes on with it.
             string carried = route.Assignment?.Id ?? string.Empty;
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                WriteOutcome written = WriteLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, current, next.Order, route, where)), next.Order.Reference), model);
-                if (!written.Ok)
+                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, current, next.Order, route, where)), next.Order.Reference), model);
+                if (routed is null)
                 {
-                    return new GoalStepResponse(goalId, "none", "Not recorded: " + written.Problem!.Message, false, key, route.State, route.Principal, Problem: written.Problem);
+                    return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
                 }
 
-                assignment = written.Written;
-                carried = assignment!.Id;
+                FindingList invalid = Invalid(LoadWith([routed]), [routed]);
+                if (invalid.HasErrors)
+                {
+                    var problem = new Problem("rejected", $"Not recorded: the estate would be invalid with routing's assignment of {key} ({invalid.Errors} errors). Nothing was recorded.", ToFindings(invalid, "rejected").Findings);
+                    return new GoalStepResponse(goalId, "none", problem.Message, false, key, route.State, route.Principal, Problem: problem);
+                }
+
+                carried = routed.Envelope.Id;
             }
 
             run = new RunStartRequest(carried, route.Launcher!, route.Principal!, request.By, request.Repository!, goalId, request.Branch, request.Base, request.WallMinutes, request.Settings);
         }
 
-        // The run starts through the worker, which judges the custody precondition and the budget again before it records anything.
-        RunResponse started = RunStart(run);
-        string assigned = assignment is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}). ";
+        // The run starts through the worker, whose preflight comes before anything is recorded and which judges the custody precondition
+        // and the budget again when it records the intent, routing's assignment with it.
+        RunResponse started = Start(run, routed, out RecordWritten? assignment);
+        string assigned = assignment is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}), recorded with the run's intent. ";
         return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
     }
 
@@ -205,26 +213,26 @@ public sealed partial class EstateService
             return StepProblem(goal.Id, "refused", $"{key} has no principal available and the estate names no one to ask: it has no charter operator. Nothing was recorded.", key, route);
         }
 
-        RecordWritten? assignment = null;
+        AuthoredRecord? assignment = null;
         string question, recommendation, consequence;
         string[] options = [];
         if (route.State is "person" or "reserved")
         {
-            // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs.
-            WriteOutcome written = WriteLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, goal, step.Order, route, "the repositories its scope names, on a work branch, named without machine paths")), step.Order.Reference), model);
-            if (!written.Ok)
+            // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
+            // together, or neither is.
+            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, goal, step.Order, route, "the repositories its scope names, on a work branch, named without machine paths")), step.Order.Reference), model);
+            if (assignment is null)
             {
-                return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, key, route.State, route.Principal, Problem: written.Problem);
+                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
             }
 
-            assignment = written.Written;
-            model = session.Load();
+            string id = assignment.Envelope.Id;
             question = route.State == "reserved"
-                ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {assignment!.Id})."
-                : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {assignment!.Id}).";
+                ? $"{key} {title}, a step of goal {goalTitle}, is a reserved action, {Routing.Describe(route.Reserved!)}: will you carry it? It is assigned to you as its {route.Role} (assignment {id})."
+                : $"Will you carry {key} {title}, the next step of goal {goalTitle}? It is assigned to you as its {route.Role} (assignment {id}).";
             recommendation = route.State == "reserved"
-                ? $"Carry it yourself, from vericairn work brief {key}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {assignment.Id} when you start and a result when you stop."
-                : $"Carry it: record an attempt on assignment {assignment.Id} when the work starts and a result when it stops; vericairn work brief {key} is everything it needs.";
+                ? $"Carry it yourself, from vericairn work brief {key}: no agent carries a reserved action without a grant in force, and you hold it. Record an attempt on assignment {id} when you start and a result when you stop."
+                : $"Carry it: record an attempt on assignment {id} when the work starts and a result when it stops; vericairn work brief {key} is everything it needs.";
             consequence = route.State == "reserved"
                 ? $"{key} waits until you act, and nothing reserved is done for you; the goal's other steps go on."
                 : $"{key} waits with you, and no other contributor is given it; the goal's other steps go on.";
@@ -257,20 +265,47 @@ public sealed partial class EstateService
             ask["options"] = new JsonArray(options.Select(o => (JsonNode)o).ToArray());
         }
 
-        WriteOutcome asked = WriteLocked(new RecordDraft("ask", request.By, Element(ask), new RecordReference("work-order", step.Order.Id, null)), model);
-        if (!asked.Ok)
+        var draft = new RecordDraft("ask", request.By, Element(ask), new RecordReference("work-order", step.Order.Id, null));
+        RecordWritten? assigned = null;
+        RecordWritten asked;
+        if (assignment is null)
         {
-            return new GoalStepResponse(goal.Id, "none", $"{(assignment is null ? string.Empty : $"Assignment {assignment.Id} was recorded; ")}the ask was not recorded: {asked.Problem!.Message}", false, key, route.State, route.Principal, assignment, Problem: asked.Problem);
+            WriteOutcome written = WriteLocked(draft, model);
+            if (!written.Ok)
+            {
+                return new GoalStepResponse(goal.Id, "none", "Not recorded: " + written.Problem!.Message, false, key, route.State, route.Principal, Problem: written.Problem);
+            }
+
+            asked = written.Written!;
+        }
+        else
+        {
+            (AuthoredRecord? authored, string? unsigned) = AuthorLocked(draft, model);
+            if (authored is null)
+            {
+                return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
+            }
+
+            (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored]);
+            if (problem is not null)
+            {
+                assigned = stored.Count > 0 ? stored[0] : null;
+                string what = assigned is null ? "Nothing was recorded." : $"Routing's assignment {assigned.Id} was recorded and holds the step, and its ask could not be.";
+                return new GoalStepResponse(goal.Id, "none", $"Not recorded: {problem.Message} {what}", false, key, route.State, route.Principal, assigned, Problem: problem);
+            }
+
+            assigned = stored[0];
+            asked = stored[1];
         }
 
         string whom = PrincipalName(model, route.Principal);
-        string what = route.State switch
+        string said = route.State switch
         {
-            "reserved" => $"{key} is a reserved action: it is assigned to {whom}, who holds it (assignment {assignment!.Id}), and asked of them (ask {asked.Written!.Id}).",
-            "person" => $"{key} is routed to a person: it is assigned to {whom} (assignment {assignment!.Id}) and asked of them (ask {asked.Written!.Id}).",
-            _ => $"No principal is available for {key}: {whom} is asked to assign someone or change the roster (ask {asked.Written!.Id}); it is given to no one else.",
+            "reserved" => $"{key} is a reserved action: it is assigned to {whom}, who holds it (assignment {assigned!.Id}), and asked of them (ask {asked.Id}).",
+            "person" => $"{key} is routed to a person: it is assigned to {whom} (assignment {assigned!.Id}) and asked of them (ask {asked.Id}).",
+            _ => $"No principal is available for {key}: {whom} is asked to assign someone or change the roster (ask {asked.Id}); it is given to no one else.",
         };
-        return new GoalStepResponse(goal.Id, "ask", $"{what} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assignment, asked.Written);
+        return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked);
     }
 
     /// <summary>The assignment routing writes for the principal it chose: a brief from the work order, the goal and the route, with no machine path.</summary>

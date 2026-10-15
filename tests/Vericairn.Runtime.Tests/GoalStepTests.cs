@@ -153,6 +153,78 @@ public class GoalStepTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void AStepNoAssignmentHeldIsAssignedOnlyWithItsRunsIntent()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        Done(run, run.Assignment);
+        int assignments = run.Service.Records("assignment").Count;
+        string? unverified = null;
+        HookedLauncher.Install(run, () => unverified);
+
+        // W-1's result awaits review, so the next step is W-2, which no assignment holds: each refusal of the worker's preflight leaves
+        // it so, and records nothing.
+        Dictionary<string, string> command = Command(run, "never");
+        var unknown = new Dictionary<string, string>(command, StringComparer.Ordinal) { ["model"] = "x" };
+        (GoalStepRequest Request, string Because, string? Unverified)[] cases =
+        [
+            (new GoalStepRequest(op), "An agent's run is made in a workspace of a repository", null),
+            (new GoalStepRequest(op, "01M4TRNE1GYEK4P8MXQAB3C8Q4", command), "No repository resource has id 01M4TRNE1GYEK4P8MXQAB3C8Q4.", null),
+            (new GoalStepRequest(op, run.Resource, command, WallMinutes: 0), "A run's cap is at least one wall minute", null),
+            (new GoalStepRequest(op, run.Resource, unknown), "it takes no model", null),
+            (new GoalStepRequest(op, run.Resource, command), "The claude-code launcher cannot run here: Claude Code is not signed in.", "Claude Code is not signed in."),
+            (new GoalStepRequest(op, run.Resource, command, Branch: "bad..branch"), "The workspace could not be prepared: 'bad..branch' is not a branch name git accepts.", null),
+        ];
+        foreach ((GoalStepRequest request, string because, string? refusal) in cases)
+        {
+            unverified = refusal;
+            GoalStepResponse refused = run.Service.GoalStep(run.Goal, request);
+            Assert.False(refused.Ok, because);
+            Assert.Equal(("none", "W-2", "agent"), (refused.Outcome, refused.Step, refused.Route));
+            Assert.Null(refused.Assignment);
+            Assert.Contains(because, refused.Message, StringComparison.Ordinal);
+            Assert.EndsWith("nothing was recorded.", refused.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("Routing assigned", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(assignments, run.Service.Records("assignment").Count);
+            Assert.Empty(run.Service.Records("operation"));
+        }
+
+        unverified = null;
+        JsonElement unassigned = Next(run, "W-2");
+        Assert.Equal(JsonValueKind.Null, unassigned.GetProperty("assignment").ValueKind);
+        Assert.Equal("agent", unassigned.GetProperty("route").GetProperty("state").GetString());
+        Assert.False(File.Exists(run.Report("never")));
+
+        // Taken: routing's assignment of W-2 and the run's intent are recorded together.
+        GoalStepResponse taken = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "taken")));
+        Assert.True(taken.Ok, taken.Message);
+        Assert.StartsWith($"Routing assigned W-2 to its agent (assignment {taken.Assignment!.Id}), recorded with the run's intent.", taken.Message, StringComparison.Ordinal);
+        AgentRuns.Run carried = AgentRuns.Find(run.Estate.Load(), taken.Run!.Run)!;
+        Assert.Equal(taken.Assignment.Id, carried.Assignment);
+        Assert.Equal("observed-success", run.Settled(taken.Run.Run).Status);
+        Done(run, taken.Assignment.Id);
+
+        // A harness that cannot start once the intent is recorded: W-3's assignment and its run's intent were recorded together, and the
+        // run is recorded as the known failure it is, which spent nothing.
+        Order(run, "W-3", string.Empty);
+        GoalStepResponse failed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(run.Scratch, "no-such-harness") }));
+        Assert.False(failed.Ok);
+        Assert.Equal(("none", "W-3"), (failed.Outcome, failed.Step));
+        Assert.StartsWith($"Routing assigned W-3 to its agent (assignment {failed.Assignment!.Id}), recorded with the run's intent.", failed.Message, StringComparison.Ordinal);
+        Assert.Contains("The run is recorded as a known failure; nothing ran and nothing is charged.", failed.Message, StringComparison.Ordinal);
+        Assert.Equal("known-failure", run.Row(failed.Run!.Run).Status);
+        Assert.Equal(failed.Assignment.Id, AgentRuns.Find(run.Estate.Load(), failed.Run.Run)!.Assignment);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    private static Dictionary<string, string> Command(RunEstate run, string report) =>
+        new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", run.Report(report)) };
+
+    private static JsonElement Next(RunEstate run, string key) =>
+        Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key);
+
     private static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>
         run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, run.Report(report)) }));
 

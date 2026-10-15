@@ -39,9 +39,18 @@ public sealed partial class EstateService
     public IReadOnlyList<ProviderRow> Launchers() => ProviderRows().Where(r => r.Kind == "launcher").ToList();
 
     /// <inheritdoc />
-    public RunResponse RunStart(RunStartRequest request)
+    public RunResponse RunStart(RunStartRequest request) => Start(request, null, out _);
+
+    /// <summary>
+    /// Starts a run: the whole preflight first, the records last. With a pending assignment, routing's assignment of a step that no
+    /// assignment held, signed and not yet stored, the run carries it, and it is stored with the run's intent, so that neither is left
+    /// alone: every refusal before the intent records nothing, that assignment included.
+    /// </summary>
+    private RunResponse Start(RunStartRequest request, AuthoredRecord? routed, out RecordWritten? assigned)
     {
         ArgumentNullException.ThrowIfNull(request);
+        assigned = null;
+        IReadOnlyList<AuthoredRecord> carried = routed is null ? [] : [routed];
         string pending = $"run of assignment {request.Assignment}";
         if (!Ulid.IsValid(request.Assignment) || !Ulid.IsValid(request.Agent) || !Ulid.IsValid(request.By) || !Ulid.IsValid(request.Repository) || (request.Goal is not null && !Ulid.IsValid(request.Goal)))
         {
@@ -77,7 +86,7 @@ public sealed partial class EstateService
         RunPlan plan;
         lock (gate)
         {
-            EstateModel model = session.Load();
+            EstateModel model = LoadWith(carried);
             (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, request, launcher);
             if (planned is null)
             {
@@ -133,15 +142,21 @@ public sealed partial class EstateService
         string where = $"{plan.Repository}, branch {workspace.Branch}";
 
         // Record the intent before anything starts, judged again against the records as they are now, after the preparation: the
-        // goal at its current revision, the custody guard over the keys held here and the exception in force now, which the intent
-        // names, and the cap. The run is its intent.
+        // step still unassigned when routing's assignment comes with the run, the goal at its current revision, the custody guard
+        // over the keys held here and the exception in force now, which the intent names, and the cap. The run is its intent.
         string run;
         RecordWritten intent;
         Excepted? excepted = null;
         lock (gate)
         {
-            EstateModel model = session.Load();
+            EstateModel model = LoadWith(carried);
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
+            if (routed is not null && WorkView.OrderOfAssignment(model, routed.Envelope) is RecordEnvelope routedOrder
+                && Routing.Assignments(model, model.Latest(routedOrder)).FirstOrDefault(a => a.Id != routed.Envelope.Id) is RecordEnvelope meanwhile)
+            {
+                return RunProblem(pending, "not-started", "refused", $"Work order {plan.Key} was assigned meanwhile, by assignment {meanwhile.Id}; its step goes on from that assignment. Nothing was recorded.");
+            }
+
             DateTimeOffset now = DateTimeOffset.UtcNow;
             if (goal is not null)
             {
@@ -194,13 +209,39 @@ public sealed partial class EstateService
 
             run = Ulid.NewUlid(now).Value;
             body["identity"] = "agent-run:" + run;
-            WriteOutcome written = WriteLocked(new RecordDraft("operation", request.By, Element(body), plan.Assignment.Reference, At: now, Id: run), model);
-            if (!written.Ok)
+            var draft = new RecordDraft("operation", request.By, Element(body), plan.Assignment.Reference, At: now, Id: run);
+            if (routed is null)
             {
-                return new RunResponse(pending, "not-started", "Not recorded: " + written.Problem!.Message, false, Problem: written.Problem);
-            }
+                WriteOutcome written = WriteLocked(draft, model);
+                if (!written.Ok)
+                {
+                    return new RunResponse(pending, "not-started", "Not recorded: " + written.Problem!.Message, false, Problem: written.Problem);
+                }
 
-            intent = written.Written!;
+                intent = written.Written!;
+            }
+            else
+            {
+                // Routing's assignment and the run's intent are stored together, or neither is.
+                (AuthoredRecord? authored, string? unsigned) = AuthorLocked(draft, model);
+                if (authored is null)
+                {
+                    return RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded.");
+                }
+
+                (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([routed, authored]);
+                if (problem is not null)
+                {
+                    assigned = stored.Count > 0 ? stored[0] : null;
+                    string what = assigned is null
+                        ? "Nothing was recorded."
+                        : $"Routing's assignment {assigned.Id} was recorded and holds the step, and the run's intent could not be: nothing was launched, and a run of that assignment starts it again.";
+                    return new RunResponse(pending, "not-started", $"Not recorded: {problem.Message} {what}", false, Problem: problem);
+                }
+
+                assigned = stored[0];
+                intent = stored[1];
+            }
         }
 
         // The MCP server configured for the agent's principal, and the run's own files, outside the workspace; then the launch, and the
