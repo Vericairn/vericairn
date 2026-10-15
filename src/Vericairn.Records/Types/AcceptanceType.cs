@@ -13,7 +13,7 @@ public sealed class AcceptanceType : IRecordType
     public string Name => "acceptance";
 
     /// <inheritdoc />
-    public string Summary => "Acceptance of an exact subject revision: a work order, or a result toward one. Milestones and their results need the operator; ordinary work may be self-accepted only under an explicit authority scope.";
+    public string Summary => "Acceptance of an exact subject revision: a work order, or a result toward one; a goal; or another record, such as a release candidate, which only the operator accepts. Milestones and their results need the operator; ordinary work may be self-accepted only under an explicit authority scope. A goal is accepted by its sponsor when the sponsor is a person and by an operator when an agent sponsors it, after its sponsor activated it, relying on its current evaluation, which finds every condition met, and never by that evaluation's author or by the author of one of its steps.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -25,12 +25,12 @@ public sealed class AcceptanceType : IRecordType
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
         new("statement", "string", true, "What is accepted and on what basis."),
-        new("basis", "ulid[]", true, "Review records of the same subject that the acceptance relies on; may be empty for operator acceptance."),
+        new("basis", "ulid[]", true, "Review records of the same subject that the acceptance relies on; may be empty for operator acceptance. A goal's acceptance names the goal's current evaluation."),
         new("self", "boolean", true, "True when the accepting principal authored the subject; must match the facts."),
     ];
 
-    /// <summary>The subject types an acceptance may have: a work order, or a result toward one.</summary>
-    public static readonly string[] SubjectTypes = ["work-order", "result"];
+    /// <summary>The subject types whose acceptance follows rules of their own: a work order, a result toward one, and a goal.</summary>
+    public static readonly string[] SubjectTypes = ["work-order", "result", "goal"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -70,7 +70,15 @@ public sealed class AcceptanceType : IRecordType
 
         bool isOperator = context.HasRole(context.Record.By, Roles.Operator);
         RecordEnvelope? order = subject.Type == "work-order" ? subject : subject.Type == "result" ? WorkView.OrderOfResult(context.Model, subject) : null;
-        if (order is not null)
+        if (subject.Type == "goal")
+        {
+            // Who accepts a goal is one rule (GoalRules.AccepterOf); the rest is the same for every goal (design/goals.md § 5).
+            foreach ((string code, string message) in GoalRules.AcceptanceRefusals(context.Model, subject, context.Record.By, basis ?? [], context.Record))
+            {
+                context.Error(code, message);
+            }
+        }
+        else if (order is not null)
         {
             string kind = order.Body.TryGetProperty("kind", out System.Text.Json.JsonElement k) ? k.GetString() ?? "milestone" : "milestone";
             if (kind == "milestone" && !isOperator)

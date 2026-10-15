@@ -43,6 +43,9 @@ public static class Scopes
     /// <summary>Record principals, authority and admissions.</summary>
     public const string Administer = "administer";
 
+    /// <summary>Spend: grant a goal's budget by activating or resuming a goal the grantee sponsors; the operator holds it without a grant.</summary>
+    public const string Spending = "spending";
+
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer];
+    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending];
 }

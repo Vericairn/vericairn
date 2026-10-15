@@ -849,6 +849,307 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public IReadOnlyList<GoalRow> Goals()
+    {
+        lock (gate)
+        {
+            return GoalView.Rows(session.Load()).Select(r => new GoalRow(r.Id, r.Hash, r.Title, r.Status, r.Sponsor, r.SponsorName)).ToList();
+        }
+    }
+
+    /// <inheritdoc />
+    public GoalResponse? Goal(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? goal = GoalView.Find(model, id);
+            if (goal is null)
+            {
+                return null;
+            }
+
+            using JsonDocument json = JsonDocument.Parse(GoalView.RenderJson(model, goal));
+            return new GoalResponse(GoalView.RenderText(model, goal), json.RootElement.Clone());
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome GoalPropose(GoalProposeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The proposing principal must be a ULID.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? previous = request.Supersedes is null ? null : GoalView.Find(model, request.Supersedes);
+            if (request.Supersedes is not null && (previous is null || previous.Id != request.Supersedes))
+            {
+                return previous is null ? NotFound($"No goal has id {request.Supersedes}.") : Refuse($"Goal {request.Supersedes} was revised by {previous.Id}; a revision supersedes the current one.");
+            }
+
+            return WriteLocked(new RecordDraft("goal", request.By, request.Body, null, request.Supersedes), model);
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome GoalActivate(string goal, GoalActionRequest request) => GoalTransition(goal, request, "activate");
+
+    /// <inheritdoc />
+    public WriteOutcome GoalPause(string goal, GoalActionRequest request) => GoalTransition(goal, request, "pause");
+
+    /// <inheritdoc />
+    public WriteOutcome GoalResume(string goal, GoalActionRequest request) => GoalTransition(goal, request, "resume");
+
+    /// <inheritdoc />
+    public WriteOutcome GoalStop(string goal, GoalActionRequest request) => GoalTransition(goal, request, "stop");
+
+    /// <inheritdoc />
+    public WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(goal);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The evaluating principal must be a ULID.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? current = GoalView.Find(model, goal);
+            if (current is null)
+            {
+                return NotFound($"No goal has id {goal}.");
+            }
+
+            // The evaluator did none of the work: refused before anything is written, as the record's rule would refuse it.
+            if (GoalRules.StepAuthors(model, current).Contains(request.By))
+            {
+                return Refuse($"A goal is evaluated by a principal other than any step's author, and {request.By} authored one of the steps of goal {current.Id}.");
+            }
+
+            List<JsonElement> completion = current.Body.TryGetProperty("completion", out JsonElement c) && c.ValueKind == JsonValueKind.Array ? c.EnumerateArray().ToList() : [];
+            var given = new Dictionary<int, GoalVerdict>();
+            var problems = new List<string>();
+            foreach (GoalVerdict verdict in request.Verdicts ?? [])
+            {
+                if (verdict.Condition < 1 || verdict.Condition > completion.Count)
+                {
+                    problems.Add($"The goal has conditions 1 to {completion.Count}, not {verdict.Condition}.");
+                }
+                else if (Array.IndexOf(GoalRules.EvaluationVerdicts, verdict.Verdict) < 0)
+                {
+                    problems.Add($"Condition {verdict.Condition}'s verdict is one of {string.Join(", ", GoalRules.EvaluationVerdicts)}, not '{verdict.Verdict}'.");
+                }
+                else if (!given.TryAdd(verdict.Condition, verdict))
+                {
+                    problems.Add($"Condition {verdict.Condition} has more than one verdict.");
+                }
+            }
+
+            var conditions = new JsonArray();
+            var verdicts = new List<string>();
+            foreach ((JsonElement condition, int index) in completion.Select((e, i) => (e, i)))
+            {
+                int number = index + 1;
+                given.TryGetValue(number, out GoalVerdict? judged);
+                List<RecordReference> read = [];
+                foreach (string id in judged?.Read ?? [])
+                {
+                    if (model.ById.TryGetValue(id, out RecordEnvelope? record))
+                    {
+                        read.Add(record.Reference);
+                    }
+                    else
+                    {
+                        problems.Add($"Condition {number} names {id} among the records read, and no record has that id.");
+                    }
+                }
+
+                string verdictValue;
+                string reason;
+                if (condition.ValueKind == JsonValueKind.Object && condition.TryGetProperty("record", out _))
+                {
+                    // A record predicate is the runtime's to decide; the evaluator may only judge one that is not met impossible.
+                    GoalPredicates.Verdict runtime = GoalPredicates.Evaluate(model, condition);
+                    if (judged is not null && judged.Verdict != "impossible" && judged.Verdict != (runtime.Value == "met" ? "met" : "not-yet"))
+                    {
+                        problems.Add($"Condition {number} is a record predicate, which the runtime finds {runtime.Value}: {runtime.Reason}");
+                    }
+                    else if (judged?.Verdict == "impossible" && runtime.Value == "met")
+                    {
+                        problems.Add($"Condition {number} is a record predicate the runtime finds met; it is not impossible.");
+                    }
+
+                    verdictValue = judged?.Verdict == "impossible" ? "impossible" : runtime.Value == "met" ? "met" : "not-yet";
+                    reason = judged?.Reason is { Length: > 0 } own ? $"{own} The runtime: {runtime.Reason}" : runtime.Reason;
+                    read = [.. runtime.Read, .. read.Where(r => runtime.Read.All(k => k.Id != r.Id))];
+                }
+                else if (judged is null)
+                {
+                    problems.Add($"Condition {number} is an evidence statement; the evaluator gives its verdict: met, not-yet or impossible.");
+                    continue;
+                }
+                else
+                {
+                    if (judged.Verdict == "met" && read.Count == 0)
+                    {
+                        problems.Add($"Condition {number} is an evidence statement found met; name the records read.");
+                    }
+
+                    verdictValue = judged.Verdict;
+                    reason = string.IsNullOrWhiteSpace(judged.Reason) ? "No reason given." : judged.Reason;
+                }
+
+                verdicts.Add(verdictValue);
+                conditions.Add(new JsonObject
+                {
+                    ["verdict"] = verdictValue,
+                    ["reason"] = reason.Length > 4000 ? reason[..3999] + "…" : reason,
+                    ["read"] = new JsonArray(read.Select(r => (JsonNode)new JsonObject { ["type"] = r.Type, ["id"] = r.Id, ["hash"] = r.Hash }).ToArray()),
+                });
+            }
+
+            if (problems.Count > 0)
+            {
+                return Refuse("Not evaluated: " + string.Join(" ", problems));
+            }
+
+            string independence = current.By == request.By ? "self" : model.HasRole(request.By, Roles.Operator) ? "operator" : "independent-agent";
+            var body = new JsonObject
+            {
+                ["independence"] = independence,
+                ["outcome"] = verdicts.All(v => v == "met") ? "pass" : verdicts.Contains("impossible") ? "fail" : "findings",
+                ["summary"] = request.Summary,
+                ["findings"] = new JsonArray(),
+                ["conditions"] = conditions,
+            };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteLocked(new RecordDraft("review", request.By, document.RootElement, current.Reference), model);
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome GoalAccept(string goal, GoalAcceptRequest request)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(goal);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The accepting principal must be a ULID.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? current = GoalView.Find(model, goal);
+            if (current is null)
+            {
+                return NotFound($"No goal has id {goal}.");
+            }
+
+            if (GoalRules.Achievement(model, current) is RecordEnvelope achieved)
+            {
+                return Refuse($"Goal {current.Id} was achieved by acceptance {achieved.Id}; a new objective is a new goal.");
+            }
+
+            // Every rule the acceptance record keeps, and every record predicate holding now, refused all at once before anything is written.
+            RecordEnvelope? evaluation = GoalRules.CurrentEvaluation(model, current);
+            var refusals = GoalRules.AcceptanceRefusals(model, current, request.By, evaluation is null ? [] : [evaluation.Id]).Select(r => r.Message).ToList();
+            List<JsonElement> completion = current.Body.TryGetProperty("completion", out JsonElement c) && c.ValueKind == JsonValueKind.Array ? c.EnumerateArray().ToList() : [];
+            foreach ((JsonElement condition, int index) in completion.Select((e, i) => (e, i)).Where(x => x.e.ValueKind == JsonValueKind.Object && x.e.TryGetProperty("record", out _)))
+            {
+                GoalPredicates.Verdict now = GoalPredicates.Evaluate(model, condition);
+                if (now.Value != "met")
+                {
+                    refusals.Add($"Condition {index + 1} is {now.Value} now: {now.Reason}");
+                }
+            }
+
+            if (refusals.Count > 0)
+            {
+                return Refuse("Not accepted: " + string.Join(" ", refusals));
+            }
+
+            var body = new JsonObject { ["statement"] = request.Statement, ["basis"] = new JsonArray(evaluation!.Id), ["self"] = current.By == request.By };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteLocked(new RecordDraft("acceptance", request.By, document.RootElement, current.Reference), model);
+        }
+    }
+
+    /// <summary>
+    /// Records a goal's next status: activate a proposed goal; pause an active one; resume a paused, budget-limited or blocked one;
+    /// stop one that has not ended. Activation and resumption are its sponsor's, a person within the authority to spend, or an
+    /// operator's for a goal an agent sponsors; pausing and stopping are the sponsor's or that operator's. Every refusal comes before
+    /// anything is written.
+    /// </summary>
+    private WriteOutcome GoalTransition(string goal, GoalActionRequest request, string action)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(goal);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!Ulid.IsValid(request.By))
+        {
+            return Refuse("The acting principal must be a ULID.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            RecordEnvelope? current = GoalView.Find(model, goal);
+            if (current is null)
+            {
+                return NotFound($"No goal has id {goal}.");
+            }
+
+            string status = GoalRules.Status(model, current);
+            bool ended = status == "achieved" || Array.IndexOf(GoalRules.Ended, status) >= 0;
+            string? refusal = action switch
+            {
+                _ when ended => status == "achieved" ? $"Goal {current.Id} was achieved; a new objective is a new goal." : $"Goal {current.Id} ended as {status}; a new objective is a new goal.",
+                "activate" when status != "proposed" => status == "active" ? $"Goal {current.Id} is already active." : $"Goal {current.Id} is {status}; resume it instead.",
+                "resume" when status is not ("paused" or "budget-limited" or "blocked") => status == "proposed" ? $"Goal {current.Id} was never activated; activate it." : $"Goal {current.Id} is already active.",
+                "pause" when status != "active" => $"Goal {current.Id} is {status}, not active.",
+                _ => null,
+            };
+            if (refusal is not null)
+            {
+                return Refuse(refusal);
+            }
+
+            string sponsor = EstateModel.BodyString(current, "sponsor") ?? "?";
+            if (action is "activate" or "resume")
+            {
+                IReadOnlyList<(string Code, string Message)> refusals = GoalRules.ActivationRefusals(model, current, request.By, DateTimeOffset.UtcNow);
+                if (refusals.Count > 0)
+                {
+                    return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
+                }
+            }
+            else if (request.By != sponsor && !GoalRules.AccepterOf(model, current).Decides(model, request.By))
+            {
+                return Refuse($"Only the goal's sponsor, {sponsor}, or an operator for a goal an agent sponsors, {(action == "pause" ? "pauses" : "stops")} it.");
+            }
+
+            (string next, string note) = action switch
+            {
+                "activate" => ("active", "Activated by its sponsor, which grants its budget."),
+                "resume" => ("active", "Resumed by its sponsor, which grants its budget again."),
+                "pause" => ("paused", "Paused by its sponsor."),
+                _ => ("abandoned", "Stopped by its sponsor."),
+            };
+            var body = new JsonObject { ["status"] = next, ["note"] = string.IsNullOrWhiteSpace(request.Note) ? note : request.Note };
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteLocked(new RecordDraft("goal-status", request.By, document.RootElement, current.Reference), model);
+        }
+    }
+
     /// <summary>
     /// Reads each refuse-level document of the product (named by any revision of its record) in another repository at the commit a
     /// release would build, where a clone of it is registered here: those whose bytes differ from their latest review, and what was

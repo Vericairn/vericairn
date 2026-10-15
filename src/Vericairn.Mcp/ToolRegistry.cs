@@ -116,6 +116,10 @@ public sealed class ToolRegistry
                 (api, _) => Json(api.Devices())),
             Read("documents_due", "The living documents that are due or unavailable: each with its level (remind, warn or refuse), every trigger newer than its latest clearance, and the contributions no installed pack provides. A document due at refuse holds its product's next release.", NoArguments(),
                 (api, _) => Json(api.Documents().Where(d => d.State != "current").ToList())),
+            Read("goal_get", "One goal by the id of any of its revisions, in the machine form of vericairn goal show: its objective, completion conditions, constraints, sponsor, budget and status, each condition's verdict with the records it read, its current evaluation and its steps; without an id, the estate's goals with their status. Reading a goal changes nothing.", Arguments(("goal", "Goal record id (ULID); omitted, the goals are listed.")),
+                (api, a) => OptionalArg(a, "goal") is string id ? api.Goal(id) is GoalResponse goal ? new ToolCallResult(goal.Json.GetRawText(), false) : NotFound("goal", id) : Json(api.Goals())),
+            Read("goal_progress", "A goal's progress condition by condition, as vericairn goal show prints it: each record predicate's verdict (met, not-met or unknown) with its reason, each condition's verdict in the current evaluation, the steps, who accepts the goal and what still stands between it and its acceptance, which no tool records.", Arguments(("goal", "Goal record id (ULID), any revision.")), "goal",
+                (api, a) => api.Goal(Arg(a, "goal")) is GoalResponse goal ? new ToolCallResult(goal.Text, false) : NotFound("goal", Arg(a, "goal"))),
             Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 (api, a) => Outcome(api.Attempt(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note"))))),
@@ -174,6 +178,9 @@ public sealed class ToolRegistry
 
         throw new ArgumentException($"'{name}' is required.");
     }
+
+    private static string? OptionalArg(JsonObject? arguments, string name) =>
+        arguments?[name] is JsonValue value && value.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text) ? text : null;
 
     private static JsonElement Body(JsonObject? arguments, string name)
     {

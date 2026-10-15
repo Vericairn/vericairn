@@ -61,16 +61,20 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 
 - **`goal`**: an objective the estate carries out with agents and people (the estate's `design/goals.md`). It states
   the objective in the sponsor's words, the `completion` conditions (at least one: a record predicate `{record: {type,
-  fields, min, max}}`, checked from current records, or an evidence statement `{evidence, check}`, judged by an
-  evaluator who did none of the work), `constraints`, `kind` (finite or stewardship), the `sponsor`, the `roster` or
-  role overrides it uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`,
-  `concurrency` and `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a
-  planner or given as work orders, and who approves it), `limits` and `inputs`.
+  subject, product, fields, state, min, max}}`, checked from current records, or an evidence statement `{evidence,
+  check}`, judged by an evaluator who did none of the work; see [A goal's completion
+  conditions](#a-goals-completion-conditions)), `constraints`, `kind` (finite or stewardship), the `sponsor`, the
+  `delegate` a sponsor who is a person may name for an ordinary goal's acceptance, the `roster` or role overrides it
+  uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`, `concurrency` and
+  `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a planner or given as
+  work orders, and who approves it), `limits` and `inputs`.
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
-  `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when its sponsor activates it, which grants
-  its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and abandoned;
-  nothing follows impossible or abandoned; a revised goal starts again from its sponsor's activation. Achievement is
-  never a status: it is an operator's acceptance of the goal (the sponsor's, when the sponsor holds the operator role).
+  `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when it is activated, which grants its
+  budget, or ends unstarted when it is abandoned; active is recorded by its sponsor, a person with the authority to
+  spend, or by an operator when an agent sponsors it, and impossible and abandoned by the sponsor or that operator (see
+  [A goal's activation and acceptance](#a-goals-activation-and-acceptance)); nothing follows impossible or abandoned;
+  a revised goal starts again from its activation. Achievement is never a status: it is the goal's acceptance, by its
+  sponsor when the sponsor is a person and by an operator when an agent sponsors it.
 - **`roster`**: who fills each role of the estate's work (planner, builder, reviewer, evaluator, release manager,
   publisher, decider, or a role the estate names), principals in order of preference. One current roster per estate,
   recorded by the operator or under `administer`; the decider role is held by operators, because decisions and
@@ -137,6 +141,7 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
 | `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept in every revision; `wallMinutes` is required |
 | `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it, and the units it did not report (`unreported`), which are charged at the cap |
+| `review` | `conditions` | object list, required for a review of a goal and refused for any other | The goal's evaluation: one verdict per completion condition, in the goal's order, each with its `verdict` (`met`, `not-yet` or `impossible`), its `reason` and the records it `read`, each `{type, id, hash}` |
 
 ## Rules enforced in format 2
 
@@ -212,6 +217,114 @@ review or the latest revising one, is `self`; `independent-agent` needs an agent
 operator role. A `self` review, stated or judged, does not clear a document whose `clearedBy` is `independent`.
 Release 0.5.2 judged a document of another repository from the estate's records alone and refused `self` there, so a
 builder's review of a document the builder wrote was recorded as `independent-agent`.
+
+## A goal's completion conditions
+
+A goal's `completion` lists what done looks like: record predicates, which the runtime checks from the current records,
+and evidence statements, which an evaluator judges.
+
+A record predicate `{record: {type, subject, product, fields, state, min, max}}` counts the current records of `type`
+that match it, a superseded revision never counting, and holds when the count is within `min` and `max`: with neither
+given, at least one record must match, and with `max` alone none need to. A record matches when each of these that the
+predicate names holds:
+
+- `subject`: the record is about the record named or any revision of it, the first record of its chain standing for
+  them all, so a predicate about a product or a work order follows it across its revisions;
+- `product`, for type `living-document` only: one of the document's `release` triggers names the product, by any
+  revision of the product record, as the release gate matches it;
+- `fields`: each body field named equals the string given, as the record states it;
+- `state`: the record is in the state status derives for it. An ask is `answered` once a current decision names it in
+  `answers`, and otherwise `open`, `notified` or `withdrawn` as its asker recorded; a work order is `planned`,
+  `active`, `paused`, `submitted`, `retired`, `accepted` or `accepted (earlier revision)`; a living document is `due`
+  while a trigger is newer than its latest clearance, and `current` otherwise. No other type has a derived state; its
+  own fields are compared with `fields`.
+
+So "release 0.5.0 of product P is published" is `{"type": "release", "subject": "<P>", "fields": {"version": "0.5.0",
+"status": "published"}}`; "work order K is accepted" is `{"type": "work-order", "fields": {"key": "K"}, "state":
+"accepted"}`; "no ask is open" is `{"type": "ask", "state": "open", "max": 0}`, where `"fields": {"state": "open"}`
+would also count the asks a decision answered, whose recorded state stays open; and "no living document of product P
+is due" is `{"type": "living-document", "product": "<P>", "state": "due", "max": 0}`. The language has no order and no
+latest: a predicate about a commit names the commit.
+
+The runtime gives each condition a verdict, `met`, `not-met` or `unknown`, with its reason and the records it read,
+each at its exact hash; `vericairn goal show <goal>` shows them, and `vericairn goal` those of the one goal that is
+neither achieved nor ended. A record predicate is `unknown` only when a record it might count cannot be decided here
+and the verdict turns on it: a living document that names a contribution no installed pack provides, or whose covered
+paths are in a repository with no clone registered here. A living document that is due is due whatever else could not
+be evaluated. Like status, a living document's `covers` trigger compares its covered paths in the working tree; every
+other input of a verdict is a record, so every machine gives the same verdicts for the same records. An evidence
+statement is always `unknown` to the runtime: the evaluation judges it.
+
+## A goal's evaluation
+
+A review of a goal is its evaluation (the estate's `design/goals.md` § 5), pinned to the goal's exact revision. Its
+`conditions` give, for each completion condition in the goal's order, a `verdict` (`met`, `not-yet` or `impossible`),
+the `reason`, and the records the verdict `read`, each at the hash it pins, which must be the record's own
+(`review.read`); an evidence condition found met names at least one record. One verdict is given for each condition
+(`review.conditions`), and the review's `outcome` follows them: `pass` when every verdict is met, `fail` when one is
+impossible, and `findings` otherwise (`review.outcome`).
+
+The evaluator is a principal other than any step's author (`review.evaluator`). A goal's work is the work orders its
+plan gives and the current ones that name the goal, by any revision, among their `inputs`; the authors of its steps
+are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
+one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
+authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
+goal's current evaluation is the latest one of its exact revision that counts: one that gives a known verdict for
+each condition and whose author authored no step when it was written. A revised goal is evaluated afresh.
+
+`vericairn goal evaluate <goal> --by <id> --summary <text> [--verdict n:verdict:reason]... [--read n:record-id]...`
+records an evaluation through the runtime, which gives each record predicate its own verdict, `met`, or `not-yet` when
+it does not find it met, with the records it read, and refuses an evaluator's verdict that contradicts it; the
+evaluator may still judge a predicate the runtime does not find met `impossible`. Each evidence statement takes the
+evaluator's verdict, and one found met names the records read. The runtime refuses a step's author before anything is
+written. The evaluator is told the conditions, never an expected answer.
+
+## A goal's activation and acceptance
+
+Who decides for a goal is its sponsor when the sponsor is a person, and an operator when an agent or a service
+sponsors it: an agent may propose a goal, as its author or as its sponsor, but never activates, funds or accepts one.
+Activating a goal, its first `active` status, and resuming it, an `active` status after `paused`, `budget-limited` or
+`blocked`, grant its budget, which is spending, and are recorded by who decides for it: the sponsor, never another
+principal, for a goal a person sponsors (`goal-status.sponsor`), and an operator for a goal an agent sponsors
+(`goal-status.operator`). A person who is not an operator needs the authority to spend at the time
+(`goal-status.authority`), a grant of the `spending` scope; an operator holds it. Like every grant, one recorded later
+authorizes what came before it, and an expired one authorizes nothing written from its expiry on. What is granted is
+the goal's budget, unit by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`, `concurrency` and
+`currency` where the goal states them; a unit the goal does not state is not granted, never granted without limit.
+Impossible and abandoned are recorded by the sponsor or by who decides for the goal. A status counts only when its
+author could record it, so an activation an agent wrote around the runtime activates nothing.
+
+A goal is achieved by an `acceptance` of its exact revision. Who accepts it is the operator's decision
+01M507XV4VBFYWMRN8WCXMXHX4, kept in one place:
+
+- its sponsor when the sponsor is a person, and an operator, only an operator, when an agent or a service sponsors it,
+  so that no agent accepts a goal it sponsors (`acceptance.policy`);
+- or, for an ordinary goal a person sponsors, the principal the sponsor delegates its acceptance to, named in the
+  goal's `delegate`, while that principal holds the `accept-work` scope. The sponsor's activation of the exact revision
+  that names the delegate is the delegation. A goal that includes a reserved action is never accepted by delegation:
+  one whose completion has a condition about a release, whose acceptance and publication are the operator's, or about
+  a milestone, or whose work includes a milestone, whose acceptance is the operator's. The goal refuses a delegate that
+  is its sponsor, a delegate of a goal an agent sponsors, and a delegate of a goal whose conditions or given work
+  include a reserved action (`goal.delegate`); a milestone that joins its work later withdraws the delegation from then
+  on.
+
+The acceptance also:
+
+- comes after the goal's activation, and before it ends as impossible or abandoned (`acceptance.activation`);
+- names in its `basis` the goal's current evaluation, which finds every condition met at the goal's exact hash
+  (`acceptance.evaluation`); an evaluation by a step's author never counts;
+- is never by that evaluation's author, nor by a principal that authored one of the goal's steps
+  (`acceptance.independence`).
+
+Each is judged from the records before the acceptance, so a later record never unmakes it. Until an acceptance passes
+them all, the goal's status is the latest status of its exact revision, and `proposed` before any.
+
+`vericairn goal propose` writes a goal from its options (`--done` takes each condition as JSON, `--budget` each cap as
+`unit=value`, `--delegate` the delegate), `vericairn goal activate|pause|resume|stop <goal> --by <id>` record its
+statuses in their order (activation and resumption by who decides for the goal, a pause or a stop by the sponsor too),
+and `vericairn goal accept <goal> --by <id> --statement <text>` accepts it on its current evaluation. Records can
+change after an evaluation, so the runtime also refuses an acceptance while a record predicate does not hold, before
+anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is not, why.
 
 ## A device keeps its identity
 

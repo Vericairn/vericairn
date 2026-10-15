@@ -176,6 +176,33 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
 
     /// <inheritdoc />
+    public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
+
+    /// <inheritdoc />
+    public GoalResponse? Goal(string id) => Get<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true);
+
+    /// <inheritdoc />
+    public WriteOutcome GoalPropose(GoalProposeRequest request) => Post<GoalProposeRequest, WriteOutcome>("/v1/goals", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalActivate(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "activate"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalPause(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "pause"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalResume(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "resume"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalStop(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "stop"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request) => Post<GoalEvaluateRequest, WriteOutcome>(GoalPath(goal, "evaluate"), request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome GoalAccept(string goal, GoalAcceptRequest request) => Post<GoalAcceptRequest, WriteOutcome>(GoalPath(goal, "accept"), request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
 
     /// <inheritdoc />
@@ -240,6 +267,8 @@ public sealed class VericairnClient : IEstateApi, IDisposable
 
     /// <inheritdoc />
     public void Dispose() => http.Dispose();
+
+    private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;
 
     private static string Fingerprint(X509Certificate certificate) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(certificate.GetRawCertData()));
 

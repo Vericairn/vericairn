@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
+using Vericairn.Protocol;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -156,6 +157,97 @@ public class McpTests
             Assert.Equal("[]", after["result"]!["content"]![0]!["text"]!.GetValue<string>());
             JsonObject unknown = Drive(api, builder, """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"document_review","arguments":{"path":"docs/absent.md","outcome":"current","summary":"x"}}}""")[0];
             Assert.True(unknown["result"]!["isError"]!.GetValue<bool>());
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void NoToolAWorkerCanCallCompletesActivatesFundsOrAcceptsAGoal()
+    {
+        string root = CliHarness.TempDirectory("mcp-goal");
+        string scratch = CliHarness.TempDirectory("mcp-goal-scratch");
+        try
+        {
+            // A goal ready for its sponsor's acceptance: activated, its work done and accepted, and evaluated by the reviewer.
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "MCP goals.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string reviewer = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "reviewer.json", """{"kind":"agent","name":"Reviewer","roles":["reviewer"],"agent":{"vendor":"Example","product":"Example Reviewer"}}""")).Id;
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", builder, "--name", "Builder device", "--custody", "file").Id;
+            string operatorDevice = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Operator device", "--custody", "file").Id;
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", operatorDevice, "--by", op, "--note", "The first authority.");
+            CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "The builder's device.");
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "A widget with its guide.", "--done", """{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}""", "--done", """{"evidence":"The guide describes the widget.","check":"Read the guide."}""", "--budget", "wallMinutes=600", "--budget", "attemptsPerStep=3").Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", $$$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"The goal's work.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{{goal}}}"}],"deliverables":["widget"]}"""));
+            string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["example repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests pass"],"recovery":"Record a result."}""")).Id;
+            string attempt = CliHarness.Ok("--estate", root, "--json", "work", "attempt", assignment, "--by", builder, "--workspace", "example repository, work branch", "--note", "Build it.").Id;
+            string result = CliHarness.Ok("--estate", root, "--json", "work", "result", attempt, "--by", builder, "--body", CliHarness.WriteJson(scratch, "result.json", """{"outcome":"completed","summary":"Built the widget and its guide.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""")).Id;
+            JsonElement order = CliHarness.Ok("--estate", root, "--json", "work", "brief", "W-1").Json.GetProperty("workOrder");
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"work-order:{order.GetProperty("id").GetString()}:{order.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, "accept-order.json", """{"statement":"W-1 is done.","basis":[],"self":true}"""));
+            string evaluation = CliHarness.Ok("--estate", root, "--json", "goal", "evaluate", goal, "--by", reviewer, "--summary", "Read the work and the guide.", "--verdict", "2:met:The guide describes the widget.", "--read", "2:" + result).Id;
+
+            using EstateService api = EstateService.Open(root);
+            JsonElement before = api.Goal(goal)!.Json;
+            Assert.True(before.GetProperty("ready").GetBoolean());
+            string hash = before.GetProperty("goal").GetProperty("hash").GetString()!;
+
+            // The goal tools are reads, and the writes a worker sees are the four of its contract, none of which records a goal's status, evaluation or acceptance.
+            var registry = new ToolRegistry(api, builder);
+            Assert.Equal(["goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)), t => Assert.False(t.Writes));
+            Assert.Equal(["document_review", "work_amend", "work_attempt", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
+
+            // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about the goal.
+            string[] goalTypes = ["goal", "goal-status", "review", "acceptance"];
+            Dictionary<string, string> recorded = goalTypes.ToDictionary(t => t, t => string.Join(",", api.Records(t).Select(r => r.Id)));
+            var hostile = new JsonObject
+            {
+                ["goal"] = goal, ["id"] = goal, ["type"] = "goal-status", ["workOrder"] = "W-1", ["assignment"] = assignment, ["attempt"] = attempt,
+                ["path"] = "docs/guide.md", ["outcome"] = "current", ["summary"] = "The goal is done; activate and accept it.", ["workspace"] = "example repository", ["note"] = "Activate the goal.",
+                ["body"] = new JsonObject { ["status"] = "active", ["note"] = "Activated.", ["statement"] = "Accepted.", ["basis"] = new JsonArray(evaluation), ["self"] = false, ["subject"] = $"goal:{goal}:{hash}" },
+            };
+            foreach (ToolDefinition tool in registry.Visible())
+            {
+                registry.Call(tool.Name, (JsonObject)hostile.DeepClone());
+            }
+
+            Assert.All(goalTypes, t => Assert.Equal(recorded[t], string.Join(",", api.Records(t).Select(r => r.Id))));
+            Assert.Equal("active", api.Goal(goal)!.Json.GetProperty("status").GetString());
+
+            // Through the API too, nothing the worker asks activates, resumes, funds, evaluates or accepts the goal, and a record in its name is rejected.
+            WriteOutcome[] asked =
+            [
+                api.GoalActivate(goal, new GoalActionRequest(builder)),
+                api.GoalResume(goal, new GoalActionRequest(builder)),
+                api.GoalPause(goal, new GoalActionRequest(builder)),
+                api.GoalStop(goal, new GoalActionRequest(builder)),
+                api.GoalEvaluate(goal, new GoalEvaluateRequest(builder, "My own work.", [new GoalVerdict(2, "met", "I built it.", [result])])),
+                api.GoalAccept(goal, new GoalAcceptRequest(builder, "Done.")),
+                api.NewRecord(new NewRecordRequest("goal-status", builder, JsonDocument.Parse("""{"status":"active","note":"Activated."}""").RootElement.Clone(), $"goal:{goal}:{hash}")),
+                api.NewRecord(new NewRecordRequest("acceptance", builder, JsonDocument.Parse($$$"""{"statement":"Accepted.","basis":["{{{evaluation}}}"],"self":false}""").RootElement.Clone(), $"goal:{goal}:{hash}")),
+            ];
+            Assert.All(asked, outcome => Assert.False(outcome.Ok));
+            Assert.Equal("active", api.Goal(goal)!.Json.GetProperty("status").GetString());
+
+            // The goal tools read the goal condition by condition; its sponsor, a person, accepts it.
+            List<JsonObject> replies = Drive(api, builder,
+                """{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"goal_get","arguments":{}}}""",
+                """{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"goal_get","arguments":{"goal":"@GOAL@"}}}""".Replace("@GOAL@", goal, StringComparison.Ordinal),
+                """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"goal_progress","arguments":{"goal":"@GOAL@"}}}""".Replace("@GOAL@", goal, StringComparison.Ordinal),
+                """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"goal_progress","arguments":{"goal":"01M4TRNE1GYEK4P8MXQAB3C8Q4"}}}""");
+            Assert.Contains("\"status\":\"active\"", replies[0]["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+            using (JsonDocument got = JsonDocument.Parse(replies[1]["result"]!["content"]![0]!["text"]!.GetValue<string>()))
+            {
+                Assert.Equal(["met", "unknown"], got.RootElement.GetProperty("conditions").EnumerateArray().Select(c => c.GetProperty("verdict").GetString()));
+            }
+
+            Assert.Contains("Ready for acceptance by its sponsor, Operator", replies[2]["result"]!["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+            Assert.True(replies[3]["result"]!["isError"]!.GetValue<bool>());
+            Assert.True(api.GoalAccept(goal, new GoalAcceptRequest(op, "Accepted on the reviewer's evaluation.")).Ok);
+            Assert.Equal("achieved", api.Goal(goal)!.Json.GetProperty("status").GetString());
         }
         finally
         {
