@@ -3,10 +3,14 @@
 
 using System.Buffers.Text;
 using System.Globalization;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Security;
 using System.Numerics;
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
@@ -254,6 +258,34 @@ public class DaemonTests
         }
 
         Assert.Contains("conflict is reserved and nothing answers with it yet", listed);
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public async Task OnWindowsTheNamedPipeAllowsOnlyTheUserThatStartedTheDaemon()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("The local socket is a named pipe on Windows only; elsewhere it is an owner-only Unix domain socket.");
+        }
+
+        using var estate = new TestEstate();
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal("pipe", host.Endpoint.Kind);
+        using var client = new NamedPipeClientStream(".", host.Endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await client.ConnectAsync(5000, TestContext.Current.CancellationToken);
+
+        // Kestrel's named-pipe transport creates the pipe with CurrentUserOnly, its default: the access list allows the owner of the
+        // daemon's process token, the user's own account, or for an elevated process the owner Windows gives it (the Administrators
+        // group by default). No one else is allowed, LocalSystem aside.
+        using WindowsIdentity current = WindowsIdentity.GetCurrent();
+        IdentityReference[] daemonsUser = [current.User!, current.Owner!];
+        IdentityReference[] allowed = [.. daemonsUser, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null)];
+        PipeSecurity security = client.GetAccessControl();
+        Assert.Contains(security.GetOwner(typeof(SecurityIdentifier))!, daemonsUser);
+        List<AccessRule> allows = security.GetAccessRules(includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier)).Cast<AccessRule>().Where(r => r.AccessControlType == AccessControlType.Allow).ToList();
+        Assert.Contains(allows, r => daemonsUser.Contains(r.IdentityReference));
+        Assert.All(allows, r => Assert.Contains(r.IdentityReference, allowed));
     }
 
     [Fact]

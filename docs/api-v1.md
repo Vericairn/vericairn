@@ -36,6 +36,11 @@ same refusals and the same status bytes; nothing lives only in the daemon.
 | Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
 | Loopback | TLS on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
 
+On Windows the pipe is created by Kestrel's named-pipe transport with its default, `CurrentUserOnly`, and no
+other pipe security. Its access list allows only the owner of the daemon's process token: the account that
+started the daemon or, for a daemon run elevated, the owner Windows gives elevated processes (by default the
+Administrators group), so that only administrators' elevated processes reach it.
+
 The runtime certificate is self-signed ECDSA P-256, valid 180 days and replaced at the next start when
 fewer than 30 days remain, kept owner-only as `runtime-certificate.p12` beside the live store. Its SHA-256
 fingerprint is published in the endpoint file; a client accepts that certificate and no other, and

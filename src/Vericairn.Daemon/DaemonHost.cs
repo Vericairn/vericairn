@@ -138,6 +138,9 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             if (pipe)
             {
+                // Kestrel's named-pipe transport creates the pipe with CurrentUserOnly, its default, and no PipeSecurity: the pipe's
+                // access list allows only the owner of this process's token, the user that started the daemon (for an elevated
+                // process, the owner Windows gives it, by default the Administrators group). A Windows test reads that list.
                 kestrel.ListenNamedPipe(address);
             }
             else
