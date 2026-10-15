@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -38,7 +39,7 @@ public sealed class GoalType : IRecordType
     [
         new("title", "string", true, "Short title.", 2),
         new("objective", "string", true, "What the sponsor wants, in the sponsor's words.", 2),
-        new("completion", "object[]", true, "The conditions that make it done, at least one: {record: {type, fields?, min?, max?}} is checked from current records; {evidence, check} is judged by an evaluator who did none of the work.", 2),
+        new("completion", "object[]", true, "The conditions that make it done, at least one: a record predicate {record: {type, subject?, product?, fields?, state?, min?, max?}}, checked from current records, counts the current records of the type about the subject (any revision of it), of the product (living documents), with each body field equal to its string and in the state status derives (ask, living-document, work-order), and holds when the count is within min and max (at least one when neither is given); an evidence statement {evidence, check} is judged by an evaluator who did none of the work.", 2),
         new("constraints", "string[]", true, "What must not change or happen; may be empty.", 2),
         new("kind", string.Join('|', Kinds), true, "finite ends when done; stewardship holds a standing condition.", 2),
         new("sponsor", "ulid", true, "The accountable principal, who activates, stops and accepts it.", 2),
@@ -70,7 +71,7 @@ public sealed class GoalType : IRecordType
         body.NoOtherKeys();
         foreach (BodyReader condition in completion ?? [])
         {
-            Condition(condition);
+            Condition(context, condition);
         }
 
         context.RequireReference("sponsor", sponsor, "principal");
@@ -120,7 +121,7 @@ public sealed class GoalType : IRecordType
     }
 
     /// <summary>A completion condition: a record predicate the runtime checks, or an evidence statement an evaluator judges.</summary>
-    private static void Condition(BodyReader condition)
+    private static void Condition(ValidationContext context, BodyReader condition)
     {
         bool record = condition.Has("record");
         bool evidence = condition.Has("evidence");
@@ -132,37 +133,73 @@ public sealed class GoalType : IRecordType
         BodyReader? predicate = condition.Nested("record", false);
         if (predicate is not null)
         {
-            string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
-            if (type is not null && RecordTypeRegistry.Find(type) is null)
-            {
-                predicate.Error("goal.predicate", "type", $"'{type}' is not a record type this build reads.");
-            }
-
-            BodyReader? fields = predicate.Nested("fields", false);
-            if (fields is not null)
-            {
-                foreach (JsonProperty field in fields.Element.EnumerateObject())
-                {
-                    fields.Allow(field.Name);
-                    if (field.Value.ValueKind != JsonValueKind.String)
-                    {
-                        fields.Error("body.type", field.Name, "A predicate compares a body field with a string value.");
-                    }
-                }
-            }
-
-            long? min = predicate.Number("min", false, 0, 1_000_000);
-            long? max = predicate.Number("max", false, 0, 1_000_000);
-            if (min is not null && max is not null && max < min)
-            {
-                predicate.Error("goal.predicate", "max", "'max' is at least 'min'.");
-            }
-
-            predicate.NoOtherKeys();
+            Predicate(context, predicate);
         }
 
         condition.Text("evidence", false, 2000);
         condition.Text("check", evidence, 2000);
         condition.NoOtherKeys();
+    }
+
+    /// <summary>A record predicate (the estate's design/goals.md § 5): type, subject, product, field equalities, derived state, and bounds.</summary>
+    private static void Predicate(ValidationContext context, BodyReader predicate)
+    {
+        string? type = predicate.Text("type", true, 100, Patterns.Slug, "a record type");
+        if (type is not null && RecordTypeRegistry.Find(type) is null)
+        {
+            predicate.Error("goal.predicate", "type", $"'{type}' is not a record type this build reads.");
+        }
+
+        // The subject is any record, followed across its revisions; the product names the product whose living documents count.
+        string? subject = predicate.Ulid("subject", false);
+        if (subject is not null && context.Find(subject) is null)
+        {
+            predicate.Error("body.reference", "subject", $"'subject' references {subject}, which does not exist in this estate.");
+        }
+
+        string? product = predicate.Ulid("product", false);
+        if (product is not null && type is not null && type != "living-document")
+        {
+            predicate.Error("goal.predicate", "product", "'product' names the product whose living documents are counted; it goes with type living-document.");
+        }
+        else if (product is not null && context.Find(product) is not { Type: "product" })
+        {
+            predicate.Error("body.reference", "product", $"'product' references {product}, which is not a product record of this estate.");
+        }
+
+        BodyReader? fields = predicate.Nested("fields", false);
+        if (fields is not null)
+        {
+            foreach (JsonProperty field in fields.Element.EnumerateObject())
+            {
+                fields.Allow(field.Name);
+                if (field.Value.ValueKind != JsonValueKind.String)
+                {
+                    fields.Error("body.type", field.Name, "A predicate compares a body field with a string value.");
+                }
+            }
+        }
+
+        string? state = predicate.Text("state", false, 100);
+        if (state is not null && type is not null && RecordTypeRegistry.Find(type) is not null)
+        {
+            if (!GoalPredicates.States.TryGetValue(type, out IReadOnlyList<string>? states))
+            {
+                predicate.Error("goal.predicate", "state", $"'state' is the state status derives, for {string.Join(", ", GoalPredicates.States.Keys)} records; a {type} record's own fields are compared with 'fields'.");
+            }
+            else if (!states.Contains(state, StringComparer.Ordinal))
+            {
+                predicate.Error("goal.predicate", "state", $"The state of a {type} record is one of: {string.Join(", ", states)}.");
+            }
+        }
+
+        long? min = predicate.Number("min", false, 0, 1_000_000);
+        long? max = predicate.Number("max", false, 0, 1_000_000);
+        if (min is not null && max is not null && max < min)
+        {
+            predicate.Error("goal.predicate", "max", "'max' is at least 'min'.");
+        }
+
+        predicate.NoOtherKeys();
     }
 }

@@ -150,6 +150,12 @@ The release as intent, then observed effect:
 `vericairn status` lists every current operation with its state; one that is not observed-success or
 canceled needs attention.
 
+A goal can ask that no living document of a product be due, with the record predicate `{"type": "living-document",
+"product": "<id>", "state": "due", "max": 0}` among its completion conditions. It follows the product across the
+revisions of its record as the release gate does, counts every document due at any level, and is never met while a
+document of the product names a contribution no installed pack provides, so a goal such as "release 0.6.0" is not done
+while one of its documents is due ([record-format-v2.md](record-format-v2.md#a-goals-completion-conditions)).
+
 A release's documentation set (for Vericairn, `docs/releases/<version>/`) carries a manifest the product's
 build tooling writes from the build; from 0.6.0 it states the record formats the build reads and writes,
 which step 2 reads from the draft. `vericairn docs notes --from <previous> --to <version> --out <set>`

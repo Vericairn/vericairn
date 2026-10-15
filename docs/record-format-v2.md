@@ -61,11 +61,12 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 
 - **`goal`**: an objective the estate carries out with agents and people (the estate's `design/goals.md`). It states
   the objective in the sponsor's words, the `completion` conditions (at least one: a record predicate `{record: {type,
-  fields, min, max}}`, checked from current records, or an evidence statement `{evidence, check}`, judged by an
-  evaluator who did none of the work), `constraints`, `kind` (finite or stewardship), the `sponsor`, the `roster` or
-  role overrides it uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`,
-  `concurrency` and `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a
-  planner or given as work orders, and who approves it), `limits` and `inputs`.
+  subject, product, fields, state, min, max}}`, checked from current records, or an evidence statement `{evidence,
+  check}`, judged by an evaluator who did none of the work; see [A goal's completion
+  conditions](#a-goals-completion-conditions)), `constraints`, `kind` (finite or stewardship), the `sponsor`, the
+  `roster` or role overrides it uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and
+  `tokens`, `concurrency` and `currency` where they apply; an absent unit is not an unlimited one), the `plan`
+  (proposed by a planner or given as work orders, and who approves it), `limits` and `inputs`.
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
   `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when its sponsor activates it, which grants
   its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and abandoned;
@@ -212,6 +213,42 @@ review or the latest revising one, is `self`; `independent-agent` needs an agent
 operator role. A `self` review, stated or judged, does not clear a document whose `clearedBy` is `independent`.
 Release 0.5.2 judged a document of another repository from the estate's records alone and refused `self` there, so a
 builder's review of a document the builder wrote was recorded as `independent-agent`.
+
+## A goal's completion conditions
+
+A goal's `completion` lists what done looks like: record predicates, which the runtime checks from the current records,
+and evidence statements, which an evaluator judges.
+
+A record predicate `{record: {type, subject, product, fields, state, min, max}}` counts the current records of `type`
+that match it, a superseded revision never counting, and holds when the count is within `min` and `max`: with neither
+given, at least one record must match, and with `max` alone none need to. A record matches when each of these that the
+predicate names holds:
+
+- `subject`: the record is about the record named or any revision of it, the first record of its chain standing for
+  them all, so a predicate about a product or a work order follows it across its revisions;
+- `product`, for type `living-document` only: one of the document's `release` triggers names the product, by any
+  revision of the product record, as the release gate matches it;
+- `fields`: each body field named equals the string given, as the record states it;
+- `state`: the record is in the state status derives for it. An ask is `answered` once a current decision names it in
+  `answers`, and otherwise `open`, `notified` or `withdrawn` as its asker recorded; a work order is `planned`,
+  `active`, `paused`, `submitted`, `retired`, `accepted` or `accepted (earlier revision)`; a living document is `due`
+  while a trigger is newer than its latest clearance, and `current` otherwise. No other type has a derived state; its
+  own fields are compared with `fields`.
+
+So "release 0.5.0 of product P is published" is `{"type": "release", "subject": "<P>", "fields": {"version": "0.5.0",
+"status": "published"}}`; "work order K is accepted" is `{"type": "work-order", "fields": {"key": "K"}, "state":
+"accepted"}`; "no ask is open" is `{"type": "ask", "state": "open", "max": 0}`, where `"fields": {"state": "open"}`
+would also count the asks a decision answered, whose recorded state stays open; and "no living document of product P
+is due" is `{"type": "living-document", "product": "<P>", "state": "due", "max": 0}`. The language has no order and no
+latest: a predicate about a commit names the commit.
+
+The runtime gives each condition a verdict, `met`, `not-met` or `unknown`, with its reason and the records it read,
+each at its exact hash; `vericairn goal` shows them. A record predicate is `unknown` only when a record it might count
+cannot be decided here and the verdict turns on it: a living document that names a contribution no installed pack
+provides, or whose covered paths are in a repository with no clone registered here. A living document that is due is
+due whatever else could not be evaluated. Like status, a living document's `covers` trigger compares its covered paths
+in the working tree; every other input of a verdict is a record, so every machine gives the same verdicts for the same
+records. An evidence statement is always `unknown` to the runtime: the evaluation judges it.
 
 ## A device keeps its identity
 
