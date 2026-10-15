@@ -45,7 +45,7 @@ public class EstateSessionTests
         Assert.False(File.Exists(Path.Combine(estate.Root, status.RelativePath.Replace('/', Path.DirectorySeparatorChar))));
         Assert.False(session.Live.Has(status.RelativePath));
         Assert.Equal("file", session.Objects.Kind);
-        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(estate.Root), e => Path.GetFileName(e) == ".vericairn" || e.EndsWith(".db", StringComparison.Ordinal));
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(estate.Root), e => e.EndsWith(".db", StringComparison.Ordinal));
     }
 
     [Fact]

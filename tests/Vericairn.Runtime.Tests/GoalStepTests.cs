@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -314,6 +315,54 @@ public class GoalStepTests
         Assert.True(asked.Ok, asked.Message);
         Assert.Equal(asked.Assignment!.Id, EstateModel.BodyString(run.Estate.Load().ById[asked.Ask!.Id], "assignment"));
         Assert.Equal("assigned", Next(run, "W-3").GetProperty("route").GetProperty("state").GetString());
+        Assert.Empty(run.Service.Reconcile());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void InterruptedTemporaryWritesDoNotObstructReopenAndRoutingRetry(bool beforeRename)
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        Done(run, run.Assignment);
+        string? staging = null;
+        byte[] residue = [];
+        run.Service.BeforeStoringTogether = record =>
+        {
+            if (record.Envelope.Type == "operation")
+            {
+                RecordAuthor.Write(run.Estate.Root, record, (path, bytes) =>
+                {
+                    staging = path;
+                    residue = beforeRename ? bytes : bytes[..(bytes.Length / 2)];
+                    File.WriteAllBytes(path, residue);
+                    // Inspect while the unpublished bytes still exist, as they would after process termination.
+                    Assert.False(run.Estate.Load().Findings.HasErrors);
+                    Assert.Equal(0, run.Service.Check().Errors);
+                    throw new IOException("Interrupted temporary write.");
+                });
+            }
+        };
+        GoalStepResponse stopped = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "interrupted")));
+        Assert.False(stopped.Ok, stopped.Message);
+        Assert.NotNull(staging);
+        Assert.False(File.Exists(staging));
+        string stranded = stopped.Assignment!.Id;
+
+        // Leave the same residue as an abrupt process death, when finally cannot run.
+        File.WriteAllBytes(staging, residue);
+        RunEstate.Git(run.Estate.Root, "init", "-q");
+        Assert.Equal(".vericairn/record-staging/" + Path.GetFileName(staging), RunEstate.Git(run.Estate.Root, "check-ignore", "--", Path.GetRelativePath(run.Estate.Root, staging)).Trim());
+        run.Reopen();
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+        Assert.Equal(0, run.Service.Check().Errors);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(run.Estate.Root, "records"), "*.tmp", SearchOption.AllDirectories));
+        GoalStepResponse retried = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "recovered")));
+        Assert.True(retried.Ok, retried.Message);
+        Assert.Equal("observed-success", run.Settled(retried.Run!.Run).Status);
+        Assert.True(run.Estate.Load().ById.ContainsKey(stranded));
         Assert.Empty(run.Service.Reconcile());
         Assert.Equal(0, run.Service.Check().Errors);
     }
