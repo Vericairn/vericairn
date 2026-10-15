@@ -185,6 +185,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public GoalResponse? Goal(string id) => Get<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true);
 
     /// <inheritdoc />
+    public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
+
+    /// <inheritdoc />
     public WriteOutcome GoalPropose(GoalProposeRequest request) => Post<GoalProposeRequest, WriteOutcome>("/v1/goals", request)!;
 
     /// <inheritdoc />

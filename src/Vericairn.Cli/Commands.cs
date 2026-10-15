@@ -112,28 +112,10 @@ internal static class Commands
     /// <summary>The current goal condition by condition: the one named, or the one goal neither achieved nor ended; with none or several, the list.</summary>
     public static int Goal(string root, string? id, bool json) => WithApi(root, api =>
     {
+        id ??= OpenGoal(api, json);
         if (id is null)
         {
-            IReadOnlyList<GoalRow> rows = api.Goals();
-            List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
-            if (open.Count != 1)
-            {
-                if (json)
-                {
-                    Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-                    return Clean;
-                }
-
-                Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
-                foreach (GoalRow row in rows)
-                {
-                    Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
-                }
-
-                return Clean;
-            }
-
-            id = open[0].Id;
+            return Clean;
         }
 
         GoalResponse? goal = api.Goal(id);
@@ -145,6 +127,53 @@ internal static class Commands
         Console.Out.Write(json ? CanonicalJson.SerializePretty(goal.Json) : goal.Text);
         return Clean;
     });
+
+    /// <summary>
+    /// A goal's next steps routed from the runtime's machine: the one named, or the one goal neither achieved nor ended; with none or
+    /// several, the list. It records and starts nothing.
+    /// </summary>
+    public static int GoalNext(string root, string? id, bool json) => WithApi(root, api =>
+    {
+        id ??= OpenGoal(api, json);
+        if (id is null)
+        {
+            return Clean;
+        }
+
+        NextResponse? next = api.GoalNext(id);
+        if (next is null)
+        {
+            return Fail($"No goal has id {id}.");
+        }
+
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(next.Json) : next.Text);
+        return Clean;
+    });
+
+    /// <summary>The one goal neither achieved nor ended; with none or several, prints the goals and returns null.</summary>
+    private static string? OpenGoal(IEstateApi api, bool json)
+    {
+        IReadOnlyList<GoalRow> rows = api.Goals();
+        List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
+        if (open.Count == 1)
+        {
+            return open[0].Id;
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+            return null;
+        }
+
+        Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
+        foreach (GoalRow row in rows)
+        {
+            Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
+        }
+
+        return null;
+    }
 
     /// <summary>What <c>vericairn goal propose</c> was given.</summary>
     internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string? Delegate, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);

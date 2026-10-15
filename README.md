@@ -55,8 +55,12 @@ release and pins the one it runs on.
   `vericairn.worker/1`): through Claude Code's or Codex's own `/goal`, or a generic launch, in a git worktree on
   a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
   after, unknown usage charged at the cap, a stop's facts kept apart, and nothing launched while an operator's
-  or the sponsor's key on the machine signs without presence. There is no conductor yet: people choose a
-  goal's next step, and the worker or a person carries it.
+  or the sponsor's key on the machine signs without presence. `vericairn goal next` routes a goal's eligible steps by
+  its roster from the machine it runs on: each reaches the first available principal of its role, an agent where a
+  launcher for its harness, its admitted key and the goal's budget allow and a person where needed, while a reserved
+  action reaches only a person who holds it or an agent under a grant in force; when none is available the sponsor is
+  asked, never another contributor. There is no
+  conductor yet: people choose a goal's next step, and the worker or a person carries it.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over

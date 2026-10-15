@@ -21,6 +21,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public string Launcher => LauncherId;
 
     /// <inheritdoc />
+    public string? Harness => "Claude Code";
+
+    /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "claude-code-cli",
         IAgentLauncher.Contract,

@@ -243,6 +243,16 @@ public sealed record GoalRow(string Id, string Hash, string Title, string Status
 public sealed record GoalResponse(string Text, JsonElement Json);
 
 /// <summary>
+/// A goal's next steps routed from the runtime's machine (the next-eligible view with routing and budget): each of its steps with the
+/// state status derives, what holds each planned one, and for each eligible one the principal its role's roster reaches, or why none
+/// is available, with whether the goal's budget allows it; the goal's ledger and its asks. It reads that machine's launchers and keys,
+/// so it is not the same on every machine; reading it records and starts nothing.
+/// </summary>
+/// <param name="Text">Human form.</param>
+/// <param name="Json">Machine form, canonical: format vericairn.next/1.</param>
+public sealed record NextResponse(string Text, JsonElement Json);
+
+/// <summary>
 /// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
 /// activation. Anyone may propose a new goal; a revision of an existing one is recorded only by its sponsor when the sponsor is a
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).

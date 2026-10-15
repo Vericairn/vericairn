@@ -212,6 +212,40 @@ public class GoalJourneyTests
         }
     }
 
+    [Fact]
+    public void GoalNextRoutesTheOpenGoalsStepsAndRecordsNothing()
+    {
+        string root = CliHarness.TempDirectory("goal-next");
+        string scratch = CliHarness.TempDirectory("goal-next-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Routing.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            Assert.Contains("No goals; propose one with vericairn goal propose.", CliHarness.Ok("--estate", root, "goal", "next").Out, StringComparison.Ordinal);
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "roster", "--by", op, "--body", CliHarness.WriteJson(scratch, "roster.json", $$"""{"roles":[{"role":"builder","principals":["{{builder}}"]},{"role":"decider","principals":["{{op}}"]}]}"""));
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "A widget.", "--done", """{"evidence":"It ships.","check":"Read it."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2").Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            string order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", $$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}""")).Id;
+            int records = Directory.EnumerateFiles(Path.Combine(root, "records"), "*.json", SearchOption.AllDirectories).Count();
+
+            // The builder has no admitted device, so it is not available: the sponsor would be asked, never another contributor.
+            string text = CliHarness.Ok("--estate", root, "goal", "next").Out;
+            Assert.StartsWith($"Next steps of goal Build the widget [goal {goal}], active, routed from this machine\n", text, StringComparison.Ordinal);
+            Assert.Contains($"  W-1  Build the widget [work-order {order}]\n    builder: unavailable, Operator [principal {op}]\n", text, StringComparison.Ordinal);
+            Assert.Contains("      candidate Builder (agent): not available: it has no admitted device, so it could sign no attempt and no result\n", text, StringComparison.Ordinal);
+            Assert.Contains("  Next: W-1, unavailable\n", text, StringComparison.Ordinal);
+            JsonElement json = CliHarness.Ok("--estate", root, "--json", "goal", "next", goal).Json;
+            Assert.Equal("vericairn.next/1", json.GetProperty("format").GetString());
+            Assert.Equal("unavailable", Assert.Single(json.GetProperty("steps").EnumerateArray()).GetProperty("route").GetProperty("state").GetString());
+            Assert.Equal(2, CliHarness.Run("--estate", root, "goal", "next", "01M4TRNE1GYEK4P8MXQAB3C8Q4").Code);
+            Assert.Equal(records, Directory.EnumerateFiles(Path.Combine(root, "records"), "*.json", SearchOption.AllDirectories).Count());
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
     private static string Principal(string root, string scratch, string op, string name, string role) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, name + ".json", $$$"""{"kind":"agent","name":"{{{name}}}","roles":["{{{role}}}"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
 

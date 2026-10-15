@@ -217,7 +217,7 @@ public class ProgressReportTests
         Assert.All(held.Relations, r => Assert.True(r.Holds));
         Assert.Equal(["report"], held.Relations[1].Open);
         string section = Section(ProgressReport.Render(model, null), "The next eligible work");
-        Assert.StartsWith("The next eligible work: 2 of 4 planned work orders\n  Planned work orders whose after work orders are all accepted and whose blockedBy holds nothing open; routing by roster and budget is GOAL-04's.\n", section, StringComparison.Ordinal);
+        Assert.StartsWith("The next eligible work: 2 of 4 planned work orders\n  Planned work orders whose after work orders are all accepted and whose blockedBy holds nothing open; vericairn goal next routes a goal's eligible steps by its roster and budget, from the machine it runs on.\n", section, StringComparison.Ordinal);
         Assert.Contains($"  A-1  ordinary   Order A-1 [work-order {first.Id}]\n    assigned to Test Builder: no attempt [assignment {assignment.Id}]\n", section, StringComparison.Ordinal);
         Assert.Contains($"  Held: 2\n    B-1  ordinary   Order B-1 [work-order {afterFirst.Id}]\n      after A-1: planned, holds it [work-order {first.Id}]\n", section, StringComparison.Ordinal);
         Assert.Contains($"      blockedBy ask {ask.Id}: open, holds it [ask {ask.Id}]\n", section, StringComparison.Ordinal);

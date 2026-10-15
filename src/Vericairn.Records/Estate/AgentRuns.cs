@@ -308,7 +308,7 @@ public static class AgentRuns
             long remaining = ledger.Remaining(unit)!.Value;
             if (remaining <= 0)
             {
-                refusals.Add(("operation.budget", $"The goal's budget is spent: {ledger.Describe(unit)} charged to its runs, every run in flight at its cap."));
+                refusals.Add(("operation.budget", SpentRefusal(ledger, unit)));
             }
             else if (Amount(cap, unit) is long capped && capped > remaining)
             {
@@ -316,22 +316,57 @@ public static class AgentRuns
             }
         }
 
-        if (ledger.InFlight >= ledger.Concurrency)
+        if (ConcurrencyRefusal(ledger) is string busy)
         {
-            refusals.Add(("operation.budget", $"{ledger.InFlight.ToString(CultureInfo.InvariantCulture)} of the goal's runs {(ledger.InFlight == 1 ? "is" : "are")} in flight, and its budget allows {ledger.Concurrency.ToString(CultureInfo.InvariantCulture)} at a time{(ledger.StatesConcurrency ? string.Empty : ", one when it states no concurrency")}."));
+            refusals.Add(("operation.budget", busy));
         }
 
-        if (assignment is not null)
+        if (assignment is not null && AttemptsRefusal(model, ledger, assignment) is string used)
         {
-            IReadOnlyList<string> step = model.ById.TryGetValue(assignment, out RecordEnvelope? record) ? model.Chain(model.Latest(record)) : [assignment];
-            int had = ledger.Attempts(step);
-            if (had >= ledger.AttemptsPerStep)
-            {
-                refusals.Add(("operation.budget", $"The step has had {had.ToString(CultureInfo.InvariantCulture)} runs, the {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} attempts per step the goal's budget grants."));
-            }
+            refusals.Add(("operation.budget", used));
         }
 
         return refusals;
+    }
+
+    /// <summary>
+    /// Why the goal's budget leaves nothing for another run of a step, whatever runs are in flight and whether the goal is active: a
+    /// charged unit of which nothing remains, and, for a step that has an assignment, its attempts used up. Empty when the budget
+    /// leaves something for a run; the run's cap is then what remains (<see cref="CapFor"/>). Routing reads it as whether the budget
+    /// allows an agent to carry the step (design/goals.md § 6).
+    /// </summary>
+    public static IReadOnlyList<string> Exhausted(EstateModel model, Ledger ledger, string? assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(ledger);
+        var reasons = ChargedUnits.Where(u => ledger.Remaining(u) is <= 0).Select(u => SpentRefusal(ledger, u)).ToList();
+        if (assignment is not null && AttemptsRefusal(model, ledger, assignment) is string used)
+        {
+            reasons.Add(used);
+        }
+
+        return reasons;
+    }
+
+    /// <summary>Why no further run of the goal starts while those in flight hold its concurrency; null when one may start.</summary>
+    public static string? ConcurrencyRefusal(Ledger ledger)
+    {
+        ArgumentNullException.ThrowIfNull(ledger);
+        return ledger.InFlight >= ledger.Concurrency
+            ? $"{ledger.InFlight.ToString(CultureInfo.InvariantCulture)} of the goal's runs {(ledger.InFlight == 1 ? "is" : "are")} in flight, and its budget allows {ledger.Concurrency.ToString(CultureInfo.InvariantCulture)} at a time{(ledger.StatesConcurrency ? string.Empty : ", one when it states no concurrency")}."
+            : null;
+    }
+
+    private static string SpentRefusal(Ledger ledger, string unit) =>
+        $"The goal's budget is spent: {ledger.Describe(unit)} charged to its runs, every run in flight at its cap.";
+
+    private static string? AttemptsRefusal(EstateModel model, Ledger ledger, string assignment)
+    {
+        IReadOnlyList<string> step = model.ById.TryGetValue(assignment, out RecordEnvelope? record) ? model.Chain(model.Latest(record)) : [assignment];
+        int had = ledger.Attempts(step);
+        return had >= ledger.AttemptsPerStep
+            ? $"The step has had {had.ToString(CultureInfo.InvariantCulture)} runs, the {ledger.AttemptsPerStep.ToString(CultureInfo.InvariantCulture)} attempts per step the goal's budget grants."
+            : null;
     }
 
     /// <summary>A unit's amount in caps or usage: a number, or for currency the amount in minor units; null when it states none.</summary>

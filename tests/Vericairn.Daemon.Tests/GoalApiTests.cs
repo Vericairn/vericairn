@@ -53,6 +53,14 @@ public class GoalApiTests
         Assert.Equal(CanonicalJson.SerializePretty(host.Service.Goal(goal)!.Json), CanonicalJson.SerializePretty(api.Goal(goal)!.Json));
         Assert.True(api.Goal(goal)!.Json.GetProperty("ready").GetBoolean());
 
+        // The goal's next steps routed from the daemon's machine, through the API: its one step is accepted, so nothing is next.
+        NextResponse next = api.GoalNext(goal)!;
+        Assert.Equal("vericairn.next/1", next.Json.GetProperty("format").GetString());
+        Assert.Equal("accepted", Assert.Single(next.Json.GetProperty("steps").EnumerateArray()).GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, next.Json.GetProperty("next").ValueKind);
+        Assert.Equal(host.Service.GoalNext(goal)!.Text, next.Text);
+        Assert.Null(api.GoalNext("01M4TRNE1GYEK4P8MXQAB3C8Q4"));
+
         Ok(api.GoalAccept(goal, new GoalAcceptRequest(op, "Accepted on the reviewer's evaluation.")));
         Assert.Equal("achieved", Assert.Single(api.Goals()).Status);
         Assert.Contains("Achieved: acceptance", api.Goal(goal)!.Text, StringComparison.Ordinal);

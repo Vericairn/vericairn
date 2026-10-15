@@ -608,6 +608,10 @@ internal static class CliApp
         show.Arguments.Add(shownArgument);
         show.SetAction(parseResult => Commands.Goal(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(show);
+        var next = new Command("next", "Show a goal's next steps routed from this machine: each eligible step with the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, whether the goal's budget allows it, and what holds the others. It records and starts nothing.");
+        next.Arguments.Add(shownArgument);
+        next.SetAction(parseResult => Commands.GoalNext(parseResult.GetValue(estateOption)!, parseResult.GetValue(shownArgument), parseResult.GetValue(jsonOption)));
+        goal.Subcommands.Add(next);
 
         var byOption = new Option<string>("--by") { Description = "Acting principal id (ULID).", Required = true };
         var goalArgument = new Argument<string>("goal") { Description = "Goal record id (any revision)." };

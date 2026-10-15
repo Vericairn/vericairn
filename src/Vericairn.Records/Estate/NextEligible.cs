@@ -7,11 +7,12 @@ using Vericairn.Records.Model;
 namespace Vericairn.Records.Estate;
 
 /// <summary>
-/// The next-eligible view's records-only part (the estate's design/goals.md § 7, decision 18): the planned work orders whose 'after'
-/// work orders are all accepted and whose 'blockedBy' holds nothing open. It is a read-only query of the records alone, so every machine
-/// derives the same view from the same records. This is the one place the view lives: routing by roster and budget (GOAL-04) extends it.
+/// The next-eligible view (the estate's design/goals.md § 7, decision 18). Its records-only part is the planned work orders whose
+/// 'after' work orders are all accepted and whose 'blockedBy' holds nothing open, the same on every machine for the same records. Its
+/// routed part (NextEligible.Routes.cs) takes each such step of a goal to the principal the goal's roster names, from this machine, with
+/// whether the goal's budget allows it. Both are read-only queries: the view never dispatches anything.
 /// </summary>
-public static class NextEligible
+public static partial class NextEligible
 {
     /// <summary>The operation states that hold nothing: the effect was observed, or the intent was canceled before any dispatch.</summary>
     private static readonly string[] SettledOperations = ["observed-success", "canceled"];
@@ -60,7 +61,7 @@ public static class NextEligible
     /// <summary>The planned work orders nothing holds, by key.</summary>
     public static IReadOnlyList<Item> Eligible(EstateModel model) => Derive(model).Where(i => i.Eligible).ToList();
 
-    private static List<Relation> Relations(EstateModel model, RecordEnvelope order, Dictionary<string, string> status)
+    private static List<Relation> Relations(EstateModel model, RecordEnvelope order, IReadOnlyDictionary<string, string> status)
     {
         var relations = new List<Relation>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -100,7 +101,7 @@ public static class NextEligible
         return relations;
     }
 
-    private static Relation WorkOrder(EstateModel model, string kind, string id, Dictionary<string, string> status, string[] free)
+    private static Relation WorkOrder(EstateModel model, string kind, string id, IReadOnlyDictionary<string, string> status, string[] free)
     {
         if (Find(model, id, "work-order") is not RecordEnvelope holder)
         {
