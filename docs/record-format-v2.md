@@ -39,15 +39,50 @@ before and after are equal; `--check` shows the same without writing. The releas
 estate's records use; an upgrade to a release that does not is refused, as is one to a release writing a format this
 build cannot read.
 
+## Types new in format 2
+
+`vericairn records describe <type>` and the record reference list every field; these are the meanings and the rules.
+
+- **`goal`**: an objective the estate carries out with agents and people (the estate's `design/goals.md`). It states
+  the objective in the sponsor's words, the `completion` conditions (at least one: a record predicate `{record: {type,
+  fields, min, max}}`, checked from current records, or an evidence statement `{evidence, check}`, judged by an
+  evaluator who did none of the work), `constraints`, `kind` (finite or stewardship), the `sponsor`, the `roster` or
+  role overrides it uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`,
+  `concurrency` and `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a
+  planner or given as work orders, and who approves it), `limits` and `inputs`.
+- **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
+  `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when its sponsor activates it, which grants
+  its budget, or ends unstarted when the sponsor abandons it; only the sponsor records active, impossible and
+  abandoned; nothing follows impossible or abandoned; a revised goal starts again from its sponsor's activation.
+  Achievement is never a status: it is the sponsor's acceptance of the goal.
+- **`roster`**: who fills each role of the estate's work (planner, builder, reviewer, evaluator, release manager,
+  publisher, decider, or a role the estate names), principals in order of preference. One current roster per estate,
+  recorded by the operator or under `administer`; the decider role is held by operators, because decisions and
+  acceptances stay theirs.
+- **`ask`**: a question put to a principal, kept apart from any notification of it: `to`, the `question`, the
+  `recommendation` first, the `consequence` of leaving it unanswered, optional `options` and `goal`, and its `state`.
+  It starts `open`; the asker alone revises it, to `notified` (delivery stays unknown) or `withdrawn`, never changing
+  the question or whom it is put to. A decision that names it in `answers` answers it; waiting never does.
+
 ## Fields new in format 2
 
 | Type | Field | Kind | Meaning |
 |---|---|---|---|
 | `decision` | `stake` | `low`, `medium`, `high` or `critical`, required | How much rides on the decision; at medium and above the recorder asks with a recommendation first and at most three questions at a time |
 | `decision` | `notAuthorized` | string list, required, may be empty | What this answer does not authorize, so no one reads more into it |
+| `decision` | `answers` | ULID list, optional | The asks the decision answers; an ask is answered by the principal it was put to, and a withdrawn ask is not answered |
+| `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
+| `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
+| `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
+| `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept in every revision; `wallMinutes` is required |
+| `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it, and the units it did not report (`unreported`), which are charged at the cap |
 
 ## Rules enforced in format 2
 
 - A decision that supersedes another keeps its `statement` byte for byte: the operator's words are protected, a revision
   corrects what surrounds them, and different words are a new decision (`decision.statement`).
+- An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
+  in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
+- Authority is judged at the time a record was authored: a grant that had expired by then authorizes nothing. Grants
+  without an expiry, as every format-1 grant is, behave as they always did.
 - Every rule of record format 1 applies to format-2 records too, except where this document says otherwise.

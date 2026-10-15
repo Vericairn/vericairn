@@ -69,7 +69,7 @@ public sealed class AssignmentType : IRecordType
         {
             context.Error("assignment.author", $"Assigning principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
         {
             context.Error("assignment.author", "Work is assigned by the operator or by a principal granted the 'local-engineering' scope.");
         }

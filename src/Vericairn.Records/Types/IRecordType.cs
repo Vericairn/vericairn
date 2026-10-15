@@ -85,6 +85,9 @@ public sealed class ValidationContext
     /// <summary>True when the principal currently holds the role.</summary>
     public bool HasRole(string? principalId, string role) => Model.HasRole(principalId, role);
 
+    /// <summary>True when a grant gives the principal the scope and had not expired when this record was authored.</summary>
+    public bool HasScope(string? principalId, string scope) => Model.HasScope(principalId, scope, Record.AtTime);
+
     /// <summary>Checks that a body field references an existing record of the expected type; returns the record.</summary>
     public RecordEnvelope? RequireReference(string field, string? id, string expectedType)
     {

@@ -26,6 +26,7 @@ public sealed class AuthorityType : IRecordType
         new("reserved", "string[]", true, "Actions explicitly never granted (publication, spending, credentials, ...)."),
         new("conditions", "string[]", true, "Conditions under which the grant applies."),
         new("basis", "ulid", true, "The decision record that authorizes this grant."),
+        new("expires", "timestamp", false, "When the grant stops being in force; a record authored from then on cannot rely on it.", 2),
     ];
 
     /// <inheritdoc />
@@ -38,6 +39,11 @@ public sealed class AuthorityType : IRecordType
         body.StringArray("reserved", true, allowEmpty: true, maxItemLength: 200);
         body.StringArray("conditions", true, allowEmpty: true, maxItemLength: 2000);
         string? basis = body.Ulid("basis", true);
+        if (body.Since(2, "expires") && body.Timestamp("expires", false) is { } expires && string.CompareOrdinal(expires, context.Record.At) <= 0)
+        {
+            body.Error("authority.expires", "expires", "A grant expires after it is made.");
+        }
+
         body.NoOtherKeys();
         if (grantee is not null && context.RequireReference("grantee", grantee, "principal") is null)
         {

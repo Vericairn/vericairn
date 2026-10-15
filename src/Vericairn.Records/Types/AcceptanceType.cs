@@ -79,7 +79,7 @@ public sealed class AcceptanceType : IRecordType
             }
             else if (kind == "ordinary" && !isOperator)
             {
-                bool allowed = sameAuthor ? context.Model.HasScope(context.Record.By, Scopes.SelfAcceptOrdinaryWork) : context.Model.HasScope(context.Record.By, Scopes.AcceptWork);
+                bool allowed = sameAuthor ? context.HasScope(context.Record.By, Scopes.SelfAcceptOrdinaryWork) : context.HasScope(context.Record.By, Scopes.AcceptWork);
                 if (!allowed)
                 {
                     context.Error("acceptance.policy", sameAuthor ? "Self-acceptance of ordinary work needs the 'self-accept-ordinary-work' authority scope." : "Accepting another principal's work needs the 'accept-work' authority scope.");

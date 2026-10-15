@@ -26,6 +26,9 @@ public static partial class Patterns
     /// <summary>A 40-character lower-case hex git commit id.</summary>
     public static Regex Commit => CommitRegex();
 
+    /// <summary>A currency unit: three upper-case letters, as ISO 4217 writes them.</summary>
+    public static Regex CurrencyUnit => CurrencyUnitRegex();
+
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$")]
     private static partial Regex SlugRegex();
 
@@ -40,6 +43,9 @@ public static partial class Patterns
 
     [GeneratedRegex(@"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z.-]+)?$")]
     private static partial Regex SemanticVersionRegex();
+
+    [GeneratedRegex("^[A-Z]{3}$")]
+    private static partial Regex CurrencyUnitRegex();
 
     [GeneratedRegex("^[0-9a-f]{40}$")]
     private static partial Regex CommitRegex();

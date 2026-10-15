@@ -73,7 +73,7 @@ public sealed class DeviceType : IRecordType
             context.Error("device.principal", $"Principal {principal} has no principal record.");
         }
 
-        if (context.Record.By != principal && !context.HasRole(context.Record.By, Roles.Operator) && !context.Model.HasScope(context.Record.By, Scopes.Administer))
+        if (context.Record.By != principal && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
         {
             context.Error("device.author", "A device record is authored by its principal, by the operator, or under the 'administer' scope.");
         }
