@@ -31,8 +31,38 @@ jobs:
         run: dotnet restore --locked-mode
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      - name: Build the Secure Enclave helper
+        # As in continuous integration: the release's own test run exercises real key custody on every platform it qualifies.
+        # The Apple-silicon runners expose a Secure Enclave, so the store's test creates, signs with and removes a real enclave
+        # key there (one without presence, so nothing waits for a person).
+        if: runner.os == 'macOS'
+        run: |
+          set -eu
+          mkdir -p artifacts/enclave
+          swiftc -O -o artifacts/enclave/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
+          artifacts/enclave/vericairn-enclave available || test $? -eq 3
+          echo "VERICAIRN_ENCLAVE_HELPER=$PWD/artifacts/enclave/vericairn-enclave" >> "$GITHUB_ENV"
+      - name: Install a secret service
+        # GNOME Keyring and secret-tool, so the Linux tests run the secret-service store in a D-Bus session with a keyring
+        # unlocked by a throwaway password.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends gnome-keyring libsecret-tools dbus-daemon
       - name: Test
+        if: runner.os != 'Linux'
         run: dotnet test --no-build --configuration Release
+      - name: Test, with a secret service
+        if: runner.os == 'Linux'
+        env:
+          VERICAIRN_EXPECT_SECRET_SERVICE: "1"
+        run: |
+          dbus-run-session -- bash -c '
+            set -eu
+            printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            printf probe | secret-tool store --label "Vericairn release probe" application vericairn-ci probe 1
+            test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
+            dotnet test --no-build --configuration Release'
 
   enclave-helper:
     # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
