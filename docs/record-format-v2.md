@@ -408,8 +408,9 @@ records its intent before anything starts: its identity is `agent-run:` and the 
 `provider` the launcher; its `target` the `assignment`, the agent `principal`, the `workspace` as a repository and branch
 (never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key, the
 worker contract (`worker`: `vericairn.worker/1`) and, for a run launched under it, the sponsor's `custodyException`, which
-must have covered the goal's revision when the intent was recorded (`operation.custody`); and its `cap`, taken from the
-goal's budget. The intent is the
+must have covered the goal's revision when the intent was recorded, unexpired and not yet replaced by a revision recorded
+before the intent (`operation.custody`), judged as of the intent so that a later revision or expiry leaves the run valid;
+and its `cap`, taken from the goal's budget. The intent is the
 `not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
 (`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
 operation never records that the work is done: the agent's result is a claim another principal reviews.

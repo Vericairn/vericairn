@@ -235,7 +235,10 @@ sponsor records an exception for the goal: `vericairn goal custody-exception <go
 which only the sponsor, or an operator for a goal an agent sponsors, may record. While it is in force the guard lets the
 run launch unattended: the run's intent names the exception in its target and its evidence names the devices it lifted,
 the response says so, and `vericairn goal next` shows it on every agent's route where the refusal would be. A revised goal
-needs a fresh exception.
+needs a fresh exception. The guard judges the run before its workspace is prepared and again, against the records and
+the keys as they are then, when its intent is recorded: an exception revised or expired meanwhile lifts nothing, and the
+intent names the one in force at that moment. The records judge that name as of the intent, so a run stays valid when its
+exception is revised or expires afterwards, and one naming an exception already revised before it is refused.
 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed

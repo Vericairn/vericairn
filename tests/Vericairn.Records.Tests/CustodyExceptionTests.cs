@@ -85,6 +85,16 @@ public class CustodyExceptionTests
         Assert.DoesNotContain(findings, f => f.Location == covered.ExpectedPath);
         Assert.Contains(findings, f => f.Location == wrongGoal.ExpectedPath);
         Assert.Contains(findings, f => f.Location == notOne.ExpectedPath);
+
+        // A run names the exception as it stood when the run was recorded: a revision recorded before the run replaces what it names,
+        // and one recorded after the run leaves that run as valid as it was.
+        RecordEnvelope revised = estate.Add("custody-exception", estate.OperatorId, Exception("2026-10-13T18:00:00Z"), goal.Reference, supersedes: excepted.Id);
+        RecordEnvelope replaced = estate.Add("operation", estate.OperatorId, Run(estate, goal.Id, assignment, "agent-run:replaced", excepted.Id));
+        RecordEnvelope current = estate.Add("operation", estate.OperatorId, Run(estate, goal.Id, assignment, "agent-run:current", revised.Id));
+        findings = [.. estate.Load().Findings.Where(f => f.Code == "operation.custody")];
+        Assert.DoesNotContain(findings, f => f.Location == covered.ExpectedPath);
+        Assert.Contains(findings, f => f.Location == replaced.ExpectedPath);
+        Assert.DoesNotContain(findings, f => f.Location == current.ExpectedPath);
     }
 
     private static RecordEnvelope Goal(TestEstate estate, string sponsor) => estate.Add("goal", estate.OperatorId, GoalBody(sponsor, "Build the widget"));

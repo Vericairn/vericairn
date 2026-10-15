@@ -485,6 +485,87 @@ public class WorkerTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void ARunNamesTheCustodyExceptionInForceWhenItsIntentIsRecordedNotTheOneItsPreflightFound()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+        string? second = null;
+
+        // While the worker verifies its launcher, after the preflight found the first exception, the sponsor replaces it with a second.
+        HookedLauncher.Install(run, () =>
+        {
+            second ??= Except(run, DateTimeOffset.UtcNow.AddHours(2), "A narrower window.", first);
+            return null;
+        });
+        RunResponse started = run.Start("claude-code", "claude", run.Report("replaced"));
+        Assert.True(started.Ok, started.Message);
+        Assert.NotNull(second);
+        Assert.Contains($"It was launched under the custody exception {second} that Test Operator recorded for the goal", started.Message, StringComparison.Ordinal);
+        Assert.Contains("A narrower window.", started.Message, StringComparison.Ordinal);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(second, recorded.Target("custodyException"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.StartsWith($"Launched unattended under the sponsor's custody exception {second},", StringComparison.Ordinal));
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AnExceptionThatLapsesWhileARunIsPreparedLaunchesNothing()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+
+        // The sponsor replaces the exception with one that expires a second later, and the preparation outlasts it.
+        Func<string?> replace = () =>
+        {
+            string expires = Except(run, DateTimeOffset.UtcNow.AddSeconds(1), "Only a moment.", first);
+            WaitPast(run, expires);
+            return null;
+        };
+        HookedLauncher.Install(run, replace);
+        RunResponse replaced = run.Start("claude-code", "claude", run.Report("replaced"));
+        Assert.False(replaced.Ok, replaced.Message);
+        Assert.StartsWith("The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine", replaced.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was recorded.", replaced.Message, StringComparison.Ordinal);
+
+        // An exception in force when the preflight read it, and expired before the intent, launches nothing either.
+        string brief = Except(run, DateTimeOffset.UtcNow.AddSeconds(2), "A short window.");
+        HookedLauncher.Install(run, () =>
+        {
+            WaitPast(run, brief);
+            return null;
+        });
+        RunResponse expired = run.Start("claude-code", "claude", run.Report("expired"));
+        Assert.False(expired.Ok, expired.Message);
+        Assert.Contains($"Device {run.OperatorDevice} (Operator's laptop, admitted) of Test Operator", expired.Message, StringComparison.Ordinal);
+        Assert.EndsWith("Nothing was recorded.", expired.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(run.Report("replaced")));
+        Assert.False(File.Exists(run.Report("expired")));
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    /// <summary>Records the operator's custody exception for the run estate's goal, or a revision of one; returns its id.</summary>
+    private static string Except(RunEstate run, DateTimeOffset expires, string reason, string? replaces = null)
+    {
+        string hash = run.Service.Goal(run.Goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
+        string until = RecordParser.FormatTimestamp(expires);
+        return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"{{reason}}","expires":"{{until}}"}"""), $"goal:{run.Goal}:{hash}", replaces))).Id;
+    }
+
+    /// <summary>Waits until a custody exception has expired.</summary>
+    private static void WaitPast(RunEstate run, string exception)
+    {
+        DateTimeOffset expires = CustodyExceptions.Expires(run.Estate.Load().ById[exception])!.Value;
+        while (DateTimeOffset.UtcNow <= expires)
+        {
+            Thread.Sleep(50);
+        }
+    }
+
     private static JsonElement Route(RunEstate run, string key) =>
         Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key).GetProperty("route");
 

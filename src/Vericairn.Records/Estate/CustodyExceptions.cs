@@ -44,6 +44,22 @@ public static class CustodyExceptions
             && Expires(exception) is DateTimeOffset expires && at < expires;
     }
 
+    /// <summary>
+    /// True when a custody exception covered a goal revision when a record was written, as the validation of a run's intent judges it
+    /// at any later time: it covered that revision then (<see cref="Covers"/>), and no revision of the exception had been recorded
+    /// before the record, since a revision replaces what the exception says. A run recorded under an exception stays valid when the
+    /// exception is revised or expires afterwards.
+    /// </summary>
+    public static bool CoveredWhen(EstateModel model, RecordEnvelope exception, RecordEnvelope goal, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(exception);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(record);
+        bool revised = model.SupersededBy.TryGetValue(exception.Id, out string? next) && model.ById.TryGetValue(next, out RecordEnvelope? successor) && GoalRules.Before(successor, record);
+        return !revised && Covers(model, exception, goal, record.AtTime);
+    }
+
     /// <summary>When an exception expires, or null when it states no readable expiry.</summary>
     public static DateTimeOffset? Expires(RecordEnvelope exception)
     {

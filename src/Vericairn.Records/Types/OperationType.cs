@@ -139,11 +139,12 @@ public sealed class OperationType : IRecordType
                 context.Error(code, message);
             }
 
-            // A run launched under the sponsor's custody exception names one that covered the goal's revision when its intent was recorded.
+            // A run launched under the sponsor's custody exception names one that covered the goal's revision when its intent was
+            // recorded, judged as of then: neither expired nor replaced by a revision recorded before the intent.
             if (target.TryGetProperty("custodyException", out JsonElement excepted) && excepted.ValueKind == JsonValueKind.String
-                && (context.Find(excepted.GetString()) is not RecordEnvelope exception || !CustodyExceptions.Covers(context.Model, exception, goal, context.Record.AtTime)))
+                && (context.Find(excepted.GetString()) is not RecordEnvelope exception || !CustodyExceptions.CoveredWhen(context.Model, exception, goal, context.Record)))
             {
-                context.Error("operation.custody", $"The run names custody exception {excepted.GetString()}, which did not cover goal {goal.Id}'s revision when the run was recorded: an exception is recorded by who decides for the goal, about its exact revision, and is in force until its expiry.");
+                context.Error("operation.custody", $"The run names custody exception {excepted.GetString()}, which did not cover goal {goal.Id}'s revision when the run was recorded: an exception is recorded by who decides for the goal, about its exact revision, is in force until its expiry, and a revision of it replaces it.");
             }
         }
         else if (context.Record.Supersedes is null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("custodyException", out _))
