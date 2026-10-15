@@ -357,27 +357,30 @@ public static class GoalRules
             : [];
     }
 
-    /// <summary>The acceptance that achieved the exact goal revision: the first acceptance of it that no rule refuses; null when none did.</summary>
-    public static RecordEnvelope? Achievement(EstateModel model, RecordEnvelope goal)
+    /// <summary>
+    /// The acceptance that achieved the exact goal revision: the first acceptance of it that no rule refuses, before a record when one
+    /// is given; null when none did.
+    /// </summary>
+    public static RecordEnvelope? Achievement(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
-        return Ordered(model.About(goal.Id, "acceptance").Where(a => a.Subject?.Hash == goal.ComputedHash))
+        return Ordered(model.About(goal.Id, "acceptance").Where(a => a.Subject?.Hash == goal.ComputedHash && (before is null || Before(a, before))))
             .FirstOrDefault(a => AcceptanceRefusals(model, goal, a.By, Basis(a), a).Count == 0);
     }
 
     /// <summary>
     /// The goal's status: achieved once an acceptance no rule refuses is recorded, otherwise the latest status of its exact revision,
-    /// and proposed before any; a revision starts again from proposed.
+    /// and proposed before any; a revision starts again from proposed. Judged from the records before a record when one is given.
     /// </summary>
-    public static string Status(EstateModel model, RecordEnvelope goal)
+    public static string Status(EstateModel model, RecordEnvelope goal, RecordEnvelope? before = null)
     {
-        if (Achievement(model, goal) is not null)
+        if (Achievement(model, goal, before) is not null)
         {
             return "achieved";
         }
 
-        IReadOnlyList<RecordEnvelope> statuses = Statuses(model, goal);
+        IReadOnlyList<RecordEnvelope> statuses = Statuses(model, goal, before);
         return statuses.Count == 0 ? "proposed" : EstateModel.BodyString(statuses[^1], "status") ?? "proposed";
     }
 

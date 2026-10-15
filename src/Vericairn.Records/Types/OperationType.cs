@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -45,27 +46,37 @@ public sealed class OperationType : IRecordType
         new("action", "string", true, "The declared operation, for example dispatch-release-workflow."),
         new("identity", "string", true, "The original identity the effect is reconciled under; unique among current operations."),
         new("intent", "string", true, "The intended effect, in a sentence."),
-        new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; string values only."),
+        new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; for an agent run, its assignment, its principal, its workspace (a repository and branch, never a machine path), the goal it is charged to and the worker contract; string values only."),
         new("status", string.Join('|', Statuses), true, "not-started, dispatched, observed-success, known-failure, canceled or uncertain."),
         new("dispatchedAt", "timestamp", false, "When the dispatch was made; required once dispatched."),
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
         new("reconciliation", "string", false, "How an uncertain or failed outcome was settled before a retry; required when a retry is dispatched."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
-        new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts; wallMinutes is required. Units: " + Caps.Units + ".", 2),
-        new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units it did not report (unreported), which are charged at the cap.", 2),
+        new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts and kept in every revision; wallMinutes is required. A run that names its goal starts only while the goal is active, with the units its budget grants, within what remains of them, its concurrency and its attempts per step. Units: " + Caps.Units + ".", 2),
+        new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
+        new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
 
     /// <summary>The operation kind of a coding agent's run on an assignment, from record format 2.</summary>
     public const string AgentRun = "agent-run";
 
-    /// <summary>An agent run states its cap before it starts and its observed usage once settled; other operations carry neither.</summary>
-    private static void CheckAgentRun(ValidationContext context, string? action, string? status, BodyReader? cap, BodyReader? usage)
+    /// <summary>
+    /// An agent run states its cap before it starts and keeps it, and its observed usage once settled, unit by unit; its intent, when it
+    /// names its goal, is within the goal's budget (the agent-run ledger, <see cref="AgentRuns"/>); a stop records its facts as they were
+    /// observed. Other operations carry none of these.
+    /// </summary>
+    private static void CheckAgentRun(ValidationContext context, string? action, string? status, BodyReader? cap, BodyReader? usage, BodyReader? stop)
     {
         if (action != AgentRun)
         {
             if (cap is not null || usage is not null)
             {
                 context.Error("operation.cap", "A cap and usage describe agent runs (action agent-run).");
+            }
+
+            if (stop is not null)
+            {
+                context.Error("operation.stop", "A stop's facts describe agent runs (action agent-run).");
             }
 
             return;
@@ -89,12 +100,120 @@ public sealed class OperationType : IRecordType
             context.Error("operation.usage", "A settled agent run records its usage; what the harness did not report is listed as unreported and charged at the cap.");
         }
 
+        JsonElement target = context.Record.Body.TryGetProperty("target", out JsonElement t) && t.ValueKind == JsonValueKind.Object ? t : default;
         foreach (string key in new[] { "assignment", "principal", "workspace" })
         {
-            if (!context.Record.Body.TryGetProperty("target", out JsonElement target) || target.ValueKind != JsonValueKind.Object || !target.TryGetProperty(key, out _))
+            if (target.ValueKind != JsonValueKind.Object || !target.TryGetProperty(key, out _))
             {
                 context.Error("operation.agent-run", $"An agent run's target names its {key}.");
             }
+        }
+
+        if (cap is not null)
+        {
+            Kept(context, cap.Element);
+            if (usage is not null)
+            {
+                Reported(context, cap.Element, usage.Element);
+            }
+        }
+
+        if (stop is not null)
+        {
+            Stop(context, status, stop);
+        }
+
+        // The intent of a run that names its goal: the goal active, and the cap within its budget, judged from the records before it.
+        if (context.Record.Supersedes is null && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
+        {
+            RecordEnvelope? goal = AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record);
+            if (goal is null)
+            {
+                context.Error("operation.goal", $"An agent run's target names goal {named.GetString()}, which is no goal of this estate written before the run.");
+                return;
+            }
+
+            string? assignment = target.TryGetProperty("assignment", out JsonElement a) && a.ValueKind == JsonValueKind.String ? a.GetString() : null;
+            foreach ((string code, string message) in AgentRuns.StartRefusals(context.Model, goal, assignment, cap.Element, context.Record))
+            {
+                context.Error(code, message);
+            }
+        }
+    }
+
+    /// <summary>A revision keeps the cap its run's intent recorded: what a run may spend is fixed before it starts.</summary>
+    private static void Kept(ValidationContext context, JsonElement cap)
+    {
+        if (context.Record.Supersedes is null)
+        {
+            return;
+        }
+
+        RecordEnvelope intent = context.Model.ById.TryGetValue(context.Model.Chain(context.Record)[0], out RecordEnvelope? first) ? first : context.Record;
+        if (intent.Id != context.Record.Id && intent.Body.TryGetProperty("cap", out JsonElement recorded) && CanonicalJson.Serialize(recorded) != CanonicalJson.Serialize(cap))
+        {
+            context.Error("operation.cap", "An agent run keeps the cap its intent recorded in every revision; what a run may spend is fixed before it starts.");
+        }
+    }
+
+    /// <summary>A settled run's usage states, for each charged unit its cap states, what was spent or that it was not reported.</summary>
+    private static void Reported(ValidationContext context, JsonElement cap, JsonElement usage)
+    {
+        HashSet<string> unreported = usage.TryGetProperty("unreported", out JsonElement listed) && listed.ValueKind == JsonValueKind.Array
+            ? listed.EnumerateArray().Where(u => u.ValueKind == JsonValueKind.String).Select(u => u.GetString()!).ToHashSet(StringComparer.Ordinal)
+            : [];
+        foreach (string unit in AgentRuns.ChargedUnits.Where(u => AgentRuns.Amount(cap, u) is not null))
+        {
+            if (AgentRuns.Amount(usage, unit) is null && !unreported.Contains(unit))
+            {
+                context.Error("operation.usage", $"The run's cap states {unit}, so its usage states the {unit} spent or lists {unit} as unreported, which is charged at the cap.");
+            }
+        }
+
+        if (AgentRuns.CurrencyUnit(usage) is string spent && AgentRuns.CurrencyUnit(cap) is string capped && spent != capped)
+        {
+            context.Error("operation.usage", $"The run's usage is in {spent}, and its cap in {capped}.");
+        }
+    }
+
+    /// <summary>
+    /// A stop's facts, each recorded only once observed and never before the request it answers: requested, transmitted, acknowledged,
+    /// escalated, and contained, which is observed only when the run settles. A stop that was not observed stays requested.
+    /// </summary>
+    private static void Stop(ValidationContext context, string? status, BodyReader stop)
+    {
+        string? requestedAt = stop.Timestamp("requestedAt", true);
+        string? requestedBy = stop.Text("requestedBy", true, 100);
+        stop.Text("reason", false, 2000);
+        string? transmittedAt = stop.Timestamp("transmittedAt", false);
+        stop.Text("transmission", transmittedAt is not null, 2000);
+        string? acknowledgedAt = stop.Timestamp("acknowledgedAt", false);
+        stop.Text("acknowledgment", false, 2000);
+        string? escalatedAt = stop.Timestamp("escalatedAt", false);
+        stop.Text("escalation", escalatedAt is not null, 2000);
+        string? containedAt = stop.Timestamp("containedAt", false);
+        stop.NoOtherKeys();
+        if (requestedBy is not null && requestedBy != "worker" && context.Principal(requestedBy) is null)
+        {
+            stop.Error("operation.stop", "requestedBy", "A stop is requested by a principal of this estate, or by the worker for a cap the run reached.");
+        }
+
+        foreach ((string name, string? at) in new[] { ("transmittedAt", transmittedAt), ("acknowledgedAt", acknowledgedAt), ("escalatedAt", escalatedAt), ("containedAt", containedAt) })
+        {
+            if (at is not null && requestedAt is not null && string.CompareOrdinal(at, requestedAt) < 0)
+            {
+                stop.Error("operation.stop", name, $"'{name}' records a fact observed after the stop was requested, at {requestedAt}.");
+            }
+        }
+
+        if ((acknowledgedAt is not null || escalatedAt is not null) && transmittedAt is null)
+        {
+            context.Error("operation.stop", "A stop is acknowledged or escalated only once it was transmitted.");
+        }
+
+        if (containedAt is not null && status is not ("observed-success" or "known-failure"))
+        {
+            context.Error("operation.stop", "Containment is observed when the run settles; a run still in flight records no containment.");
         }
     }
 
@@ -145,10 +264,11 @@ public sealed class OperationType : IRecordType
 
         BodyReader? cap = body.Since(2, "cap") ? body.Nested("cap", false) : null;
         BodyReader? usage = body.Since(2, "usage") ? body.Nested("usage", false) : null;
+        BodyReader? stop = body.Since(2, "stop") ? body.Nested("stop", false) : null;
         body.NoOtherKeys();
         if (context.Format >= 2)
         {
-            CheckAgentRun(context, EstateModel.BodyString(context.Record, "action"), status, cap, usage);
+            CheckAgentRun(context, EstateModel.BodyString(context.Record, "action"), status, cap, usage, stop);
         }
 
         if (status is null || identity is null)

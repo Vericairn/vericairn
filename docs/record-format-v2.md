@@ -142,8 +142,9 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
-| `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept in every revision; `wallMinutes` is required |
-| `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it, and the units it did not report (`unreported`), which are charged at the cap |
+| `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept unchanged in every revision; `wallMinutes` is required, and a run charged to a goal states exactly the units its budget grants (see [An agent run and its goal's ledger](#an-agent-run-and-its-goals-ledger)) |
+| `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it: for each of `wallMinutes`, `tokens` and `currency` its cap states, the amount spent or the unit listed in `unreported`, which is charged at the cap |
+| `operation` | `stop` | object, optional, `agent-run` only | A stop's facts, each recorded only once observed: `requestedAt` and `requestedBy` (a principal, or `worker` for a cap the run reached) with an optional `reason`, then `transmittedAt` with `transmission`, `acknowledgedAt` with `acknowledgment`, `escalatedAt` with `escalation`, and `containedAt`, which only a settled revision records; from 0.6.0 |
 | `review` | `conditions` | object list, required for a review of a goal and refused for any other | The goal's evaluation: one verdict per completion condition, in the goal's order, each with its `verdict` (`met`, `not-yet` or `impossible`), its `reason` and the records it `read`, each `{type, id, hash}` |
 
 ## Rules enforced in format 2
@@ -151,7 +152,11 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 - A decision that supersedes another keeps its `statement` byte for byte: the operator's words are protected, a revision
   corrects what surrounds them, and different words are a new decision (`decision.statement`).
 - An operation of action `agent-run` names its assignment, principal and workspace in its target and carries its cap
-  in every revision; once it is observed or failed it carries its usage. Other operations carry neither.
+  in every revision, unchanged from its intent (`operation.cap`); once it is observed or failed it carries its usage,
+  which states every charged unit of the cap or lists it as unreported (`operation.usage`). Its intent, when its target
+  names the goal it is charged to, starts only while that goal is active and within its budget, and a stop it records
+  keeps its facts apart (see [An agent run and its goal's ledger](#an-agent-run-and-its-goals-ledger)). Other operations
+  carry none of these.
 - A device revision keeps its principal and its purpose, and keeps the device's identity (below).
 - In an estate at format 2 an admission, admitting or revoking, is signed: by a device already admitted or, for the
   operator's first device, by the device it admits, the estate's first authority. An unsigned one is refused when it is
@@ -343,6 +348,51 @@ statuses in their order (activation and resumption by who decides for the goal, 
 and `vericairn goal accept <goal> --by <id> --statement <text>` accepts it on its current evaluation. Records can
 change after an evaluation, so the runtime also refuses an acceptance while a record predicate does not hold, before
 anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is not, why.
+
+## An agent run and its goal's ledger
+
+A coding agent's run is an operation of action `agent-run` (the estate's `design/goals.md` §§ 7 and 9, decision
+01M4YBR5PGCPQD94BVNC547EBA). The worker, `vericairn worker run` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)),
+records its intent before anything starts: its identity is `agent-run:` and the intent's id, which is the run's id; its
+`provider` the launcher; its `target` the `assignment`, the agent `principal`, the `workspace` as a repository and branch
+(never a machine path), the `repository` resource, the `branch`, the `goal` it is charged to, the `workOrder` key and the
+worker contract (`worker`: `vericairn.worker/1`); and its `cap`, taken from the goal's budget. The intent is the
+`not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
+(`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
+operation never records that the work is done: the agent's result is a claim another principal reviews.
+
+A run is charged to its goal, unit by unit:
+
+- a settled run, what its usage reports, and its cap in every unit its usage lists as `unreported`: unknown usage is
+  never zero;
+- a run in flight (not started, dispatched or uncertain), its whole cap, so that a run holds its allowance until it
+  settles and two runs never spend the same allowance;
+- a run that ended before anything was dispatched (no revision records `dispatchedAt`), nothing.
+
+A goal's spend is the sum of the charges of every run that names any revision of the goal, against the budget of its
+current revision. An intent that names its goal is refused unless, judged from the records written before it (so a
+later record never unmakes it):
+
+- the goal's revision then current is `active` (`operation.fenced`);
+- the cap states `wallMinutes` and `attemptsPerStep` and, exactly where the budget states them, `tokens` and `currency`
+  in the budget's currency; never `concurrency`, and no more attempts per step than the budget (`operation.cap`);
+- no charged unit is spent, and each is capped within what remains (`operation.budget`);
+- fewer of the goal's runs are in flight than its `concurrency`, one when the budget states none, since an absent cap is
+  not an unlimited one (`operation.budget`);
+- the step, the assignment, has had fewer runs than the goal's `attemptsPerStep` (`operation.budget`).
+
+The worker takes a run's cap from the goal's budget: the wall minutes asked for or what remains, whichever is less, the
+goal's attempts per step, and what remains of `tokens` and `currency` where the budget states them. A cap is enforced as
+the run goes: the worker stops a run that reaches its wall minutes, or whose reported tokens cross its cap. When the
+settled runs' charges reach the budget in a unit, or a run is asked for a step whose attempts are used up, the worker
+records the goal `budget-limited`, which fences new runs and asks the sponsor to raise the budget or stop. Resuming a
+budget-limited goal grants its budget again but does not refill it: the spend still counts every run, so the budget is
+raised by a revision of the goal, which its sponsor activates.
+
+A stop's facts are kept apart in the settling revision's `stop`: when it was requested and by whom (`worker` for a cap
+the run reached), when and how it was transmitted, when and how the harness acknowledged it, when it was escalated after
+the grace period and what the escalation did, and when containment was observed. Each is present only once observed, never
+before the request, and containment only in a settled revision; a stop that was not observed stays requested.
 
 ## A device keeps its identity
 
