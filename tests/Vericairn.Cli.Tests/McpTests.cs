@@ -193,6 +193,43 @@ public class McpTests
     }
 
     [Fact]
+    public void TheAgentMatrixShowsTheEstatesQualificationsOfAgentHarnesses()
+    {
+        // In 0.5.2 nothing passed recorded observations to the generator, so every harness stayed a non-claim whatever was recorded.
+        string root = CliHarness.TempDirectory("mcp-matrix");
+        string output = CliHarness.TempDirectory("mcp-matrix-out");
+        string bodies = CliHarness.TempDirectory("mcp-matrix-bodies");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example Estate", "--slug", "example", "--purpose", "Orientation.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(bodies, "product.json", """{"name":"Example","slug":"example","summary":"A product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
+            CliHarness.Outcome release = CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--body", CliHarness.WriteJson(bodies, "release.json", $$"""{"version":"0.9.0","repository":"Example/example","commit":"{{Commit}}","status":"candidate","artifacts":[],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}"""));
+            string session = CliHarness.Ok("--estate", root, "--json", "records", "new", "verification", "--by", op, "--subject", $"release:{release.Id}:{release.Hash}", "--body", CliHarness.WriteJson(bodies, "session.json", $$"""{"method":"manual","commit":"{{Commit}}","environment":{"harness":"Claude Code"},"role":"operator","outcome":"passed","summary":"A Claude Code session read a brief and recorded an attempt through the server.","evidence":[],"limitations":[]}""")).Id;
+            string claude = CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "claude.json", $$"""{"profile":"Claude Code over MCP","outcome":"qualified","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Observed in one session.","limitations":[]}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "opencode.json", """{"profile":"OpenCode over MCP","outcome":"non-claim","evidence":[],"summary":"Not observed.","limitations":[]}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--body", CliHarness.WriteJson(bodies, "platform.json", """{"profile":"linux-x64","outcome":"non-claim","evidence":[],"summary":"Not a harness.","limitations":[]}"""));
+
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
+            string agents = File.ReadAllText(Path.Combine(output, "AGENTS.md"));
+            Assert.Contains("| Claude Code | qualified for release 0.9.0 |", agents, StringComparison.Ordinal);
+            Assert.Contains("| Codex | non-claim: not observed |", agents, StringComparison.Ordinal);
+            // A harness the build does not name still gets its row, after those it names; a platform profile is not a harness.
+            Assert.Contains("| Cline | non-claim: not observed |\n| OpenCode | non-claim for release 0.9.0 |\n", agents, StringComparison.Ordinal);
+            Assert.DoesNotContain("linux-x64", agents, StringComparison.Ordinal);
+
+            // A revised qualification replaces the one it supersedes, and a copy generated before it is out of date.
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "qualification", "--by", op, "--subject", $"release:{release.Id}", "--supersedes", claude, "--body", CliHarness.WriteJson(bodies, "claude-revised.json", $$"""{"profile":"Claude Code over MCP","outcome":"measured-in-part","evidence":[{"type":"verification","id":"{{session}}"}],"summary":"Writes were not observed.","limitations":["No result was recorded."]}"""));
+            Assert.Equal(1, CliHarness.Run("--estate", root, "mcp", "orientation", "--out", output, "--check").Code);
+            CliHarness.Ok("--estate", root, "mcp", "orientation", "--out", output);
+            Assert.Contains("| Claude Code | measured-in-part for release 0.9.0 |", File.ReadAllText(Path.Combine(output, "AGENTS.md")), StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, output, bodies);
+        }
+    }
+
+    [Fact]
     public void OrientationCheckNamesEveryMissingOrChangedFileAndWritesNothing()
     {
         string root = CliHarness.TempDirectory("mcp-orientation-check");
@@ -227,8 +264,11 @@ public class McpTests
     [Fact]
     public void TheRepositorysOrientationFilesAreCurrent()
     {
-        // The committed files describe the Vericairn estate. Everything in them but the estate's name comes from this build, so an
-        // estate of that name reproduces them exactly; a new tool or a change to the generator's text without regenerating fails here.
+        // The committed files describe the Vericairn estate. Everything in them but the estate's name and the agent matrix comes from
+        // this build, and the matrix comes from the estate's qualifications of agent harnesses, of which the Vericairn estate has
+        // recorded none; so an estate of that name with none reproduces them exactly, and a new tool or a change to the generator's
+        // text without regenerating fails here. Once the Vericairn estate qualifies a harness, this estate records the same
+        // qualification (its profile and outcome, about a release of the same version), since the matrix names no record id.
         string root = CliHarness.TempDirectory("mcp-orientation-repository");
         try
         {

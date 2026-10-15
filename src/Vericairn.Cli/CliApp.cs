@@ -70,7 +70,7 @@ internal static class CliApp
         serve.SetAction(parseResult => Commands.McpServe(parseResult.GetValue(estateOption)!, parseResult.GetValue(asOption)));
         mcp.Subcommands.Add(serve);
 
-        var orientation = new Command("orientation", "Write AGENTS.md and the pointer files for the common agent harnesses from the estate's identity and the tool registry, or check existing copies against a fresh generation.");
+        var orientation = new Command("orientation", "Write AGENTS.md and the pointer files for the common agent harnesses from the estate's identity, its qualifications of agent harnesses and the tool registry, or check existing copies against a fresh generation.");
         var outOption = new Option<string>("--out") { Description = "Directory to write the files into, for example a repository root.", Required = true };
         var orientationAsOption = new Option<string>("--as") { Description = "Principal id the files describe as the acting principal, if any." };
         var checkOption = new Option<bool>("--check") { Description = "Write nothing; compare the files in --out with a fresh generation and name every one that is missing or differs." };
