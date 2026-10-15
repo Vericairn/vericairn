@@ -74,6 +74,21 @@ internal static class ReferenceSet
                 documents = declared.RootElement.EnumerateArray().Where(n => n.ValueKind == JsonValueKind.String).Select(n => n.GetString()!).ToList();
             }
 
+            // The window of the set's notes is written by `vericairn docs notes`; a set generated again keeps it.
+            JsonNode? notes = null;
+            string manifestPath = Path.Combine(output, "manifest.json");
+            if (File.Exists(manifestPath))
+            {
+                try
+                {
+                    notes = (JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject)?["notes"]?.DeepClone();
+                }
+                catch (JsonException)
+                {
+                    notes = null;
+                }
+            }
+
             Directory.CreateDirectory(output);
             List<CommandDoc> commands = Walk(CliApp.Build(), string.Empty);
             using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
@@ -91,11 +106,17 @@ internal static class ReferenceSet
                 ["commit"] = Commit,
                 ["generatedAt"] = date,
                 ["generator"] = "vericairn-docs generate " + InformationalVersion,
+                ["recordFormat"] = BuildRecordFormat(),
                 ["documents"] = new JsonArray(documents.Select(d => (JsonNode)d).ToArray()),
                 ["commands"] = new JsonArray(commands.Select(c => (JsonNode)c.Path).ToArray()),
                 ["operations"] = new JsonArray(operations.Select(o => (JsonNode)o).ToArray()),
                 ["recordTypes"] = new JsonArray(types.Select(t => (JsonNode)t).ToArray()),
             };
+            if (notes is not null)
+            {
+                manifest["notes"] = notes;
+            }
+
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
 
             if (json)
@@ -138,11 +159,31 @@ internal static class ReferenceSet
             using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
             Compare(Operations(api.RootElement), Strings(manifest, "operations"), "operation", "api-reference.md", o => o, findings);
             Compare(RecordTypeRegistry.All.Select(t => t.Name).ToList(), Strings(manifest, "recordTypes"), "record type", "record-reference.md", t => t, findings);
+
+            // The release observer records the record formats the set states as the release's own, so they must be this build's.
+            string built = DescribeFormats(BuildRecordFormat());
+            string? stated = manifest.TryGetProperty("recordFormat", out JsonElement format) && format.ValueKind == JsonValueKind.Object ? DescribeFormats(JsonNode.Parse(format.GetRawText())!.AsObject()) : null;
+            if (stated != built)
+            {
+                findings.Add(new FindingDto("error", "docs.stale", "manifest.json", stated is null
+                    ? $"This build {built}, and the set states no record formats; regenerate the set from this build."
+                    : $"The set states that the release {stated}, and this build {built}; regenerate the set from this build."));
+            }
         }
 
         int errors = findings.Count(f => f.Severity == "error");
         return Commands.ReportFindings(new FindingsResponse(errors == 0 ? $"{directory}: matches this build" : $"{directory}: differs from this build", errors, 0, findings), json);
     }
+
+    /// <summary>The record formats this build reads and writes, as a set's manifest states them for the release it documents.</summary>
+    private static JsonObject BuildRecordFormat() => new()
+    {
+        ["reads"] = new JsonArray(RecordFormats.Reads.Select(f => (JsonNode)f).ToArray()),
+        ["writes"] = RecordFormats.Current,
+    };
+
+    private static string DescribeFormats(JsonObject format) =>
+        $"reads record formats {(format["reads"] is JsonArray reads ? string.Join(", ", reads.Select(r => r?.ToJsonString())) : "none")} and writes {format["writes"]?.ToJsonString() ?? "none"}";
 
     private static void Compare(List<string> live, List<string> documented, string what, string file, Func<string, string> show, List<FindingDto> findings)
     {

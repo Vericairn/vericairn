@@ -109,6 +109,49 @@ public class LivingDocumentDerivationTests
     }
 
     [Fact]
+    public void ReleaseTriggersTheGateAndTheReleasesTableFollowTheProductAcrossItsRevisions()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = Product(estate);
+        estate.Add("living-document", estate.OperatorId, $$"""{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"refuse","product":"{{first.Id}}"}],"summary":"Follows the releases."}""");
+
+        // The product record is revised after the declaration named it; a later declaration names the revision.
+        RecordEnvelope revised = estate.Add("product", estate.OperatorId, first.Body.GetRawText().Replace("A product.", "A product, revised.", StringComparison.Ordinal), supersedes: first.Id);
+        estate.Add("living-document", estate.OperatorId, $$"""{"path":"docs/notes.md","title":"Notes","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"warn","product":"{{revised.Id}}"}],"summary":"Follows the releases."}""");
+        RecordEnvelope other = estate.Add("product", estate.OperatorId, """{"name":"Other","slug":"other","summary":"Another product.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""");
+        Assert.Equal(first.Id, LivingDocuments.ProductIdentity(estate.Load(), revised.Id));
+
+        // A publication under the revision fires both triggers, and the gate closes whichever revision the submission names.
+        RecordEnvelope release = estate.Add("release", estate.BuilderId, Release("published"), new RecordReference("product", revised.Id, null));
+        EstateModel model = estate.Load();
+        IReadOnlyList<LivingDocuments.State> states = LivingDocuments.Derive(model);
+        Assert.Equal(release.Id, Assert.Single(states.Single(d => d.Path == "docs/guide.md").Reasons).Record);
+        Assert.Equal("warn", states.Single(d => d.Path == "docs/notes.md").Level);
+        Assert.Equal("docs/guide.md", Assert.Single(LivingDocuments.Gate(model, revised.Id)).Path);
+        Assert.Equal("docs/guide.md", Assert.Single(LivingDocuments.Gate(model, first.Id)).Path);
+        Assert.Empty(LivingDocuments.Gate(model, other.Id));
+
+        // A publication recorded under the earlier revision fires a trigger that names the later one, and another product's fires none.
+        foreach (string path in new[] { "docs/guide.md", "docs/notes.md" })
+        {
+            RecordEnvelope declaration = model.Current("living-document").Single(d => EstateModel.BodyString(d, "path") == path);
+            estate.Add("document-review", estate.OperatorId, Review("current", "operator"), declaration.Reference);
+        }
+
+        estate.Add("release", estate.BuilderId, Release("published").Replace("0.2.0", "0.3.0", StringComparison.Ordinal), new RecordReference("product", other.Id, null));
+        Assert.All(LivingDocuments.Derive(estate.Load()), d => Assert.False(d.Due));
+        RecordEnvelope earlier = estate.Add("release", estate.BuilderId, Release("published").Replace("0.2.0", "0.2.1", StringComparison.Ordinal), new RecordReference("product", first.Id, null));
+        Assert.All(LivingDocuments.Derive(estate.Load()), d => Assert.Equal(earlier.Id, Assert.Single(d.Reasons).Record));
+
+        // The releases table of a product lists the releases of every revision of it, and no other product's.
+        string table = DocumentGenerators.Find("vericairn.records/releases")!.Generate(estate.Load(), "releases", [first.Id])!;
+        Assert.Contains("| 0.2.0 |", table, StringComparison.Ordinal);
+        Assert.Contains("| 0.2.1 |", table, StringComparison.Ordinal);
+        Assert.DoesNotContain("| 0.3.0 |", table, StringComparison.Ordinal);
+        Assert.Equal(table, DocumentGenerators.Find("vericairn.records/releases")!.Generate(estate.Load(), "releases", [revised.Id]));
+    }
+
+    [Fact]
     public void AContributionNoInstalledPackProvidesIsShownAndClosesTheGateAtRefuse()
     {
         using var estate = new TestEstate(recordFormat: 2);

@@ -832,14 +832,15 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>
-    /// Reads each refuse-level document of the product in another repository at the commit a release would build, where a clone of it
-    /// is registered here: those whose bytes differ from their latest review, and what was compared or could not be.
+    /// Reads each refuse-level document of the product (named by any revision of its record) in another repository at the commit a
+    /// release would build, where a clone of it is registered here: those whose bytes differ from their latest review, and what was
+    /// compared or could not be.
     /// </summary>
     private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, string product, string reference)
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.Triggers(d.Declaration).Any(t => t.On == "release" && t.Product == product)))
+        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.NamesProduct(model, d.Declaration, product)))
         {
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
@@ -1174,19 +1175,77 @@ public sealed class EstateService : IEstateApi, IDisposable
                     evidence.Insert(0, $"Release build run {run.RunId} on commit {run.HeadSha} succeeded: {run.Url}");
                 }
 
-                WriteOutcome candidate = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums)), $"product:{product}"));
+                (ReleaseRecordFormat formats, string formatEvidence, bool stated) = CandidateFormats(provider, destination, tag, request.Version, release, profile, checksums);
+                evidence.Add(formatEvidence);
+                WriteOutcome candidate = NewRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums, formats)), $"product:{product}"));
                 if (!candidate.Ok)
                 {
                     return ReleaseProblem(identity, newStatus, candidate.Problem!);
                 }
 
                 string publish = provider.ManualPublicationCommand(destination, tag);
-                return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}. Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
+                string formatNote = stated ? string.Empty : $" The draft states no record formats, so the candidate carries this runtime's ({formats.Describe()}); a superseding revision corrects them if the release's differ.";
+                return new ReleaseResponse(identity, newStatus, $"{identity}: observed-success; release {request.Version} recorded as a candidate at commit {commit[..12]}.{formatNote} Publication is the operator's: after accepting candidate {candidate.Written!.Id} at its exact hash, publish with '{publish}', then observe again to record the observed publication.", true, revision.Written, candidate.Written, Run: run?.RunId, Publish: publish, Url: release.Url);
             }
 
             default:
                 return new ReleaseResponse(identity, status, $"{identity}: {status}. {(status == "not-started" ? "The intent is recorded and nothing was dispatched; a submission dispatches it, or a cancellation settles it." : "Retry with a reconciliation once the cause is settled.")}", false);
         }
+    }
+
+    /// <summary>
+    /// The record formats a candidate records: those the release states in the manifest of the documentation set its draft carries,
+    /// read through the provider and held to the hash its checksum file names; otherwise this runtime's own, and the evidence says
+    /// which, and why.
+    /// </summary>
+    private static (ReleaseRecordFormat Formats, string Evidence, bool Stated) CandidateFormats(IReleaseProvider provider, string destination, string tag, string version, ReleaseObservation release, ReleaseProfile profile, string checksums)
+    {
+        ReleaseAsset? documentation = release.Assets
+            .Where(a => a.Name != checksums && profile.Classify(a.Name, version).Role == "documentation")
+            .OrderBy(a => a.Name, StringComparer.Ordinal).FirstOrDefault();
+        string why;
+        if (documentation is null)
+        {
+            why = "it carries no documentation set";
+        }
+        else if (documentation.Hash is null || documentation.Bytes > ReleaseFlow.DocumentationLimit)
+        {
+            why = documentation.Hash is null ? $"{documentation.Name} is named in no checksum" : $"{documentation.Name} is larger than an observer reads";
+        }
+        else
+        {
+            byte[]? archive;
+            string? failure = null;
+            try
+            {
+                archive = provider.ReadAsset(destination, tag, documentation.Name);
+            }
+            catch (Exception exception) when (exception is ProviderRefusedException or ProviderUncertainException)
+            {
+                archive = null;
+                failure = exception.Message.Length > 200 ? exception.Message[..200] + "..." : exception.Message;
+            }
+
+            if (archive is null)
+            {
+                why = $"{documentation.Name} could not be read through {provider.Provider}{(failure is null ? string.Empty : " (" + failure + ")")}";
+            }
+            else if (ContentHash.Sha256(archive) != documentation.Hash)
+            {
+                why = $"{documentation.Name}, as read through {provider.Provider}, is not the content its checksum file names";
+            }
+            else if (ReleaseFlow.DocumentedRecordFormat(archive, version, out string missing) is ReleaseRecordFormat stated)
+            {
+                return (stated, $"Record formats as the release states them in the manifest of its documentation set {documentation.Name} ({documentation.Hash}): {stated.Describe()}.", true);
+            }
+            else
+            {
+                why = $"{documentation.Name} {missing}";
+            }
+        }
+
+        ReleaseRecordFormat own = ReleaseRecordFormat.ThisBuild;
+        return (own, $"The draft states no record formats, since {why}; recorded are those of the Vericairn {Version.Split('+')[0]} that observed it, {own.Describe()}, and a superseding revision corrects them if the release's differ.", false);
     }
 
     private ReleaseResponse ObservePublication(ReleaseObserveRequest request, string identity, string product, ReleaseRow? recorded, ReleaseObservation? release, string destination, string tag, IReleaseProvider provider)

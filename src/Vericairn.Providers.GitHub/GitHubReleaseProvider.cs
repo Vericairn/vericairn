@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
@@ -118,27 +119,16 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
         using JsonDocument document = JsonDocument.Parse(output);
         JsonElement root = document.RootElement;
         var sums = new Dictionary<string, string>(StringComparer.Ordinal);
-        string directory = Path.Combine(Path.GetTempPath(), "vericairn-sums-" + Guid.NewGuid().ToString("N"));
-        try
+        if (ReadAsset(repository, tag, checksums) is byte[] listed)
         {
-            Directory.CreateDirectory(directory);
-            if (Gh(out _, "release", "download", tag, "-R", repository, "-p", checksums, "-D", directory, "--clobber") == 0 && File.Exists(Path.Combine(directory, checksums)))
+            using var reader = new StreamReader(new MemoryStream(listed), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            while (reader.ReadLine() is string line)
             {
-                foreach (string line in File.ReadAllLines(Path.Combine(directory, checksums)))
+                string[] parts = line.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 2 && parts[0].Length == 64)
                 {
-                    string[] parts = line.Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length == 2 && parts[0].Length == 64)
-                    {
-                        sums[parts[1].TrimStart('*', ' ')] = "sha256:" + parts[0].ToLowerInvariant();
-                    }
+                    sums[parts[1].TrimStart('*', ' ')] = "sha256:" + parts[0].ToLowerInvariant();
                 }
-            }
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
             }
         }
 
@@ -156,6 +146,33 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
 
     /// <inheritdoc />
     public string ManualPublicationCommand(string destination, string tag) => $"gh release edit {tag} -R {destination} --draft=false --latest";
+
+    /// <inheritdoc />
+    public byte[]? ReadAsset(string destination, string tag, string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tag);
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.IndexOfAny(['/', '\\']) >= 0 || name is "." or "..")
+        {
+            return null;
+        }
+
+        string directory = Path.Combine(Path.GetTempPath(), "vericairn-asset-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(directory);
+            string file = Path.Combine(directory, name);
+            return Gh(out _, "release", "download", tag, "-R", destination, "-p", name, "-D", directory, "--clobber") == 0 && File.Exists(file) ? File.ReadAllBytes(file) : null;
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
 
     private static int Gh(out string output, params string[] arguments)
     {

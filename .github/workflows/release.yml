@@ -218,12 +218,15 @@ jobs:
           set -eu
           (cd dist && sha256sum * > SHA256SUMS)
           cat dist/SHA256SUMS
+          # The record formats this build reads and writes, as the documentation set's manifest states them from the build (the
+          # comparison above refused a manifest that states others); the release observer reads the same manifest from the draft.
+          formats=$(jq -r '"reads " + (.recordFormat.reads | map(tostring) | join(", ")) + ", writes " + (.recordFormat.writes | tostring)' "docs/releases/$VERSION/manifest.json")
           {
             echo "Vericairn $VERSION (unsigned developer build)"
             echo
             echo "Commit: ${{ github.sha }}"
             echo "Evidence: workflow run ${{ github.run_id }} built and tested on ubuntu-latest, macos-latest and windows-latest."
-            echo "Record format: reads 1, writes 1."
+            echo "Record format: $formats."
             echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
             echo
             echo "Distributables are self-contained per platform: unpack and run bin/vericairn (bin/vericairn.exe on Windows)."

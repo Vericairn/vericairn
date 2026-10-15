@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -135,6 +137,65 @@ public class SoftwareFlowTests
         Assert.Equal("release.yml", settings["workflow"]);
         Assert.Equal("release", settings["ref"]);
         Assert.DoesNotContain("repository", ReleaseProfile.None.Settings(descriptor, "github-releases", null).Keys);
+    }
+
+    [Fact]
+    public void TheCandidateCarriesTheRecordFormatsTheReleaseStatesInItsDocumentationSet()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        string op = estate.OperatorId;
+        RecordEnvelope product = estate.Add("product", op, """
+            {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}],
+             "release":{"destination":{"provider":"github-releases","settings":{"repository":"Example/widget"}},"artifacts":[{"name":"widget-{version}-{platform}.zip","role":"distributable","platforms":["linux-x64"]},{"name":"widget-{version}-docs.zip","role":"documentation"}]}}
+            """);
+        var provider = new FakeReleaseProvider();
+        var registry = new ProviderRegistry();
+        registry.Register(provider);
+        using var service = EstateService.Open(estate.Root);
+        service.Providers = registry;
+
+        // The release's documentation set states formats other than this build's: the candidate records the release's, from that manifest.
+        (JsonElement stated, string message) = Candidate(service, provider, product.Id, op, "0.9.0", DocumentationSet("0.9.0", ""","recordFormat":{"reads":[1,2,3],"writes":3}"""));
+        Assert.Equal([1L, 2L, 3L], stated.GetProperty("recordFormat").GetProperty("reads").EnumerateArray().Select(f => f.GetInt64()));
+        Assert.Equal(3, stated.GetProperty("recordFormat").GetProperty("writes").GetInt64());
+        string evidence = stated.GetProperty("evidence").EnumerateArray().Last().GetProperty("summary").GetString()!;
+        Assert.StartsWith("Record formats as the release states them in the manifest of its documentation set widget-0.9.0-docs.zip (sha256:", evidence, StringComparison.Ordinal);
+        Assert.EndsWith("): reads 1, 2, 3; writes 3.", evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("states no record formats", message, StringComparison.Ordinal);
+
+        // A set from before the manifest stated them: the candidate carries this runtime's formats, and the evidence and the answer say so.
+        (JsonElement older, string olderMessage) = Candidate(service, provider, product.Id, op, "0.9.1", DocumentationSet("0.9.1", string.Empty));
+        Assert.Equal(RecordFormats.Reads, older.GetProperty("recordFormat").GetProperty("reads").EnumerateArray().Select(f => f.GetInt64()));
+        Assert.Equal(RecordFormats.Current, older.GetProperty("recordFormat").GetProperty("writes").GetInt64());
+        Assert.StartsWith("The draft states no record formats, since widget-0.9.1-docs.zip has a manifest that states none; recorded are those of the Vericairn ", older.GetProperty("evidence").EnumerateArray().Last().GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Contains("The draft states no record formats, so the candidate carries this runtime's (" + ReleaseRecordFormat.ThisBuild.Describe() + ")", olderMessage, StringComparison.Ordinal);
+        Assert.Equal(0, service.Check().Errors);
+    }
+
+    [Fact]
+    public void ADocumentationSetStatesRecordFormatsOnlyInAManifestOfItsVersion()
+    {
+        ReleaseRecordFormat? stated = ReleaseFlow.DocumentedRecordFormat(DocumentationSet("1.0.0", ""","recordFormat":{"reads":[2,1],"writes":2}"""), "1.0.0", out string missing);
+        Assert.Equal([1L, 2L], stated!.Reads);
+        Assert.Equal(2, stated.Writes);
+        Assert.Empty(missing);
+        Assert.NotNull(ReleaseFlow.DocumentedRecordFormat(Zip(("manifest.json", Manifest("1.0.0", ""","recordFormat":{"reads":[1],"writes":1}"""))), "1.0.0", out _));
+
+        Assert.Null(ReleaseFlow.DocumentedRecordFormat(DocumentationSet("1.0.0", ""","recordFormat":{"reads":[1,2],"writes":2}"""), "1.0.1", out missing));
+        Assert.Equal("holds no manifest.json of its set", missing);
+        Assert.Null(ReleaseFlow.DocumentedRecordFormat(Zip(("1.0.0/manifest.json", Manifest("1.0.1", ""","recordFormat":{"reads":[1,2],"writes":2}"""))), "1.0.0", out missing));
+        Assert.Equal("holds no vericairn.docs/1 manifest of version 1.0.0", missing);
+        Assert.Null(ReleaseFlow.DocumentedRecordFormat(DocumentationSet("1.0.0", string.Empty), "1.0.0", out missing));
+        Assert.Equal("has a manifest that states none", missing);
+        foreach (string malformed in new[] { ""","recordFormat":{"reads":[1,2],"writes":3}""", ""","recordFormat":{"reads":[],"writes":1}""", ""","recordFormat":{"reads":[0,1],"writes":1}""", ""","recordFormat":{"reads":[1,1],"writes":1}""", ""","recordFormat":2""" })
+        {
+            Assert.Null(ReleaseFlow.DocumentedRecordFormat(DocumentationSet("1.0.0", malformed), "1.0.0", out missing));
+            Assert.StartsWith("has a manifest whose recordFormat is malformed", missing, StringComparison.Ordinal);
+        }
+
+        Assert.Null(ReleaseFlow.DocumentedRecordFormat(Encoding.UTF8.GetBytes("not a zip"), "1.0.0", out missing));
+        Assert.Equal("is not a zip archive holding a readable manifest", missing);
+        Assert.Null(ReleaseFlow.DocumentedRecordFormat(Zip(("1.0.0/manifest.json", "{not json")), "1.0.0", out _));
     }
 
     [Theory]
@@ -278,6 +339,40 @@ public class SoftwareFlowTests
     {
         using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
         return document.RootElement.Clone();
+    }
+
+    /// <summary>Submits a version, completes its run with a distributable and the documentation set, observes it and returns the candidate's body and the answer.</summary>
+    private static (JsonElement Body, string Message) Candidate(EstateService service, FakeReleaseProvider provider, string product, string by, string version, byte[] documentation)
+    {
+        ReleaseResponse submitted = service.ReleaseSubmit(new ReleaseSubmitRequest(product, version, null, by));
+        Assert.True(submitted.Ok, submitted.Message);
+        string docs = $"widget-{version}-docs.zip";
+        provider.CompleteRun("Example/widget", submitted.Run!, true, version, [$"widget-{version}-linux-x64.zip", docs], contents: new Dictionary<string, byte[]>(StringComparer.Ordinal) { [docs] = documentation });
+        ReleaseResponse observed = service.ReleaseObserve(new ReleaseObserveRequest(version, null, by, ["linux-x64"], [], Product: product));
+        Assert.True(observed.Candidate is not null, observed.Message);
+        return (service.Record(observed.Candidate!.Id)!.Envelope.GetProperty("body").Clone(), observed.Message);
+    }
+
+    /// <summary>A documentation set's archive as the release workflow packs it: the set's directory, named by its version, with its manifest.</summary>
+    private static byte[] DocumentationSet(string version, string extra) =>
+        Zip(($"{version}/README.md", $"# Widget {version}\n"), ($"{version}/manifest.json", Manifest(version, extra)));
+
+    private static string Manifest(string version, string extra) =>
+        $$"""{"format":"vericairn.docs/1","version":"{{version}}","commit":"{{Commit}}","documents":["README.md"]{{extra}}}""";
+
+    private static byte[] Zip(params (string Name, string Text)[] entries)
+    {
+        using var stream = new MemoryStream();
+        using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach ((string name, string text) in entries)
+            {
+                using Stream entry = zip.CreateEntry(name).Open();
+                entry.Write(Encoding.UTF8.GetBytes(text));
+            }
+        }
+
+        return stream.ToArray();
     }
 
     /// <summary>A migration between two formats, a pretend one beyond what this release writes among them, that stages one file or fails on purpose.</summary>

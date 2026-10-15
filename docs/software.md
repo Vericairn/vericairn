@@ -83,7 +83,9 @@ serves `github-releases` and declares `repository` (required, the destination), 
 in by the user on the runtime's machine, and Vericairn never sees or stores the token. `FakeReleaseProvider`
 declares the same settings and simulates GitHub in memory for the conformance suite and the journeys. A
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
-cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently.
+cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
+implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
+earlier release reads none.
 
 A product declares how its releases are made on its own record, in an optional `release` object (read from
 release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
@@ -128,9 +130,13 @@ The release as intent, then observed effect:
    product's profile, nothing is recorded and what is missing is printed. When the run succeeded and the
    draft is complete, the operation becomes `observed-success` and a `release` record with status
    `candidate` is written with every asset's platform and the bill of materials and notices taken from
-   the profile, with the run as evidence. When the run failed, the operation becomes `known-failure`.
-   `--cancel <reason>` settles an intent that was never dispatched, an uncertain outcome reconciled as
-   having had no effect, or a known failure.
+   the profile, with the run as evidence, and with the release's own record formats: those the manifest
+   of the documentation set in the draft states (`recordFormat`, which the build tooling writes from the
+   build), read through the provider and held to the hash the checksum file names. A draft whose set
+   states none, as the sets of 0.5.2 and earlier do, gets the formats of the Vericairn that observes it,
+   and the candidate's evidence and the command's answer say so, for a superseding revision to correct.
+   When the run failed, the operation becomes `known-failure`. `--cancel <reason>` settles an intent that
+   was never dispatched, an uncertain outcome reconciled as having had no effect, or a known failure.
 3. The operator accepts the exact candidate (`vericairn records new acceptance --by <operator id> --subject release:<id>:<hash> --body <file>`,
    whose body states `statement`, `basis` and `self`) and publishes by hand with the command the CLI printed
    (for GitHub, `gh release edit vX -R <owner/name> --draft=false --latest`). Nothing in Vericairn publishes.
@@ -141,6 +147,17 @@ The release as intent, then observed effect:
 
 `vericairn status` lists every current operation with its state; one that is not observed-success or
 canceled needs attention.
+
+A release's documentation set (for Vericairn, `docs/releases/<version>/`) carries a manifest the product's
+build tooling writes from the build; from 0.6.0 it states the record formats the build reads and writes,
+which step 2 reads from the draft. `vericairn docs notes --from <previous> --to <version> --out <set>`
+writes the set's release notes from the estate's records and records their window in the manifest
+(`notes: {from, to}`, the records dated after `from` and up to `to`). The notes begin where the notes of
+the previous set, the directory `<previous>` names beside `<set>`, ended, so no record falls between two
+sets. For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
+notes state, to the minute, and with no previous set at the previous publication; `--since <time>` names
+the beginning instead. Until the version's publication is recorded they end at the second before they are
+generated.
 
 ## The synthetic migration
 

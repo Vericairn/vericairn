@@ -203,6 +203,9 @@ public class SoftwareJourneyTests
             string acceptedResult = noted[0];
             string acceptedHash = Directory.EnumerateFiles(Path.Combine(root, "records", "result"), acceptedResult + ".json", SearchOption.AllDirectories).Select(f => JsonDocument.Parse(File.ReadAllText(f)).RootElement.GetProperty("hash").GetString()!).Single();
             CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"result:{acceptedResult}:{acceptedHash}", "--body", CliHarness.WriteJson(scratch, "accept-w8.json", """{"statement":"Accepted.","basis":[],"self":false}"""));
+
+            // Before its publication is recorded the notes end at the second before they are generated; a record of that second opens the next set.
+            Thread.Sleep(1100);
             string notesDirectory = Path.Combine(scratch, "notes");
             CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.2.0", "--to", "0.3.0", "--out", notesDirectory);
             string notes = File.ReadAllText(Path.Combine(notesDirectory, "release-notes.md"));

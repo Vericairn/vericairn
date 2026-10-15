@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.DocsTool;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Cli.Tests;
 
@@ -41,6 +42,11 @@ public class DocsTests
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Equal(13, manifest.RootElement.GetProperty("documents").GetArrayLength());
+
+            // The record formats of the build, which the release observer reads from the set as the release's own.
+            JsonElement formats = manifest.RootElement.GetProperty("recordFormat");
+            Assert.Equal(RecordFormats.Reads, formats.GetProperty("reads").EnumerateArray().Select(f => f.GetInt64()));
+            Assert.Equal(RecordFormats.Current, formats.GetProperty("writes").GetInt64());
 
             string cli = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
@@ -131,10 +137,105 @@ public class DocsTests
             Assert.Equal(1, code);
             Assert.Contains("This build has the command vericairn docs check and the set does not", text, StringComparison.Ordinal);
             Assert.Contains("The set documents the command vericairn docs retired-verb, which this build does not have", text, StringComparison.Ordinal);
+
+            // Record formats other than this build's, or none, are refused too: the release observer records what the set states.
+            string writes = $"\"writes\": {RecordFormats.Current}";
+            Assert.Contains(writes, manifest, StringComparison.Ordinal);
+            File.WriteAllText(manifestPath, manifest.Replace(writes, "\"writes\": 1", StringComparison.Ordinal));
+            (code, text) = Tool(() => ReferenceSet.CompareWithBuild(output, json: false));
+            Assert.Equal(1, code);
+            string reads = string.Join(", ", RecordFormats.Reads);
+            Assert.Contains($"The set states that the release reads record formats {reads} and writes 1, and this build reads record formats {reads} and writes {RecordFormats.Current}", text, StringComparison.Ordinal);
+            using (JsonDocument stale = JsonDocument.Parse(manifest))
+            {
+                File.WriteAllText(manifestPath, JsonSerializer.Serialize(stale.RootElement.EnumerateObject().Where(p => p.Name != "recordFormat").ToDictionary(p => p.Name, p => p.Value)));
+            }
+
+            (code, text) = Tool(() => ReferenceSet.CompareWithBuild(output, json: false));
+            Assert.Equal(1, code);
+            Assert.Contains($"This build reads record formats {reads} and writes {RecordFormats.Current}, and the set states no record formats", text, StringComparison.Ordinal);
         }
         finally
         {
             Directory.Delete(output, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheNotesBeginWhereThePreviousSetsNotesEndedAndRecordTheirWindow()
+    {
+        string root = CliHarness.TempDirectory("notes-window");
+        string scratch = CliHarness.TempDirectory("notes-window-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Release notes.", "--operator-name", "Operator", "--organization", "Example", "--commit", "0123456789abcdef0123456789abcdef01234567").Json.GetProperty("operator").GetString()!;
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
+
+            // The 0.1.0 notes were made at 00:30, before its build; W-1 was recorded after them and before the 0.1.0 publication at 01:02.
+            WorkOrder(root, scratch, op, "W-0", "2026-09-01T00:10:00Z");
+            WorkOrder(root, scratch, op, "W-1", "2026-09-01T00:45:00Z");
+            string release = $$"""{"version":"0.1.0","repository":"Example/widget","commit":"0123456789abcdef0123456789abcdef01234567","status":"candidate","artifacts":[{"name":"widget-0.1.0-linux-x64.zip","hash":"sha256:{{new string('1', 64)}}","bytes":10,"platform":"linux-x64"}],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""";
+            CliHarness.Outcome candidate = CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--at", "2026-09-01T01:00:00Z", "--body", CliHarness.WriteJson(scratch, "candidate.json", release));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.Id}:{candidate.Hash}", "--at", "2026-09-01T01:01:00Z", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted 0.1.0.","basis":[],"self":true}"""));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--supersedes", candidate.Id, "--at", "2026-09-01T01:02:00Z", "--body", CliHarness.WriteJson(scratch, "published.json", release.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-09-01T01:02:00Z\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal)));
+            WorkOrder(root, scratch, op, "W-2", "2026-09-01T02:00:00Z");
+
+            // The previous set records the window of its notes: these begin at its end, so W-1 is in them, and they record their own.
+            string sets = Path.Combine(scratch, "releases");
+            Directory.CreateDirectory(Path.Combine(sets, "0.1.0"));
+            File.WriteAllText(Path.Combine(sets, "0.1.0", "manifest.json"), """{"format":"vericairn.docs/1","version":"0.1.0","notes":{"from":"2026-08-01T00:00:00Z","to":"2026-09-01T00:30:00Z"}}""");
+            string output = Path.Combine(sets, "0.2.0");
+            CliHarness.Outcome written = CliHarness.Ok("--estate", root, "--json", "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output);
+            Assert.Equal("2026-09-01T00:30:00Z", written.Json.GetProperty("window").GetProperty("from").GetString());
+            string notes = File.ReadAllText(Path.Combine(output, "release-notes.md"));
+            Assert.Contains("from the estate's records since the end of the notes of 0.1.0 (2026-09-01 00:30 UTC) up to ", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("**W-0**", notes, StringComparison.Ordinal);
+            Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
+            Assert.Contains("**W-2**", notes, StringComparison.Ordinal);
+            Assert.Contains("## The release itself\n\nNone in this window.", notes, StringComparison.Ordinal);
+            Assert.Contains("## Other releases recorded in this window\n\n- 0.1.0 candidate", notes, StringComparison.Ordinal);
+            Assert.Contains("- 0.1.0 published", notes, StringComparison.Ordinal);
+            JsonElement window = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))).RootElement.GetProperty("notes");
+            Assert.Equal("2026-09-01T00:30:00Z", window.GetProperty("from").GetString());
+            Assert.True(string.CompareOrdinal(window.GetProperty("to").GetString(), "2026-09-01T02:00:00Z") >= 0);
+            Assert.True(string.CompareOrdinal(window.GetProperty("to").GetString(), Vericairn.Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)) < 0);
+
+            // The build tooling, generating the set's references again, keeps the window the notes recorded.
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            using (JsonDocument regenerated = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))))
+            {
+                Assert.Equal(window.GetRawText(), regenerated.RootElement.GetProperty("notes").GetRawText());
+                Assert.True(regenerated.RootElement.TryGetProperty("commands", out _));
+            }
+
+            // A set made before the window was recorded gives the end its notes state, to the minute.
+            File.WriteAllText(Path.Combine(sets, "0.1.0", "manifest.json"), """{"format":"vericairn.docs/1","version":"0.1.0"}""");
+            File.WriteAllText(Path.Combine(sets, "0.1.0", "release-notes.md"), "# Release notes, Vericairn 0.1.0\n\nPrepared by `vericairn docs notes` before the release build (one entry moved after generation), from the estate's records since the publication of 0.0.9 (2026-08-01 00:00 UTC) up to 2026-09-01 00:30 UTC; the records are the source and this page is a rendering.\n\n## What the release contains\n\nUp to 2026-09-01 01:00 UTC; the records are the source of nothing here.\n");
+            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output + Path.DirectorySeparatorChar);
+            notes = File.ReadAllText(Path.Combine(output, "release-notes.md"));
+            Assert.Contains("since 2026-09-01 00:30 UTC (where the notes of 0.1.0 end, as they state it to the minute, so a record of that minute may be in both) up to ", notes, StringComparison.Ordinal);
+            Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("**W-0**", notes, StringComparison.Ordinal);
+
+            // Notes that state no end are refused until the time is named; with no previous set the notes begin at the publication.
+            File.WriteAllText(Path.Combine(sets, "0.1.0", "release-notes.md"), "# Release notes, Vericairn 0.1.0\n\nWritten by hand.\n");
+            CliHarness.Outcome unread = CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output);
+            Assert.Equal(2, unread.Code);
+            Assert.Contains("--since", unread.Err, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:40:00Z");
+            Assert.Contains("since 2026-09-01 00:40 UTC (the time named when they were generated) up to ", File.ReadAllText(Path.Combine(output, "release-notes.md")), StringComparison.Ordinal);
+            Assert.Equal("2026-09-01T00:40:00Z", JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))).RootElement.GetProperty("notes").GetProperty("from").GetString());
+            Assert.Equal(2, CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01 00:40").Code);
+            string elsewhere = Path.Combine(scratch, "elsewhere", "0.2.0");
+            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", elsewhere);
+            notes = File.ReadAllText(Path.Combine(elsewhere, "release-notes.md"));
+            Assert.Contains("since the publication of 0.1.0 (2026-09-01 01:02 UTC; no documentation set of 0.1.0 beside this one says where its notes ended) up to ", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("**W-1**", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain(scratch, notes, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
         }
     }
 
@@ -159,6 +260,9 @@ public class DocsTests
         Assert.True(outcome.Code == 0, outcome.Out + outcome.Err);
         Assert.Contains("complete: 0 errors", outcome.Out, StringComparison.Ordinal);
     }
+
+    private static void WorkOrder(string root, string scratch, string by, string key, string at) =>
+        CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", by, "--at", at, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
 
     private static string Declaration(string directory)
     {

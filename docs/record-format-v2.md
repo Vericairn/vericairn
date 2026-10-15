@@ -174,6 +174,11 @@ unavailable (`document.unavailable`) and, when it declares a `refuse` trigger, c
 the pack is installed or the declaration is revised. Status in JSON lists every declared document with its state,
 reasons and latest clearance.
 
+A `release` trigger may name any revision of the product record. A product is the first record of its chain, so the
+trigger fires on a release recorded under any revision of it, the release gate and the content comparison of `vericairn
+release submit` match the product the same way, and revising the product record neither silences a trigger nor needs its
+declaration revised.
+
 A generated region is the content between `<!-- vericairn:generated <id> -->` and `<!-- vericairn:end <id> -->`, each on
 its own line. For the estate's own files, `vericairn estate check` regenerates every region whose generator is
 installed, and a generated document as a whole, and refuses a hand edit or lost markers (`document.generated-edited`);
@@ -186,7 +191,8 @@ covered paths' identity, the triggers answered and the reviewer's independence, 
 `names-version` (the document names the version of each release the review answers), `links-resolve` (every relative
 link resolves within the repository) and `matches-generator` (generated content equals a fresh generation). A failed
 check refuses the clearance; a check no installed pack provides is recorded as not performed. A declared estate document
-that is not in the working tree is a `document.absent` warning.
+that is not in the working tree is a `document.absent` warning. Like a `release` trigger, the releases generator takes
+any revision of a product's record as the product.
 
 ## A device keeps its identity
 
