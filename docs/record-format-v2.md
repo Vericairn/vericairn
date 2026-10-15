@@ -3,8 +3,8 @@
 Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written
 from now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and
 the rules it was written under. A record states the format it was written in, and an estate at format 2 holds both.
-Format 2 carries the records goals need, the additions milestone M3 adopted, and the living-document records; this
-document grows with them until release 0.5.0 ships the format.
+Format 2 carries the records goals need, the additions milestone M3 adopted, and the living-document records; release
+0.5.0 is the first release that writes it.
 
 ## Why a new format number
 

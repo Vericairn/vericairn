@@ -126,11 +126,12 @@ internal static class CliApp
 
         var bodyOption = new Option<string>("--body") { Description = "Path to a JSON file holding the living-document declaration, or '-' for standard input.", Required = true };
         var supersedesOption = new Option<string?>("--supersedes") { Description = "The declaration this one revises." };
+        var declareByOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
         var declare = new Command("declare", "Record or revise the declaration of a living document: its triggers and levels, generated regions, checks and who may clear it.");
-        declare.Options.Add(byOption);
+        declare.Options.Add(declareByOption);
         declare.Options.Add(bodyOption);
         declare.Options.Add(supersedesOption);
-        declare.SetAction(parseResult => Commands.DocsDeclare(parseResult.GetValue(estateOption)!, parseResult.GetValue(byOption)!, parseResult.GetValue(bodyOption)!, parseResult.GetValue(supersedesOption), parseResult.GetValue(jsonOption)));
+        declare.SetAction(parseResult => Commands.DocsDeclare(parseResult.GetValue(estateOption)!, parseResult.GetValue(declareByOption)!, parseResult.GetValue(bodyOption)!, parseResult.GetValue(supersedesOption), parseResult.GetValue(jsonOption)));
         docs.Subcommands.Add(declare);
 
         var regenerate = new Command("regenerate", "Rewrite an estate document's generated regions, or a generated document, from their generators; nothing outside the markers changes.");

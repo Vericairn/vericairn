@@ -24,9 +24,11 @@ release and pins the one it runs on.
 ## What is here
 
 - `Vericairn.Records`: record formats 1 and 2 (canonical JSON, ULIDs, content hashes, signed records, devices
-  and admission, estate loading, validation, cleanliness checks, status), documented in
+  and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
   [docs/record-format-v1.md](docs/record-format-v1.md) and, for what format 2 changes,
-  [docs/record-format-v2.md](docs/record-format-v2.md).
+  [docs/record-format-v2.md](docs/record-format-v2.md). Device keys are held in the strongest custody the machine
+  offers: CNG on Windows, the Secure Enclave on a Mac through the `vericairn-enclave` helper
+  (`src/Vericairn.Enclave`, in Swift), the secret service on Linux, otherwise an owner-only file.
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
@@ -41,12 +43,13 @@ release and pins the one it runs on.
 - `vericairn` CLI: `records`, `estate`, `work`, `devices`, `release`, `sources`, `check`, `runtime`,
   `recover`, `objects`, `docs`, `mcp`, `status`, `decisions`, `doctor`, `version`; a client of the daemon when
   one serves the estate, the embedded runtime otherwise. `vericairn docs` writes a release's notes from an
-  estate's records and refuses an incomplete documentation set. `vericairn mcp serve` is the Model Context
+  estate's records, refuses an incomplete documentation set, and keeps the estate's living documents: their
+  declarations, what is due and why, reviews and generated regions. `vericairn mcp serve` is the Model Context
   Protocol server for coding agents, a client adapter over the API that lists only the tools the connected
   device may use, documented in [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
   the runtime: home and attention, products, work orders, assignments, results, review and decisions,
-  releases and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
+  releases, living documents and the runtime, documented in [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record
   references and its manifest from the build, and refuses a set that disagrees with the build. The release
