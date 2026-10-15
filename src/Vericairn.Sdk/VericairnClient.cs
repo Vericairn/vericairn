@@ -107,6 +107,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
 
     /// <inheritdoc />
+    public ProgressResponse Progress() => Get<ProgressResponse>("/v1/progress")!;
+
+    /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
 
     /// <inheritdoc />

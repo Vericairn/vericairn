@@ -34,6 +34,7 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 | `estate_health` | read | The runtime's identity and what it serves: API version, Vericairn version, estate, profile and record format. |
 | `estate_status` | read | The estate's current state derived from its records, as the canonical status document: work orders, releases, assignments, operations and findings. Identical on every machine for the same records. |
 | `estate_check` | read | Validation of every record plus the repository cleanliness and portability checks: the findings with their counts. |
+| `estate_progress` | read | The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator, each line naming the records it rests on. As text, or as the canonical JSON when form is json. Reading it changes nothing. |
 | `work_brief` | read | The brief of a work order, by key or record id: everything a contributor needs, from the records alone, as Markdown; includes the latest result's next step when one exists. |
 | `work_observe` | read | What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances. |
 | `record_get` | read | One record by id: its envelope with type, author, subject, hash, signatures and body, and whether it is current. |

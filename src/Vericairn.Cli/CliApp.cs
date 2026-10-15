@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
@@ -44,6 +44,10 @@ internal static class CliApp
         var status = new Command("status", "Show the estate's current state derived from its records.");
         status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(status);
+
+        var progress = new Command("progress", "Show the progress report, rendered from the records alone: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
+        progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(progress);
 
         var decisions = new Command("decisions", "List the estate's current decisions, or show one cleanly.");
         var decisionIdArgument = new Argument<string?>("id") { Description = "Decision record id (any revision); omit to list.", Arity = ArgumentArity.ZeroOrOne };

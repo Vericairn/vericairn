@@ -15,6 +15,9 @@ public interface IEstateApi
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
+    /// <summary>The progress report, rendered from the records alone, with the same check status runs.</summary>
+    ProgressResponse Progress();
+
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();
 

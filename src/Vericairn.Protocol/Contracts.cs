@@ -68,6 +68,16 @@ public sealed record HealthResponse(string Api, string Vericairn, string Estate,
 /// <param name="HasErrors">Whether errors exist.</param>
 public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors);
 
+/// <summary>
+/// The progress report, rendered from the records alone: where the estate stands, its work orders by state, each published release and
+/// what it contained, what comes next by release, the next eligible work and what waits on the operator. The same on every machine for
+/// the same records.
+/// </summary>
+/// <param name="Text">The report as text; every line names the records it rests on.</param>
+/// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>
+/// <param name="HasErrors">Whether the check the report shows found errors.</param>
+public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors);
+
 /// <summary>Findings of a validation or check.</summary>
 /// <param name="Summary">For example '161 records'.</param>
 /// <param name="Errors">Error count.</param>

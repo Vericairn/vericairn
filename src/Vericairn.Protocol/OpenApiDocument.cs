@@ -14,6 +14,7 @@ public static class OpenApiDocument
     [
         ("GET", "/v1/health"),
         ("GET", "/v1/status"),
+        ("GET", "/v1/progress"),
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
@@ -260,6 +261,7 @@ public static class OpenApiDocument
     {
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
         ("GET", "/v1/status") => "Current status: human text and the canonical JSON that is identical on every machine.",
+        ("GET", "/v1/progress") => "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",
         ("GET", "/v1/records/{id}") => "A record by id.",
