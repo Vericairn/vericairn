@@ -82,6 +82,32 @@ public class GoalServiceTests
     }
 
     [Fact]
+    public void OnlyWhoDecidesForAGoalRevisesItAndARefusalWritesNothing()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        string person = Ok(service.NewRecord(new NewRecordRequest("principal", estate.OperatorId, Json("""{"kind":"human","name":"Sponsor","roles":["contributor"]}""")))).Id;
+
+        // Anyone proposes a goal; only its sponsor, a person, revises it, and an operator is no exception (decision 01M50A8KHJT1MSSS84KZKHKRHB).
+        string goal = Ok(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(person))))).Id;
+        int files = Directory.EnumerateFiles(Path.Combine(estate.Root, "records"), "*.json", SearchOption.AllDirectories).Count();
+        Refused(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.BuilderId)), goal)), $"A goal is revised only by its sponsor, Sponsor ({person})");
+        Refused(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(person)), goal)), "anyone else proposes the change as an ask to the sponsor");
+        Assert.Equal(files, Directory.EnumerateFiles(Path.Combine(estate.Root, "records"), "*.json", SearchOption.AllDirectories).Count());
+        string revised = Ok(service.GoalPropose(new GoalProposeRequest(person, Json(Goal(person).Replace("Ship the widget.", "Ship the widget sooner.", StringComparison.Ordinal)), goal))).Id;
+        Assert.Equal(2, service.Goal(revised)!.Json.GetProperty("goal").GetProperty("revision").GetInt32());
+
+        // A goal an agent sponsors is revised by an operator, never by the agent; and the record's own rule refuses what the runtime would.
+        string agents = Ok(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.BuilderId))))).Id;
+        Refused(service.GoalPropose(new GoalProposeRequest(estate.BuilderId, Json(Goal(estate.BuilderId)), agents)), "A goal an agent sponsors is revised only by an operator");
+        WriteOutcome around = service.NewRecord(new NewRecordRequest("goal", estate.BuilderId, Json(Goal(estate.BuilderId)), Supersedes: agents));
+        Assert.Equal("rejected", around.Problem!.Code);
+        Assert.Contains(around.Problem.Findings, f => f.Code == "goal.revision");
+        Ok(service.GoalPropose(new GoalProposeRequest(estate.OperatorId, Json(Goal(estate.BuilderId)), agents)));
+        Assert.Equal(0, service.Check().Errors);
+    }
+
+    [Fact]
     public void TheDelegateOfAnOrdinaryGoalAcceptsItWhileItHoldsAcceptWork()
     {
         using var estate = new TestEstate(recordFormat: 2);

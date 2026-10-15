@@ -87,7 +87,7 @@ public interface IEstateApi
     /// <summary>A goal by the id of any of its revisions, with each condition's verdict, its evaluation and its steps; null when no goal has that id.</summary>
     GoalResponse? Goal(string id);
 
-    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing.</summary>
+    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);
 
     /// <summary>Activates a proposed goal, which grants its budget: its sponsor, a person with the authority to spend, or an operator when an agent sponsors it.</summary>

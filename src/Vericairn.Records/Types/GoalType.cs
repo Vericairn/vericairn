@@ -23,7 +23,7 @@ public sealed class GoalType : IRecordType
     public string Name => "goal";
 
     /// <inheritdoc />
-    public string Summary => "An objective the estate carries out with agents and people: what done looks like, its constraints, budget, roles and sponsor. Its sponsor activates it, and it is done only when the records and an independent evaluation show it and the sponsor accepts it.";
+    public string Summary => "An objective the estate carries out with agents and people: what done looks like, its constraints, budget, roles and sponsor. Anyone may propose one; its sponsor activates and revises it, or an operator when an agent sponsors it, and it is done only when the records and an independent evaluation show it and the sponsor accepts it.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -42,7 +42,7 @@ public sealed class GoalType : IRecordType
         new("completion", "object[]", true, "The conditions that make it done, at least one: a record predicate {record: {type, subject?, product?, fields?, state?, min?, max?}}, checked from current records, counts the current records of the type about the subject (any revision of it), of the product (living documents), with each body field equal to its string and in the state status derives (ask, living-document, work-order), and holds when the count is within min and max (at least one when neither is given); an evidence statement {evidence, check} is judged by an evaluator who did none of the work.", 2),
         new("constraints", "string[]", true, "What must not change or happen; may be empty.", 2),
         new("kind", string.Join('|', Kinds), true, "finite ends when done; stewardship holds a standing condition.", 2),
-        new("sponsor", "ulid", true, "The accountable principal. A person who sponsors a goal activates, stops and accepts it; a goal an agent sponsors is activated and accepted by an operator, and only an operator.", 2),
+        new("sponsor", "ulid", true, "The accountable principal. A person who sponsors a goal activates, revises, stops and accepts it; a goal an agent sponsors is activated, revised and accepted by an operator, and only an operator. A revision is recorded by who decides for the revision it supersedes; anyone else proposes the change as an ask.", 2),
         new("delegate", "ulid", false, "The principal the sponsor, a person, delegates the acceptance of an ordinary goal to; it accepts while it holds the 'accept-work' scope. Never the sponsor, never for a goal an agent sponsors, and never for a goal that includes a reserved action: a condition about a release or a milestone, or a milestone among its work.", 2),
         new("roster", "ulid", false, "The roster record whose roles it uses; the estate's current roster otherwise.", 2),
         new("roles", "object[]", false, "Role overrides for this goal: role, principals in order of preference, optional note.", 2),
@@ -124,6 +124,16 @@ public sealed class GoalType : IRecordType
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("goal.author", $"Authoring principal {context.Record.By} has no principal record.");
+        }
+
+        // A revision of an existing goal is recorded by who decides for it, the rule GoalRules.MayRevise keeps (decision
+        // 01M50A8KHJT1MSSS84KZKHKRHB); anyone may propose a new goal.
+        if (context.Find(context.Record.Supersedes) is { Type: "goal" } revised)
+        {
+            foreach ((string code, string message) in GoalRules.RevisionRefusals(context.Model, revised, context.Record.By))
+            {
+                context.Error(code, message);
+            }
         }
     }
 

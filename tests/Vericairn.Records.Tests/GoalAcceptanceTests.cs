@@ -50,6 +50,38 @@ public class GoalAcceptanceTests
     }
 
     [Fact]
+    public void AGoalIsRevisedOnlyByWhoDecidesForItWhileAnyoneProposesANewOne()
+    {
+        // Decision 01M50A8KHJT1MSSS84KZKHKRHB: a revision of an existing goal is its sponsor's when the sponsor is a person, and an
+        // operator's when an agent sponsors it; anyone else proposes the change as an ask, and anyone may propose a new goal.
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope person = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Sponsor","roles":["contributor"]}""");
+        RecordEnvelope personal = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: person.Id));
+        RecordEnvelope personalAgain = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: person.Id));
+        RecordEnvelope agents = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: estate.BuilderId));
+        RecordEnvelope agentsAgain = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: estate.BuilderId));
+        RecordEnvelope operators = estate.Add("goal", estate.BuilderId, Goal(estate));
+
+        RecordEnvelope bySponsor = estate.Add("goal", person.Id, Goal(estate, sponsor: person.Id), supersedes: personal.Id);
+        RecordEnvelope byOperator = estate.Add("goal", estate.OperatorId, Goal(estate, sponsor: estate.OperatorId), supersedes: personalAgain.Id);
+        RecordEnvelope byItsAgent = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: estate.BuilderId), supersedes: agents.Id);
+        RecordEnvelope forItsAgent = estate.Add("goal", estate.OperatorId, Goal(estate, sponsor: estate.BuilderId), supersedes: agentsAgain.Id);
+        RecordEnvelope usurped = estate.Add("goal", estate.BuilderId, Goal(estate, sponsor: estate.BuilderId), supersedes: operators.Id);
+
+        EstateModel model = estate.Load();
+        List<Finding> findings = model.Findings.Where(f => f.Severity == Severity.Error).ToList();
+        Assert.Contains(findings, f => f.Code == "goal.revision" && f.Location == byOperator.ExpectedPath && f.Message.Contains("revised only by its sponsor, Sponsor", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "goal.revision" && f.Location == byItsAgent.ExpectedPath && f.Message.Contains("revised only by an operator", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "goal.revision" && f.Location == usurped.ExpectedPath);
+        Assert.Equal(3, findings.Count);
+        Assert.True(GoalRules.MayRevise(model, model.ById[personal.Id], person.Id));
+        Assert.False(GoalRules.MayRevise(model, model.ById[personal.Id], estate.OperatorId));
+        Assert.True(GoalRules.MayRevise(model, model.ById[agents.Id], estate.OperatorId));
+        Assert.False(GoalRules.MayRevise(model, model.ById[agents.Id], estate.BuilderId));
+        Assert.DoesNotContain(findings, f => f.Location == bySponsor.ExpectedPath || f.Location == forItsAgent.ExpectedPath);
+    }
+
+    [Fact]
     public void ThePersonWhoSponsorsAGoalAcceptsItOnACurrentEvaluationThatFindsEveryConditionMet()
     {
         using var estate = new TestEstate(recordFormat: 2);

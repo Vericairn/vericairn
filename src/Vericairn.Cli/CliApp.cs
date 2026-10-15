@@ -623,8 +623,8 @@ internal static class CliApp
         var workOrderOption = new Option<string[]>("--work-order") { Description = "A work order the sponsor gives as its plan; repeatable. Without one a planner proposes its work, as work orders that name the goal among their inputs." };
         var inputOption = new Option<string[]>("--input") { Description = "A record it builds on, as type:id; repeatable." };
         var deadlineOption = new Option<string?>("--deadline") { Description = "A stop condition: when it stops, for example 2026-12-01T00:00:00Z." };
-        var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation." };
-        var propose = new Command("propose", "Propose a goal, or a revision of one: what done looks like, its constraints, its budget and its sponsor. A proposal authorizes and funds nothing.");
+        var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation, and only its sponsor, a person, or an operator for a goal an agent sponsors records it." };
+        var propose = new Command("propose", "Propose a goal, or a revision of one: what done looks like, its constraints, its budget and its sponsor. A proposal authorizes and funds nothing. Anyone may propose a goal; a revision is its sponsor's when the sponsor is a person, and an operator's when an agent sponsors it, and anyone else proposes the change as an ask.");
         propose.Options.Add(byOption);
         propose.Options.Add(titleOption);
         propose.Options.Add(objectiveOption);

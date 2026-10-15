@@ -906,6 +906,13 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return previous is null ? NotFound($"No goal has id {request.Supersedes}.") : Refuse($"Goal {request.Supersedes} was revised by {previous.Id}; a revision supersedes the current one.");
             }
 
+            // Who decides for the goal revises it (decision 01M50A8KHJT1MSSS84KZKHKRHB), refused before anything is written as the record's rule would refuse it.
+            IReadOnlyList<(string Code, string Message)> refusals = previous is null ? [] : GoalRules.RevisionRefusals(model, previous, request.By);
+            if (refusals.Count > 0)
+            {
+                return Refuse(string.Join(" ", refusals.Select(r => r.Message)));
+            }
+
             return WriteLocked(new RecordDraft("goal", request.By, request.Body, null, request.Supersedes), model);
         }
     }

@@ -242,8 +242,12 @@ public sealed record GoalRow(string Id, string Hash, string Title, string Status
 /// <param name="Json">Machine form, canonical.</param>
 public sealed record GoalResponse(string Text, JsonElement Json);
 
-/// <summary>Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation.</summary>
-/// <param name="By">The proposing principal.</param>
+/// <summary>
+/// Propose a goal, or a revision of one; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's
+/// activation. Anyone may propose a new goal; a revision of an existing one is recorded only by its sponsor when the sponsor is a
+/// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).
+/// </summary>
+/// <param name="By">The proposing principal; for a revision, who decides for the goal it supersedes.</param>
 /// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits.</param>
 /// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);

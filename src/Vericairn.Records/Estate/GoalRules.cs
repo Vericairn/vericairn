@@ -133,6 +133,36 @@ public static class GoalRules
     }
 
     /// <summary>
+    /// Who may record a revision of an existing goal, the one place the rule lives (decision 01M50A8KHJT1MSSS84KZKHKRHB, which answers
+    /// ask 01M509A2SX02VQJ64C83V1ZGB7): who decides for the goal, as for its activation, its end and its acceptance. That is its sponsor
+    /// when the sponsor is a person, and an operator, only an operator, when an agent or a service sponsors it. Anyone else proposes the
+    /// change as an ask to the sponsor, and anyone may still propose a new goal. <paramref name="goal"/> is the revision a revision
+    /// supersedes; its sponsor decides, whatever the revision names.
+    /// </summary>
+    public static bool MayRevise(EstateModel model, RecordEnvelope goal, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        return AccepterOf(model, goal).Decides(model, by);
+    }
+
+    /// <summary>Why a principal may not record a revision of a goal (<see cref="MayRevise"/>), in words; empty when it may.</summary>
+    public static IReadOnlyList<(string Code, string Message)> RevisionRefusals(EstateModel model, RecordEnvelope goal, string? by)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        if (MayRevise(model, goal, by))
+        {
+            return [];
+        }
+
+        Accepter decider = AccepterOf(model, goal);
+        return decider.Principal is not null
+            ? [("goal.revision", $"A goal is revised only by its sponsor, {Name(model, decider.Principal)} ({decider.Principal}); anyone else proposes the change as an ask to the sponsor (decision 01M50A8KHJT1MSSS84KZKHKRHB).")]
+            : [("goal.revision", "A goal an agent sponsors is revised only by an operator; anyone else proposes the change as an ask (decision 01M50A8KHJT1MSSS84KZKHKRHB).")];
+    }
+
+    /// <summary>
     /// True when the principal may end a goal as impossible or abandoned: its sponsor, or who decides for it, an operator for a goal
     /// an agent sponsors.
     /// </summary>

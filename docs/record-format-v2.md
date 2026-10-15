@@ -67,7 +67,10 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   `delegate` a sponsor who is a person may name for an ordinary goal's acceptance, the `roster` or role overrides it
   uses, the `budget` (caps by unit: `wallMinutes` and `attemptsPerStep` always, and `tokens`, `concurrency` and
   `currency` where they apply; an absent unit is not an unlimited one), the `plan` (proposed by a planner or given as
-  work orders, and who approves it), `limits` and `inputs`.
+  work orders, and who approves it), `limits` and `inputs`. Anyone may propose a goal. A revision of an existing goal, a
+  goal record that supersedes one, is recorded only by who decides for the revision it supersedes: its sponsor when the
+  sponsor is a person, and an operator when an agent or a service sponsors it (`goal.revision`, the operator's decision
+  01M50A8KHJT1MSSS84KZKHKRHB). Anyone else proposes the change as an ask to the sponsor.
 - **`goal-status`**: a change in the lifecycle of an exact goal revision, pinned by hash: `active`, `paused`,
   `budget-limited`, `blocked`, `impossible` or `abandoned`. A goal starts when it is activated, which grants its
   budget, or ends unstarted when it is abandoned; active is recorded by its sponsor, a person with the authority to
