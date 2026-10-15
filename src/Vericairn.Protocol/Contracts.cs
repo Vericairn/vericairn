@@ -148,10 +148,10 @@ public sealed record DeviceRow(string Id, string Principal, string? PrincipalNam
 /// <summary>Create a device for a principal on the runtime's machine.</summary>
 /// <param name="Principal">Principal id.</param>
 /// <param name="Name">Device name.</param>
-/// <param name="Custody">Custody: default, file, cng, or secure-enclave on a Mac.</param>
+/// <param name="Custody">Custody: default (the strongest this machine offers), file, cng on Windows, secure-enclave on a Mac, or secret-service on Linux.</param>
 /// <param name="Profiles">Permitted profiles.</param>
-/// <param name="Presence">Whether every signature needs the owner's presence; Secure Enclave custody only.</param>
-public sealed record DeviceCreateRequest(string Principal, string Name, string? Custody = null, IReadOnlyList<string>? Profiles = null, bool Presence = false);
+/// <param name="Presence">Whether every signature needs the owner's presence, where the custody enforces it; when omitted, a person's device needs it wherever its custody enforces it and an agent's or a service's never does.</param>
+public sealed record DeviceCreateRequest(string Principal, string Name, string? Custody = null, IReadOnlyList<string>? Profiles = null, bool? Presence = null);
 
 /// <summary>Admit a device.</summary>
 /// <param name="Device">Device id.</param>

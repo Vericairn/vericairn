@@ -331,23 +331,36 @@ public sealed class EstateService : IEstateApi, IDisposable
             return Refuse("The principal must be a ULID.");
         }
 
-        IDeviceKeyStore store;
-        try
-        {
-            store = DeviceKeyStores.Named(request.Custody, request.Presence);
-        }
-        catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
-        {
-            // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
-            string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
-            return Refuse(message);
-        }
-
         lock (gate)
         {
-            // Presence and the Secure Enclave are named in device records from record format 2; an older estate refuses them.
-            long format = session.Load().Manifest?.RecordFormat ?? session.Manifest.RecordFormat;
-            if (format < 2 && (request.Presence || store.Kind == SecureEnclaveCustody.Kind))
+            // Presence and the Secure Enclave are named in device records from record format 2: an older estate refuses them, and its
+            // default custody is the strongest that format can name.
+            EstateModel model = session.Load();
+            long format = model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat;
+            bool person = model.CurrentPrincipal(request.Principal) is { } principal && EstateModel.BodyString(principal, "kind") == "human";
+            IDeviceKeyStore store;
+            bool presence;
+            try
+            {
+                // The strongest custody this machine offers unless the request names one. A person's device needs its owner's
+                // presence wherever that custody enforces it; an agent's or a service's device signs unattended and never claims it.
+                string kind = DeviceKeyStores.Named(request.Custody, enclave: format >= 2).Kind;
+                presence = request.Presence ?? (format >= 2 && DeviceKeyStores.PresenceByDefault(person, kind));
+                store = DeviceKeyStores.Named(kind, presence);
+            }
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            {
+                // The refusal is for a person: the message alone, without the parameter name an ArgumentException appends.
+                string message = exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message;
+                return Refuse(message);
+            }
+
+            if (presence && !person)
+            {
+                return Refuse("An agent's or a service's device signs unattended and never claims its owner's presence.");
+            }
+
+            if (format < 2 && (presence || store.Kind == SecureEnclaveCustody.Kind))
             {
                 return Refuse("A device with presence or Secure Enclave custody is recorded in record format 2; upgrade the estate to a release that writes format 2 first.");
             }
@@ -377,12 +390,12 @@ public sealed class EstateService : IEstateApi, IDisposable
             };
             if (format >= 2)
             {
-                body["presence"] = request.Presence ? "required" : "none";
+                body["presence"] = presence ? "required" : "none";
                 body["purpose"] = "signing";
             }
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), session.Load(), [new StoreSigner(store, id)]);
+            WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), model, [new StoreSigner(store, id)]);
             if (!outcome.Ok)
             {
                 store.Remove(id);

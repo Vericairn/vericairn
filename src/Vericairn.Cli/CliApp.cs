@@ -473,8 +473,8 @@ internal static class CliApp
 
         var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
         var nameOption = new Option<string>("--name") { Description = "Descriptive device name, never a machine path.", Required = true };
-        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default (CNG on Windows, owner-only file elsewhere), file, cng, or secure-enclave on a Mac." };
-        var presenceOption = new Option<bool>("--presence") { Description = "Every signature needs its owner's presence (Touch ID or the login password); Secure Enclave custody only, never for an agent." };
+        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default, the strongest this machine offers (CNG on Windows; the Secure Enclave on a Mac that has one; the secret service on Linux where one runs; else an owner-only file), or file, cng, secure-enclave or secret-service." };
+        var presenceOption = new Option<bool?>("--presence") { Description = "Every signature needs its owner's presence (Touch ID or the login password; Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines." };
         var profilesOption = new Option<string[]>("--profile") { Description = "Permitted connectivity profile; repeatable (default: embedded).", AllowMultipleArgumentsPerToken = true };
         var create = new Command("create", "Generate a key on this machine and record the device, signed by its own key.");
         create.Options.Add(principalOption);
@@ -537,7 +537,7 @@ internal static class CliApp
         rename.SetAction(parseResult => Commands.DevicesRename(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(newNameOption)!, parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(rename);
 
-        var rotateCustodyOption = new Option<string?>("--custody") { Description = "Custody of the new key: default, file, cng, or secure-enclave on a Mac (default: the custody the device has)." };
+        var rotateCustodyOption = new Option<string?>("--custody") { Description = "Custody of the new key: file, cng, secure-enclave, secret-service, or default for the strongest this machine offers (when omitted: the custody the device has)." };
         var rotatePresenceOption = new Option<bool?>("--presence") { Description = "Every signature with the new key needs its owner's presence (Secure Enclave custody only, never for an agent); '--presence false' removes it. Default: the device's presence, where the new custody enforces it." };
         var rotate = new Command("rotate", "Replace a device's key with a new one, signed by both keys; the device keeps its identity and admission, and its earlier records stay valid (record format 2).");
         rotate.Arguments.Add(deviceArgument);

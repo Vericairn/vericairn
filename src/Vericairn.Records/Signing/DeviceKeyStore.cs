@@ -49,21 +49,48 @@ public static class DeviceKeyStores
     /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
     public static readonly string[] PresenceKinds = [SecureEnclaveCustody.Kind];
 
-    /// <summary>The default store for this platform: CNG on Windows (no key file exists), an owner-only file elsewhere.</summary>
-    public static IDeviceKeyStore Default() => OperatingSystem.IsWindows() ? new CngKeyStore() : new FileKeyStore(VericairnHome.Path());
+    /// <summary>Whether a new device needs its owner's presence when nobody says: a person's does wherever its custody enforces it; an agent's or a service's never does.</summary>
+    public static bool PresenceByDefault(bool person, string custodyKind) => person && Array.IndexOf(PresenceKinds, custodyKind) >= 0;
 
-    /// <summary>A store by custody name: cng, secure-enclave, or file; presence only where the custody enforces it.</summary>
-    public static IDeviceKeyStore Named(string? custody, bool presence = false)
+    /// <summary>
+    /// The strongest store this machine offers: CNG on Windows, where no key file exists; on a Mac with a Secure Enclave and the
+    /// helper, the enclave (only when <paramref name="enclave"/> allows it, since record format 1 cannot name it); on Linux, the secret
+    /// service where one runs; else an owner-only file.
+    /// </summary>
+    public static IDeviceKeyStore Default(bool presence = false, bool enclave = true)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return new CngKeyStore();
+        }
+
+        if (OperatingSystem.IsMacOS() && enclave && SecureEnclaveKeyStore.Available())
+        {
+            return new SecureEnclaveKeyStore(VericairnHome.Path(), presence);
+        }
+
+        if (OperatingSystem.IsLinux() && SecretServiceKeyStore.Available())
+        {
+            return new SecretServiceKeyStore(VericairnHome.Path());
+        }
+
+        return new FileKeyStore(VericairnHome.Path());
+    }
+
+    /// <summary>A store by custody name: default, cng, secure-enclave, secret-service or file; presence only where the custody enforces it.</summary>
+    public static IDeviceKeyStore Named(string? custody, bool presence = false, bool enclave = true)
     {
         IDeviceKeyStore store = custody switch
         {
-            null or "" or "default" => Default(),
+            null or "" or "default" => Default(presence, enclave),
             "file" or "file-owner-only" => new FileKeyStore(VericairnHome.Path()),
             "cng" or "windows-cng" when OperatingSystem.IsWindows() => new CngKeyStore(),
             "cng" or "windows-cng" => throw new PlatformNotSupportedException("CNG custody exists on Windows only."),
             "secure-enclave" or SecureEnclaveCustody.Kind when OperatingSystem.IsMacOS() && SecureEnclaveKeyStore.Available() => new SecureEnclaveKeyStore(VericairnHome.Path(), presence),
             "secure-enclave" or SecureEnclaveCustody.Kind => throw new PlatformNotSupportedException($"Secure Enclave custody needs a Mac with a Secure Enclave and the {SecureEnclaveCustody.HelperName} helper beside the command line."),
-            _ => throw new ArgumentException($"Unknown custody '{custody}'. Use file, secure-enclave on a Mac, or cng on Windows.", nameof(custody)),
+            "secret-service" or SecretServiceCustody.Kind when OperatingSystem.IsLinux() && SecretServiceKeyStore.Available() => new SecretServiceKeyStore(VericairnHome.Path()),
+            "secret-service" or SecretServiceCustody.Kind => throw new PlatformNotSupportedException($"Secret-service custody needs Linux with a running secret service and {SecretServiceCustody.Tool} (libsecret)."),
+            _ => throw new ArgumentException($"Unknown custody '{custody}'. Use file, secure-enclave on a Mac, secret-service on Linux, or cng on Windows.", nameof(custody)),
         };
         if (presence && Array.IndexOf(PresenceKinds, store.Kind) < 0)
         {
@@ -73,7 +100,7 @@ public static class DeviceKeyStores
         return store;
     }
 
-    /// <summary>Every store that could hold keys on this machine, default first.</summary>
+    /// <summary>Every store that could hold keys on this machine; a lookup by device asks each in turn, and none of them opens a keyring to answer.</summary>
     public static IReadOnlyList<IDeviceKeyStore> All()
     {
         if (OperatingSystem.IsWindows())
@@ -84,6 +111,11 @@ public static class DeviceKeyStores
         if (OperatingSystem.IsMacOS() && SecureEnclaveCustody.HelperPath() is not null)
         {
             return [new FileKeyStore(VericairnHome.Path()), new SecureEnclaveKeyStore(VericairnHome.Path())];
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            return [new FileKeyStore(VericairnHome.Path()), new SecretServiceKeyStore(VericairnHome.Path())];
         }
 
         return [new FileKeyStore(VericairnHome.Path())];
