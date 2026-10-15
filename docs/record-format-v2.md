@@ -231,9 +231,16 @@ an `assignment` to that principal, whose brief names the work order and the goal
 reserved action unless a grant in force covers it, names the grant that lets its principal carry a reserved step, and
 whose note says why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is
 the work order (without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it
-unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask. A
-hand-over of a step an agent holds to a person (`vericairn work takeover`) is an `assignment` of the step to the person,
-whose brief carries the agent's brief with the agent's assignment among its sources.
+unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask.
+From 0.6.0 an `assignment` of a step of a goal may also be recorded by the goal's sponsor when the sponsor is a person,
+beside the operator and a principal holding `local-engineering`; the goal and its work are judged as they were when the
+assignment was recorded.
+
+A hand-over of a step an agent holds to a person (`vericairn work takeover`) is an `assignment` of the step to the person,
+whose brief carries the agent's brief with the agent's assignment among its sources. From 0.6.0 any `assignment` of a
+person to a work order whose latest assignment recorded before it is an agent's or a service's is a hand-over, whatever its
+brief says, and is recorded by a person only: the person taking the step over, the sponsor of a goal the step belongs to,
+or an operator (`assignment.handover`). An agent never records one, whatever scope it holds.
 
 ## Living documents due
 
@@ -412,7 +419,9 @@ records its intent before anything starts: its identity is `agent-run:` and the 
 worker contract (`worker`: `vericairn.worker/1`) and, for a run launched under it, the sponsor's `custodyException`, which
 must have covered the goal's revision when the intent was recorded, unexpired and not yet replaced by a revision recorded
 before the intent (`operation.custody`), judged as of the intent so that a later revision or expiry leaves the run valid;
-and its `cap`, taken from the goal's budget. The intent is the
+and its `cap`, taken from the goal's budget. Beside the operator and a principal holding `local-engineering`, who record
+every external operation, the sponsor of the goal a run is charged to records the run's operation when the sponsor is a
+person, from 0.6.0 (`operation.author`). The intent is the
 `not-started` revision; `dispatched` records the harness's start, and the settlement records the observed effect
 (`observed-success` when the harness exited 0, `known-failure` when it failed or was stopped) and the `usage`. The
 operation never records that the work is done: the agent's result is a claim another principal reviews.

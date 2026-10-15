@@ -63,10 +63,11 @@ release and pins the one it runs on.
   asked, never another contributor. `vericairn ask` shows what waits on a principal: its open asks, at most three
   at a time with the recommendation first and the consequence of leaving each unanswered, which a decision of the
   principal asked answers and waiting never does. `vericairn goal step` takes a goal's next step, one at a time, the
-  smallest form of Community's conductor: an agent's run starts through the worker, its assignment recorded only
-  with the run's intent, a person's step is assigned and asked, and a step nobody is available for is asked of the
-  sponsor; `vericairn work takeover` hands a step an agent holds over to a person. Pro's program plans and schedules
-  many steps.
+  smallest form of Community's conductor, for an operator, the goal's sponsor or a principal holding
+  `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
+  a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
+  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Pro's
+  program plans and schedules many steps.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over

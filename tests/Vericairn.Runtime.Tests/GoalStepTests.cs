@@ -246,6 +246,89 @@ public class GoalStepTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void AStepIsTakenByAnOperatorTheGoalsSponsorOrAPrincipalHoldingLocalEngineering()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string pat = Person(run, "Pat");
+        string helper = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Helper","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")))).Id;
+        int assignments = run.Service.Records("assignment").Count;
+
+        // A person who is neither an operator nor the sponsor, and an agent without local-engineering, take no step, and nothing is recorded.
+        foreach (string by in new[] { pat, helper, builder })
+        {
+            GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(by, run.Resource, Command(run, "never")));
+            Assert.False(refused.Ok, by);
+            Assert.Equal("refused", refused.Problem!.Code);
+            Assert.EndsWith($"does not take steps of goal {run.Goal}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority. Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(assignments, run.Service.Records("assignment").Count);
+        Assert.Empty(run.Service.Records("operation"));
+
+        // Under local-engineering the builder dispatches W-1's run, as it does under the operator's authority.
+        Grant(run, builder, "local-engineering");
+        GoalStepResponse engineered = run.Service.GoalStep(run.Goal, new GoalStepRequest(builder, run.Resource, Command(run, "engineered")));
+        Assert.True(engineered.Ok, engineered.Message);
+        Assert.Equal(builder, AgentRuns.Find(run.Estate.Load(), engineered.Run!.Run)!.Intent.By);
+        Assert.Equal("observed-success", run.Settled(engineered.Run.Run).Status);
+
+        // Sam, a person who funds a goal of their own, takes its step: routing's assignment and the run's intent are Sam's records.
+        (string sam, string goal) = SamsGoal(run);
+        GoalStepResponse own = run.Service.GoalStep(goal, new GoalStepRequest(sam, run.Resource, Command(run, "sam")));
+        Assert.True(own.Ok, own.Message);
+        Assert.Equal(("run", "S-1", builder), (own.Outcome, own.Step, own.Principal));
+        Assert.Equal(sam, run.Estate.Load().ById[own.Assignment!.Id].By);
+        Assert.Equal(sam, AgentRuns.Find(run.Estate.Load(), own.Run!.Run)!.Intent.By);
+        Assert.Equal("observed-success", run.Settled(own.Run.Run).Status);
+
+        // Sam takes no step of a goal Sam does not sponsor.
+        Assert.Contains($"does not take steps of goal {run.Goal}", run.Service.GoalStep(run.Goal, new GoalStepRequest(sam, run.Resource)).Message, StringComparison.Ordinal);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AHandOverIsRecordedByThePersonTakingOverTheSponsorOrAnOperatorAndNeverByAnAgent()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        string builder = run.Estate.BuilderId;
+        string pat = Person(run, "Pat");
+        string quinn = Person(run, "Quinn");
+        Grant(run, builder, "local-engineering");
+        Grant(run, quinn, "local-engineering");
+        int assignments = run.Service.Records("assignment").Count;
+
+        // The builder, whatever its scope, and Quinn, who is neither Pat, nor the sponsor, nor an operator, record no hand-over of W-1 to Pat.
+        foreach (string by in new[] { builder, quinn })
+        {
+            TakeoverResponse refused = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, by, pat));
+            Assert.False(refused.Ok, by);
+            Assert.EndsWith("does not record this hand-over: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent. Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(assignments, run.Service.Records("assignment").Count);
+
+        // Pat records it, taking W-1 over with no scope at all.
+        TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, pat));
+        Assert.True(taken.Ok, taken.Message);
+        RecordEnvelope handover = run.Estate.Load().ById[taken.Assignment!.Id];
+        Assert.Equal((pat, pat), (handover.By, EstateModel.BodyString(handover, "contributor")));
+
+        // The sponsor of a goal, a person, records the hand-over of its step from the builder to Quinn.
+        (string sam, _) = SamsGoal(run);
+        string held = RunEstate.Ok(run.Service.Assign(new AssignRequest("S-1", builder, op, RunEstate.Json(RunEstate.Brief)))).Id;
+        TakeoverResponse bySponsor = run.Service.WorkTakeover(new TakeoverRequest(held, sam, quinn));
+        Assert.True(bySponsor.Ok, bySponsor.Message);
+        RecordEnvelope sponsored = run.Estate.Load().ById[bySponsor.Assignment!.Id];
+        Assert.Equal((sam, quinn), (sponsored.By, EstateModel.BodyString(sponsored, "contributor")));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     /// <summary>The reserved effects every routed brief prohibits unless a grant in force covers one.</summary>
     private const string ReservedEffects = "nothing reserved to the operator (publication, spending, credentials, DNS, destructive operations, material product changes, milestone and release acceptance) unless a grant in force covers it";
 
@@ -255,6 +338,9 @@ public class GoalStepTests
     private static JsonElement Next(RunEstate run, string key) =>
         Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key);
 
+    private static string Person(RunEstate run, string name) =>
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", run.Estate.OperatorId, RunEstate.Json($$"""{"kind":"human","name":"{{name}}","roles":["contributor"]}""")))).Id;
+
     /// <summary>The operator's grant of a scope to a principal, on a decision of the operator's; returns the grant's id.</summary>
     private static string Grant(RunEstate run, string grantee, string scope, string? expires = null)
     {
@@ -262,6 +348,17 @@ public class GoalStepTests
         string decision = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", op, RunEstate.Json($$"""{"title":"A grant","statement":"Grant {{scope}}.","summary":"A grant.","synthesis":"A grant of {{scope}}.","effects":["{{scope}}"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-15T12:00:00Z","stake":"medium","notAuthorized":[]}""")))).Id;
         string until = expires is null ? string.Empty : ",\"expires\":\"" + expires + "\"";
         return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("authority", op, RunEstate.Json($$"""{"grantee":"{{grantee}}","scope":["{{scope}}"],"reserved":[],"conditions":[],"basis":"{{decision}}"{{until}}}""")))).Id;
+    }
+
+    /// <summary>A goal Sam sponsors and funds, a person with a grant of spending, with one step, S-1, for the builder.</summary>
+    private static (string Sam, string Goal) SamsGoal(RunEstate run)
+    {
+        string sam = Person(run, "Sam");
+        Grant(run, sam, "spending");
+        string goal = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(sam, RunEstate.Json($$$"""{"title":"Describe the widget","objective":"A guide to the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"S-1"},"state":"accepted"}}],"constraints":[],"kind":"finite","sponsor":"{{{sam}}}","budget":{"wallMinutes":60,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""")))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(goal, new GoalActionRequest(sam)));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", run.Estate.OperatorId, RunEstate.Json($$"""{"key":"S-1","kind":"ordinary","title":"Describe the widget","intent":"Describe it.","scope":["widget guide"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["guide"]}"""))));
+        return (sam, goal);
     }
 
     private static GoalStepResponse Step(RunEstate run, string report, string scenario = "claude") =>

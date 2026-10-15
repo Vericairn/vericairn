@@ -412,7 +412,7 @@ public class WorkerTests
             (new RunStartRequest(run.Assignment, "gemini", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "The launcher 'gemini' has no implementation"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["model"] = "x" }), "it takes no model"),
             (new RunStartRequest(run.Assignment, "generic", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource), "this run names no command"),
-            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.BuilderId, run.Resource, Settings: settings), "holds neither"),
+            (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.BuilderId, run.Resource, Settings: settings), "or by the sponsor of the goal it is charged to when the sponsor is a person, and Test Builder"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Goal, Settings: settings), "No repository resource"),
             (new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, WallMinutes: 0, Settings: settings), "at least one wall minute"),
         ];

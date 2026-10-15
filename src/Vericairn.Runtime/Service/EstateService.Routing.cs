@@ -67,6 +67,11 @@ public sealed partial class EstateService
             }
 
             goalId = current.Id;
+            if (!Routing.MayTakeStep(model, current, request.By, DateTimeOffset.UtcNow))
+            {
+                return StepProblem(goalId, "refused", $"{PrincipalName(model, request.By)} ({request.By}) does not take steps of goal {goalId}: a step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding the 'local-engineering' scope, as the builder dispatches agents under the operator's authority. Nothing was recorded.");
+            }
+
             string status = GoalRules.Status(model, current);
             if (status != "active")
             {
@@ -173,6 +178,7 @@ public sealed partial class EstateService
                 : orderStatus is "accepted" or "retired" ? $"Work order {EstateModel.BodyString(order, "key")} is {orderStatus}: no step of it is left to take over."
                 : assignments.Count == 0 || assignments[^1].Id != held.Id ? $"Assignment {held.Id} no longer holds work order {EstateModel.BodyString(order, "key")}: assignment {(assignments.Count == 0 ? "none" : assignments[^1].Id)} does."
                 : !GoalRules.IsPerson(model, person) ? $"{personName} ({person}) is not a person: a step an agent holds is taken over by a person."
+                : !Routing.MayHandOver(model, request.By, person, order) ? $"{PrincipalName(model, request.By)} ({request.By}) does not record this hand-over: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent."
                 : null;
             if (refusal is not null)
             {

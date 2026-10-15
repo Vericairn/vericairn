@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -65,13 +66,26 @@ public sealed class AssignmentType : IRecordType
 
         body.Text("note", false, 4000);
         body.NoOtherKeys();
-        if (context.Principal(context.Record.By) is null)
+        string by = context.Record.By;
+        RecordEnvelope? order = context.Find(context.Record.Subject?.Id) is { Type: "work-order" } named ? named : null;
+        RecordEnvelope? handedOver = context.Format >= 2 && order is not null ? Routing.TakesOverFrom(context.Model, context.Record) : null;
+        if (context.Principal(by) is null)
         {
-            context.Error("assignment.author", $"Assigning principal {context.Record.By} has no principal record.");
+            context.Error("assignment.author", $"Assigning principal {by} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (handedOver is not null)
         {
-            context.Error("assignment.author", "Work is assigned by the operator or by a principal granted the 'local-engineering' scope.");
+            // A hand-over, from record format 2: a person takes over a step an agent holds (design/goals.md § 6, step 4). It is recorded
+            // by a person, the one taking the step over, who decides for its goal or an operator, and never by an agent.
+            if (!Routing.MayHandOver(context.Model, by, contributor, order!, context.Record))
+            {
+                context.Error("assignment.handover", $"This assignment takes work order {EstateModel.BodyString(order!, "key") ?? order!.Id} over from the agent's assignment {handedOver.Id}: a hand-over is recorded by a person, the one taking the step over, the sponsor of its goal or an operator, and never by an agent.");
+            }
+        }
+        else if (!context.HasRole(by, Roles.Operator) && !context.HasScope(by, Scopes.LocalEngineering)
+            && !(context.Format >= 2 && order is not null && Routing.DecidesForStep(context.Model, by, order, context.Record)))
+        {
+            context.Error("assignment.author", "Work is assigned by the operator, by a principal granted the 'local-engineering' scope, or, for a step of a goal, by the goal's sponsor when the sponsor is a person.");
         }
 
         if (contributor is not null && context.Principal(contributor) is null)

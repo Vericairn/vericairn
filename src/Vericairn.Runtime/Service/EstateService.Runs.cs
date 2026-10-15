@@ -516,11 +516,6 @@ public sealed partial class EstateService
             return (null, $"Principal {request.By} has no principal record in this estate.", null);
         }
 
-        if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, DateTimeOffset.UtcNow))
-        {
-            return (null, $"A run is an external operation, recorded by the operator or under the 'local-engineering' scope, and {PrincipalName(model, request.By)} ({request.By}) holds neither.", null);
-        }
-
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
         if (!model.Current("device").Any(d => EstateModel.BodyString(d, "principal") == request.Agent && SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))))
         {
@@ -549,6 +544,14 @@ public sealed partial class EstateService
                     ? $"Work order {key} belongs to no goal, whose budget would cap the run: a goal that names it among its inputs or in its plan, activated by its sponsor, grants one."
                     : $"Work order {key} belongs to {(active.Count > 1 ? "several active goals" : "several goals")} ({string.Join(", ", (active.Count > 1 ? active : goals).Select(g => g.Id))}); name the one the run is charged to.", null);
             }
+        }
+
+        // A run is an external operation: recorded by the operator, under 'local-engineering', or by the goal's sponsor when a person,
+        // who takes a step of the goal under its activation.
+        GoalRules.Accepter decider = GoalRules.AccepterOf(model, goal);
+        if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, DateTimeOffset.UtcNow) && (decider.Principal is null || decider.Principal != request.By))
+        {
+            return (null, $"A run is an external operation, recorded by the operator, under the 'local-engineering' scope, or by the sponsor of the goal it is charged to when the sponsor is a person, and {PrincipalName(model, request.By)} ({request.By}) is none of these.", null);
         }
 
         // The custody precondition, judged here before anything is prepared and again when the intent is recorded: no operator's or

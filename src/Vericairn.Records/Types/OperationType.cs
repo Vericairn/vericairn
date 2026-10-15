@@ -153,6 +153,25 @@ public sealed class OperationType : IRecordType
         }
     }
 
+    /// <summary>
+    /// True for an agent run, from record format 2, recorded by who decides for the goal it is charged to when that is a person, its
+    /// sponsor: taking a step of the goal under its activation, which granted the budget the run spends (design/goals.md §§ 6 and 9). The
+    /// goal is judged at its revision when the record was written.
+    /// </summary>
+    private static bool SponsorsRun(ValidationContext context)
+    {
+        if (context.Format < 2 || EstateModel.BodyString(context.Record, "action") != AgentRun
+            || !context.Record.Body.TryGetProperty("target", out JsonElement target) || target.ValueKind != JsonValueKind.Object
+            || !target.TryGetProperty("goal", out JsonElement named) || named.ValueKind != JsonValueKind.String
+            || AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record) is not RecordEnvelope goal)
+        {
+            return false;
+        }
+
+        GoalRules.Accepter decider = GoalRules.AccepterOf(context.Model, goal, context.Record);
+        return decider.Principal is not null && decider.Principal == context.Record.By;
+    }
+
     /// <summary>A revision keeps the cap its run's intent recorded: what a run may spend is fixed before it starts.</summary>
     private static void Kept(ValidationContext context, JsonElement cap)
     {
@@ -292,9 +311,9 @@ public sealed class OperationType : IRecordType
         {
             context.Error("operation.author", $"Principal {context.Record.By} has no principal record.");
         }
-        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering))
+        else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering) && !SponsorsRun(context))
         {
-            context.Error("operation.author", "External operations are recorded by the operator or under the 'local-engineering' scope.");
+            context.Error("operation.author", "External operations are recorded by the operator or under the 'local-engineering' scope; an agent's run of a goal also by the goal's sponsor when the sponsor is a person.");
         }
 
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);

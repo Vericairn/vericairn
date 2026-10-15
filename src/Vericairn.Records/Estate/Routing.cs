@@ -130,6 +130,87 @@ public static class Routing
     }
 
     /// <summary>
+    /// The goals a work order is a step of, each at its revision when a record was written and only when its work then included the work
+    /// order; at their current revisions without a record. The work order is named by any of its revisions.
+    /// </summary>
+    public static IReadOnlyList<RecordEnvelope> GoalsOf(EstateModel model, RecordEnvelope order, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        string identity = model.Chain(model.Latest(order))[0];
+        var goals = new List<RecordEnvelope>();
+        foreach (RecordEnvelope latest in model.Current("goal").OrderBy(g => g.Id, StringComparer.Ordinal))
+        {
+            RecordEnvelope? revision = before is null ? latest : AgentRuns.GoalAt(model, latest.Id, before);
+            if (revision is not null && GoalRules.Work(model, revision, before).Any(o => model.Chain(o)[0] == identity))
+            {
+                goals.Add(revision);
+            }
+        }
+
+        return goals;
+    }
+
+    /// <summary>
+    /// True when a principal decides for a goal a work order is a step of, as of a record when one is given: the goal's sponsor when the
+    /// sponsor is a person, or an operator when an agent sponsors it (decision 01M507XV4VBFYWMRN8WCXMXHX4).
+    /// </summary>
+    public static bool DecidesForStep(EstateModel model, string? principal, RecordEnvelope order, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return principal is not null && GoalsOf(model, order, before).Any(g => GoalRules.AccepterOf(model, g, before).Decides(model, principal));
+    }
+
+    /// <summary>
+    /// When an assignment is a hand-over (design/goals.md § 6, step 4), the assignment it takes the step over from: the latest assignment
+    /// of the same work order, by any revision, recorded before it, when that one's contributor is an agent or a service and this one's
+    /// is a person. Null for any other assignment.
+    /// </summary>
+    public static RecordEnvelope? TakesOverFrom(EstateModel model, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        if (!GoalRules.IsPerson(model, EstateModel.BodyString(assignment, "contributor")) || assignment.Subject is null || !model.ById.TryGetValue(assignment.Subject.Id, out RecordEnvelope? order))
+        {
+            return null;
+        }
+
+        IReadOnlyList<string> orders = model.Chain(model.Latest(order));
+        RecordEnvelope? previous = model.OfType("assignment")
+            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && GoalRules.Before(a, assignment))
+            .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
+            .LastOrDefault();
+        string kind = previous is not null && model.CurrentPrincipal(EstateModel.BodyString(previous, "contributor")) is RecordEnvelope holder ? EstateModel.BodyString(holder, "kind") ?? "?" : "?";
+        return kind is "agent" or "service" ? previous : null;
+    }
+
+    /// <summary>
+    /// Whether a principal may record a hand-over of a work order's step to a person, as of a record when one is given: a person only,
+    /// the one taking the step over, who decides for a goal the step belongs to (its sponsor when a person), or an operator; never an agent.
+    /// </summary>
+    public static bool MayHandOver(EstateModel model, string? principal, string? person, RecordEnvelope order, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return GoalRules.IsPerson(model, principal)
+            && (principal == person || model.HasRole(principal, Roles.Operator) || DecidesForStep(model, principal, order, before));
+    }
+
+    /// <summary>
+    /// Whether a principal may take a step of a goal: an operator; the goal's sponsor when the sponsor is a person, under the goal's
+    /// activation; or a principal holding the 'local-engineering' scope at the time, which is how the builder dispatches agents under the
+    /// operator's authority. An agent that sponsors a goal takes its steps only as such a principal, since an operator decides for that goal.
+    /// </summary>
+    public static bool MayTakeStep(EstateModel model, RecordEnvelope goal, string? principal, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        return principal is not null && model.CurrentPrincipal(principal) is not null
+            && (model.HasRole(principal, Roles.Operator) || GoalRules.AccepterOf(model, goal).Decides(model, principal) || model.HasScope(principal, Scopes.LocalEngineering, at));
+    }
+
+    /// <summary>
     /// Whether a principal the roster names for a role can carry a step of a goal from this machine, and why not. An agent needs a
     /// launcher here for its harness, a key of one of its admitted devices held here, and the goal's budget to leave something for a run
     /// of the step (<see cref="AgentRuns.Exhausted"/>), and for a reserved action a grant in force that covers it; a person needs its
