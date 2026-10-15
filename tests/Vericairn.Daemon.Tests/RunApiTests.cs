@@ -120,7 +120,7 @@ public class RunApiTests
     }
 
     /// <summary>A launcher that starts the command its run names, as the stand-in harness.</summary>
-    private sealed class StandInLauncher : IAgentLauncher
+    internal sealed class StandInLauncher : IAgentLauncher
     {
         public string Launcher => "stand-in";
 
@@ -130,7 +130,7 @@ public class RunApiTests
     }
 
     /// <summary>A workspace that is a directory: no repository is needed to start the stand-in.</summary>
-    private sealed class DirectoryWorkspaces : IWorkspaceProvider
+    internal sealed class DirectoryWorkspaces : IWorkspaceProvider
     {
         public ProviderDescriptor Descriptor { get; } = new("directory", IWorkspaceProvider.Contract, "implemented", ["prepare"], ["A directory, for tests."]);
 

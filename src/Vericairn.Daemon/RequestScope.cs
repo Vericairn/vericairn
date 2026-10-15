@@ -107,7 +107,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(ReleaseSubmitRequest)] = (_, r, d) => Acting(((ReleaseSubmitRequest)r).By, d),
         [typeof(ReleaseObserveRequest)] = (_, r, d) => Acting(((ReleaseObserveRequest)r).By, d),
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
-        [typeof(ExportRequest)] = (_, r, d) => Optional(((ExportRequest)r).By, d),
+        [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
@@ -121,23 +121,21 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// <summary>Whether a request type is one this holds to a principal; a device-signed request of any other protocol type is refused.</summary>
     internal static bool Covers(Type type) => Rules.ContainsKey(type);
 
-    /// <summary>Why a bound argument may not proceed for the device, or null.</summary>
+    /// <summary>
+    /// Why a bound argument may not proceed for the device, or null. A route's own values (text, numbers) and the request's context
+    /// pass; a request object is held by its rule, and one of any type the rules do not name, wherever it is declared, is refused.
+    /// </summary>
     private string? Refusal(object? argument, AuthenticatedDevice device)
     {
-        if (argument is null or string or HttpContext or HttpRequest)
+        if (argument is null or string or HttpContext or HttpRequest or CancellationToken || argument.GetType().IsPrimitive || argument.GetType().IsEnum)
         {
             return null;
         }
 
         Type type = argument.GetType();
-        if (Rules.TryGetValue(type, out Func<RequestScope, object, AuthenticatedDevice, string?>? rule))
-        {
-            return rule(this, argument, device);
-        }
-
-        return type.Namespace == typeof(Problem).Namespace
-            ? $"A device-signed {type.Name} names no principal the runtime can hold it to, so it is refused."
-            : null;
+        return Rules.TryGetValue(type, out Func<RequestScope, object, AuthenticatedDevice, string?>? rule)
+            ? rule(this, argument, device)
+            : $"A device-signed {type.Name} names no principal the runtime can hold it to, so it is refused.";
     }
 
     /// <summary>The principal a request names as acting must be the device's.</summary>
@@ -151,6 +149,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         acting is null || string.Equals(acting, device.Principal, StringComparison.Ordinal)
             ? null
             : $"Device {device.Identity} acts for its own principal {device.Principal}; this request names {acting} as acting. A principal's requests are signed by its own device{(device.LocalNetwork ? string.Empty : ", or sent over the local socket by the runtime machine's user")}.";
+
+    /// <summary>What a device-signed request asks only of an administrator: the operator, or a principal holding the 'administer' scope.</summary>
+    private string? Administrator(string what, AuthenticatedDevice device) =>
+        service.Administers(device.Principal)
+            ? null
+            : $"{what}, and is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope.";
 
     /// <summary>A device renames or rotates only devices of its own principal.</summary>
     private string? OwnDevice(string? named, AuthenticatedDevice device)

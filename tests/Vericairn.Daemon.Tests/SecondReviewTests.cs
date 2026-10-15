@@ -9,8 +9,15 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Vericairn.Protocol;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Signing;
+using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Tests;
+using Vericairn.Runtime.Workers;
 using Vericairn.Sdk;
 
 namespace Vericairn.Daemon.Tests;
@@ -308,5 +315,160 @@ public class SecondReviewTests
         string nonce = PairingProtocol.NewNonce();
         Assert.Contains("confirmations that did not match", Try(registry, new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, "sha256:runtime")), "192.0.2.1").Problem, StringComparison.Ordinal);
         Assert.Equal(0, issued.AttemptsLeft);
+    }
+
+    private static JsonElement Json(string text)
+    {
+        using JsonDocument document = JsonDocument.Parse(text);
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// A run in flight on the harness's runtime: the operator's goal, a work order and its assignment to the builder, carried by the
+    /// stand-in harness that ignores a stop until its grace runs out. Devices of other principals are made first, while the
+    /// operator's device still signs admissions here; then the operator's key leaves this machine, as a run requires.
+    /// </summary>
+    private static async Task<string> RunInFlightAsync(LocalNetworkHarness harness, string scratch, Action devices)
+    {
+        string op = harness.Estate.OperatorId;
+        string builder = harness.Estate.BuilderId;
+        VericairnClient api = harness.Socket;
+        var registry = new ProviderRegistry();
+        registry.Register(new RunApiTests.StandInLauncher());
+        registry.Register(new RunApiTests.DirectoryWorkspaces());
+        harness.Host.Service.Providers = registry;
+        harness.Host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), StopWait = TimeSpan.FromSeconds(2) };
+        Assert.True(api.DeviceAdmit(new AdmitRequest(api.DeviceCreate(new DeviceCreateRequest(builder, "Builder's device", "file")).Written!.Id, op, "The builder's.")).Ok);
+        devices();
+        new FileKeyStore(VericairnHome.Path()).Remove(harness.OperatorDevice);
+        string goal = api.GoalPropose(new GoalProposeRequest(op, Json($$$"""{"title":"Build the widget","objective":"Ship the widget.","completion":[{"evidence":"It ships.","check":"Read it."}],"constraints":[],"kind":"finite","sponsor":"{{{op}}}","budget":{"wallMinutes":60,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}"""))).Written!.Id;
+        Assert.True(api.GoalActivate(goal, new GoalActionRequest(op)).Ok);
+        Assert.True(api.NewRecord(new NewRecordRequest("work-order", op, Json($$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}"""))).Ok);
+        string assignment = api.Assign(new AssignRequest("W-1", builder, op, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}"""))).Written!.Id;
+        string resource = api.NewRecord(new NewRecordRequest("resource", op, Json("""{"kind":"repository","name":"widget","role":"Its source.","location":{"github":"Example/widget"},"visibility":"private"}"""))).Written!.Id;
+        RepositoryClones.Register(harness.Host.Service.Session.Manifest.Estate, resource, scratch);
+        RunResponse started = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("ignore-stop", Path.Combine(scratch, "report.jsonl")) }));
+        Assert.True(started.Ok, started.Message);
+        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
+        while (!api.Runs().Runs.Single(r => r.Run == started.Run).Observed)
+        {
+            Assert.True(DateTimeOffset.UtcNow < until, "The run was never observed.");
+            await Task.Delay(100, TestContext.Current.CancellationToken);
+        }
+
+        return started.Run;
+    }
+
+    [Fact]
+    public async Task C3_N2_OnlyAnOperatorWhoeverDecidesForTheGoalOrWhoStartedTheRunStopsItAndNoStopIsHeldForItsGrace()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        string op = harness.Estate.OperatorId;
+        string builder = harness.Estate.BuilderId;
+
+        // A third principal, an agent with no part in the run, with a paired laptop and a device on the runtime's machine.
+        using JsonDocument person = JsonDocument.Parse("""{"kind":"agent","name":"Bystander","roles":["contributor"],"agent":{"vendor":"Example","product":"Other"}}""");
+        string bystander = harness.Socket.NewRecord(new NewRecordRequest("principal", op, person.RootElement)).Written!.Id;
+        RuntimeConnection laptop = null!;
+        string local = null!;
+        string scratch = Path.Combine(Path.GetTempPath(), "vericairn-second-review-run-" + Records.Identity.Ulid.NewUlid().Value);
+        Directory.CreateDirectory(scratch);
+        try
+        {
+            string run = await RunInFlightAsync(harness, scratch, () =>
+            {
+                laptop = harness.Pair(bystander, "Bystander laptop");
+                local = harness.Socket.DeviceCreate(new DeviceCreateRequest(bystander, "Bystander worker", "file")).Written!.Id;
+                Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(local, op, "The bystander's.")).Ok);
+            });
+
+            // Over the local network and over loopback, the bystander's devices are refused at once, and the run goes on.
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            using (VericairnClient lan = VericairnClient.LocalNetwork(laptop, harness.Signer(laptop)))
+            {
+                RunStopResponse refused = lan.RunStop(run, new RunStopRequest(bystander, "Because I can.", 8));
+                Assert.False(refused.Ok);
+                Assert.Equal("refused", refused.Problem!.Code);
+                Assert.Contains("may not stop run", refused.Problem.Message, StringComparison.Ordinal);
+            }
+
+            using (VericairnClient loopback = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(local)!))
+            {
+                RunStopResponse refused = loopback.RunStop(run, new RunStopRequest(bystander, "Because I can.", 8));
+                Assert.Equal("refused", refused.Problem!.Code);
+            }
+
+            // The run's own agent did not start it and decides nothing for its goal: refused as well, on the local socket too.
+            Assert.Equal("refused", harness.Socket.RunStop(run, new RunStopRequest(builder, "Mine.", 8)).Problem!.Code);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"The refusals took {clock.Elapsed}.");
+            Assert.Equal("dispatched", harness.Socket.Runs().Runs.Single(r => r.Run == run).Status);
+
+            // The operator, who started it, stops it: the answer comes within the stop wait, not after the eight seconds of grace.
+            clock.Restart();
+            RunStopResponse stopped = harness.Socket.RunStop(run, new RunStopRequest(op, "Replaced.", 8));
+            Say($"{stopped.State} after {clock.Elapsed.TotalSeconds:F1} s: {stopped.Message}");
+            Assert.True(stopped.Ok, stopped.Message);
+            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"The stop was held for {clock.Elapsed}.");
+            Assert.NotEqual("contained", stopped.State);
+
+            // The worker still escalates after the grace and the settlement records it.
+            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(40);
+            while (harness.Socket.Runs().Runs.Single(r => r.Run == run).Status == "dispatched")
+            {
+                Assert.True(DateTimeOffset.UtcNow < until, "The run never settled.");
+                await Task.Delay(200, TestContext.Current.CancellationToken);
+            }
+        }
+        finally
+        {
+            Directory.Delete(scratch, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task N4_AnExportIsAnAdministratorsOnLoopbackAndNamesTheirPrincipal()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        WriteOutcome local = harness.Socket.DeviceCreate(new DeviceCreateRequest(harness.Estate.BuilderId, "Agent worker", "file"));
+        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(local.Written!.Id, harness.Estate.OperatorId, "Agent.")).Ok);
+        string target = Path.Combine(harness.DeviceHome, "chosen", "by", "the-agent", "export.zip");
+
+        // The agent's loopback device naming no principal, or its own, is refused, and nothing is written.
+        using (VericairnClient agent = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(local.Written.Id)!))
+        {
+            (ExportResponse? unnamed, Problem? anonymous) = agent.Export(new ExportRequest(target));
+            Assert.Null(unnamed);
+            Assert.Equal("denied", anonymous!.Code);
+            (ExportResponse? own, Problem? notAdministrator) = agent.Export(new ExportRequest(target, harness.Estate.BuilderId));
+            Assert.Null(own);
+            Assert.Contains("administrator's", notAdministrator!.Message, StringComparison.Ordinal);
+        }
+
+        Assert.False(File.Exists(target));
+        Assert.False(Directory.Exists(Path.Combine(harness.DeviceHome, "chosen")));
+
+        // The operator's own device exports, naming the operator.
+        using VericairnClient operatorDevice = VericairnClient.Loopback(harness.Host.Endpoint, DeviceRequestSigner.Find(harness.OperatorDevice)!);
+        (ExportResponse? export, Problem? problem) = operatorDevice.Export(new ExportRequest(target, harness.Estate.OperatorId));
+        Assert.True(export is not null, problem?.Message);
+        Assert.True(File.Exists(target));
+    }
+
+    [Fact]
+    public async Task InfoA_ARequestOfATypeTheRulesDoNotNameIsRefusedWhereverItIsDeclared()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        var scope = new RequestScope(harness.Host.Service, new LocalNetworkLedger(harness.DeviceHome));
+        var context = new DefaultHttpContext();
+        context.Request.Method = "POST";
+        context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice(harness.OperatorDevice, harness.Estate.OperatorId, LocalNetwork: false);
+        bool reached = false;
+        object? result = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, new Uri("https://example.invalid/")), _ =>
+        {
+            reached = true;
+            return ValueTask.FromResult<object?>(null);
+        });
+        Assert.False(reached);
+        Assert.Equal(StatusCodes.Status401Unauthorized, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
     }
 }
