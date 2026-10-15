@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers;
 using System.Buffers.Text;
 using System.Formats.Asn1;
 using System.Globalization;
+using System.IO.Pipelines;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -370,14 +372,38 @@ internal sealed class RequestAuthenticator
             return null;
         }
 
-        request.EnableBuffering();
         byte[] body;
+        PipeReader reader = request.BodyReader;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
         deadline.CancelAfter(left);
         try
         {
             using var buffer = new MemoryStream();
-            await request.Body.CopyToAsync(buffer, deadline.Token).ConfigureAwait(false);
+            // Cancelling a stream read can cancel the transport (notably TLS on Windows), losing the 401 as well.
+            // Cancel only the pipe's pending read; the request and its response remain live until the refusal is written.
+            using CancellationTokenRegistration pending = deadline.Token.Register(reader.CancelPendingRead);
+            while (true)
+            {
+                ReadResult read = await reader.ReadAsync(context.RequestAborted).ConfigureAwait(false);
+                ReadOnlySequence<byte> bytes = read.Buffer;
+                if (read.IsCanceled || deadline.IsCancellationRequested)
+                {
+                    reader.AdvanceTo(bytes.Start, bytes.End);
+                    return null;
+                }
+
+                foreach (ReadOnlyMemory<byte> segment in bytes)
+                {
+                    buffer.Write(segment.Span);
+                }
+
+                reader.AdvanceTo(bytes.End);
+                if (read.IsCompleted)
+                {
+                    break;
+                }
+            }
+
             body = buffer.ToArray();
         }
         catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
@@ -385,7 +411,8 @@ internal sealed class RequestAuthenticator
             return null;
         }
 
-        request.Body.Position = 0;
+        request.Body = new MemoryStream(body, writable: false);
+        context.Response.RegisterForDispose(request.Body);
         string target = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.ToString() + request.QueryString;
         byte[] digest = binding is { } bound
             ? RequestSigning.LocalNetworkDigest(bound.Estate, bound.Identity, request.Method, target, signedAt, body)

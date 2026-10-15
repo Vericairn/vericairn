@@ -476,7 +476,8 @@ public sealed class DaemonHost : IAsyncDisposable
                 : null;
         if (denied is not null)
         {
-            await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: localNetwork).ConfigureAwait(false);
+            await WriteProblemAsync(context, StatusCodes.Status401Unauthorized, denied, close: true).ConfigureAwait(false);
+            await context.Response.CompleteAsync().ConfigureAwait(false);
             return;
         }
 

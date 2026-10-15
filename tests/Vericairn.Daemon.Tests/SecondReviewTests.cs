@@ -103,25 +103,30 @@ public class SecondReviewTests
         Assert.Equal(ReplayCache.Outcome.Stale, cache.Accept("device", "second", now.AddMinutes(5), now.AddMinutes(6)));
     }
 
-    [Fact]
-    public async Task N1_AReplayWhoseBodyArrivesAfterItsSignatureIsStaleIsRefused()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task N1_AReplayWhoseBodyArrivesAfterItsSignatureIsStaleIsRefused(bool loopback)
     {
         // The re-review's probe, on the system clock: a signature five seconds from stale, accepted once, then replayed with its body
         // trickled until after the signature is stale.
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(systemClock: true);
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
-        DeviceRequestSigner signer = harness.Signer(connection);
-        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
+        DeviceRequestSigner signer = loopback ? DeviceRequestSigner.Find(harness.OperatorDevice)! : harness.Signer(connection);
+        string address = loopback ? LoopbackAddress(harness) : harness.Address;
+        using X509Certificate2? credential = loopback ? null : LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
         byte[] body = Encoding.ASCII.GetBytes(new string('a', 3600));
         string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow.AddSeconds(-295));
-        byte[] head = Head("GET", "/v1/status", body, at, signer, harness.Digest("GET", "/v1/status", at, body), "text/plain");
-        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, .. body], TimeSpan.FromSeconds(5)), StringComparison.Ordinal);
+        byte[] digest = loopback ? RequestSigning.Digest("GET", "/v1/status", at, body) : harness.Digest("GET", "/v1/status", at, body);
+        byte[] head = Head("GET", "/v1/status", body, at, signer, digest, "text/plain");
+        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(address, credential, pinned, [.. head, .. body], TimeSpan.FromSeconds(5)), StringComparison.Ordinal);
 
-        string replay = await Raw.ExchangeAsync(harness.Address, credential, pinned, head, TimeSpan.FromSeconds(15), trickle: body, chunkSize: 360, delay: TimeSpan.FromSeconds(1));
+        string replay = await Raw.ExchangeAsync(address, credential, pinned, head, TimeSpan.FromSeconds(15), trickle: body, chunkSize: 360, delay: TimeSpan.FromSeconds(1));
         Say(replay);
         Assert.StartsWith("HTTP/1.1 401", replay, StringComparison.Ordinal);
         Assert.Contains("five minutes", replay, StringComparison.Ordinal);
+        Assert.Contains("Connection: close", replay, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
