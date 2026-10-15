@@ -91,9 +91,14 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     {
         int status = result is IStatusCodeHttpResult { StatusCode: int code } ? code : StatusCodes.Status200OK;
         object? value = result is IValueHttpResult { Value: object answered } ? answered : null;
-        RecordWritten? written = value is WriteOutcome { Written: RecordWritten record } ? record : null;
+        RecordWritten? written = value switch
+        {
+            WriteOutcome { Written: RecordWritten record } => record,
+            TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
+            _ => null,
+        };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -105,11 +110,85 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     }
 
     /// <summary>
+    /// Each served operation's scope: a bound request rule, or no principal named in its arguments (read views, raw bytes and
+    /// bodyless operations). This table is independent of the route registry: a newly added route is refused until its scope is declared.
+    /// </summary>
+    private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GET /v1/health"] = null,
+        ["GET /v1/status"] = null,
+        ["GET /v1/progress"] = null,
+        ["GET /v1/validate"] = null,
+        ["GET /v1/check"] = null,
+        ["GET /v1/records/{id}"] = null,
+        ["GET /v1/records"] = null,
+        ["POST /v1/records"] = typeof(NewRecordRequest),
+        ["GET /v1/decisions"] = null,
+        ["GET /v1/decisions/{id}"] = null,
+        ["GET /v1/work/{key}/brief"] = null,
+        ["GET /v1/work/{key}"] = null,
+        ["POST /v1/work/assign"] = typeof(AssignRequest),
+        ["POST /v1/work/attempt"] = typeof(AttemptRequest),
+        ["POST /v1/work/result"] = typeof(ResultRequest),
+        ["POST /v1/work/amend"] = typeof(AmendRequest),
+        ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
+        ["GET /v1/devices"] = null,
+        ["POST /v1/devices"] = typeof(DeviceCreateRequest),
+        ["POST /v1/devices/admit"] = typeof(AdmitRequest),
+        ["POST /v1/devices/rename"] = typeof(DeviceRenameRequest),
+        ["POST /v1/devices/rotate"] = typeof(DeviceRotateRequest),
+        ["POST /v1/devices/revoke"] = typeof(RevokeRequest),
+        ["POST /v1/devices/recovery"] = typeof(DeviceRecoveryRequest),
+        ["GET /v1/releases"] = null,
+        ["GET /v1/documents"] = null,
+        ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
+        ["GET /v1/asks"] = null,
+        ["GET /v1/goals"] = null,
+        ["POST /v1/goals"] = typeof(GoalProposeRequest),
+        ["GET /v1/goals/{id}"] = null,
+        ["GET /v1/goals/{id}/next"] = null,
+        ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
+        ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/resume"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/stop"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/evaluate"] = typeof(GoalEvaluateRequest),
+        ["POST /v1/goals/{id}/accept"] = typeof(GoalAcceptRequest),
+        ["GET /v1/providers"] = null,
+        ["GET /v1/launchers"] = null,
+        ["GET /v1/runs"] = null,
+        ["POST /v1/runs"] = typeof(RunStartRequest),
+        ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
+        ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
+        ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
+        ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
+        ["POST /v1/estate/export"] = typeof(ExportRequest),
+        ["GET /v1/reconcile"] = null,
+        ["GET /v1/recover/inspect"] = null,
+        ["GET /v1/objects"] = null,
+        ["POST /v1/objects"] = null,
+        ["GET /v1/objects/verify"] = null,
+        ["GET /v1/objects/{hash}"] = null,
+        ["POST /v1/shutdown"] = null,
+        ["POST /v1/pairings"] = typeof(PairingIssueRequest),
+        ["POST /v1/pairing/hello"] = typeof(PairingHello),
+        ["POST /v1/pairing/confirm"] = typeof(PairingConfirm),
+        ["GET /v1/runtime/identity"] = null,
+        ["POST /v1/runtime/certificate"] = typeof(CertificateRotateRequest),
+        ["GET " + OpenApiDocument.Path] = null,
+    };
+
+    /// <summary>Whether an operation has a scope rule, including the rule of its bound request type.</summary>
+    internal static bool Covers(string operation) => Operations.TryGetValue(operation, out Type? type) && (type is null || Covers(type));
+
+    /// <summary>
     /// The operations a device-signed request may ask only for an administrator: stopping the runtime and replacing its certificate or
     /// identity. Over the local network they are refused before this, as operations on the runtime's own machine.
     /// </summary>
     private string? Refusal(string operation, AuthenticatedDevice device) =>
-        operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
+        !Covers(operation)
+            ? $"{operation} has no request scope rule and is refused."
+            : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
             ? $"{operation} is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope. On the runtime's machine its operating-system user reaches it over the local socket."
             : null;
 
@@ -120,6 +199,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
+        [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
+        [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),
         [typeof(AssignRequest)] = (_, r, d) => Acting(((AssignRequest)r).By, d),
         [typeof(AttemptRequest)] = (_, r, d) => Acting(((AttemptRequest)r).By, d),
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),

@@ -260,7 +260,9 @@ then prints what it has; the settlement records the rest.
 none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts
 nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>] [--setting name=value]...
 [--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
-Community's conductor, one step in sequence; Pro's program plans and schedules many. The goal must be active, and the
+Community's conductor, one step in sequence; Pro's program plans and schedules many. Like `worker run`,
+it runs on the runtime's machine and is refused through the local-network listener. On loopback, its `by`
+is the signing device's principal; the local socket uses its caller's operating-system identity. The goal must be active, and the
 principal an operator, the goal's sponsor when the sponsor is a person, or a principal holding `local-engineering`, which
 is how the builder dispatches agents under the operator's authority; an agent that sponsors a goal takes its steps only
 under `local-engineering`, like any agent, since an operator decides for that goal. A person who sponsors a goal assigns
