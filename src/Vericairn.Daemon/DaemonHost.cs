@@ -255,7 +255,7 @@ public sealed class DaemonHost : IAsyncDisposable
         app.Use(host.AuthenticateAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
-        routes.AddEndpointFilter(new RequestScope(service));
+        routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory)));
         ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
         DaemonRoutes.Map(routes, host);
         try

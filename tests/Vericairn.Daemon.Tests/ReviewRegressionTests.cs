@@ -125,6 +125,123 @@ public class ReviewRegressionTests
     }
 
     [Fact]
+    public async Task F3_ADeviceRecordIsRefusedOverTheLocalNetworkOnTheRecordsRouteAsOnRename()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Operator phone");
+        DeviceRequestSigner signer = harness.Signer(phone);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(phone.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        string rename = "{\"device\":\"" + harness.OperatorDevice + "\",\"name\":\"Renamed\"}";
+        Assert.Equal(HttpStatusCode.Unauthorized, (await lan.SendAsync(HttpMethod.Post, "/v1/devices/rename", signer, Encoding.UTF8.GetBytes(rename), "application/json")).Status);
+
+        RecordEnvelope device = harness.Estate.Load().ById[harness.OperatorDevice];
+        var body = System.Text.Json.Nodes.JsonNode.Parse(device.Body.GetRawText())!.AsObject();
+        body["name"] = "Renamed over the local network";
+        string json = "{\"type\":\"device\",\"by\":\"" + harness.Estate.OperatorId + "\",\"supersedes\":\"" + harness.OperatorDevice + "\",\"body\":" + body.ToJsonString() + "}";
+        (HttpStatusCode status, string answer) = await lan.SendAsync(HttpMethod.Post, "/v1/records", signer, Encoding.UTF8.GetBytes(json), "application/json");
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+        Assert.Contains("machine that holds its key", Message(answer), StringComparison.Ordinal);
+        Assert.Equal("Operator laptop", Assert.Single(harness.Socket.Devices(), d => d.Id == harness.OperatorDevice).Name);
+    }
+
+    [Fact]
+    public async Task F3_ReleasesUpgradesObjectsAndRunsAreTheRuntimeMachinesAndRefusedOverTheLocalNetwork()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
+        DeviceRequestSigner signer = harness.Signer(connection);
+        using X509Certificate2 credential = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
+        using var lan = new Lan(harness.Address, credential, harness.Host.Endpoint.Loopback!.Certificate);
+        string by = harness.Estate.BuilderId;
+        string ulid = Records.Identity.Ulid.NewUlid().Value;
+        (string Path, string Json)[] refused =
+        [
+            ("/v1/releases/submit", "{\"product\":\"" + by + "\",\"version\":\"9.9.9\",\"repository\":\"someone/else\",\"workflow\":\"any.yml\",\"ref\":\"main\",\"by\":\"" + by + "\",\"provider\":\"github\"}"),
+            ("/v1/releases/observe", "{\"version\":\"9.9.9\",\"repository\":\"someone/else\",\"by\":\"" + by + "\"}"),
+            ("/v1/estate/upgrade", "{\"version\":\"9.9.9\",\"by\":\"" + by + "\",\"check\":false}"),
+            ("/v1/objects", "not json at all, stored on the runtime's disk"),
+            ("/v1/runs", "{\"assignment\":\"" + ulid + "\",\"launcher\":\"generic\",\"agent\":\"" + by + "\",\"by\":\"" + by + "\",\"repository\":\"" + ulid + "\"}"),
+        ];
+        foreach ((string path, string json) in refused)
+        {
+            (HttpStatusCode status, string answer) = await lan.SendAsync(HttpMethod.Post, path, signer, Encoding.UTF8.GetBytes(json), path == "/v1/objects" ? "application/octet-stream" : "application/json");
+            Say($"{path}: {(int)status} {answer}");
+            Assert.True(status == HttpStatusCode.Unauthorized, $"{path}: {status} {answer}");
+        }
+
+        Assert.Empty(harness.Socket.Objects());
+
+        // An upgrade's plan and a run's stop stay the device's principal's to ask for.
+        (HttpStatusCode plan, string planBody) = await lan.SendAsync(HttpMethod.Post, "/v1/estate/upgrade", signer, Encoding.UTF8.GetBytes("{\"version\":\"9.9.9\",\"check\":true}"), "application/json");
+        Assert.NotEqual(HttpStatusCode.Unauthorized, plan);
+        Say($"plan: {(int)plan} {planBody}");
+        (HttpStatusCode stop, string stopBody) = await lan.SendAsync(HttpMethod.Post, "/v1/runs/" + ulid + "/stop", signer, Encoding.UTF8.GetBytes("{\"by\":\"" + by + "\"}"), "application/json");
+        Assert.NotEqual(HttpStatusCode.Unauthorized, stop);
+        Say($"stop: {(int)stop} {stopBody}");
+    }
+
+    [Fact]
+    public async Task F7_ALocalNetworkWriteIsKeptWithThePairedDeviceBehindItBeyondItsRevocation()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection phone = harness.Pair(harness.Estate.OperatorId, "Operator phone");
+        using VericairnClient client = harness.Connections.Connect(phone);
+        using JsonDocument order = JsonDocument.Parse(Order("W-R7"));
+        WriteOutcome written = client.NewRecord(new NewRecordRequest("work-order", harness.Estate.OperatorId, order.RootElement));
+        Assert.True(written.Ok, written.Problem?.Message);
+
+        // The record is the operator's, signed by the operator's device that this machine holds, as every API write is.
+        RecordEnvelope record = harness.Estate.Load().ById[written.Written!.Id];
+        Assert.Equal(harness.OperatorDevice, Assert.Single(record.Signatures).Device);
+
+        // The paired device behind it is kept beside the live store, with the record; a refused write leaves no line.
+        using JsonDocument other = JsonDocument.Parse(Order("W-R8"));
+        Assert.Equal(HttpStatusCode.Unauthorized, Assert.Throws<HttpRequestException>(() => client.NewRecord(new NewRecordRequest("work-order", harness.Estate.BuilderId, other.RootElement))).StatusCode);
+        string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!;
+        LocalNetworkWrite kept = Assert.Single(LocalNetworkLedger.Read(directory));
+        Assert.Equal((phone.Device, harness.Estate.OperatorId, "POST /v1/records", written.Written.Id, written.Written.Hash), (kept.Device, kept.Principal, kept.Operation, kept.Record, kept.Hash));
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(directory, LocalNetworkLedger.FileName)));
+        }
+
+        // It outlives the device's revocation.
+        Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(phone.Device, harness.Estate.OperatorId, "Lost.")).Ok);
+        Assert.Equal(written.Written.Id, Assert.Single(LocalNetworkLedger.Read(directory)).Record);
+    }
+
+    [Fact]
+    public async Task F7_ALocalNetworkWriteIsRefusedWhenItsSignerHereNeedsItsOwnersPresence()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        string op = harness.Estate.OperatorId;
+
+        // A person whose only device on the runtime's machine asks for its owner's presence at every signature.
+        using JsonDocument person = JsonDocument.Parse("""{"kind":"human","name":"Present Person","roles":["contributor"]}""");
+        string present = harness.Socket.NewRecord(new NewRecordRequest("principal", op, person.RootElement)).Written!.Id;
+        // Its key is a file here, which a test can make; the record states the enclave custody and presence a Mac with Touch ID would.
+        var keys = new FileKeyStore(VericairnHome.Path());
+        harness.Estate.SetClock(DateTimeOffset.UtcNow.AddSeconds(-30));
+        string id = Records.Identity.Ulid.NewUlid(harness.Estate.Clock.AddSeconds(1)).Value;
+        byte[] spki = keys.Create(id);
+        System.Text.Json.Nodes.JsonObject body = Records.Authoring.DeviceRecords.Body(present, "Laptop with Touch ID", "macos", SecureEnclaveCustody.Kind, RecordSigning.EncodePublicKey(spki), ["embedded"], 2, "required");
+        RecordEnvelope device = harness.Estate.Add("device", present, body.ToJsonString(), id: id, signer: new StoreSigner(keys, id));
+        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(device.Id, op, "Present Person's laptop.")).Ok);
+
+        // Their phone, paired, is refused a write the runtime would sign with that laptop's key; the same write on the machine goes through.
+        RuntimeConnection phone = harness.Pair(present, "Phone");
+        using VericairnClient client = harness.Connections.Connect(phone);
+        using JsonDocument order = JsonDocument.Parse(Order("W-R9"));
+        HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)));
+        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+        Assert.Null(harness.Socket.Brief("W-R9"));
+        Assert.Empty(LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!));
+        Assert.True(harness.Socket.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)).Ok);
+        keys.Remove(id);
+    }
+
+    [Fact]
     public void F2_EveryRequestTypeOfTheProtocolIsHeldToAPrincipal()
     {
         // A request type an operation could bind that the scope does not know would be refused for every device; this keeps the table whole.

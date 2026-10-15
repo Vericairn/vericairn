@@ -58,6 +58,19 @@ public class PairingJourneyTests
             string device = added.GetProperty("device").GetString()!;
             Assert.Contains("used already", CliHarness.Run("connections", "add", address, "--code", code, "--name", "Another laptop", "--custody", "file").Err, StringComparison.Ordinal);
 
+            // What the device writes over the local network is the builder's, and this machine keeps which device asked for it.
+            Assert.Contains("no paired device has written", CliHarness.Ok("--estate", root, "devices", "writes").Out, StringComparison.Ordinal);
+            var connections = new Vericairn.Sdk.RuntimeConnections();
+            using (Vericairn.Sdk.VericairnClient lan = connections.Connect(connections.Find(connection)!))
+            {
+                using JsonDocument order = JsonDocument.Parse("""{"key":"W-9","kind":"ordinary","title":"From the laptop","intent":"Over the local network.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["y"]}""");
+                Assert.True(lan.NewRecord(new Vericairn.Protocol.NewRecordRequest("work-order", builder, order.RootElement)).Ok);
+            }
+
+            JsonElement wrote = Assert.Single(CliHarness.Ok("--estate", root, "--json", "devices", "writes", device).Json.EnumerateArray());
+            Assert.Equal(builder, wrote.GetProperty("principal").GetString());
+            Assert.Equal("POST /v1/records", wrote.GetProperty("operation").GetString());
+
             // The runtime recorded the device with its permitted profile and admitted it; the second device lists its connection as current.
             JsonElement row = CliHarness.Ok("--estate", root, "--json", "devices", "list").Json.EnumerateArray().Single(d => d.GetProperty("id").GetString() == device);
             Assert.Equal("admitted", row.GetProperty("admission").GetString());
@@ -70,7 +83,9 @@ public class PairingJourneyTests
             Assert.Contains("paired devices keep working", CliHarness.Ok("--estate", root, "runtime", "rotate").Out, StringComparison.Ordinal);
             Assert.Equal("current", Listed(connection).GetProperty("state").GetString());
 
-            // Revoked on the runtime's machine: refused at once.
+            // Revoked on the runtime's machine: refused at once. Here the laptop's key shares this test's home with the runtime, which
+            // signed the laptop's write with it; a revocation applies from its own second, so the write must sit in an earlier one.
+            Thread.Sleep(1100);
             CliHarness.Ok("--estate", root, "--json", "devices", "revoke", device, "--by", op, "--reason", "The laptop was lost.");
             JsonElement denied = Listed(connection);
             Assert.Equal("denied", denied.GetProperty("state").GetString());

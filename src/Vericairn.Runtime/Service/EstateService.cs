@@ -1893,6 +1893,28 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>
+    /// Why the runtime will not sign a write for a principal that a paired device asked for over the local network, or null: the device
+    /// of the principal it would sign with needs its owner's presence at every signature, on this machine, from someone who did not ask.
+    /// </summary>
+    public string? PresenceRefusal(string principal)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(principal);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            var write = new RecordDraft("work-order", principal, default);
+            if (ResolveSigner(model, write, out IRecordSigner? signer) is not null || signer is null || !model.ById.TryGetValue(signer.DeviceId, out RecordEnvelope? device))
+            {
+                return null;
+            }
+
+            return EstateModel.BodyString(model.Latest(device), "presence") == "required"
+                ? $"The runtime signs a write for {principal} with device {signer.DeviceId}, whose every signature needs its owner's presence on the runtime's machine; it does not ask that of the person there for a request from the local network. Record it on that machine, or give {principal} a device there that signs unattended."
+                : null;
+        }
+    }
+
     /// <summary>Whether a principal administers this estate now: it holds the operator role or a grant of the 'administer' scope.</summary>
     public bool Administers(string principal)
     {

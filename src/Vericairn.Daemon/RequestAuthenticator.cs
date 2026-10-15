@@ -43,7 +43,10 @@ internal sealed class RequestAuthenticator
     /// <summary>The routes of the pairing exchange, which a device without a credential reaches; the code authenticates them.</summary>
     internal static readonly IReadOnlySet<string> PairingRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "POST /v1/pairing/hello", "POST /v1/pairing/confirm" };
 
-    /// <summary>Operations whose effect is on the runtime's own machine: its process, its key custody, its files and its certificate.</summary>
+    /// <summary>
+    /// Operations whose effect is on the runtime's own machine: its process, its key custody, its files, its certificate, the release
+    /// provider's credentials there (a release's submission and observation), its object store, and the coding agents it launches.
+    /// </summary>
     internal static readonly IReadOnlySet<string> MachineLocal = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "POST /v1/shutdown",
@@ -54,6 +57,10 @@ internal sealed class RequestAuthenticator
         "POST /v1/estate/export",
         "POST /v1/pairings",
         "POST /v1/runtime/certificate",
+        "POST /v1/releases/submit",
+        "POST /v1/releases/observe",
+        "POST /v1/objects",
+        "POST /v1/runs",
     };
 
     private const int Remembered = 4096;

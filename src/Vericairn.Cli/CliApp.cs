@@ -636,6 +636,12 @@ internal static class CliApp
         pair.SetAction(parseResult => Commands.DevicesPair(parseResult.GetValue(estateOption)!, parseResult.GetValue(pairPrincipalOption)!, parseResult.GetValue(pairByOption)!, parseResult.GetValue(pairProfilesOption) ?? [], parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(pair);
 
+        var writesDeviceArgument = new Argument<string?>("device") { Description = "A paired device's id, to list its writes only.", Arity = ArgumentArity.ZeroOrOne };
+        var writes = new Command("writes", "List what paired devices wrote over the local network through this machine's runtime: when, which device, for which principal, the operation and the record it produced. A record a paired device asks for is signed by a device of the same principal held here, so this is where the paired device behind it is kept.");
+        writes.Arguments.Add(writesDeviceArgument);
+        writes.SetAction(parseResult => Commands.DevicesWrites(parseResult.GetValue(estateOption)!, parseResult.GetValue(writesDeviceArgument), parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(writes);
+
         var newNameOption = new Option<string>("--name") { Description = "The device's new descriptive name, never a machine path.", Required = true };
         var rename = new Command("rename", "Rename a device whose key is held here; it keeps its identity, key and admission (record format 2).");
         rename.Arguments.Add(deviceArgument);

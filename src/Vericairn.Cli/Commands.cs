@@ -1555,6 +1555,41 @@ internal static class Commands
         return Clean;
     });
 
+    /// <summary>Lists the writes paired devices made over the local network, from the ledger beside the live store; no daemon is needed.</summary>
+    public static int DevicesWrites(string root, string? device, bool json)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            List<LocalNetworkWrite> writes = [.. LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!).Where(w => device is null || w.Device == device)];
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(writes, ProtocolJson.Options));
+                return Clean;
+            }
+
+            if (writes.Count == 0)
+            {
+                Console.Out.WriteLine(device is null ? "no paired device has written over the local network through this machine's runtime" : $"device {device} has written nothing over the local network through this machine's runtime");
+            }
+
+            foreach (LocalNetworkWrite write in writes)
+            {
+                Console.Out.WriteLine($"{write.At}  device {write.Device} for {write.Principal}  {write.Operation}{(write.Record is null ? string.Empty : $"  {write.Record}  {write.Hash}")}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
     public static int RuntimeConfigure(string root, string? localNetwork, bool json)
     {
         try

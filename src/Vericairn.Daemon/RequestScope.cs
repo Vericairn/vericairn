@@ -16,7 +16,7 @@ namespace Vericairn.Daemon;
 /// is refused, so a new operation is held to a principal before it can be reached by a device. Requests over the local socket carry
 /// no device, and the operating system's identity of their caller stands for them as before.
 /// </summary>
-internal sealed class RequestScope(EstateService service) : IEndpointFilter
+internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger) : IEndpointFilter
 {
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -42,7 +42,35 @@ internal sealed class RequestScope(EstateService service) : IEndpointFilter
             }
         }
 
-        return await next(context).ConfigureAwait(false);
+        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method);
+        if (!device.LocalNetwork || !write)
+        {
+            return await next(context).ConfigureAwait(false);
+        }
+
+        // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
+        // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
+        if (service.PresenceRefusal(device.Principal) is string presence)
+        {
+            return Denied(context.HttpContext, device, presence);
+        }
+
+        object? result = await next(context).ConfigureAwait(false);
+        Keep(device, operation, result);
+        return result;
+    }
+
+    /// <summary>Keeps a write a paired device made: which device, for whom, what operation, and the record it produced.</summary>
+    private void Keep(AuthenticatedDevice device, string operation, object? result)
+    {
+        int status = result is IStatusCodeHttpResult { StatusCode: int code } ? code : StatusCodes.Status200OK;
+        if (status >= 300)
+        {
+            return;
+        }
+
+        RecordWritten? written = result is IValueHttpResult { Value: WriteOutcome { Written: RecordWritten record } } ? record : null;
+        ledger.Append(new LocalNetworkWrite(Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), device.Identity, device.Principal, operation, written?.Id, written?.Hash, written?.Path));
     }
 
     /// <summary>
@@ -60,7 +88,7 @@ internal sealed class RequestScope(EstateService service) : IEndpointFilter
     /// </summary>
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
-        [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d),
+        [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
         [typeof(AssignRequest)] = (_, r, d) => Acting(((AssignRequest)r).By, d),
         [typeof(AttemptRequest)] = (_, r, d) => Acting(((AttemptRequest)r).By, d),
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
@@ -78,7 +106,7 @@ internal sealed class RequestScope(EstateService service) : IEndpointFilter
         [typeof(GoalAcceptRequest)] = (_, r, d) => Acting(((GoalAcceptRequest)r).By, d),
         [typeof(ReleaseSubmitRequest)] = (_, r, d) => Acting(((ReleaseSubmitRequest)r).By, d),
         [typeof(ReleaseObserveRequest)] = (_, r, d) => Acting(((ReleaseObserveRequest)r).By, d),
-        [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d),
+        [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (_, r, d) => Optional(((ExportRequest)r).By, d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
@@ -136,6 +164,18 @@ internal sealed class RequestScope(EstateService service) : IEndpointFilter
             ? null
             : $"Device {standing.Identity} is a device of {standing.Principal}; a request signed by device {device.Identity} reaches only the devices of {device.Principal}.";
     }
+
+    /// <summary>A device record is written on the machine that holds its key; over the local network it is refused, as /v1/devices and its renames are.</summary>
+    private static string? DeviceRecord(string? type, AuthenticatedDevice device) =>
+        device.LocalNetwork && string.Equals(type, "device", StringComparison.Ordinal)
+            ? "A device record is written on the machine that holds its key, and is refused over the local network."
+            : null;
+
+    /// <summary>Applying an upgrade rewrites the estate's pin and applies an irreversible migration on the runtime's machine; over the local network only its plan is given.</summary>
+    private static string? Upgrade(AuthenticatedDevice device) =>
+        device.LocalNetwork
+            ? "Applying an upgrade acts on the runtime's own machine and is refused over the local network; its plan (check) is not."
+            : null;
 
     /// <summary>A recovery key is a file on the runtime's machine, used there only.</summary>
     private static string? Recovery(string? recovery, AuthenticatedDevice device) =>
