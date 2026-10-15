@@ -90,11 +90,4 @@ public sealed class AskType : IRecordType
             context.Error("ask.state", "A notified ask does not become open again.");
         }
     }
-
-    /// <summary>The latest revision of an ask: its current state.</summary>
-    public static RecordEnvelope Latest(EstateModel model, RecordEnvelope ask)
-    {
-        ArgumentNullException.ThrowIfNull(model);
-        return model.Latest(ask);
-    }
 }
