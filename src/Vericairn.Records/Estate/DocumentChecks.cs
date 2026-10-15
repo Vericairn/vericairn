@@ -20,8 +20,11 @@ public static partial class DocumentChecks
     /// <param name="Summary">What it found.</param>
     public sealed record Outcome(string Name, string Result, string Summary);
 
-    /// <summary>Runs every check a declaration names against the document's text, answering the given trigger records.</summary>
-    public static IReadOnlyList<Outcome> Run(EstateModel model, RecordEnvelope declaration, string text, string documentPath, string? root, IReadOnlyList<RecordEnvelope> answered)
+    /// <summary>
+    /// Runs every check a declaration names against the document's text, answering the given trigger records. Links resolve in the
+    /// estate's working tree when a root is given, else through <paramref name="exists"/>, which answers for a repository-relative path.
+    /// </summary>
+    public static IReadOnlyList<Outcome> Run(EstateModel model, RecordEnvelope declaration, string text, string documentPath, string? root, IReadOnlyList<RecordEnvelope> answered, Func<string, bool>? exists = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(declaration);
@@ -36,7 +39,9 @@ public static partial class DocumentChecks
             {
                 "names-version" => NamesVersion(text, answered),
                 "matches-generator" => MatchesGenerator(model, declaration, text),
-                "links-resolve" => root is null ? new Outcome(name, "not-performed", "The links are resolved where the repository is.") : LinksResolve(text, documentPath, root),
+                "links-resolve" => root is not null ? LinksResolve(text, documentPath, relative => File.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))) || Directory.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))))
+                    : exists is not null ? LinksResolve(text, documentPath, exists)
+                    : new Outcome(name, "not-performed", "The links are resolved where the repository is."),
                 _ => new Outcome(name, "not-performed", LivingDocuments.IsAvailable(name) ? "A pack's check; the pack runs it." : "No installed pack provides this check."),
             });
         }
@@ -123,10 +128,9 @@ public static partial class DocumentChecks
             : new Outcome("matches-generator", "failed", string.Join("; ", problems) + ".");
     }
 
-    private static Outcome LinksResolve(string text, string documentPath, string root)
+    private static Outcome LinksResolve(string text, string documentPath, Func<string, bool> exists)
     {
         string directory = documentPath.Contains('/', StringComparison.Ordinal) ? documentPath[..documentPath.LastIndexOf('/')] : string.Empty;
-        string full = Path.GetFullPath(root);
         var broken = new List<string>();
         foreach (Match link in LinkRegex().Matches(text))
         {
@@ -136,9 +140,31 @@ public static partial class DocumentChecks
                 continue;
             }
 
-            string resolved = Path.GetFullPath(Path.Combine(full, directory.Replace('/', Path.DirectorySeparatorChar), Uri.UnescapeDataString(target).Replace('/', Path.DirectorySeparatorChar)));
-            bool inside = resolved.StartsWith(Path.TrimEndingDirectorySeparator(full) + Path.DirectorySeparatorChar, StringComparison.Ordinal) || resolved == full;
-            if (!inside || !(File.Exists(resolved) || Directory.Exists(resolved)))
+            // Resolved within the repository, by its segments: a link that climbs out of it never resolves.
+            var segments = new List<string>(directory.Length == 0 ? [] : directory.Split('/'));
+            bool outside = false;
+            foreach (string segment in Uri.UnescapeDataString(target).Split('/'))
+            {
+                if (segment is "" or ".")
+                {
+                    continue;
+                }
+
+                if (segment == "..")
+                {
+                    outside |= segments.Count == 0;
+                    if (segments.Count > 0)
+                    {
+                        segments.RemoveAt(segments.Count - 1);
+                    }
+
+                    continue;
+                }
+
+                segments.Add(segment);
+            }
+
+            if (outside || segments.Count == 0 || !exists(string.Join('/', segments)))
             {
                 broken.Add(target);
             }

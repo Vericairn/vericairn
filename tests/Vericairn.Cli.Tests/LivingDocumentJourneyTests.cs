@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Diagnostics;
 using System.Text.Json;
 using Vericairn.Cli;
 using Vericairn.Records.Hashing;
@@ -13,6 +14,7 @@ namespace Vericairn.Cli.Tests;
 public class LivingDocumentJourneyTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
+    private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
     private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""";
 
     [Fact]
@@ -141,5 +143,105 @@ public class LivingDocumentJourneyTests
         {
             CliHarness.Delete(root, scratch);
         }
+    }
+
+    [Fact]
+    public void TheProductsReadmeIsReviewedAtACommitAndAnEditAfterItsReviewHoldsTheRelease()
+    {
+        string root = CliHarness.TempDirectory("living-repo");
+        string repo = CliHarness.TempDirectory("living-repo-widget");
+        string scratch = CliHarness.TempDirectory("living-repo-scratch");
+        IReleaseProvider? previous = Commands.ReleaseProvider;
+        var provider = new FakeReleaseProvider();
+        Commands.ReleaseProvider = provider;
+        try
+        {
+            Git(repo, "init", "-q", "-b", "main");
+            Directory.CreateDirectory(Path.Combine(repo, "src"));
+            File.WriteAllText(Path.Combine(repo, "README.md"), "# Widget\n\nSee [the source](src/a.txt) and the releases page.\n");
+            File.WriteAllText(Path.Combine(repo, "src", "a.txt"), "a\n");
+            Git(repo, "add", ".");
+            Git(repo, "commit", "-q", "-m", "First commit");
+            string first = GitOutput(repo, "rev-parse", "HEAD");
+
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Living documents.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Delegate","stake":"low","notAuthorized":[],"statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", CliHarness.WriteJson(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering"],"reserved":["publication"],"conditions":["label self-review"],"basis":"{{decision}}"}"""));
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", Product)).Id;
+            string resource = CliHarness.Ok("--estate", root, "--json", "sources", "adopt", repo, "--by", op, "--name", "Widget", "--role", "source of the widget", "--visibility", "public").Json.GetProperty("resource").GetProperty("id").GetString()!;
+            Assert.Contains("Registered this machine's clone", CliHarness.Ok("--estate", root, "sources", "clone", repo, "--resource", resource).Out, StringComparison.Ordinal);
+
+            // The widget's README, in its own repository, read through the git-file source: due at each publication, and when its source changes.
+            CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "readme.json", $$"""{"path":"README.md","repository":"{{resource}}","title":"Readme","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"},{"on":"covers","level":"warn","paths":["src"]}],"checks":["links-resolve"],"summary":"Says what the widget is and where its releases are."}"""));
+            Assert.Contains($"at {first[..12]}, no review has recorded its covered paths", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+            CliHarness.Outcome reviewed = CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "Read at the first commit.", "--commit", first);
+            using (JsonDocument record = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, reviewed.Json.GetProperty("path").GetString()!.Replace('/', Path.DirectorySeparatorChar)))))
+            {
+                JsonElement body = record.RootElement.GetProperty("body");
+                Assert.Equal(first, body.GetProperty("content").GetProperty("commit").GetString());
+                Assert.Equal("passed", body.GetProperty("checks")[0].GetProperty("outcome").GetString());
+                Assert.StartsWith("sha256:", body.GetProperty("covered").GetString(), StringComparison.Ordinal);
+            }
+
+            Assert.Contains("README.md  current", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+
+            // A change under the covered source makes it due at the clone's head, and a review at that commit clears it.
+            File.WriteAllText(Path.Combine(repo, "src", "a.txt"), "changed\n");
+            Git(repo, "commit", "-q", "-am", "Change the source");
+            string second = GitOutput(repo, "rev-parse", "HEAD");
+            Assert.Contains($"at {second[..12]}, its covered paths (src) changed after the review", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "The source change does not touch the README.", "--commit", second);
+
+            // Release 0.2.0: the intent records that the README at the commit being released is what its review cleared.
+            string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
+            string intent = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Select(File.ReadAllText).Single(t => t.Contains("\"not-started\"", StringComparison.Ordinal));
+            Assert.Contains($"README.md at {second[..12]} is the content its review", intent, StringComparison.Ordinal);
+            provider.CompleteRun("Example/widget", run, true, "0.2.0");
+            JsonElement candidate = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder, "--qualified", "linux-x64", "--limitation", "Nothing signed.").Json.GetProperty("candidate");
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.GetProperty("id").GetString()}:{candidate.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted 0.2.0.","basis":[],"self":false}"""));
+            provider.Publish("Example/widget", "v0.2.0");
+            CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Contains("README.md  due at refuse", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "Holds after 0.2.0.", "--commit", second);
+
+            // An edit after the review, committed: 0.3.0 is refused with the commits and hashes, until the README is reviewed again.
+            File.AppendAllText(Path.Combine(repo, "README.md"), "Now with a claim nobody reviewed.\n");
+            Git(repo, "commit", "-q", "-am", "Edit the README");
+            string third = GitOutput(repo, "rev-parse", "HEAD");
+            CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Equal(2, held.Code);
+            Assert.Contains($"README.md changed after its review at {second[..12]}: at {third[..12]}", held.Out + held.Err, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "The new sentence holds.", "--commit", third);
+            Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+        }
+        finally
+        {
+            Commands.ReleaseProvider = previous;
+            CliHarness.Delete(root, repo, scratch);
+        }
+    }
+
+    private static void Git(string repo, params string[] arguments) => Assert.Equal(0, RunGit(repo, out _, arguments));
+
+    private static string GitOutput(string repo, params string[] arguments)
+    {
+        Assert.Equal(0, RunGit(repo, out string output, arguments));
+        return output.Trim();
+    }
+
+    private static int RunGit(string repo, out string output, params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = repo };
+        foreach (string argument in GitIdentity.Concat(arguments))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(info)!;
+        output = process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        return process.ExitCode;
     }
 }

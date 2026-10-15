@@ -19,6 +19,13 @@ public static class EstateLocations
         return Path.Combine(VericairnHome.Path(), "estates", estateId, key, "live.db");
     }
 
+    /// <summary>The clones of an estate's repositories registered on this machine, shared by every clone of the estate here: machine configuration, never a record.</summary>
+    public static string ClonesPath(string estateId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(estateId);
+        return Path.Combine(VericairnHome.Path(), "estates", estateId, "clones.json");
+    }
+
     /// <summary>The file a daemon publishes its endpoint in, beside the estate's live store.</summary>
     public static string EndpointFilePath(string root)
     {
