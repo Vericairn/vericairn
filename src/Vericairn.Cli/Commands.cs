@@ -1223,6 +1223,43 @@ internal static class Commands
         });
     }
 
+    /// <summary>Registers this machine's clone of an adopted repository, for the sources that read it, such as living documents of other repositories; nothing is recorded.</summary>
+    public static int SourcesClone(string root, string resourceId, string path, bool json)
+    {
+        RepositoryObservation observation;
+        try
+        {
+            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return Fail(exception.Message);
+        }
+
+        return WithApi(root, api =>
+        {
+            RecordResponse? resource = api.Record(resourceId);
+            if (resource is null || resource.Type != "resource" || !resource.Current)
+            {
+                return Fail($"No current resource has id {resourceId}.");
+            }
+
+            // The clone is the repository the resource names: by its root commit where recorded, else by its GitHub remote.
+            JsonElement location = resource.Envelope.GetProperty("body").GetProperty("location");
+            string? rootCommit = location.TryGetProperty("rootCommit", out JsonElement r) ? r.GetString() : null;
+            string? github = location.TryGetProperty("github", out JsonElement g) ? g.GetString() : null;
+            bool matches = rootCommit is not null ? rootCommit == observation.RootCommit : github is not null && string.Equals(SourceAdoption.GitHubRepository(observation.Remote), github, StringComparison.OrdinalIgnoreCase);
+            if (!matches)
+            {
+                return Fail($"That working tree is not the repository of resource {resource.Id}: its {(rootCommit is not null ? "root commit" : "GitHub remote")} differs.");
+            }
+
+            RepositoryClones.Register(api.Health().Estate, resource.Id, path);
+            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { resource = resource.Id, commit = observation.Commit }) : $"Registered this machine's clone of resource {resource.Id} at {observation.Commit[..12]}; the path stays in this machine's configuration, never in a record.");
+            return Clean;
+        });
+    }
+
     public static int SourcesObserve(string root, string path, string resourceId, string by, bool json)
     {
         RepositoryObservation observation;

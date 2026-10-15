@@ -140,7 +140,9 @@ latest clearance, which is a new revision of the estate file or a review with ou
 `release` trigger fires on the newest published release of its product, `upgrade` on the newest migration, `decision`
 on the newest current decision that names the document by path or by declaration, and `accepted` on the newest
 acceptance of a work order with one of its keys. `covers` compares the covered paths' identity in the working tree,
-uncommitted changes included, with the one the latest clearing review recorded; only a review clears it. A document
+uncommitted changes included, with the one the latest clearing review recorded; only a review clears it. For a
+document of another repository, `covers` is compared at the head of that repository's clone registered here (`vericairn
+sources clone`), through its source; without one, it is compared at the commit reviewed or released. A document
 is due at the highest level among its reasons: `remind` shows in status; `warn` is also a `document.due` warning of
 `vericairn estate check`; `refuse` also refuses the next `vericairn release submit` of the product, before any intent
 is recorded, naming every such document at once. A declaration that names a source, trigger, check or generator no

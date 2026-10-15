@@ -40,6 +40,12 @@ Commands:
 | `vericairn sources inspect <path>` | Prints the observation; records nothing |
 | `vericairn sources adopt <path> --by <id> --name <n> --role <r> [--visibility] [--notes]` | Writes a `resource` (kind repository) and a first `observation`; the repository is identified by GitHub owner/name, https remote or root commit, never by the path |
 | `vericairn sources observe <path> --resource <id> --by <id>` | Writes a fresh observation of an adopted repository |
+| `vericairn sources clone <path> --resource <id>` | Registers this machine's clone of an adopted repository, checked against the resource's root commit or GitHub remote; the path is machine configuration beside the estate's per-machine state, never a record |
+
+The software pack's living-document source `vericairn.software/git-file` reads a document of an adopted repository at a
+commit from its registered clone, with git's own object ids at that commit as the covered paths' identity: `vericairn
+docs review <path> --commit <commit>` reviews it there, and `vericairn docs living` compares its covered paths at the
+clone's head. Every call is a read-only git command.
 
 ## Checks as evidence
 
@@ -104,6 +110,10 @@ The release as intent, then observed effect:
    cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled. While a
    living document of the product is due at level `refuse`, the submission is refused before the
    intent, naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)).
+   Where a clone of its repository is registered here, each cleared document of the product in another
+   repository is also read at the commit the release would build (the `ref` setting); bytes that differ
+   from its latest review refuse the submission with both commits and hashes, and the intent records
+   what was compared, or that a document could not be.
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that

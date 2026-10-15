@@ -191,21 +191,35 @@ public static class LivingDocuments
         var reasons = new List<Reason>();
         var notes = new List<string>();
 
-        // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all.
+        // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
+        // estate's own files are read from its working tree; another repository's through its source, at its clone's head here.
         IReadOnlyList<string> coveredPaths = CoveredPaths(declaration);
         RecordEnvelope? coveredReview = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
-        bool coveredChanged = !elsewhere && coveredPaths.Count > 0 && (coveredReview is null || EstateModel.BodyString(coveredReview, "covered") != CoveredIdentity(model.Root, coveredPaths));
+        string? at = null;
+        string? identity = null;
+        if (coveredPaths.Count > 0 && !elsewhere)
+        {
+            identity = CoveredIdentity(model.Root, coveredPaths);
+        }
+        else if (coveredPaths.Count > 0 && DocumentSources.Find(EstateModel.BodyString(declaration, "source")) is IDocumentSource source && source.Head(model, declaration) is string head)
+        {
+            at = head;
+            identity = source.Covered(model, declaration, coveredPaths, head);
+        }
+
+        bool coveredChanged = identity is not null && (coveredReview is null || EstateModel.BodyString(coveredReview, "covered") != identity);
         foreach ((string on, string level, string? product, IReadOnlyList<string> values) in Triggers(declaration))
         {
             if (on == "covers")
             {
-                if (elsewhere)
+                if (identity is null)
                 {
-                    notes.Add("its covered paths are compared where its repository is, through its source, at the commit reviewed or released");
+                    notes.Add("its covered paths are compared where its repository is: no clone of it is registered here (vericairn sources clone), so they are compared at the commit reviewed or released");
                 }
                 else if (coveredChanged)
                 {
-                    reasons.Add(new Reason(on, level, coveredReview is null ? $"no review has recorded its covered paths ({string.Join(", ", values)})" : $"its covered paths ({string.Join(", ", values)}) changed after the review {coveredReview.Id}", null));
+                    string where = at is null ? string.Empty : $"at {at[..Math.Min(12, at.Length)]}, ";
+                    reasons.Add(new Reason(on, level, coveredReview is null ? $"{where}no review has recorded its covered paths ({string.Join(", ", values)})" : $"{where}its covered paths ({string.Join(", ", values)}) changed after the review {coveredReview.Id}", null));
                 }
 
                 continue;

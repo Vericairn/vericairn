@@ -748,29 +748,69 @@ public sealed class EstateService : IEstateApi, IDisposable
                 return NotFound($"No living-document declaration has id {declaration}.");
             }
 
-            if (EstateModel.BodyString(declared, "repository") is not null)
-            {
-                return Refuse("A document of another repository is reviewed at a commit through its source; that source is the software pack's git-file, which reads it from a registered clone.");
-            }
-
+            // The runtime, not the reviewer, states what was reviewed: the exact bytes (of the estate's file, or of another
+            // repository's at a commit through its source), the covered paths' identity and the triggers the review answers; and it
+            // runs the declared checks, so a failed one refuses the clearance before anything is written.
             string path = EstateModel.BodyString(declared, "path")!;
-            string file = Path.Combine(session.Root, path.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(file))
+            byte[] bytes;
+            string? commit = null;
+            string? covered = null;
+            Func<string, bool>? exists = null;
+            IReadOnlyList<string> coveredPaths = LivingDocuments.CoveredPaths(declared);
+            if (EstateModel.BodyString(declared, "repository") is null)
             {
-                return Refuse($"{path} is not in the estate's working tree; a review reads the document it clears.");
+                string file = Path.Combine(session.Root, path.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(file))
+                {
+                    return Refuse($"{path} is not in the estate's working tree; a review reads the document it clears.");
+                }
+
+                bytes = File.ReadAllBytes(file);
+                covered = coveredPaths.Count > 0 ? LivingDocuments.CoveredIdentity(session.Root, coveredPaths) : null;
+            }
+            else
+            {
+                string sourceName = EstateModel.BodyString(declared, "source") ?? "?";
+                if (request.Commit is null)
+                {
+                    return Refuse($"{path} is in another repository and is reviewed at a commit; name the commit.");
+                }
+
+                if (DocumentSources.Find(sourceName) is not IDocumentSource source)
+                {
+                    return Refuse($"{path} is read through {sourceName}, which no installed pack provides here.");
+                }
+
+                if (source.Resolve(model, declared, request.Commit) is not string resolved)
+                {
+                    return Refuse($"No clone of {path}'s repository with commit {request.Commit} is registered on this machine; register one with vericairn sources clone.");
+                }
+
+                if (source.Read(model, declared, resolved) is not byte[] read)
+                {
+                    return Refuse($"{path} is not in its repository at {resolved[..12]}.");
+                }
+
+                bytes = read;
+                commit = resolved;
+                exists = relative => source.Exists(model, declared, resolved, relative);
+                covered = coveredPaths.Count > 0 ? source.Covered(model, declared, coveredPaths, resolved) : null;
             }
 
-            // The runtime, not the reviewer, states what was reviewed: the exact bytes, the covered paths' identity and the triggers
-            // the review answers; and it runs the declared checks, so a failed one refuses the clearance before anything is written.
-            byte[] bytes = File.ReadAllBytes(file);
             string text = System.Text.Encoding.UTF8.GetString(bytes);
             LivingDocuments.State state = LivingDocuments.Derive(model).First(d => d.Declaration.Id == declared.Id);
             List<RecordEnvelope> answered = state.Reasons.Where(r => r.Record is not null).Select(r => model.ById[r.Record!]).ToList();
-            IReadOnlyList<DocumentChecks.Outcome> checks = DocumentChecks.Run(model, declared, text, path, session.Root, answered);
+            IReadOnlyList<DocumentChecks.Outcome> checks = DocumentChecks.Run(model, declared, text, path, commit is null ? session.Root : null, answered, exists);
+            var content = new JsonObject { ["hash"] = ContentHash.Sha256(bytes), ["bytes"] = bytes.Length };
+            if (commit is not null)
+            {
+                content["commit"] = commit;
+            }
+
             var body = new JsonObject
             {
                 ["outcome"] = request.Outcome,
-                ["content"] = new JsonObject { ["hash"] = ContentHash.Sha256(bytes), ["bytes"] = bytes.Length },
+                ["content"] = content,
                 ["answers"] = new JsonArray(state.Reasons.Select(r => (JsonNode)(r.Record is null
                     ? new JsonObject { ["on"] = r.On }
                     : new JsonObject { ["on"] = r.On, ["record"] = new JsonObject { ["type"] = model.ById[r.Record].Type, ["id"] = r.Record, ["hash"] = model.ById[r.Record].ComputedHash } })).ToArray()),
@@ -781,9 +821,9 @@ public sealed class EstateService : IEstateApi, IDisposable
                     : new JsonObject { ["severity"] = f.Severity, ["summary"] = f.Summary, ["location"] = f.Location })).ToArray()),
                 ["checks"] = new JsonArray(checks.Select(c => (JsonNode)new JsonObject { ["name"] = c.Name, ["outcome"] = c.Result, ["summary"] = c.Summary }).ToArray()),
             };
-            if (LivingDocuments.CoveredPaths(declared) is { Count: > 0 } covered)
+            if (covered is not null)
             {
-                body["covered"] = LivingDocuments.CoveredIdentity(session.Root, covered);
+                body["covered"] = covered;
             }
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
@@ -791,12 +831,61 @@ public sealed class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>The reviewer's independence of the content, as the record's rules judge it: self when it revised the content, else operator or independent agent.</summary>
+    /// <summary>
+    /// Reads each refuse-level document of the product in another repository at the commit a release would build, where a clone of it
+    /// is registered here: those whose bytes differ from their latest review, and what was compared or could not be.
+    /// </summary>
+    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, string product, string reference)
+    {
+        var changed = new List<string>();
+        var compared = new List<string>();
+        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.Triggers(d.Declaration).Any(t => t.On == "release" && t.Product == product)))
+        {
+            RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
+            JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
+            string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
+            string clearedAt = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("commit", out JsonElement at) ? at.GetString() ?? "?" : "?";
+            if (clearedHash is null)
+            {
+                continue;
+            }
+
+            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
+            string? commit = source?.Resolve(model, document.Declaration, reference);
+            if (source is null || commit is null)
+            {
+                compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at the release commit");
+                continue;
+            }
+
+            byte[]? bytes = source.Read(model, document.Declaration, commit);
+            string? now = bytes is null ? null : ContentHash.Sha256(bytes);
+            if (now == clearedHash)
+            {
+                compared.Add($"{document.Path} at {commit[..12]} is the content its review {review!.Id} cleared");
+            }
+            else
+            {
+                changed.Add(now is null
+                    ? $"{document.Path} is not in its repository at {commit[..12]}"
+                    : $"{document.Path} changed after its review at {clearedAt[..Math.Min(12, clearedAt.Length)]}: at {commit[..12]} it is {now}, and the review cleared {clearedHash}");
+            }
+        }
+
+        return (changed, compared);
+    }
+
+    /// <summary>
+    /// The reviewer's independence of the content, as the record's rules judge it: self when it revised the content (this review, the
+    /// estate file's latest revision, or another repository's latest revising review), else operator or independent agent.
+    /// </summary>
     private static string DocumentIndependence(EstateModel model, RecordEnvelope declaration, string by, string outcome)
     {
         string? path = EstateModel.BodyString(declaration, "path");
-        RecordEnvelope? revision = model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path)
-            .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+        IReadOnlyList<string> chain = model.Chain(model.Latest(declaration));
+        RecordEnvelope? revision = EstateModel.BodyString(declaration, "repository") is null
+            ? model.OfType("document-revision").Where(r => EstateModel.BodyString(r, "path") == path).OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault()
+            : model.OfType("document-review").Where(r => r.Subject is not null && chain.Contains(r.Subject.Id) && EstateModel.BodyString(r, "outcome") == "revised").OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
         if (outcome == "revised" || revision?.By == by)
         {
             return "self";
@@ -904,11 +993,25 @@ public sealed class EstateService : IEstateApi, IDisposable
             return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", closing.Select(d => d.Describe()))}. Revise each or record a document review (vericairn docs review), then submit again; nothing was recorded.");
         }
 
+        // The content rule: records cannot see a repository, so each cleared document of another repository is read at the commit
+        // being released, where this machine has a clone of it; a document whose bytes differ from its review refuses the submission.
+        (List<string> changed, List<string> compared) = CompareLivingDocuments(session.Load(), request.Product, settings.TryGetValue("ref", out string? reference) ? reference : "HEAD");
+        if (changed.Count > 0)
+        {
+            return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each again at that commit, then submit again; nothing was recorded.");
+        }
+
         string previousId;
         JsonElement previousBody;
         if (current is null)
         {
-            WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product)), $"product:{request.Product}"));
+            JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
+            if (compared.Count > 0)
+            {
+                intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at the commit being released: " + string.Join("; ", compared) + "." });
+            }
+
+            WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(intentBody), $"product:{request.Product}"));
             if (!intent.Ok)
             {
                 return ReleaseProblem(identity, "not-started", intent.Problem!);
