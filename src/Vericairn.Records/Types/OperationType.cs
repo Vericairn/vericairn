@@ -118,6 +118,17 @@ public sealed class OperationType : IRecordType
             }
         }
 
+        if (context.Record.Supersedes is string priorId && context.Find(priorId) is RecordEnvelope prior && prior.Body.TryGetProperty("stop", out JsonElement priorStop) && priorStop.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty fact in priorStop.EnumerateObject())
+            {
+                if (stop is null || !stop.Element.TryGetProperty(fact.Name, out JsonElement kept) || CanonicalJson.Serialize(kept) != CanonicalJson.Serialize(fact.Value))
+                {
+                    context.Error("operation.stop-kept", $"A run keeps its recorded stop fact '{fact.Name}' unchanged in every revision.");
+                }
+            }
+        }
+
         if (stop is not null)
         {
             Stop(context, status, stop);
@@ -242,6 +253,32 @@ public sealed class OperationType : IRecordType
             context.Error("operation.stop", "A stop is acknowledged or escalated only once it was transmitted.");
         }
 
+        foreach ((string name, string? at) in new[] { ("acknowledgedAt", acknowledgedAt), ("escalatedAt", escalatedAt) })
+        {
+            if (at is not null && transmittedAt is not null && string.CompareOrdinal(at, transmittedAt) < 0)
+            {
+                stop.Error("operation.stop-order", name, "Acknowledgment and escalation cannot precede transmission.");
+            }
+        }
+
+        if (containedAt is not null)
+        {
+            foreach (string? earlier in new[] { requestedAt, transmittedAt, acknowledgedAt, escalatedAt })
+            {
+                if (earlier is not null && string.CompareOrdinal(containedAt, earlier) < 0)
+                {
+                    stop.Error("operation.stop-order", "containedAt", "Containment cannot precede any earlier stop fact.");
+                }
+            }
+
+            if (context.Record.Body.TryGetProperty("observed", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
+                && observed.TryGetProperty("at", out JsonElement settled) && settled.ValueKind == JsonValueKind.String
+                && string.CompareOrdinal(containedAt, settled.GetString()) > 0)
+            {
+                stop.Error("operation.stop-order", "containedAt", "Containment cannot follow the observed settlement time.");
+            }
+        }
+
         if (containedAt is not null && status is not ("observed-success" or "known-failure"))
         {
             context.Error("operation.stop", "Containment is observed when the run settles; a run still in flight records no containment.");
@@ -334,7 +371,7 @@ public sealed class OperationType : IRecordType
                 context.Error("operation.agent-run-relaunch", "Every physical agent launch needs a new agent-run intent and budget admission; an existing run identity is never dispatched again.");
             }
 
-            if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider"))
+            if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider") || EstateModel.BodyString(previous, "action") != EstateModel.BodyString(context.Record, "action"))
             {
                 context.Error("operation.identity", "A revision keeps the operation's identity and provider; a different effect is a different operation.");
             }

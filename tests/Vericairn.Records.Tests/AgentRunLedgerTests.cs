@@ -31,6 +31,48 @@ public class AgentRunLedgerTests
         Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == retried.ExpectedPath && f.Code == "operation.agent-run-relaunch");
     }
 
+    [Theory]
+    [InlineData("acknowledgedAt", "2026-10-13T12:00:21Z")]
+    [InlineData("escalatedAt", "2026-10-13T12:00:21Z")]
+    [InlineData("containedAt", "2026-10-13T12:00:25Z")]
+    [InlineData("containedAt", "2026-10-13T12:00:41Z")]
+    public void StopFactsCannotPrecedeTheirCausesOrFollowSettlement(string field, string value)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        var stop = System.Text.Json.Nodes.JsonNode.Parse("""{"requestedAt":"2026-10-13T12:00:20Z","requestedBy":"worker","transmittedAt":"2026-10-13T12:00:22Z","transmission":"Sent.","acknowledgedAt":"2026-10-13T12:00:30Z","acknowledgment":"Seen late.","escalatedAt":"2026-10-13T12:00:26Z","escalation":"Signalled.","containedAt":"2026-10-13T12:00:32Z"}""")!.AsObject();
+        stop[field] = value;
+        RecordEnvelope recorded = ledger.Run("out-of-order", Small, Usage, stop: stop.ToJsonString());
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.stop-order" && f.Location.StartsWith(recorded.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("requestedAt")]
+    [InlineData("transmittedAt")]
+    [InlineData("transmission")]
+    [InlineData("containedAt")]
+    public void ARevisionCannotRemoveOrChangeRecordedStopFacts(string field)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("kept", Small, Usage, stop: """{"requestedAt":"2026-10-13T12:00:20Z","requestedBy":"worker","transmittedAt":"2026-10-13T12:00:22Z","transmission":"Sent.","containedAt":"2026-10-13T12:00:32Z"}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        if (field == "stop")
+        {
+            body.Remove("stop");
+        }
+        else if (field == "transmission")
+        {
+            body["stop"]![field] = "A different account.";
+        }
+        else
+        {
+            body["stop"]!.AsObject().Remove(field);
+        }
+
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.stop-kept" && f.Location == changed.ExpectedPath);
+    }
+
     [Fact]
     public void ARunIsChargedWhatItsUsageReportsAndItsCapForWhatWasNotReported()
     {
