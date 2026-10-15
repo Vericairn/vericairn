@@ -178,7 +178,7 @@ public static class Routing
 
         IReadOnlyList<string> orders = model.Chain(model.Latest(order));
         RecordEnvelope? previous = model.OfType("assignment")
-            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && GoalRules.Before(a, assignment))
+            .Where(a => a.Id != assignment.Id && a.Subject is not null && orders.Contains(a.Subject.Id) && GoalRules.Before(a, assignment) && !Stranded(model, a, assignment))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
         string kind = previous is not null && model.CurrentPrincipal(EstateModel.BodyString(previous, "contributor")) is RecordEnvelope holder ? EstateModel.BodyString(holder, "kind") ?? "?" : "?";
@@ -318,14 +318,47 @@ public static class Routing
         return model.CurrentEstate is RecordEnvelope charter ? EstateModel.BodyString(charter, "operator") : null;
     }
 
-    /// <summary>The current assignments of a work order, any revision of it, oldest first; the last one holds the step.</summary>
+    /// <summary>
+    /// The current assignments of a work order that hold its step, any revision of it, oldest first; the last one holds the step. An
+    /// assignment routing stored without the record it was routed with holds nothing (<see cref="Stranded"/>).
+    /// </summary>
     public static IReadOnlyList<RecordEnvelope> Assignments(EstateModel model, RecordEnvelope order)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
         IReadOnlyList<string> chain = model.Chain(model.Latest(order));
-        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id))
+        return model.Current("assignment").Where(a => a.Subject is not null && chain.Contains(a.Subject.Id) && !Stranded(model, a))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).ToList();
+    }
+
+    /// <summary>
+    /// True when routing stored an assignment without the record it was routed with: one whose routedWith is run has no agent-run
+    /// intent on it, and one whose routedWith is ask has no ask that names it; judged as the records stand, or as they stood when a
+    /// later record was written. Such an assignment holds nothing of its step, so a store interrupted between the two never holds a
+    /// step, and the record stays, as every record does. An assignment routing did not mark is never stranded.
+    /// </summary>
+    public static bool Stranded(EstateModel model, RecordEnvelope assignment, RecordEnvelope? before = null)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(assignment);
+        string? with = EstateModel.BodyString(assignment, "routedWith");
+        if (with is null)
+        {
+            return false;
+        }
+
+        IReadOnlyList<string> chain = model.Chain(model.Latest(assignment));
+        bool Counts(RecordEnvelope record) => before is null || GoalRules.Before(record, before);
+        return with switch
+        {
+            // A run's intent, the first record of an agent-run operation, names the assignment it carries in its target.
+            "run" => !model.OfType("operation").Any(o => o.Supersedes is null && EstateModel.BodyString(o, "action") == OperationType.AgentRun && Carried(o) is string carried && chain.Contains(carried) && Counts(o)),
+            "ask" => !model.OfType("ask").Any(a => EstateModel.BodyString(a, "assignment") is string named && chain.Contains(named) && Counts(a)),
+            _ => false,
+        };
+
+        static string? Carried(RecordEnvelope intent) =>
+            intent.Body.TryGetProperty("target", out JsonElement target) && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("assignment", out JsonElement named) && named.ValueKind == JsonValueKind.String ? named.GetString() : null;
     }
 
     /// <summary>

@@ -150,6 +150,8 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 | `work-order` | `after` | ULID list, optional | Work orders this one starts after, so the next eligible work can be derived; never itself and never a cycle |
 | `work-order` | `blockedBy` | reference list, optional | What holds it: asks, decisions, operations or other work orders |
 | `work-order` | `role` | string, optional | The roster role whose principals carry it, `builder` when omitted; a `publisher` or `decider` step is a reserved action (see [Routing a goal's steps](#routing-a-goals-steps)); from 0.6.0 |
+| `assignment` | `routedWith` | `run` or `ask`, optional | Set by routing on an assignment it stores together with the record that carries it: `run`, the `agent-run` intent of a run on it, or `ask`, the ask that names it in `assignment`; until that record exists the assignment holds nothing of its step, so a store interrupted between the two never holds a step; from 0.6.0 |
+| `ask` | `assignment` | ULID, optional | The assignment routing stored together with the ask, of the principal asked (`ask.assignment`); from 0.6.0 |
 | `authority` | `expires` | timestamp, optional | When the grant stops being in force: a record authored from then on cannot rely on it |
 | `operation` | `cap` | object, required for `agent-run` | What a coding agent's run may spend, recorded before it starts and kept unchanged in every revision; `wallMinutes` is required, and a run charged to a goal states exactly the units its budget grants (see [An agent run and its goal's ledger](#an-agent-run-and-its-goals-ledger)) |
 | `operation` | `usage` | object, required once an `agent-run` settles | What the run spent as its harness reported it: for each of `wallMinutes`, `tokens` and `currency` its cap states, the amount spent or the unit listed in `unreported`, which is charged at the cap |
@@ -232,7 +234,12 @@ reserved action unless a grant in force covers it, names the grant that lets its
 whose note says why it was routed; for a person, and for a step no principal is available for, an `ask` whose subject is
 the work order (without a hash) and whose `goal` is the goal, with its recommendation and the consequence of leaving it
 unanswered. An agent's assignment is stored only with its run's `agent-run` intent, and a person's only with its ask:
-the two are judged together, their content checks included, before either is stored.
+the two are judged together, their content checks included, before either is stored. Storing them is not atomic, so
+routing marks the assignment with `routedWith`, and an assignment whose `run` intent or `ask` does not exist holds
+nothing of its step: a store that stops between the two never holds a step, and the stranded assignment stays a
+record, as every record does. The runtime that stores them keeps a journal of the pair on its machine and, until the
+step is held again or is no longer planned, reports a pair it stopped storing part-way as a reconcile task,
+`batch.incomplete`, naming what was stored and what was not.
 From 0.6.0 an `assignment` of a step of a goal may also be recorded by the goal's sponsor when the sponsor is a person,
 beside the operator and a principal holding `local-engineering`; the goal and its work are judged as they were when the
 assignment was recorded.

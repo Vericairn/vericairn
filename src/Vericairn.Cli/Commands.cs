@@ -1324,7 +1324,11 @@ internal static class Commands
                 Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
             }
 
-            Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+            // A batch stopped part-way says in its own words what settles it; divergent revisions are settled by a reconciliation.
+            if (tasks.Any(t => t.Code != "batch.incomplete"))
+            {
+                Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
+            }
         }
 
         return tasks.Count == 0 ? Clean : HasErrors;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
@@ -79,6 +80,49 @@ public class StepAuthorityTests
         Assert.Contains(estate.Load().Findings, f => f.Code == "assignment.author" && f.Location == byItsAgent.ExpectedPath);
     }
 
+    [Fact]
+    public void AnAssignmentRoutingStoredWithoutItsRunOrItsAskHoldsNothing()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        string op = estate.OperatorId;
+        string builder = estate.BuilderId;
+        string pat = Person(estate, "Pat");
+        Grant(estate, builder, "local-engineering");
+        RecordEnvelope goal = estate.Add("goal", op, Goal(op));
+        estate.Add("goal-status", op, """{"status":"active","note":"Activated."}""", goal.Reference);
+        RecordEnvelope w1 = estate.Add("work-order", op, Order("W-1", goal.Id));
+        RecordEnvelope w2 = estate.Add("work-order", op, Order("W-2", goal.Id));
+
+        // Routing's assignment of W-1 to the builder, stored without its run's intent, holds nothing; meanwhile the builder, under
+        // local-engineering, gives W-1 to Pat, which is no hand-over, since no agent held the step.
+        RecordEnvelope stranded = estate.Add("assignment", op, Routed(builder, "run"), w1.Reference);
+        Assert.True(Routing.Stranded(estate.Load(), stranded));
+        Assert.Empty(Routing.Assignments(estate.Load(), w1));
+        RecordEnvelope toPat = estate.Add("assignment", builder, Assignment(pat), w1.Reference);
+
+        // A run of it recorded later completes it, and the assignment to Pat stays what it was when it was recorded.
+        estate.Add("operation", op, Run(goal.Id, stranded.Id, builder, "agent-run:later"));
+        EstateModel model = estate.Load();
+        Assert.False(Routing.Stranded(model, stranded));
+        Assert.True(Routing.Stranded(model, stranded, toPat));
+        Assert.Equal([stranded.Id, toPat.Id], Routing.Assignments(model, w1).Select(a => a.Id));
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(toPat.ExpectedPath, StringComparison.Ordinal));
+
+        // Routing's assignment of W-2 to Pat holds it only once the ask naming it is recorded, and an ask names only Pat's assignment.
+        RecordEnvelope asked = estate.Add("assignment", op, Routed(pat, "ask"), w2.Reference);
+        Assert.Empty(Routing.Assignments(estate.Load(), w2));
+        RecordEnvelope ask = estate.Add("ask", op, Ask(pat, goal.Id, asked.Id), new RecordReference("work-order", w2.Id, null));
+        RecordEnvelope wrong = estate.Add("ask", op, Ask(op, goal.Id, asked.Id), new RecordReference("work-order", w2.Id, null));
+        model = estate.Load();
+        Assert.Equal([asked.Id], Routing.Assignments(model, w2).Select(a => a.Id));
+        Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(ask.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(model.Findings, f => f.Code == "ask.assignment" && f.Location == wrong.ExpectedPath);
+
+        // routedWith names only a run or an ask.
+        RecordEnvelope odd = estate.Add("assignment", op, Routed(pat, "later"), w2.Reference);
+        Assert.Contains(estate.Load().Findings, f => f.Severity == Severity.Error && f.Location == odd.ExpectedPath + "#body.routedWith");
+    }
+
     private static string Person(TestEstate estate, string name) => estate.Add("principal", estate.OperatorId, $$"""{"kind":"human","name":"{{name}}","roles":["contributor"]}""").Id;
 
     private static void Grant(TestEstate estate, string grantee, string scope)
@@ -95,6 +139,12 @@ public class StepAuthorityTests
 
     private static string Assignment(string contributor) =>
         $$$"""{"contributor":"{{{contributor}}}","brief":{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}}""";
+
+    private static string Routed(string contributor, string with) =>
+        $$$"""{"contributor":"{{{contributor}}}","brief":{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."},"routedWith":"{{{with}}}"}""";
+
+    private static string Ask(string to, string goal, string assignment) =>
+        $$"""{"to":"{{to}}","question":"Will you carry W-2?","recommendation":"Carry it.","consequence":"W-2 waits.","goal":"{{goal}}","state":"open","assignment":"{{assignment}}"}""";
 
     private static string Run(string goal, string assignment, string agent, string identity) =>
         $$$"""{"provider":"claude-code","action":"agent-run","identity":"{{{identity}}}","intent":"Run the builder.","target":{"assignment":"{{{assignment}}}","principal":"{{{agent}}}","workspace":"widget, branch work/w-1","goal":"{{{goal}}}"},"status":"not-started","evidence":[],"cap":{"wallMinutes":10,"attemptsPerStep":5}}""";

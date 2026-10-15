@@ -27,7 +27,11 @@ public sealed class AssignmentType : IRecordType
         new("contributor", "ulid", true, "The principal that does the work: a human, a deterministic tool, a native agent or a qualified external agent. Admitted before the work is assigned."),
         new("brief", "object", true, "outcome, sources (references {type, id, hash?}), permittedChanges, prohibitedEffects, workspace (allowed trees, named without machine paths), limits, expectedOutputs, reviewCriteria, recovery."),
         new("note", "string", false, "Free text."),
+        new("routedWith", string.Join('|', RoutedWith), false, "Set by routing on an assignment it stores together with the record that carries it: run, the intent of the agent run on it (an agent-run operation whose subject is this assignment), or ask, the ask that names it. Until that record exists the assignment holds nothing of its step, so an interrupted store never holds a step.", 2),
     ];
+
+    /// <summary>The records routing stores an assignment together with.</summary>
+    public static readonly string[] RoutedWith = ["run", "ask"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
@@ -65,6 +69,11 @@ public sealed class AssignmentType : IRecordType
         }
 
         body.Text("note", false, 4000);
+        if (body.Since(2, "routedWith"))
+        {
+            body.Enum("routedWith", false, RoutedWith);
+        }
+
         body.NoOtherKeys();
         string by = context.Record.By;
         RecordEnvelope? order = context.Find(context.Record.Subject?.Id) is { Type: "work-order" } named ? named : null;

@@ -62,7 +62,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             throw new InvalidOperationException($"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).");
         }
 
-        return new EstateService(EstateSession.Open(root));
+        var service = new EstateService(EstateSession.Open(root));
+        service.JudgeInterruptedBatches();
+        return service;
     }
 
     /// <summary>The product version of this runtime.</summary>
@@ -84,7 +86,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            FindingList checks = EstateChecks.Run(model);
+            FindingList checks = ChecksWithBatches(model);
             using JsonDocument json = JsonDocument.Parse(EstateStatus.RenderJson(model, checks));
             return new StatusResponse(EstateStatus.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
         }
@@ -1902,7 +1904,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+            foreach (Finding finding in model.Findings.Concat(ChecksWithBatches(model)))
             {
                 all.Add(finding);
             }
@@ -1917,7 +1919,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            return Recovery.Inspect(model, EstateChecks.Run(model));
+            return Recovery.Inspect(model, ChecksWithBatches(model));
         }
     }
 
@@ -2089,13 +2091,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
+    /// <summary>A test's hook, called before each record a batch stores: a test throws from it to stop a batch between its records.</summary>
+    internal Action<AuthoredRecord>? BeforeStoringTogether { get; set; }
+
     /// <summary>
     /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
     /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
-    /// make it invalid, and none is removed once stored: a store that fails part-way returns what it stored with the problem. Caller
-    /// holds the gate.
+    /// make it invalid. The store is not atomic: a journal naming the batch is written on this machine before the first record and
+    /// removed after the last, so a batch that stops part-way, by a failure or a crash, stays a reconcile task naming what was stored,
+    /// and none of its records is ever removed. A store that fails part-way returns what it stored with the problem. Caller holds the gate.
     /// </summary>
-    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records)
+    private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder)
     {
         FindingList relevant = Invalid(LoadWith(records), records, stored: false);
         if (relevant.HasErrors)
@@ -2103,22 +2109,99 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings));
         }
 
+        BatchJournal journal;
+        try
+        {
+            journal = BatchJournal.Begin(session.Manifest.Estate, purpose, workOrder, records);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({exception.Message}).", []));
+        }
+
         var written = new List<RecordWritten>();
         foreach (AuthoredRecord record in records)
         {
             try
             {
+                BeforeStoringTogether?.Invoke(record);
                 session.Write(record);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
             {
-                return (written, new Problem("refused", exception.Message, []));
+                // A batch that stored nothing leaves nothing to report; one that stored part keeps its journal, a reconcile task.
+                if (written.Count == 0)
+                {
+                    journal.Close();
+                }
+
+                return (written, new Problem("refused", $"Not written: {exception.Message}", []));
             }
 
             written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
         }
 
+        journal.Close();
         return (written, null);
+    }
+
+    /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
+    private void JudgeInterruptedBatches()
+    {
+        if (BatchJournal.All(session.Manifest.Estate).Count == 0)
+        {
+            return;
+        }
+
+        lock (gate)
+        {
+            InterruptedBatches(session.Load());
+        }
+    }
+
+    /// <summary>The estate's checks with this machine's interrupted batches among them, as status, reconcile and inspect show them. Caller holds the gate.</summary>
+    private FindingList ChecksWithBatches(EstateModel model)
+    {
+        FindingList checks = EstateChecks.Run(model);
+        foreach (Finding finding in InterruptedBatches(model))
+        {
+            checks.Add(finding);
+        }
+
+        return checks;
+    }
+
+    /// <summary>
+    /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what
+    /// was stored and what was not. A journal no longer matters, and is removed, when its batch was stored whole or not at all, when
+    /// its stored assignment is carried after all by the record it was routed with, or when its step is held again or no longer
+    /// planned. Removing a journal removes no record. Caller holds the gate.
+    /// </summary>
+    private FindingList InterruptedBatches(EstateModel model)
+    {
+        var findings = new FindingList();
+        foreach (BatchJournal journal in BatchJournal.All(session.Manifest.Estate))
+        {
+            List<BatchJournal.Entry> stored = [.. journal.Records.Where(r => model.ById.ContainsKey(r.Id))];
+            List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
+            RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
+            string status = order is null ? "planned" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
+            bool moot = stored.Count == 0 || missing.Count == 0
+                || stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
+                || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"));
+            if (moot)
+            {
+                journal.Close();
+                continue;
+            }
+
+            string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
+            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned.");
+        }
+
+        return findings;
+
+        static string Listed(List<BatchJournal.Entry> entries) => string.Join(", ", entries.Select(e => $"{e.Type} {e.Id}"));
     }
 
     /// <summary>The estate as it would be with records added that are not stored yet; as it is without any. Caller holds the gate.</summary>

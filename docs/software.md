@@ -266,16 +266,20 @@ with the assignment that holds it; when none does, routing signs an assignment t
 work order and the goal (its scope, deliverables and exit question, the goal's constraints, and every reserved action
 prohibited unless a grant in force covers it, with the grant that lets the agent carry a reserved step named apart), and
 stores it only with the run's intent, after the worker's whole preflight, the two judged together, their content checks
-included, before either is stored. The run starts through the worker with the launcher routing chose and the settings
-given, all as `worker run` does, the custody precondition included; without `--detach` the command follows the run until
-it settles. Every refusal before the intent records nothing, routing's assignment included: no repository or an unknown
-one, a cap under one wall minute, a setting the launcher does not take, the custody guard with no exception in force, the
-budget, the launcher's verification, or the workspace's preparation. A harness that cannot start once the intent is
-recorded leaves the assignment and the run, recorded as a known failure that spent nothing. A person's step is assigned
-to the person and asked of them, the two judged together the same way and stored together or neither; a reserved action
-routed to a person who holds it likewise; and a step no principal is available for is asked of who decides for the goal,
-with the recommendation that fits why, and assigned to no one. With every eligible step held, the command says what holds
-each and records nothing. It activates, funds, accepts and answers nothing.
+included, before either is stored. The store is not atomic, so the runtime writes a journal of the pair on its machine
+first, and routing marks the assignment `routedWith: run`: an assignment whose run's intent was never stored holds nothing
+of its step, a step is never held by half a pair, and `vericairn reconcile` reports the pair as `batch.incomplete`, naming
+what was stored, until the step is held again or is no longer planned; nothing stored is removed. The run starts through
+the worker with the launcher routing chose and the settings given, all as `worker run` does, the custody precondition
+included; without `--detach` the command follows the run until it settles. Every refusal before the intent records
+nothing, routing's assignment included: no repository or an unknown one, a cap under one wall minute, a setting the
+launcher does not take, the custody guard with no exception in force, the budget, the launcher's verification, or the
+workspace's preparation. A harness that cannot start once the intent is recorded leaves the assignment and the run,
+recorded as a known failure that spent nothing. A person's step is assigned to the person and asked of them, the two
+judged and stored together in the same way, the ask naming the assignment, which is marked `routedWith: ask` and holds
+nothing without it; a reserved action routed to a person who holds it likewise; and a step no principal is available for
+is asked of who decides for the goal, with the recommendation that fits why, and assigned to no one. With every eligible
+step held, the command says what holds each and records nothing. It activates, funds, accepts and answers nothing.
 
 **A hand-over.** `vericairn work takeover <assignment> --by <principal> [--contributor <person>] [--note <text>]` hands a
 step an agent holds over to a person: a new assignment of the work order to the person, the hand-over record, carries the

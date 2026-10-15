@@ -229,14 +229,14 @@ public sealed partial class EstateService
                     return RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded.");
                 }
 
-                (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([routed, authored]);
+                (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([routed, authored], $"routing's assignment of work order {plan.Key} to {plan.AgentName} and the intent of its run {run}", routed.Envelope.Subject?.Id);
                 if (problem is not null)
                 {
                     assigned = stored.Count > 0 ? stored[0] : null;
                     string what = assigned is null
                         ? "Nothing was recorded."
-                        : $"Routing's assignment {assigned.Id} was recorded and holds the step, and the run's intent could not be: nothing was launched, and a run of that assignment starts it again.";
-                    return new RunResponse(pending, "not-started", $"Not recorded: {problem.Message} {what}", false, Problem: problem);
+                        : $"Routing's assignment {assigned.Id} was stored and the run's intent was not, so nothing was launched: the assignment holds nothing of its step without that intent, routing takes the step again, and this machine reports the batch as a reconcile task (batch.incomplete).";
+                    return new RunResponse(pending, "not-started", $"{problem.Message} {what}", false, Problem: problem);
                 }
 
                 assigned = stored[0];

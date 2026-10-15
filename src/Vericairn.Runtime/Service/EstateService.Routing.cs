@@ -119,7 +119,7 @@ public sealed partial class EstateService
             if (route.Assignment is null)
             {
                 string where = Latest(model, request.Repository!, "resource") is RecordEnvelope resource ? $"{EstateModel.BodyString(resource, "name") ?? resource.Id}, a work branch" : "the step's repository, a work branch";
-                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, current, next.Order, route, where)), next.Order.Reference), model);
+                (routed, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, current, next.Order, route, where, "run")), next.Order.Reference), model);
                 if (routed is null)
                 {
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -141,7 +141,7 @@ public sealed partial class EstateService
         // The run starts through the worker, whose preflight comes before anything is recorded and which judges the custody precondition
         // and the budget again when it records the intent, routing's assignment with it.
         RunResponse started = Start(run, routed, out RecordWritten? assignment);
-        string assigned = assignment is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}), recorded with the run's intent. ";
+        string assigned = assignment is null || started.Operation is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}), recorded with the run's intent. ";
         return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
     }
 
@@ -226,7 +226,7 @@ public sealed partial class EstateService
         {
             // Routing produces the assignment to the chosen person, and the ask tells the person the step is theirs: the two are stored
             // together, or neither is.
-            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, goal, step.Order, route, "the repositories its scope names, on a work branch, named without machine paths")), step.Order.Reference), model);
+            (assignment, string? unsigned) = AuthorLocked(new RecordDraft("assignment", request.By, Element(RoutedAssignment(model, goal, step.Order, route, "the repositories its scope names, on a work branch, named without machine paths", "ask")), step.Order.Reference), model);
             if (assignment is null)
             {
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
@@ -271,6 +271,11 @@ public sealed partial class EstateService
             ask["options"] = new JsonArray(options.Select(o => (JsonNode)o).ToArray());
         }
 
+        if (assignment is not null)
+        {
+            ask["assignment"] = assignment.Envelope.Id;
+        }
+
         var draft = new RecordDraft("ask", request.By, Element(ask), new RecordReference("work-order", step.Order.Id, null));
         RecordWritten? assigned = null;
         RecordWritten asked;
@@ -292,12 +297,14 @@ public sealed partial class EstateService
                 return StepProblem(goal.Id, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
             }
 
-            (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored]);
+            (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([assignment, authored], $"routing's assignment of work order {key} to {PrincipalName(model, route.Principal)} and the ask that gives it to them", step.Order.Id);
             if (problem is not null)
             {
                 assigned = stored.Count > 0 ? stored[0] : null;
-                string what = assigned is null ? "Nothing was recorded." : $"Routing's assignment {assigned.Id} was recorded and holds the step, and its ask could not be.";
-                return new GoalStepResponse(goal.Id, "none", $"Not recorded: {problem.Message} {what}", false, key, route.State, route.Principal, assigned, Problem: problem);
+                string what = assigned is null
+                    ? "Nothing was recorded."
+                    : $"Routing's assignment {assigned.Id} was stored and its ask was not: the assignment holds nothing of its step without its ask, routing takes the step again, and this machine reports the batch as a reconcile task (batch.incomplete).";
+                return new GoalStepResponse(goal.Id, "none", $"{problem.Message} {what}", false, key, route.State, route.Principal, assigned, Problem: problem);
             }
 
             assigned = stored[0];
@@ -314,8 +321,11 @@ public sealed partial class EstateService
         return new GoalStepResponse(goal.Id, "ask", $"{said} {route.Reason}. Waiting answers nothing: the ask is answered by a decision of {whom}.", true, key, route.State, route.Principal, assigned, asked);
     }
 
-    /// <summary>The assignment routing writes for the principal it chose: a brief from the work order, the goal and the route, with no machine path.</summary>
-    private static JsonObject RoutedAssignment(EstateModel model, RecordEnvelope goal, RecordEnvelope order, NextEligible.Route route, string workspace)
+    /// <summary>
+    /// The assignment routing writes for the principal it chose: a brief from the work order, the goal and the route, with no machine
+    /// path, marked with the record it is stored together with (run or ask), without which it holds nothing of its step.
+    /// </summary>
+    private static JsonObject RoutedAssignment(EstateModel model, RecordEnvelope goal, RecordEnvelope order, NextEligible.Route route, string workspace, string routedWith)
     {
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
         // Every brief carries the reserved effects, a reserved step's too; the grant that lets a principal other than an operator carry
@@ -345,7 +355,7 @@ public sealed partial class EstateService
             ["reviewCriteria"] = new JsonArray(Clip($"The exit question is answered yes: {EstateModel.BodyString(order, "exitQuestion")}", 2000)),
             ["recovery"] = $"Record an attempt when the work starts and a result when it stops; whoever continues starts from vericairn work brief {key}, never from a conversation.",
         };
-        return new JsonObject { ["contributor"] = route.Principal, ["brief"] = brief, ["note"] = Clip($"Routed by roster ({route.Role}, from {route.Source.Description}): {route.Reason}.", 4000) };
+        return new JsonObject { ["contributor"] = route.Principal, ["brief"] = brief, ["note"] = Clip($"Routed by roster ({route.Role}, from {route.Source.Description}): {route.Reason}.", 4000), ["routedWith"] = routedWith };
     }
 
     /// <summary>The reserved effects every routed brief prohibits (design/goals.md § 6, step 1), unless a grant in force covers one.</summary>

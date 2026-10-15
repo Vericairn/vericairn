@@ -3,7 +3,11 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Vericairn.Records.Authoring;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
@@ -294,6 +298,43 @@ public class GoalJourneyTests
             Assert.False(shown.GetProperty("ready").GetBoolean());
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
             Assert.True(new FileKeyStore(VericairnHome.Path()).Has(operatorDevice));
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
+    public void ReconcileShowsABatchStoppedPartWayWithItsOwnGuidance()
+    {
+        string root = CliHarness.TempDirectory("batch");
+        string scratch = CliHarness.TempDirectory("batch-scratch");
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Batches.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}""")).Id;
+            string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "A widget.", "--done", """{"evidence":"It builds.","check":"Build it."}""", "--budget", "wallMinutes=60", "--budget", "attemptsPerStep=2").Id;
+            CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
+            CliHarness.Outcome order = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "w1.json", $$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}"""));
+
+            // Routing's assignment of W-1 was stored and the intent of its run was not: the batch's journal stays on this machine.
+            string stranded = CliHarness.Ok("--estate", root, "--json", "records", "new", "assignment", "--by", op, "--subject", $"work-order:{order.Id}:{order.Hash}", "--body", CliHarness.WriteJson(scratch, "assignment.json", $$$"""{"contributor":"{{{builder}}}","brief":{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."},"routedWith":"run"}""")).Id;
+            EstateModel model = EstateLoader.Load(root);
+            RecordEnvelope assignment = model.ById[stranded];
+            var stored = new AuthoredRecord(assignment.ExpectedPath, File.ReadAllBytes(Path.Combine(root, assignment.ExpectedPath)), assignment);
+            using JsonDocument nothing = JsonDocument.Parse("{}");
+            AuthoredRecord intent = RecordAuthor.Create(new RecordDraft("operation", op, nothing.RootElement));
+            BatchJournal journal = BatchJournal.Begin(model.Manifest!.Estate, "routing's assignment of work order W-1 to Builder and the intent of its run", order.Id, [stored, intent]);
+
+            CliHarness.Outcome tasks = CliHarness.Run("--estate", root, "estate", "reconcile");
+            Assert.NotEqual(0, tasks.Code);
+            Assert.Contains($"batch.incomplete  {assignment.ExpectedPath}: A batch this machine began at ", tasks.Out, StringComparison.Ordinal);
+            Assert.Contains($"Stored: assignment {stranded}. Not stored: operation {intent.Envelope.Id}.", tasks.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("Settle divergent revisions", tasks.Out, StringComparison.Ordinal);
+            Assert.Contains("batch.incomplete", Assert.Single(CliHarness.Ok("--estate", root, "--json", "status").Json.GetProperty("reconcile").EnumerateArray()).GetRawText(), StringComparison.Ordinal);
+            journal.Close();
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "reconcile").Code);
         }
         finally
         {

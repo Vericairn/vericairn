@@ -250,6 +250,75 @@ public class GoalStepTests
     }
 
     [Fact]
+    public void ABatchThatStopsBetweenItsRecordsLeavesAStepNothingHoldsAndAReconcileTask()
+    {
+        using var run = new RunEstate();
+        RoutingServiceTests.Routed(run);
+        string op = run.Estate.OperatorId;
+        Done(run, run.Assignment);
+
+        // The store fails after routing's assignment of W-2, before the run's intent: the assignment stays, holding nothing.
+        run.Service.BeforeStoringTogether = record =>
+        {
+            if (record.Envelope.Type == "operation")
+            {
+                throw new IOException("The disk is full.");
+            }
+        };
+        GoalStepResponse stopped = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "stopped")));
+        Assert.False(stopped.Ok, stopped.Message);
+        Assert.DoesNotContain("Routing assigned", stopped.Message, StringComparison.Ordinal);
+        string stranded = stopped.Assignment!.Id;
+        Assert.Contains($"Not written: The disk is full. Routing's assignment {stranded} was stored and the run's intent was not, so nothing was launched", stopped.Message, StringComparison.Ordinal);
+        Assert.Equal("run", EstateModel.BodyString(run.Estate.Load().ById[stranded], "routedWith"));
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.False(File.Exists(run.Report("stopped")));
+        JsonElement next = Next(run, "W-2");
+        Assert.Equal(JsonValueKind.Null, next.GetProperty("assignment").ValueKind);
+        Assert.Equal("agent", next.GetProperty("route").GetProperty("state").GetString());
+
+        // The batch is a reconcile task naming what was stored, and stays one when the estate is opened again.
+        ReconcileTask task = Assert.Single(run.Service.Reconcile());
+        Assert.Equal("batch.incomplete", task.Code);
+        Assert.Equal(run.Estate.Load().ById[stranded].ExpectedPath, task.Location);
+        Assert.Contains($"Stored: assignment {stranded}. Not stored: operation ", task.Message, StringComparison.Ordinal);
+        run.Reopen();
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+        Assert.Contains("batch.incomplete", run.Service.Status().Text, StringComparison.Ordinal);
+
+        // Taking the step again assigns W-2 afresh with its run's intent; the task ends, and the stranded assignment stays a record.
+        GoalStepResponse taken = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "taken")));
+        Assert.True(taken.Ok, taken.Message);
+        Assert.NotEqual(stranded, taken.Assignment!.Id);
+        Assert.Equal("observed-success", run.Settled(taken.Run!.Run).Status);
+        Assert.Empty(run.Service.Reconcile());
+        Assert.True(run.Estate.Load().ById.ContainsKey(stranded));
+
+        // A person's step likewise: an ask that could not be stored leaves the operator's assignment of W-3 holding nothing.
+        Order(run, "W-3", ""","role":"publisher" """);
+        Done(run, taken.Assignment.Id);
+        run.Service.BeforeStoringTogether = record =>
+        {
+            if (record.Envelope.Type == "ask")
+            {
+                throw new IOException("The disk is full.");
+            }
+        };
+        GoalStepResponse unasked = run.Service.GoalStep(run.Goal, new GoalStepRequest(op));
+        Assert.False(unasked.Ok, unasked.Message);
+        Assert.Contains("was stored and its ask was not: the assignment holds nothing of its step without its ask", unasked.Message, StringComparison.Ordinal);
+        Assert.Equal("reserved", Next(run, "W-3").GetProperty("route").GetProperty("state").GetString());
+        Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
+        run.Service.BeforeStoringTogether = null;
+        GoalStepResponse asked = run.Service.GoalStep(run.Goal, new GoalStepRequest(op));
+        Assert.True(asked.Ok, asked.Message);
+        Assert.Equal(asked.Assignment!.Id, EstateModel.BodyString(run.Estate.Load().ById[asked.Ask!.Id], "assignment"));
+        Assert.Equal("assigned", Next(run, "W-3").GetProperty("route").GetProperty("state").GetString());
+        Assert.Empty(run.Service.Reconcile());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void APublisherAgentsBriefProhibitsEveryReservedEffectAndNamesItsGrant()
     {
         using var run = new RunEstate();
