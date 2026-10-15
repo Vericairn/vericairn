@@ -57,6 +57,29 @@ internal static class CliHarness
         return outcome;
     }
 
+    /// <summary>Runs a command with the text as its standard input.</summary>
+    public static Outcome RunWithInput(string input, params string[] args)
+    {
+        TextReader previousIn = Console.In;
+        Console.SetIn(new StringReader(input));
+        try
+        {
+            return Run(args);
+        }
+        finally
+        {
+            Console.SetIn(previousIn);
+        }
+    }
+
+    /// <summary>Runs a command with the text as its standard input; it must succeed.</summary>
+    public static Outcome OkWithInput(string input, params string[] args)
+    {
+        Outcome outcome = RunWithInput(input, args);
+        Assert.True(outcome.Code == 0, $"vericairn {string.Join(' ', args)} exited {outcome.Code}\n{outcome.Out}\n{outcome.Err}");
+        return outcome;
+    }
+
     public static string TempDirectory(string purpose)
     {
         string path = Path.Combine(Path.GetTempPath(), $"vericairn-{purpose}-{Ulid.NewUlid().Value}");

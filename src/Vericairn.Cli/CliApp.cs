@@ -468,7 +468,7 @@ internal static class CliApp
 
     private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
-        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit, revoke, rename and rotate.");
+        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit, revoke, rename and rotate, and the operator's recovery device.");
         var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
 
         var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
@@ -498,11 +498,15 @@ internal static class CliApp
 
         var deviceArgument = new Argument<string>("device") { Description = "Device record id." };
         var noteOption = new Option<string>("--note") { Description = "Why the device is admitted.", Required = true };
+        var recoveryOption = new Option<string?>("--recovery") { Description = "Sign with the operator's recovery key in this file, when no admitted device of the operator is left; asks for its passphrase. Every use stays in 'status' until the operator reviews it." };
+        var passphraseStdinOption = new Option<bool>("--passphrase-stdin") { Description = "Read the recovery key's passphrase from the first line of standard input instead of the terminal." };
         var admit = new Command("admit", "Admit a device to author records in this estate (operator or 'administer' scope).");
         admit.Arguments.Add(deviceArgument);
         admit.Options.Add(byOption);
         admit.Options.Add(noteOption);
-        admit.SetAction(parseResult => Commands.DevicesAdmit(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(noteOption)!, parseResult.GetValue(jsonOption)));
+        admit.Options.Add(recoveryOption);
+        admit.Options.Add(passphraseStdinOption);
+        admit.SetAction(parseResult => Commands.DevicesAdmit(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(noteOption)!, parseResult.GetValue(recoveryOption), parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(admit);
 
         var reasonOption = new Option<string>("--reason") { Description = "Why the admission ends.", Required = true };
@@ -510,8 +514,21 @@ internal static class CliApp
         revoke.Arguments.Add(deviceArgument);
         revoke.Options.Add(byOption);
         revoke.Options.Add(reasonOption);
-        revoke.SetAction(parseResult => Commands.DevicesRevoke(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(jsonOption)));
+        revoke.Options.Add(recoveryOption);
+        revoke.Options.Add(passphraseStdinOption);
+        revoke.SetAction(parseResult => Commands.DevicesRevoke(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(recoveryOption), parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(revoke);
+
+        var recoveryPrincipalOption = new Option<string>("--principal") { Description = "The operator the recovery device acts for.", Required = true };
+        var recoveryNameOption = new Option<string>("--name") { Description = "Descriptive name, for example where the key is kept; never a machine path.", Required = true };
+        var outputOption = new Option<string>("--output") { Description = "New file to write the encrypted key to, outside the estate's repository; move it off this machine at once.", Required = true };
+        var recovery = new Command("recovery", "Make the operator's recovery device for emergency access: its key is written once to a file, encrypted with a passphrase you type, and never held by this machine; an admitted device of the operator held here admits it (record format 2).");
+        recovery.Options.Add(recoveryPrincipalOption);
+        recovery.Options.Add(recoveryNameOption);
+        recovery.Options.Add(outputOption);
+        recovery.Options.Add(passphraseStdinOption);
+        recovery.SetAction(parseResult => Commands.DevicesRecovery(parseResult.GetValue(estateOption)!, parseResult.GetValue(recoveryPrincipalOption)!, parseResult.GetValue(recoveryNameOption)!, parseResult.GetValue(outputOption)!, parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(recovery);
 
         var newNameOption = new Option<string>("--name") { Description = "The device's new descriptive name, never a machine path.", Required = true };
         var rename = new Command("rename", "Rename a device whose key is held here; it keeps its identity, key and admission (record format 2).");

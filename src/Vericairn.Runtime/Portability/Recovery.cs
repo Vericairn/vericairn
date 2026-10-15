@@ -29,14 +29,15 @@ public static class Recovery
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
         text.Append("Devices known to the estate:\n");
         bool anyDevice = false;
-        foreach (RecordEnvelope device in model.Current("device").OrderBy(d => d.Id, StringComparer.Ordinal))
+        foreach (RecordEnvelope device in model.Current("device").OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal))
         {
             anyDevice = true;
             string principal = EstateModel.BodyString(device, "principal") ?? "?";
             string identity = model.Chain(device)[0];
             bool held = stores.Any(s => s.Has(identity));
             text.Append("  ").Append(identity).Append("  ").Append(Name(model, principal)).Append("  ").Append(EstateModel.BodyString(device, "name")).Append("  ")
-                .Append(SignatureChecks.IsAdmitted(model, device) ? "admitted" : "not admitted").Append(held ? "  key held on this machine" : "  key not held here").Append('\n');
+                .Append(SignatureChecks.IsAdmitted(model, device) ? "admitted" : "not admitted")
+                .Append(held ? "  key held on this machine" : EstateModel.BodyString(device, "custody") == DeviceKeyStores.OfflineKind ? "  recovery key kept offline" : "  key not held here").Append('\n');
         }
 
         if (!anyDevice)

@@ -40,7 +40,7 @@ public sealed class DeviceType : IRecordType
         new("principal", "ulid", true, "The principal the device acts for."),
         new("name", "string", true, "Descriptive name, never a machine path."),
         new("platform", string.Join('|', Platforms), true, "Operating system family."),
-        new("custody", string.Join('|', DeviceKeyStores.Format2Kinds), true, "How the private key is held; recorded strength, never assumed. macos-secure-enclave from record format 2."),
+        new("custody", string.Join('|', DeviceKeyStores.Format2Kinds), true, "How the private key is held; recorded strength, never assumed. From record format 2, macos-secure-enclave, and offline for a recovery device's exported key."),
         new("algorithm", RecordSigning.Algorithm, true, "Signature algorithm."),
         new("publicKey", "string", true, "Base64url SubjectPublicKeyInfo of the P-256 public key."),
         new("profiles", "string[]", true, "Permitted connectivity profiles: embedded, local-socket, loopback, local-network, relay."),
@@ -98,6 +98,12 @@ public sealed class DeviceType : IRecordType
         if (purpose == "recovery" && !context.HasRole(principal, Roles.Operator))
         {
             context.Error("device.purpose", "A recovery device belongs to an operator.");
+        }
+
+        // A recovery device's key left the machine that made it, so its custody is offline; no other device's key is.
+        if (purpose is not null && custody is not null && (purpose == "recovery") != (custody == DeviceKeyStores.OfflineKind))
+        {
+            context.Error("device.recovery", "A recovery device's key is kept offline (custody 'offline'), and only a recovery device's is.");
         }
 
         if (context.Record.By != principal && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))

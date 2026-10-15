@@ -40,8 +40,11 @@ public static class DeviceKeyStores
     /// <summary>Custody kinds a device record of record format 1 may claim.</summary>
     public static readonly string[] Kinds = ["windows-cng", "macos-keychain", "linux-secret-service", "file-owner-only"];
 
-    /// <summary>Custody kinds a device record of record format 2 may claim: format 1's and the macOS Secure Enclave.</summary>
-    public static readonly string[] Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind];
+    /// <summary>The custody of a recovery device's key: exported once when it was made, encrypted with its owner's passphrase, and kept off every machine.</summary>
+    public const string OfflineKind = "offline";
+
+    /// <summary>Custody kinds a device record of record format 2 may claim: format 1's, the macOS Secure Enclave, and a recovery key kept offline.</summary>
+    public static readonly string[] Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind];
 
     /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
     public static readonly string[] PresenceKinds = [SecureEnclaveCustody.Kind];
