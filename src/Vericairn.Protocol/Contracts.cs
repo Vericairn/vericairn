@@ -159,6 +159,17 @@ public sealed record DeviceCreateRequest(string Principal, string Name, string? 
 /// <param name="Note">Why.</param>
 public sealed record AdmitRequest(string Device, string By, string Note);
 
+/// <summary>Rename a device, keeping its identity; from record format 2.</summary>
+/// <param name="Device">Device id: its identity or any revision.</param>
+/// <param name="Name">The new descriptive name.</param>
+public sealed record DeviceRenameRequest(string Device, string Name);
+
+/// <summary>Give a device a new key, keeping its identity, signed by the previous key and the new one; from record format 2.</summary>
+/// <param name="Device">Device id: its identity or any revision.</param>
+/// <param name="Custody">Custody of the new key: file, cng, or secure-enclave on a Mac; the current custody when omitted.</param>
+/// <param name="Presence">Whether every signature with the new key needs the owner's presence, Secure Enclave custody only; when omitted, the device keeps its presence where the new custody enforces it.</param>
+public sealed record DeviceRotateRequest(string Device, string? Custody = null, bool? Presence = null);
+
 /// <summary>Revoke a device's admission.</summary>
 /// <param name="Device">Device id.</param>
 /// <param name="By">Revoking principal.</param>

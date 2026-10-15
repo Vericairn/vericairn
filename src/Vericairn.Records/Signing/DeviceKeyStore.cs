@@ -26,6 +26,12 @@ public interface IDeviceKeyStore
 
     /// <summary>Removes the key; the device record stays and is revoked separately.</summary>
     void Remove(string deviceId);
+
+    /// <summary>
+    /// Makes the key held under <paramref name="keyId"/> the key of the device, replacing any it had: a rotation creates the new key
+    /// under its revision's id, and once the revision is recorded the key takes the device's place, so lookups stay by identity.
+    /// </summary>
+    void Promote(string keyId, string deviceId);
 }
 
 /// <summary>Chooses the key store for this platform.</summary>
@@ -137,6 +143,18 @@ public sealed class FileKeyStore : IDeviceKeyStore
     }
 
     /// <inheritdoc />
+    public void Promote(string keyId, string deviceId)
+    {
+        string from = PathOf(keyId);
+        if (!File.Exists(from))
+        {
+            throw new InvalidOperationException($"This machine holds no key {keyId} to promote.");
+        }
+
+        File.Move(from, PathOf(deviceId), overwrite: true);
+    }
+
+    /// <inheritdoc />
     public byte[]? PublicKey(string deviceId)
     {
         using ECDsa? key = Load(deviceId);
@@ -197,6 +215,13 @@ public sealed class FileKeyStore : IDeviceKeyStore
 public sealed class CngKeyStore : IDeviceKeyStore
 {
     private const string Prefix = "vericairn-device-";
+    private readonly string aliases;
+
+    /// <summary>Creates the store; rotated devices keep the name of their current key in an alias file under the home directory.</summary>
+    public CngKeyStore(string? home = null)
+    {
+        aliases = Path.Combine(home ?? VericairnHome.Path(), "keys");
+    }
 
     /// <inheritdoc />
     public string Kind => "windows-cng";
@@ -252,22 +277,43 @@ public sealed class CngKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public void Remove(string deviceId)
     {
-        if (!Has(deviceId))
+        if (Has(deviceId))
         {
-            return;
+            using CngKey key = CngKey.Open(Name(deviceId), CngProvider.MicrosoftSoftwareKeyStorageProvider);
+            key.Delete();
         }
 
-        using CngKey key = CngKey.Open(Name(deviceId), CngProvider.MicrosoftSoftwareKeyStorageProvider);
-        key.Delete();
+        File.Delete(AliasOf(deviceId));
     }
 
-    private static string Name(string deviceId)
+    /// <inheritdoc />
+    public void Promote(string keyId, string deviceId)
     {
-        if (!Identity.Ulid.IsValid(deviceId))
+        string promoted = Prefix + Valid(keyId);
+        if (!CngKey.Exists(promoted, CngProvider.MicrosoftSoftwareKeyStorageProvider))
         {
-            throw new ArgumentException("A device id is a ULID.", nameof(deviceId));
+            throw new InvalidOperationException($"This machine holds no key {keyId} to promote.");
         }
 
-        return Prefix + deviceId;
+        string current = Name(deviceId);
+        if (current != promoted && CngKey.Exists(current, CngProvider.MicrosoftSoftwareKeyStorageProvider))
+        {
+            using CngKey previous = CngKey.Open(current, CngProvider.MicrosoftSoftwareKeyStorageProvider);
+            previous.Delete();
+        }
+
+        Directory.CreateDirectory(aliases);
+        File.WriteAllText(AliasOf(deviceId), keyId);
     }
+
+    /// <summary>The CNG name of a device's current key: its own, or the one its alias names after a rotation.</summary>
+    private string Name(string deviceId)
+    {
+        string alias = AliasOf(deviceId);
+        return Prefix + (File.Exists(alias) ? Valid(File.ReadAllText(alias).Trim()) : deviceId);
+    }
+
+    private string AliasOf(string deviceId) => Path.Combine(aliases, Valid(deviceId) + ".cng");
+
+    private static string Valid(string deviceId) => Identity.Ulid.IsValid(deviceId) ? deviceId : throw new ArgumentException("A device id is a ULID.", nameof(deviceId));
 }

@@ -33,8 +33,9 @@ public static class Recovery
         {
             anyDevice = true;
             string principal = EstateModel.BodyString(device, "principal") ?? "?";
-            bool held = stores.Any(s => s.Has(device.Id));
-            text.Append("  ").Append(device.Id).Append("  ").Append(Name(model, principal)).Append("  ").Append(EstateModel.BodyString(device, "name")).Append("  ")
+            string identity = model.Chain(device)[0];
+            bool held = stores.Any(s => s.Has(identity));
+            text.Append("  ").Append(identity).Append("  ").Append(Name(model, principal)).Append("  ").Append(EstateModel.BodyString(device, "name")).Append("  ")
                 .Append(SignatureChecks.IsAdmitted(model, device) ? "admitted" : "not admitted").Append(held ? "  key held on this machine" : "  key not held here").Append('\n');
         }
 
@@ -44,7 +45,7 @@ public static class Recovery
         }
 
         text.Append("Authoring from this machine: ");
-        List<string> canAuthor = model.Current("device").Where(d => SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(d.Id))).Select(d => Name(model, EstateModel.BodyString(d, "principal") ?? "?")).Distinct(StringComparer.Ordinal).ToList();
+        List<string> canAuthor = model.Current("device").Where(d => SignatureChecks.IsAdmitted(model, d) && stores.Any(s => s.Has(model.Chain(d)[0]))).Select(d => Name(model, EstateModel.BodyString(d, "principal") ?? "?")).Distinct(StringComparer.Ordinal).ToList();
         text.Append(canAuthor.Count == 0 ? (policy == "required" ? "nobody; this copy is read-only until a device held here is admitted" : "unsigned only; no admitted device key is held here") : string.Join(", ", canAuthor)).Append('\n');
 
         text.Append("Work in progress:\n");

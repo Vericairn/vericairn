@@ -33,8 +33,12 @@ public sealed record AuthoredRecord(string RelativePath, byte[] Bytes, RecordEnv
 public static class RecordAuthor
 {
     /// <summary>Builds the canonical bytes of a new record, signed by the device when a signer is given.</summary>
-    public static AuthoredRecord Create(RecordDraft draft, IRecordSigner? signer = null)
+    public static AuthoredRecord Create(RecordDraft draft, IRecordSigner? signer = null) => Create(draft, signer is null ? [] : [signer]);
+
+    /// <summary>Builds the canonical bytes of a new record signed by every signer, in order; a key rotation is signed by the old key and the new one.</summary>
+    public static AuthoredRecord Create(RecordDraft draft, IReadOnlyList<IRecordSigner> signers)
     {
+        ArgumentNullException.ThrowIfNull(signers);
         ArgumentNullException.ThrowIfNull(draft);
         if (draft.Body.ValueKind != JsonValueKind.Object)
         {
@@ -82,10 +86,10 @@ public static class RecordAuthor
         }
 
         envelope["hash"] = hash;
-        if (signer is not null)
+        if (signers.Count > 0)
         {
-            RecordSignature signature = signer.Sign(RecordSigning.Digest(hash));
-            envelope["signatures"] = new JsonArray(new JsonObject { ["algorithm"] = signature.Algorithm, ["device"] = signature.Device, ["signature"] = signature.Signature });
+            byte[] digest = RecordSigning.Digest(hash);
+            envelope["signatures"] = new JsonArray(signers.Select(s => s.Sign(digest)).Select(s => (JsonNode)new JsonObject { ["algorithm"] = s.Algorithm, ["device"] = s.Device, ["signature"] = s.Signature }).ToArray());
         }
 
         byte[] bytes;

@@ -34,6 +34,48 @@ public static class SignatureChecks
             {
                 Verify(model, record, signature, rootOperator, firstAuthority, findings);
             }
+
+            Rotation(model, record, findings);
+        }
+    }
+
+    /// <summary>The identity of a device: the id of its first device record, which every revision keeps; null when the id names none.</summary>
+    public static string? IdentityOf(EstateModel model, string? deviceId)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        return deviceId is not null && model.ById.TryGetValue(deviceId, out RecordEnvelope? device) && device.Type == "device" ? model.Chain(device)[0] : null;
+    }
+
+    /// <summary>True when an admission is signed by the very device it admits, compared by identity so that no revision hides it.</summary>
+    public static bool SelfSigned(EstateModel model, RecordEnvelope admission)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(admission);
+        string? subject = IdentityOf(model, admission.Subject?.Id);
+        return subject is not null && admission.Signatures.Any(s => IdentityOf(model, s.Device) == subject);
+    }
+
+    /// <summary>A rotation, a device revision with a new key, carries a signature by the previous key and one by the new key.</summary>
+    private static void Rotation(EstateModel model, RecordEnvelope record, FindingList findings)
+    {
+        if (record.Type != "device" || record.Format < 2 || record.Supersedes is null || !model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) || previous.Type != "device")
+        {
+            return;
+        }
+
+        string? before = EstateModel.BodyString(previous, "publicKey");
+        string? after = EstateModel.BodyString(record, "publicKey");
+        if (before is null || after is null || before == after)
+        {
+            return;
+        }
+
+        byte[] digest = RecordSigning.Digest(record.ComputedHash);
+        string identity = model.Chain(previous)[0];
+        List<RecordSignature> named = record.Signatures.Where(s => s.Device == identity).ToList();
+        if (!named.Any(s => RecordSigning.Verify(before, digest, s.Signature)) || !named.Any(s => RecordSigning.Verify(after, digest, s.Signature)))
+        {
+            findings.Error("signature.rotation", record.ExpectedPath + "#signatures", "A rotation is signed both by the device's previous key and by its new key.");
         }
     }
 
@@ -46,7 +88,7 @@ public static class SignatureChecks
     {
         ArgumentNullException.ThrowIfNull(model);
         return rootOperator is null ? null : model.OfType("admission")
-            .Where(a => a.By == rootOperator && a.Subject is not null && a.Signatures.Any(s => s.Device == a.Subject.Id))
+            .Where(a => a.By == rootOperator && SelfSigned(model, a))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .FirstOrDefault();
     }
@@ -56,7 +98,7 @@ public static class SignatureChecks
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(device);
-        IReadOnlyList<string> chain = model.Chain(device);
+        IReadOnlyList<string> chain = model.Chain(model.Latest(device));
         return chain.SelectMany(id => model.About(id, "admission")).Where(model.IsCurrent).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal).LastOrDefault();
     }
 
@@ -95,9 +137,9 @@ public static class SignatureChecks
         string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
         string? firstAuthority = FirstAuthority(model, rootOperator)?.Id;
         var events = new List<(string Time, int Order, bool Admitted)>();
-        foreach (RecordEnvelope admission in model.Chain(device).SelectMany(id => model.About(id, "admission")))
+        foreach (RecordEnvelope admission in model.Chain(model.Latest(device)).SelectMany(id => model.About(id, "admission")))
         {
-            if (admission.Id != firstAuthority && admission.Subject is not null && admission.Signatures.Any(s => s.Device == admission.Subject.Id))
+            if (admission.Id != firstAuthority && SelfSigned(model, admission))
             {
                 continue;
             }
@@ -146,12 +188,16 @@ public static class SignatureChecks
             return;
         }
 
-        if (!model.ById.TryGetValue(signature.Device, out RecordEnvelope? device) || device.Type != "device")
+        if (!model.ById.TryGetValue(signature.Device, out RecordEnvelope? named) || named.Type != "device")
         {
             findings.Error("signature.device", location, $"Signed by device {signature.Device}, which has no device record.");
             return;
         }
 
+        // A signature names a device's identity and verifies against the key the device had when the record was authored. A record of
+        // the device itself (its first record, a rename or a rotation) verifies against its own key or the previous revision's.
+        RecordEnvelope device = model.Latest(named);
+        IReadOnlyList<string> chain = model.Chain(device);
         string? principal = EstateModel.BodyString(device, "principal");
         if (principal != record.By)
         {
@@ -159,19 +205,53 @@ public static class SignatureChecks
             return;
         }
 
-        string? publicKey = EstateModel.BodyString(device, "publicKey");
-        if (publicKey is null || !RecordSigning.Verify(publicKey, RecordSigning.Digest(record.ComputedHash), signature.Signature))
+        bool ownRecord = record.Type == "device" && model.Chain(record)[0] == chain[0];
+        var keys = new List<string?>();
+        if (ownRecord)
         {
-            findings.Error("signature.invalid", location, $"The signature by device {device.Id} does not verify against the record's content hash.");
+            keys.Add(EstateModel.BodyString(record, "publicKey"));
+            if (record.Supersedes is not null && model.ById.TryGetValue(record.Supersedes, out RecordEnvelope? previous) && previous.Type == "device")
+            {
+                keys.Add(EstateModel.BodyString(previous, "publicKey"));
+            }
+        }
+        else
+        {
+            // Timestamps are whole seconds, so a record dated in the very second of a rotation cannot be ordered against it and
+            // verifies with either key; at any other time exactly one revision's key is current.
+            for (int i = 0; i < chain.Count; i++)
+            {
+                bool started = i == 0 || string.CompareOrdinal(model.ById[chain[i]].At, record.At) <= 0;
+                bool ended = i + 1 < chain.Count && string.CompareOrdinal(model.ById[chain[i + 1]].At, record.At) < 0;
+                if (started && !ended)
+                {
+                    keys.Add(EstateModel.BodyString(model.ById[chain[i]], "publicKey"));
+                }
+            }
+        }
+
+        byte[] digest = RecordSigning.Digest(record.ComputedHash);
+        if (!keys.Any(key => key is not null && RecordSigning.Verify(key, digest, signature.Signature)))
+        {
+            // A key the device held at another time names the revision, so a key used after its rotation, or a rotation dated
+            // earlier than it was made, reads as what it is.
+            string? other = ownRecord ? null : chain.FirstOrDefault(id => EstateModel.BodyString(model.ById[id], "publicKey") is string key && !keys.Contains(key) && RecordSigning.Verify(key, digest, signature.Signature));
+            if (other is not null)
+            {
+                findings.Error("signature.key-time", location, $"The signature by device {chain[0]} verifies only with the key of its revision {other}, which was not the device's key at this record's time {record.At}.");
+                return;
+            }
+
+            findings.Error("signature.invalid", location, $"The signature by device {chain[0]} does not verify against the record's content hash with the key the device held when it was authored.");
             return;
         }
 
-        if (device.Id == record.Id)
+        if (ownRecord)
         {
             return;
         }
 
-        bool selfAdmission = record.Type == "admission" && record.Subject?.Id == device.Id && record.By == rootOperator;
+        bool selfAdmission = record.Type == "admission" && record.By == rootOperator && IdentityOf(model, record.Subject?.Id) == chain[0];
         if (selfAdmission && record.Id == firstAuthority)
         {
             return;
@@ -179,7 +259,7 @@ public static class SignatureChecks
 
         if (selfAdmission && AdmissionStateAt(model, device, record.At) != AdmissionState.Admitted)
         {
-            findings.Error("signature.self-admission", location, $"Device {device.Id} admitted itself for the operator; that is accepted once, for the estate's first device ({firstAuthority}). A later device is admitted under the signature of a device already admitted.");
+            findings.Error("signature.self-admission", location, $"Device {chain[0]} admitted itself for the operator; that is accepted once, for the estate's first device ({firstAuthority}). A later device is admitted under the signature of a device already admitted.");
             return;
         }
 
@@ -188,13 +268,13 @@ public static class SignatureChecks
             case AdmissionState.Admitted:
                 return;
             case AdmissionState.Revoked:
-                findings.Error("signature.revoked", location, $"Device {device.Id} was revoked before this record was authored; records signed by it from the revocation on are invalid.");
+                findings.Error("signature.revoked", location, $"Device {chain[0]} was revoked before this record was authored; records signed by it from the revocation on are invalid.");
                 return;
             case AdmissionState.NotYetAdmitted:
-                findings.Error("signature.before-admission", location, $"Device {device.Id} signed this record before it was admitted.");
+                findings.Error("signature.before-admission", location, $"Device {chain[0]} signed this record before it was admitted.");
                 return;
             default:
-                findings.Error("signature.unadmitted", location, $"Device {device.Id} is not admitted to this estate; an administrator records an admission first.");
+                findings.Error("signature.unadmitted", location, $"Device {chain[0]} is not admitted to this estate; an administrator records an admission first.");
                 return;
         }
     }

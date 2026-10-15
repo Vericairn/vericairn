@@ -818,6 +818,12 @@ internal static class Commands
     public static int DevicesRevoke(string root, string deviceId, string by, string reason, bool json) =>
         WithApi(root, api => ReportOutcome(api.DeviceRevoke(new RevokeRequest(deviceId, by, reason)), json));
 
+    public static int DevicesRename(string root, string deviceId, string name, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceRename(new DeviceRenameRequest(deviceId, name)), json));
+
+    public static int DevicesRotate(string root, string deviceId, string? custody, bool? presence, bool json) =>
+        WithApi(root, api => ReportOutcome(api.DeviceRotate(new DeviceRotateRequest(deviceId, custody, presence)), json));
+
     /// <summary>The git adapter behind sources and check; tests substitute a recorded one.</summary>
     /// <summary>Serves the estate over the Model Context Protocol on standard input and output; diagnostics go to standard error.</summary>
     public static int McpServe(string root, string? actingAs) => WithApi(root, api =>

@@ -198,6 +198,48 @@ public class DaemonTests
     }
 
     [Fact]
+    public async Task ARotatedDeviceSignsRequestsWithItsNewKeyAndTheReplacedKeyIsRefused()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        DaemonEndpoint endpoint = DaemonHost.Discover(estate.Root)!;
+        using var socket = new VericairnClient(endpoint);
+        WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.BuilderId, "Test device", "file"));
+        Assert.True(device.Ok, device.Problem?.Message);
+        string id = device.Written!.Id;
+        Assert.True(socket.DeviceAdmit(new AdmitRequest(id, estate.OperatorId, "Rotation test.")).Ok);
+
+        // The key the rotation replaces is kept aside, to show the daemon refuses it afterwards.
+        string keys = Path.Combine(VericairnHome.Path(), "keys");
+        string retired = Records.Identity.Ulid.NewUlid().Value;
+        File.Copy(Path.Combine(keys, id + ".p8"), Path.Combine(keys, retired + ".p8"));
+        var store = new FileKeyStore(VericairnHome.Path());
+        try
+        {
+            WriteOutcome renamed = socket.DeviceRename(new DeviceRenameRequest(id, "Test device, renamed"));
+            Assert.True(renamed.Ok, renamed.Problem?.Message);
+            WriteOutcome rotated = socket.DeviceRotate(new DeviceRotateRequest(id));
+            Assert.True(rotated.Ok, rotated.Problem?.Message);
+            DeviceRow row = Assert.Single(socket.Devices(), d => d.Id == id);
+            Assert.Equal("Test device, renamed", row.Name);
+            Assert.Equal("admitted", row.Admission);
+            Assert.True(row.HeldHere);
+
+            // Requests signed with the new key are accepted; the replaced key is refused although it names the same device.
+            using VericairnClient current = VericairnClient.Loopback(endpoint, DeviceRequestSigner.Find(id));
+            Assert.Equal(socket.Health().Estate, current.Health().Estate);
+            using VericairnClient replaced = VericairnClient.Loopback(endpoint, new KeySigner(store, retired, id));
+            HttpRequestException refused = Assert.Throws<HttpRequestException>(() => replaced.Health());
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+            Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+        }
+        finally
+        {
+            store.Remove(retired);
+        }
+    }
+
+    [Fact]
     public async Task ARunningDaemonRefusesASecondOwnerOfTheSameEstate()
     {
         using var estate = new TestEstate();
@@ -274,5 +316,13 @@ public class DaemonTests
 
         Assert.Throws<PlatformNotSupportedException>(() => ServiceInstaller.Plan("other", root, "01ESTATE", launcher, "/home/someone", "/home/someone/.config/vericairn", null));
         Assert.NotEmpty(ServiceInstaller.CurrentLauncher());
+    }
+
+    /// <summary>Signs requests in a device's name with a key held under another id: the key a rotation replaced.</summary>
+    private sealed class KeySigner(IDeviceKeyStore store, string keyId, string deviceId) : IRequestSigner
+    {
+        public string DeviceId => deviceId;
+
+        public byte[] Sign(ReadOnlySpan<byte> digest) => store.Sign(keyId, digest);
     }
 }

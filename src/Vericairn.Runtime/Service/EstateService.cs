@@ -301,19 +301,20 @@ public sealed class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-            return model.Current("device").OrderBy(d => d.Id, StringComparer.Ordinal).Select(device =>
+            return model.Current("device").OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).Select(device =>
             {
                 RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
                 string principal = EstateModel.BodyString(device, "principal") ?? "?";
+                string identity = model.Chain(device)[0];
                 return new DeviceRow(
-                    device.Id,
+                    identity,
                     principal,
                     model.CurrentPrincipal(principal) is RecordEnvelope p ? EstateModel.BodyString(p, "name") : null,
                     EstateModel.BodyString(device, "name"),
                     EstateModel.BodyString(device, "platform"),
                     EstateModel.BodyString(device, "custody"),
                     admission is null ? "not admitted" : EstateModel.BodyString(admission, "status") ?? "?",
-                    stores.Any(s => s.Has(device.Id)),
+                    stores.Any(s => s.Has(identity)),
                     EstateModel.BodyString(device, "presence"),
                     EstateModel.BodyString(device, "purpose"));
             }).ToList();
@@ -380,7 +381,7 @@ public sealed class EstateService : IEstateApi, IDisposable
             }
 
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), session.Load(), new StoreSigner(store, id));
+            WriteOutcome outcome = WriteLocked(new RecordDraft("device", request.Principal, document.RootElement, At: now, Id: id), session.Load(), [new StoreSigner(store, id)]);
             if (!outcome.Ok)
             {
                 store.Remove(id);
@@ -388,6 +389,124 @@ public sealed class EstateService : IEstateApi, IDisposable
 
             return outcome;
         }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome DeviceRename(DeviceRenameRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Refuse("A device is renamed to a descriptive name.");
+        }
+
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (Revisable(model, request.Device, out RecordEnvelope? device, out string? identity, out IDeviceKeyStore? store) is { } refusal)
+            {
+                return Refuse(refusal);
+            }
+
+            JsonObject body = RevisionBody(device!);
+            body["name"] = request.Name;
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            return WriteLocked(new RecordDraft("device", EstateModel.BodyString(device!, "principal")!, document.RootElement, Supersedes: device!.Id), model, [new StoreSigner(store!, identity!)]);
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome DeviceRotate(DeviceRotateRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (Revisable(model, request.Device, out RecordEnvelope? device, out string? identity, out IDeviceKeyStore? current) is { } refusal)
+            {
+                return Refuse(refusal);
+            }
+
+            // The new key keeps the device's custody and presence unless the request names others; presence carries over only
+            // where the new custody enforces it.
+            IDeviceKeyStore next;
+            bool presence;
+            try
+            {
+                string custody = request.Custody ?? current!.Kind;
+                presence = request.Presence ?? (EstateModel.BodyString(device!, "presence") == "required" && Array.IndexOf(DeviceKeyStores.PresenceKinds, DeviceKeyStores.Named(custody).Kind) >= 0);
+                next = DeviceKeyStores.Named(custody, presence);
+            }
+            catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
+            {
+                return Refuse(exception is ArgumentException { ParamName: { } name } ? exception.Message.Replace($" (Parameter '{name}')", string.Empty, StringComparison.Ordinal) : exception.Message);
+            }
+
+            // The new key is made under the revision's id and signs beside the previous key; only once the revision is recorded
+            // does it take the device's place, so a refused rotation leaves the device exactly as it was.
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            string revision = Ulid.NewUlid(now).Value;
+            byte[] publicKey;
+            try
+            {
+                publicKey = next.Create(revision);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
+            {
+                return Refuse(exception.Message);
+            }
+
+            JsonObject body = RevisionBody(device!);
+            body["publicKey"] = RecordSigning.EncodePublicKey(publicKey);
+            body["custody"] = next.Kind;
+            body["presence"] = presence ? "required" : "none";
+            using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
+            WriteOutcome outcome = WriteLocked(new RecordDraft("device", EstateModel.BodyString(device!, "principal")!, document.RootElement, Supersedes: device!.Id, At: now, Id: revision), model, [new StoreSigner(current!, identity!), new StoreSigner(next, revision, identity!)]);
+            if (!outcome.Ok)
+            {
+                next.Remove(revision);
+                return outcome;
+            }
+
+            next.Promote(revision, identity!);
+            if (current!.Kind != next.Kind)
+            {
+                current.Remove(identity!);
+            }
+
+            return outcome;
+        }
+    }
+
+    /// <summary>A device can be revised here when the estate is at record format 2, the device exists, and this machine holds its key.</summary>
+    private string? Revisable(EstateModel model, string deviceId, out RecordEnvelope? device, out string? identity, out IDeviceKeyStore? store)
+    {
+        store = null;
+        identity = null;
+        device = Latest(model, deviceId, "device");
+        if ((model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat) < 2)
+        {
+            return "A device keeps its identity across a rename or a rotation from record format 2; upgrade the estate to a release that writes format 2 first.";
+        }
+
+        if (device is null)
+        {
+            return $"No device {deviceId} in this estate.";
+        }
+
+        string id = model.Chain(device)[0];
+        identity = id;
+        store = DeviceKeyStores.All().FirstOrDefault(s => s.Has(id));
+        return store is null ? $"This machine holds no key for device {id}; a device is renamed or rotated where its key is held." : null;
+    }
+
+    /// <summary>The body of a device's next revision: its current body, with the fields record format 2 requires.</summary>
+    private static JsonObject RevisionBody(RecordEnvelope device)
+    {
+        JsonObject body = JsonNode.Parse(device.Body.GetRawText())!.AsObject();
+        body["presence"] ??= "none";
+        body["purpose"] ??= "signing";
+        return body;
     }
 
     /// <inheritdoc />
@@ -1116,15 +1235,17 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>Signs, stores and validates; a record that would make the estate invalid is removed again. Caller holds the gate.</summary>
-    private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IRecordSigner? signer = null)
+    private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
-        if (signer is null)
+        if (signers is null)
         {
-            string? refusal = ResolveSigner(current, draft, out signer);
+            string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);
             if (refusal is not null)
             {
                 return Refuse(refusal);
             }
+
+            signers = signer is null ? [] : [signer];
         }
 
         // A record is written in its estate's format, never in one this build does not write.
@@ -1142,7 +1263,7 @@ public sealed class EstateService : IEstateApi, IDisposable
         AuthoredRecord record;
         try
         {
-            record = RecordAuthor.Create(draft, signer);
+            record = RecordAuthor.Create(draft, signers);
             session.Write(record);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
@@ -1181,13 +1302,14 @@ public sealed class EstateService : IEstateApi, IDisposable
     {
         signer = null;
         IReadOnlyList<IDeviceKeyStore> stores = DeviceKeyStores.All();
-        List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => d.Id, StringComparer.Ordinal).ToList();
-        foreach (RecordEnvelope device in devices.Where(d => SignatureChecks.IsAdmitted(model, d)))
+        List<RecordEnvelope> devices = model.Current("device").Where(d => EstateModel.BodyString(d, "principal") == draft.By).OrderBy(d => model.Chain(d)[0], StringComparer.Ordinal).ToList();
+        // Keys are held under a device's identity, its first record, which signatures name across renames and rotations.
+        foreach (string identity in devices.Where(d => SignatureChecks.IsAdmitted(model, d)).Select(d => model.Chain(d)[0]))
         {
-            IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(device.Id));
+            IDeviceKeyStore? store = stores.FirstOrDefault(s => s.Has(identity));
             if (store is not null)
             {
-                signer = new StoreSigner(store, device.Id);
+                signer = new StoreSigner(store, identity);
                 return null;
             }
         }
@@ -1197,11 +1319,11 @@ public sealed class EstateService : IEstateApi, IDisposable
         // The first authority: the root operator's first device admits itself, once in the estate's history.
         if (draft.Type == "admission" && draft.Subject is not null && draft.By == rootOperator && SignatureChecks.FirstAuthority(model, rootOperator) is null)
         {
-            RecordEnvelope? own = devices.FirstOrDefault(d => d.Id == draft.Subject.Id);
-            IDeviceKeyStore? store = own is null ? null : stores.FirstOrDefault(s => s.Has(own.Id));
+            string? own = SignatureChecks.IdentityOf(model, draft.Subject.Id);
+            IDeviceKeyStore? store = own is null || !devices.Any(d => model.Chain(d)[0] == own) ? null : stores.FirstOrDefault(s => s.Has(own));
             if (own is not null && store is not null)
             {
-                signer = new StoreSigner(store, own.Id);
+                signer = new StoreSigner(store, own);
                 return null;
             }
         }

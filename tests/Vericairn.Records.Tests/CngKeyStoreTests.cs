@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Buffers.Text;
+using System.Runtime.Versioning;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 
@@ -45,5 +46,40 @@ public class CngKeyStoreTests
         }
 
         Assert.False(store.Has(id));
+    }
+
+    [Fact]
+    [SupportedOSPlatform("windows")]
+    public void ARotatedCngKeyTakesTheDevicesNameAndTheReplacedOneIsDeleted()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Skip("CNG custody exists on Windows only; the file store covers other platforms.");
+        }
+
+        string home = Path.Combine(Path.GetTempPath(), "vericairn-cng-" + Ulid.NewUlid().Value);
+        var store = new CngKeyStore(home);
+        string device = Ulid.NewUlid().Value;
+        string revision = Ulid.NewUlid().Value;
+        store.Create(device);
+        byte[] next = store.Create(revision);
+        try
+        {
+            // The new key keeps its CNG name; the device's alias names it, and the key it replaced is deleted.
+            store.Promote(revision, device);
+            Assert.Equal(next, store.PublicKey(device));
+            byte[] digest = RecordSigning.Digest("sha256:" + new string('4', 64));
+            Assert.True(RecordSigning.Verify(RecordSigning.EncodePublicKey(next), digest, Base64Url.EncodeToString(store.Sign(device, digest))));
+            Assert.True(File.Exists(Path.Combine(home, "keys", device + ".cng")));
+            Assert.Throws<InvalidOperationException>(() => store.Promote(Ulid.NewUlid().Value, device));
+        }
+        finally
+        {
+            store.Remove(device);
+            Directory.Delete(home, recursive: true);
+        }
+
+        Assert.False(store.Has(device));
+        Assert.False(store.Has(revision));
     }
 }

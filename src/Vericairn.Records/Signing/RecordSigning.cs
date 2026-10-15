@@ -27,11 +27,19 @@ public interface IRecordSigner
 public sealed class StoreSigner : IRecordSigner
 {
     private readonly IDeviceKeyStore store;
+    private readonly string keyId;
 
     /// <summary>Creates a signer for a device whose key the store holds.</summary>
     public StoreSigner(IDeviceKeyStore store, string deviceId)
+        : this(store, deviceId, deviceId)
+    {
+    }
+
+    /// <summary>Creates a signer that signs with the key held under <paramref name="keyId"/> and names the device's identity: a rotation's new key, before it takes the device's place.</summary>
+    public StoreSigner(IDeviceKeyStore store, string keyId, string deviceId)
     {
         this.store = store ?? throw new ArgumentNullException(nameof(store));
+        this.keyId = keyId ?? throw new ArgumentNullException(nameof(keyId));
         DeviceId = deviceId ?? throw new ArgumentNullException(nameof(deviceId));
     }
 
@@ -40,7 +48,7 @@ public sealed class StoreSigner : IRecordSigner
 
     /// <inheritdoc />
     public RecordSignature Sign(ReadOnlySpan<byte> digest) =>
-        new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(DeviceId, digest)));
+        new(RecordSigning.Algorithm, DeviceId, Base64Url.EncodeToString(store.Sign(keyId, digest)));
 }
 
 /// <summary>The signature scheme of the record formats and its verification; format 2 keeps format 1's.</summary>

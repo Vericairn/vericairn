@@ -155,6 +155,12 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public WriteOutcome DeviceAdmit(AdmitRequest request) => Post<AdmitRequest, WriteOutcome>("/v1/devices/admit", request)!;
 
     /// <inheritdoc />
+    public WriteOutcome DeviceRename(DeviceRenameRequest request) => Post<DeviceRenameRequest, WriteOutcome>("/v1/devices/rename", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome DeviceRotate(DeviceRotateRequest request) => Post<DeviceRotateRequest, WriteOutcome>("/v1/devices/rotate", request)!;
+
+    /// <inheritdoc />
     public WriteOutcome DeviceRevoke(RevokeRequest request) => Post<RevokeRequest, WriteOutcome>("/v1/devices/revoke", request)!;
 
     /// <inheritdoc />

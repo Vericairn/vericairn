@@ -82,7 +82,8 @@ device, before its admission, or from its revocation onward is an error. The est
 is `optional` or `required`; when required, every record authored after the charter revision that set it must
 be signed, so a clone without an admitted device key is read-only. Private keys live in the per-user state
 directory (`VERICAIRN_HOME` overrides it), never in a repository; the CLI picks the signing device for the
-author automatically.
+author automatically. From record format 2 a device keeps its identity across renames and key rotations
+([record-format-v2.md](record-format-v2.md#a-device-keeps-its-identity)).
 
 ## Where records are kept: profiles, the live store, objects
 

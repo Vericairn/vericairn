@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
@@ -10,6 +12,7 @@ namespace Vericairn.Records.Tests;
 
 public class SigningTests : IDisposable
 {
+    private const string FormatTwo = """ ,"presence":"none","purpose":"signing" """;
     private const string OrderBody = """{"key":"W-1","kind":"ordinary","title":"Signed task","intent":"Exercise signatures.","scope":["x"],"exitQuestion":"Done?","inputs":[],"deliverables":["y"]}""";
     private readonly string home = Path.Combine(Path.GetTempPath(), "vericairn-keys-" + Ulid.NewUlid().Value);
     private readonly FileKeyStore store;
@@ -148,6 +151,123 @@ public class SigningTests : IDisposable
     }
 
     [Fact]
+    public void AFormatTwoDeviceKeepsItsIdentityHistoryAndAdmissionAcrossARenameAndARotation()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope operatorDevice = CreateDevice(estate, estate.OperatorId, "Operator laptop", extra: FormatTwo);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Root."}""", operatorDevice.Reference, signer: Signer(operatorDevice));
+        RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Build machine", extra: FormatTwo);
+        estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.BuilderId}}","status":"admitted","note":"Builder."}""", device.Reference, signer: Signer(operatorDevice));
+        RecordEnvelope before = estate.Add("work-order", estate.BuilderId, OrderBody, signer: Signer(device));
+
+        // A rename is signed in the name of the device's identity, its first record, with the key it has.
+        RecordEnvelope renamed = estate.Add("device", estate.BuilderId, device.Body.GetRawText().Replace("Build machine", "Build machine, renamed", StringComparison.Ordinal), supersedes: device.Id, signer: Signer(device));
+
+        // A rotation is signed by the previous key and the new one, both in the identity's name; then the new key takes the device's place.
+        string retired = Ulid.NewUlid().Value;
+        File.Copy(KeyFile(device.Id), KeyFile(retired));
+        RecordEnvelope rotated = Rotate(estate, renamed, device.Id);
+        store.Promote(rotated.Id, device.Id);
+        RecordEnvelope after = estate.Add("work-order", estate.BuilderId, OrderBody.Replace("W-1", "W-2", StringComparison.Ordinal), signer: Signer(device));
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale");
+        Assert.Equal(device.Id, SignatureChecks.IdentityOf(model, rotated.Id));
+        Assert.True(SignatureChecks.IsAdmitted(model, device));
+        Assert.Equal(SignatureChecks.AdmissionState.Admitted, SignatureChecks.AdmissionStateAt(model, rotated, after.At));
+        Assert.Equal(2, rotated.Signatures.Count);
+        Assert.All(rotated.Signatures, s => Assert.Equal(device.Id, s.Device));
+        Assert.False(store.Has(rotated.Id));
+        Assert.True(RecordSigning.Verify(EstateModel.BodyString(device, "publicKey")!, RecordSigning.Digest(before.ComputedHash), before.Signatures[0].Signature));
+        Assert.True(RecordSigning.Verify(EstateModel.BodyString(rotated, "publicKey")!, RecordSigning.Digest(after.ComputedHash), after.Signatures[0].Signature));
+
+        // The replaced key signs nothing after its rotation, and the finding names the revision whose key it was.
+        RecordEnvelope late = estate.Add("work-order", estate.BuilderId, OrderBody.Replace("W-1", "W-3", StringComparison.Ordinal), signer: new StoreSigner(store, retired, device.Id));
+        Assert.Contains(estate.Load().Findings, f => f.Code == "signature.key-time" && f.Location.Contains(late.Id, StringComparison.Ordinal) && f.Message.Contains(device.Id, StringComparison.Ordinal));
+
+        // Times are whole seconds: a record dated in the rotation's own second cannot be ordered against it, and either key verifies.
+        using JsonDocument same = JsonDocument.Parse(OrderBody.Replace("W-1", "W-4", StringComparison.Ordinal));
+        AuthoredRecord sameSecond = RecordAuthor.Create(new RecordDraft("work-order", estate.BuilderId, same.RootElement, At: rotated.AtTime, Format: 2), new StoreSigner(store, retired, device.Id));
+        RecordAuthor.Write(estate.Root, sameSecond);
+        Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error && f.Location.Contains(sameSecond.Envelope.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ARevisionIsSignedInTheIdentitysNameAndARotationByBothKeys()
+    {
+        // A revision signed in the name of its own id rather than the device's identity.
+        using (var estate = new TestEstate(recordFormat: 2))
+        {
+            RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Build machine", extra: FormatTwo);
+            string own = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
+            RecordEnvelope misnamed = estate.Add("device", estate.BuilderId, device.Body.GetRawText().Replace("Build machine", "Misnamed", StringComparison.Ordinal), supersedes: device.Id, id: own, signer: new StoreSigner(store, device.Id, own));
+            Assert.Contains(estate.Load().Findings, f => f.Code == "device.unsigned" && f.Location.Contains(misnamed.Id, StringComparison.Ordinal));
+        }
+
+        // A rotation signed by the new key alone, and one signed twice by the previous key: both lack the other key.
+        using (var estate = new TestEstate(recordFormat: 2))
+        {
+            RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Build machine", extra: FormatTwo);
+            RecordEnvelope newOnly = Rotate(estate, device, device.Id, revision => [new StoreSigner(store, revision, device.Id)]);
+            List<Finding> findings = estate.Load().Findings.ToList();
+            Assert.Contains(findings, f => f.Code == "device.rotation" && f.Location.Contains(newOnly.Id, StringComparison.Ordinal));
+            Assert.Contains(findings, f => f.Code == "signature.rotation" && f.Location.Contains(newOnly.Id, StringComparison.Ordinal));
+        }
+
+        using (var estate = new TestEstate(recordFormat: 2))
+        {
+            RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Build machine", extra: FormatTwo);
+            RecordEnvelope oldTwice = Rotate(estate, device, device.Id, _ => [Signer(device), Signer(device)]);
+            List<Finding> findings = estate.Load().Findings.ToList();
+            Assert.DoesNotContain(findings, f => f.Code == "device.rotation");
+            Assert.Contains(findings, f => f.Code == "signature.rotation" && f.Location.Contains(oldTwice.Id, StringComparison.Ordinal));
+        }
+
+        // Custody changes only with the key.
+        using (var estate = new TestEstate(recordFormat: 2))
+        {
+            RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Build machine", extra: FormatTwo);
+            RecordEnvelope moved = estate.Add("device", estate.BuilderId, device.Body.GetRawText().Replace("file-owner-only", "macos-secure-enclave", StringComparison.Ordinal), supersedes: device.Id, signer: Signer(device));
+            Assert.Contains(estate.Load().Findings, f => f.Code == "device.custody" && f.Location.Contains(moved.Id, StringComparison.Ordinal));
+        }
+
+        // A device recorded in format 1 is renamed in format 2: it has no presence or purpose yet, which read as none and signing.
+        using (var estate = new TestEstate(recordFormat: 2))
+        {
+            RecordEnvelope device = CreateDevice(estate, estate.BuilderId, "Old machine", format: 1);
+            string body = device.Body.GetRawText().Replace("Old machine", "Old machine, renamed", StringComparison.Ordinal);
+            estate.Add("device", estate.BuilderId, body.Insert(body.Length - 1, FormatTwo), supersedes: device.Id, signer: Signer(device));
+            Assert.False(estate.Load().Findings.HasErrors, string.Join("\n", estate.Load().Findings));
+
+            // A revision keeps the purpose, read as signing where the earlier record states none: a recovery device is a new device.
+            RecordEnvelope operatorDevice = CreateDevice(estate, estate.OperatorId, "Operator laptop", format: 1);
+            string recovery = operatorDevice.Body.GetRawText();
+            RecordEnvelope repurposed = estate.Add("device", estate.OperatorId, recovery.Insert(recovery.Length - 1, FormatTwo.Replace("signing", "recovery", StringComparison.Ordinal)), supersedes: operatorDevice.Id, signer: Signer(operatorDevice));
+            Assert.Contains(estate.Load().Findings, f => f.Code == "device.identity" && f.Location.Contains(repurposed.Id, StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
+    public void ARevisionNeverHidesASelfAdmission()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope first = CreateDevice(estate, estate.OperatorId, "First laptop", extra: FormatTwo);
+        RecordEnvelope root = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"The first authority."}""", first.Reference, signer: Signer(first));
+
+        // A device minted for the operator, renamed, then admitted by itself: once in the name of its identity, once in its revision's.
+        RecordEnvelope minted = CreateDevice(estate, estate.OperatorId, "Minted", extra: FormatTwo);
+        RecordEnvelope revised = estate.Add("device", estate.OperatorId, minted.Body.GetRawText().Replace("Minted", "Minted, renamed", StringComparison.Ordinal), supersedes: minted.Id, signer: Signer(minted));
+        RecordEnvelope byIdentity = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Admits itself."}""", revised.Reference, signer: Signer(minted));
+        RecordEnvelope byRevision = estate.Add("admission", estate.OperatorId, $$"""{"principal":"{{estate.OperatorId}}","status":"admitted","note":"Admits itself again."}""", revised.Reference, signer: new StoreSigner(store, minted.Id, revised.Id));
+        RecordEnvelope forged = estate.Add("work-order", estate.OperatorId, OrderBody, signer: Signer(minted));
+        EstateModel model = estate.Load();
+        Assert.Equal(root.Id, SignatureChecks.FirstAuthority(model, estate.OperatorId)?.Id);
+        Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(byIdentity.Id, StringComparison.Ordinal));
+        Assert.Contains(model.Findings, f => f.Code == "signature.self-admission" && f.Location.Contains(byRevision.Id, StringComparison.Ordinal));
+        Assert.Contains(model.Findings, f => f.Code == "signature.unadmitted" && f.Location.Contains(forged.Id, StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TheFileStoreHoldsOwnerOnlyKeysAndSignsDeterministicallyVerifiableSignatures()
     {
         string id = Ulid.NewUlid().Value;
@@ -165,6 +285,7 @@ public class SigningTests : IDisposable
         Assert.True(RecordSigning.Verify(RecordSigning.EncodePublicKey(publicKey), digest, System.Buffers.Text.Base64Url.EncodeToString(signature)));
         Assert.False(RecordSigning.Verify(RecordSigning.EncodePublicKey(publicKey), RecordSigning.Digest("sha256:" + new string('2', 64)), System.Buffers.Text.Base64Url.EncodeToString(signature)));
         Assert.Throws<InvalidOperationException>(() => store.Create(id));
+        Assert.Throws<InvalidOperationException>(() => store.Promote(Ulid.NewUlid().Value, id));
         store.Remove(id);
         Assert.False(store.Has(id));
     }
@@ -182,12 +303,23 @@ public class SigningTests : IDisposable
         }
     }
 
-    private RecordEnvelope CreateDevice(TestEstate estate, string principal, string name, string custody = "file-owner-only", string extra = "")
+    private RecordEnvelope CreateDevice(TestEstate estate, string principal, string name, string custody = "file-owner-only", string extra = "", long? format = null)
     {
         string id = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
         string publicKey = RecordSigning.EncodePublicKey(store.Create(id));
-        return estate.Add("device", principal, $$"""{"principal":"{{principal}}","name":"{{name}}","platform":"linux","custody":"{{custody}}","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["embedded"]{{extra}}}""", id: id, signer: new StoreSigner(store, id));
+        return estate.Add("device", principal, $$"""{"principal":"{{principal}}","name":"{{name}}","platform":"linux","custody":"{{custody}}","algorithm":"ecdsa-p256-sha256","publicKey":"{{publicKey}}","profiles":["embedded"]{{extra}}}""", id: id, signer: new StoreSigner(store, id), format: format);
     }
+
+    /// <summary>A device's next revision with a new key made under the revision's id, signed by the given signers (the previous and the new key unless a test names others).</summary>
+    private RecordEnvelope Rotate(TestEstate estate, RecordEnvelope latest, string identity, Func<string, IReadOnlyList<IRecordSigner>>? signers = null)
+    {
+        string revision = Ulid.NewUlid(estate.Clock.AddSeconds(1)).Value;
+        string newKey = RecordSigning.EncodePublicKey(store.Create(revision));
+        string body = latest.Body.GetRawText().Replace(EstateModel.BodyString(latest, "publicKey")!, newKey, StringComparison.Ordinal);
+        return estate.Add("device", EstateModel.BodyString(latest, "principal")!, body, supersedes: latest.Id, id: revision, signers: signers?.Invoke(revision) ?? [new StoreSigner(store, identity), new StoreSigner(store, revision, identity)]);
+    }
+
+    private string KeyFile(string id) => Path.Combine(home, "keys", id + ".p8");
 
     private StoreSigner Signer(RecordEnvelope device) => new(store, device.Id);
 }

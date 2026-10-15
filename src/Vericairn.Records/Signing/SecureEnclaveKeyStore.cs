@@ -110,6 +110,18 @@ public sealed class SecureEnclaveKeyStore : IDeviceKeyStore
     /// <inheritdoc />
     public void Remove(string deviceId) => File.Delete(Blob(deviceId));
 
+    /// <inheritdoc />
+    public void Promote(string keyId, string deviceId)
+    {
+        string from = Blob(keyId);
+        if (!File.Exists(from))
+        {
+            throw new InvalidOperationException($"This machine holds no key {keyId} to promote.");
+        }
+
+        File.Move(from, Blob(deviceId), overwrite: true);
+    }
+
     private string Blob(string deviceId)
     {
         if (!Identity.Ulid.IsValid(deviceId))
