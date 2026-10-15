@@ -66,9 +66,12 @@ public class LauncherTests
     {
         var launcher = new CodexLauncher();
         LaunchContext context = Context(NoSettings) with { McpServer = ["C:\\Program Files\\vericairn.exe", "--estate", "/estates/the \"widget\"", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["VERICAIRN_HOME"] = "/home/me/.config/vericairn" } };
-        Assert.Equal(
-            ["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c", "mcp_servers.vericairn.command=\"C:\\\\Program Files\\\\vericairn.exe\"", "-c", "mcp_servers.vericairn.args=[\"--estate\", \"/estates/the \\\"widget\\\"\", \"mcp\", \"serve\", \"--as\", \"01M4TRNE1GYEK4P8MXQAB3C8Q4\"]", "-c", "mcp_servers.vericairn.env.VERICAIRN_HOME=\"/home/me/.config/vericairn\"", "/goal Is it done? Checks: it builds."],
-            launcher.Command(context));
+        IReadOnlyList<string> command = launcher.Command(context);
+        Assert.Equal(["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c"], command.Take(8));
+        Assert.StartsWith("mcp_servers={vericairn={command=", command[8], StringComparison.Ordinal);
+        Assert.Contains("env={\"VERICAIRN_HOME\"=\"/home/me/.config/vericairn\"}", command[8], StringComparison.Ordinal);
+        Assert.Equal("projects.\"/work/widget\".trust_level=\"untrusted\"", command[10]);
+        Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
         Assert.Null(launcher.Read("""{"type":"turn.started"}"""));
         Assert.Null(launcher.Read("""{"type":"item.completed","item":{"text":"turn.completed"}}"""));

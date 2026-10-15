@@ -63,6 +63,9 @@ public interface IAgentLauncher
     /// </summary>
     string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => null;
 
+    /// <summary>Builds the run-specific harness configuration and environment outside the workspace before launch.</summary>
+    LaunchContext Prepare(LaunchContext context) => context;
+
     /// <summary>The command line that starts the harness on the assignment: the executable first, then its arguments.</summary>
     IReadOnlyList<string> Command(LaunchContext context);
 

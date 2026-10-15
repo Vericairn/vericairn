@@ -272,7 +272,9 @@ public sealed partial class EstateService
                 },
             };
             File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-            IReadOnlyList<string> command = launcher.Command(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment));
+            LaunchContext launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment));
+            environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
+            IReadOnlyList<string> command = launcher.Command(launch);
 
             // The custody precondition once more, immediately before the launch and under the gate, so that no exception is revised
             // or expires between this judgment and the start: one that lapsed since the intent, or a key that arrived, launches nothing.

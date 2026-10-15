@@ -20,6 +20,36 @@ namespace Vericairn.Runtime.Tests;
 public class WorkerTests
 {
     [Fact]
+    public void CodexGetsAFreshConfigurationWithoutAmbientServersPluginsOrHooks()
+    {
+        using var run = new RunEstate();
+        string original = Path.Combine(run.Scratch, "codex-user");
+        Directory.CreateDirectory(original);
+        File.WriteAllText(Path.Combine(original, "config.toml"), "[mcp_servers.ambient]\ncommand = \"unapproved\"\n");
+        File.WriteAllText(Path.Combine(original, "auth.json"), "{\"stand-in-login\":true}");
+        File.WriteAllText(Path.Combine(original, "hooks.json"), "{}");
+        var source = new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CODEX_HOME"] = original };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = source };
+        string report = run.Report("isolated-codex");
+        RunResponse started = run.Start("codex", "codex", report);
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        JsonObject given = FakeHarness.Reports(report)[1];
+        string home = given["environment"]!["CODEX_HOME"]!.GetValue<string>();
+        Assert.NotEqual(original, home);
+        string configuration = File.ReadAllText(Path.Combine(home, "config.toml"));
+        Assert.StartsWith("mcp_servers={vericairn=", configuration, StringComparison.Ordinal);
+        Assert.Contains("[features]\ngoals = true", configuration, StringComparison.Ordinal);
+        Assert.DoesNotContain("ambient", configuration, StringComparison.Ordinal);
+        Assert.Equal(File.ReadAllText(Path.Combine(original, "auth.json")), File.ReadAllText(Path.Combine(home, "auth.json")));
+        Assert.False(File.Exists(Path.Combine(home, "hooks.json")));
+        List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Single(args, a => a.StartsWith("mcp_servers=", StringComparison.Ordinal));
+        Assert.DoesNotContain("ambient", string.Join(' ', args), StringComparison.Ordinal);
+        Assert.Contains("trust_level=\"untrusted\"", string.Join(' ', args), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AFailedEscalationIsKeptAndRetriedWithoutClaimingAKill()
     {
         using var run = new RunEstate();
@@ -221,11 +251,10 @@ public class WorkerTests
         string cd = arguments[3];
         Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), cd, StringComparison.Ordinal);
         Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), workspace, StringComparison.Ordinal);
-        Assert.Equal(
-            ["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c", "mcp_servers.vericairn.command=\"vericairn-under-test\"", "-c", $"mcp_servers.vericairn.args=[\"--estate\", {Toml(run.Service.Root)}, \"mcp\", \"serve\", \"--as\", \"{run.Estate.BuilderId}\"]"],
-            arguments.Take(10));
-        Assert.Contains("-c", arguments);
-        Assert.Contains($"mcp_servers.vericairn.env.VERICAIRN_HOME={Toml(home)}", arguments);
+        Assert.Equal(["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c"], arguments.Take(7));
+        Assert.StartsWith("mcp_servers={vericairn={command=\"vericairn-under-test\"", arguments[7], StringComparison.Ordinal);
+        Assert.Contains($"\"VERICAIRN_HOME\"={Toml(home)}", arguments[7], StringComparison.Ordinal);
+        Assert.Equal("projects." + Toml(workspace) + ".trust_level=\"untrusted\"", arguments[9]);
         Assert.StartsWith("/goal Does the widget build and pass its tests? Checks: the tests pass;", arguments[^1], StringComparison.Ordinal);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
     }

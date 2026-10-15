@@ -44,5 +44,7 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
         return inner.Command(context);
     }
 
+    public LaunchContext Prepare(LaunchContext context) => inner.Prepare(context);
+
     public HarnessSignal? Read(string line) => inner.Read(line);
 }

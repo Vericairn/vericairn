@@ -40,7 +40,7 @@ public sealed class CodexLauncher : IAgentLauncher
             "Needs Codex's goals feature: before a run is recorded it reads codex features list, and refuses, saying why, when goals is not enabled or its state cannot be read.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
-            "The MCP servers of the user's own Codex configuration stay configured beside vericairn.",
+            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; the complete MCP table is overridden to vericairn only.",
             "Implemented against codex --help, codex exec --help and a stand-in process that speaks its events; not yet qualified against a live Codex.",
         ],
         [new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
@@ -86,23 +86,49 @@ public sealed class CodexLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public LaunchContext Prepare(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "codex");
+        Directory.CreateDirectory(home);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        File.WriteAllText(Path.Combine(home, "config.toml"), "mcp_servers=" + Mcp(context) + "\n[features]\ngoals = true\n");
+        string? original = context.Environment.GetValueOrDefault("CODEX_HOME");
+        if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
+        {
+            original = Path.Combine(user, ".codex");
+        }
+
+        // Import only Codex's explicitly provisioned harness login, never configuration, MCP OAuth stores, plugins or hooks.
+        if (original is not null && File.Exists(Path.Combine(original, "auth.json")))
+        {
+            string login = Path.Combine(home, "auth.json");
+            File.Copy(Path.Combine(original, "auth.json"), login, overwrite: false);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(login, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
+        var environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CODEX_HOME"] = home };
+        return context with { Environment = environment };
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var command = new List<string>(HarnessProcess.Command(context.Settings, "codex")) { "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write" };
-        command.Add("-c");
-        command.Add("mcp_servers.vericairn.command=" + Toml(context.McpServer[0]));
-        command.Add("-c");
-        command.Add("mcp_servers.vericairn.args=[" + string.Join(", ", context.McpServer.Skip(1).Select(Toml)) + "]");
-        foreach ((string name, string value) in context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal))
-        {
-            command.Add("-c");
-            command.Add($"mcp_servers.vericairn.env.{name}={Toml(value)}");
-        }
-
-        command.Add("/goal " + context.Condition);
-        return command;
+        return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
+            "-c", "mcp_servers=" + Mcp(context),
+            "-c", "projects." + Toml(context.Workspace) + ".trust_level=\"untrusted\"",
+            "/goal " + context.Condition];
     }
+
+    private static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";
 
     /// <summary>Each completed turn reports the tokens it spent, its input and output tokens, added to the run's tally.</summary>
     public HarnessSignal? Read(string line)

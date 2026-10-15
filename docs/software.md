@@ -298,7 +298,7 @@ Limitations: the launchers are implemented against the harnesses' `--help` and t
 their streams, and none is yet qualified against a live harness. Windows has no signal a windowless process receives, so a
 harness that does not watch the stop file is contained by escalation. Files of the operating-system user stay readable to
 the harness, which only running the worker as another user changes. A process that deliberately leaves its POSIX process
-group is outside that boundary; the worker is not an OS security sandbox. Codex keeps the MCP servers of the user's own configuration beside vericairn. No MCP tool launches or
+group is outside that boundary; the worker is not an OS security sandbox. Codex replaces user configuration with its per-run configuration and vericairn-only MCP table. No MCP tool launches or
 stops a run.
 
 ## The synthetic migration
@@ -318,3 +318,5 @@ A worker state-file write failure after launch leaves the run dispatched and res
 Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
 
 Harnesses enter a containment boundary before executing: a Windows Job Object (no breakaway), or a new POSIX process group on Linux and macOS. Stops signal the group; escalation terminates the whole boundary. Root exit alone does not establish containment. The worker observes every remaining member exited (including kernel zombie exit state) before settling. A failed escalation is retained in local state and settlement evidence and retried, without claiming a kill. Failure to observe the boundary leaves the allowance reserved. A POSIX process that deliberately creates another session can escape this same-user boundary; use OS isolation for hostile code.
+
+Codex runs with a fresh per-run `CODEX_HOME`: only its provisioned harness `auth.json` login is imported, with owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The run configuration and a complete `mcp_servers` command-line override name only `vericairn`; project configuration is untrusted. Claude Code continues to use `--strict-mcp-config`. These are configuration boundaries, not filesystem isolation: the harness still runs as the worker user and can read that user's files or keychain. Use a dedicated OS identity with only the approved harness login for credential isolation. See the [Codex configuration documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
