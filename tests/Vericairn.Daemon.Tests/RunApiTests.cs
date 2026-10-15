@@ -65,7 +65,8 @@ public class RunApiTests
             Assert.Equal("dispatched", started.Status);
             Assert.Equal("Example/widget, branch work/w-1", started.Workspace);
             Assert.Equal(60, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
-            RunRow row = await Until(api, started.Run, r => r.Observed);
+            // The stand-in holds SIGTERM off once it has reported, so the stop waits for the report.
+            RunRow row = await Until(api, started.Run, r => r.Observed && File.Exists(report));
             Assert.Equal("dispatched", row.Status);
             Assert.Equal(60, row.Charged.GetProperty("wallMinutes").GetInt64());
             LedgerRow ledger = Assert.Single(api.Runs().Goals);

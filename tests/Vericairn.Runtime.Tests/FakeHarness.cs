@@ -87,6 +87,7 @@ internal static class FakeHarness
             ["directory"] = Directory.GetCurrentDirectory(),
             ["process"] = Environment.ProcessId,
         };
+        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "ignore-stop" or "ack-stop" ? HoldTerminate() : null;
         File.AppendAllText(report, line.ToJsonString() + "\n");
         bool listing = arguments.Contains("features") && arguments.Contains("list");
         switch (scenario)
@@ -219,38 +220,44 @@ internal static class FakeHarness
     private static string Text(JsonObject reply) => reply["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? reply.ToJsonString();
 
     /// <summary>Works until stopped: acknowledging a stop, by the stop file or SIGTERM, and exiting; or ignoring every stop until killed.</summary>
-    private static int Linger(bool acknowledge)
+    /// <summary>Set when SIGTERM reaches a stand-in that lingers.</summary>
+    private static readonly ManualResetEventSlim Terminated = new(false);
+
+    /// <summary>
+    /// Holds SIGTERM off for a stand-in that lingers and notes that it came. It is in place before the stand-in reports, so a test that
+    /// waits for the report never stops a stand-in whose handler is not yet set, which SIGTERM would end before any escalation.
+    /// </summary>
+    private static PosixSignalRegistration? HoldTerminate()
     {
-        using var terminated = new ManualResetEventSlim(false);
-        PosixSignalRegistration? registration = null;
         try
         {
-            registration = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+            return PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
             {
                 context.Cancel = true;
-                terminated.Set();
+                Terminated.Set();
             });
         }
         catch (PlatformNotSupportedException)
         {
             // Windows sends no SIGTERM to a windowless process.
+            return null;
         }
+    }
 
-        using (registration)
+    private static int Linger(bool acknowledge)
+    {
+        string? stopFile = Environment.GetEnvironmentVariable("VERICAIRN_STOP_FILE");
+        DateTimeOffset until = DateTimeOffset.UtcNow.AddMinutes(2);
+        while (DateTimeOffset.UtcNow < until)
         {
-            string? stopFile = Environment.GetEnvironmentVariable("VERICAIRN_STOP_FILE");
-            DateTimeOffset until = DateTimeOffset.UtcNow.AddMinutes(2);
-            while (DateTimeOffset.UtcNow < until)
+            Emit("working");
+            if (acknowledge && (Terminated.IsSet || (stopFile is not null && File.Exists(stopFile))))
             {
-                Emit("working");
-                if (acknowledge && (terminated.IsSet || (stopFile is not null && File.Exists(stopFile))))
-                {
-                    Emit("""{"vericairn":"stop-acknowledged"}""");
-                    return 0;
-                }
-
-                Thread.Sleep(200);
+                Emit("""{"vericairn":"stop-acknowledged"}""");
+                return 0;
             }
+
+            Thread.Sleep(200);
         }
 
         return 0;
