@@ -41,6 +41,9 @@ public class LivingDocumentJourneyTests
             CliHarness.Outcome declared = CliHarness.Ok("--estate", root, "--json", "records", "new", "living-document", "--by", op, "--body", CliHarness.WriteJson(scratch, "declaration.json", $$"""{"path":"docs/overview.md","title":"Overview","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"summary":"Says what the widget is and where its releases are."}"""));
             Assert.Contains("Living documents: 0 due of 1 declared", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
 
+            // The product record is revised after the declaration named it; releases now name the revision, and the trigger follows.
+            product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--supersedes", product, "--body", CliHarness.WriteJson(scratch, "product-revised.json", Product.Replace("A widget.", "A widget, revised.", StringComparison.Ordinal))).Id;
+
             // Release 0.2.0 runs through intent, effect, acceptance and publication.
             string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
             provider.CompleteRun("Example/widget", run, true, "0.2.0");
@@ -204,6 +207,9 @@ public class LivingDocumentJourneyTests
             CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Contains("README.md  due at refuse", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "Holds after 0.2.0.", "--commit", second);
+
+            // The product record is revised; the README's trigger, naming the first revision, still holds the next release to its content.
+            product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--supersedes", product, "--body", CliHarness.WriteJson(scratch, "product-revised.json", Product.Replace("A widget.", "A widget, revised.", StringComparison.Ordinal))).Id;
 
             // An edit after the review, committed: 0.3.0 is refused with the commits and hashes, until the README is reviewed again.
             File.AppendAllText(Path.Combine(repo, "README.md"), "Now with a claim nobody reviewed.\n");

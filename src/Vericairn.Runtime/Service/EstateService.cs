@@ -832,14 +832,15 @@ public sealed class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>
-    /// Reads each refuse-level document of the product in another repository at the commit a release would build, where a clone of it
-    /// is registered here: those whose bytes differ from their latest review, and what was compared or could not be.
+    /// Reads each refuse-level document of the product (named by any revision of its record) in another repository at the commit a
+    /// release would build, where a clone of it is registered here: those whose bytes differ from their latest review, and what was
+    /// compared or could not be.
     /// </summary>
     private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, string product, string reference)
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.Triggers(d.Declaration).Any(t => t.On == "release" && t.Product == product)))
+        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.NamesProduct(model, d.Declaration, product)))
         {
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;

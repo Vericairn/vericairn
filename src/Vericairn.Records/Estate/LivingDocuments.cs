@@ -104,11 +104,36 @@ public static class LivingDocuments
             .Select(d => Evaluate(model, d)).ToList();
     }
 
-    /// <summary>The documents of a product that close its release gate: those whose release trigger names it and that are due at level refuse or unavailable while they declare refuse.</summary>
+    /// <summary>
+    /// The documents of a product that close its release gate: those whose release trigger names it, by any revision of the product
+    /// record, and that are due at level refuse or unavailable while they declare refuse.
+    /// </summary>
     public static IReadOnlyList<State> Gate(EstateModel model, string product)
     {
         ArgumentNullException.ThrowIfNull(model);
-        return Derive(model).Where(s => Triggers(s.Declaration).Any(t => t.On == "release" && t.Product == product) && s.Closes).ToList();
+        return Derive(model).Where(s => NamesProduct(model, s.Declaration, product) && s.Closes).ToList();
+    }
+
+    /// <summary>True when one of the declaration's release triggers names the product, by any revision of the product record.</summary>
+    public static bool NamesProduct(EstateModel model, RecordEnvelope declaration, string product)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(declaration);
+        ArgumentNullException.ThrowIfNull(product);
+        string identity = ProductIdentity(model, product);
+        return Triggers(declaration).Any(t => t.On == "release" && t.Product is not null && ProductIdentity(model, t.Product) == identity);
+    }
+
+    /// <summary>
+    /// A product's identity across the revisions of its record: the first record of the chain the named revision belongs to, or the
+    /// id itself when the estate holds no such record. A trigger, a release or a request may name any revision of the product, so
+    /// revising the product record neither silences a trigger nor needs every declaration revised with it.
+    /// </summary>
+    public static string ProductIdentity(EstateModel model, string product)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(product);
+        return model.ById.TryGetValue(product, out RecordEnvelope? record) ? model.Chain(record)[0] : product;
     }
 
     /// <summary>
@@ -225,9 +250,11 @@ public static class LivingDocuments
                 continue;
             }
 
+            // A release of any revision of the product fires a trigger that names any revision of it.
+            string? named = product is null ? null : ProductIdentity(model, product);
             RecordEnvelope? fired = on switch
             {
-                "release" => Newest(model.OfType("release").Where(r => r.Subject?.Id == product && EstateModel.BodyString(r, "status") == "published")),
+                "release" => Newest(model.OfType("release").Where(r => named is not null && r.Subject is not null && ProductIdentity(model, r.Subject.Id) == named && EstateModel.BodyString(r, "status") == "published")),
                 "upgrade" => Newest(model.OfType("migration")),
                 "decision" => Newest(model.Current("decision").Where(d => Documents(d).Any(name => name == path || chain.Contains(name)))),
                 "accepted" => Newest(model.OfType("acceptance").Where(a => a.Subject?.Type == "work-order" && model.ById.TryGetValue(a.Subject.Id, out RecordEnvelope? order) && values.Contains(EstateModel.BodyString(order, "key") ?? string.Empty))),

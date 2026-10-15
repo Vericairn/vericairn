@@ -45,8 +45,9 @@ public static class DocumentGenerators
     }
 
     /// <summary>
-    /// vericairn.records/releases: a table of the published releases of the products its inputs name (all products when none),
-    /// newest first, from release records only. It restates the releases in a document that must name them, held to the records.
+    /// vericairn.records/releases: a table of the published releases of the products its inputs name, by any revision of a product's
+    /// record (all products when none), newest first, from release records only. It restates the releases in a document that must
+    /// name them, held to the records.
     /// </summary>
     private sealed class ReleasesTable : IDocumentGenerator
     {
@@ -61,8 +62,9 @@ public static class DocumentGenerators
                 return null;
             }
 
+            HashSet<string> products = inputs.Select(i => LivingDocuments.ProductIdentity(model, i)).ToHashSet(StringComparer.Ordinal);
             List<RecordEnvelope> published = model.Current("release")
-                .Where(r => EstateModel.BodyString(r, "status") == "published" && (inputs.Count == 0 || inputs.Contains(r.Subject?.Id ?? string.Empty)))
+                .Where(r => EstateModel.BodyString(r, "status") == "published" && (inputs.Count == 0 || (r.Subject is not null && products.Contains(LivingDocuments.ProductIdentity(model, r.Subject.Id)))))
                 .OrderByDescending(r => EstateModel.BodyString(r, "publishedAt"), StringComparer.Ordinal).ThenByDescending(r => r.Id, StringComparer.Ordinal).ToList();
             var text = new StringBuilder("| Version | Published | Release |\n|---|---|---|\n");
             foreach (RecordEnvelope release in published)
