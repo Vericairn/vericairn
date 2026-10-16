@@ -42,6 +42,33 @@ as the [install guide](docs/releases/0.6.1/install.md) describes.
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
 
+## Install the command line and SDK
+
+NuGet distribution is prepared for 0.7.0. Once that release's packages are published, install the command
+line with the .NET 10 SDK on Linux, macOS or Windows:
+
+```sh
+dotnet tool install --global dotnet-vc
+dotnet vc version
+dotnet vc doctor
+dotnet vc records describe
+```
+
+The global tool directory must be on PATH, as the installer describes. A repository can instead keep a
+local tool manifest; see the [installation draft](docs/install.md). The tool is framework-dependent; the
+self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
+also carry the Secure Enclave helper. The NuGet tool does not bundle that helper or Workbench.
+
+In a .NET 10 project, install the SDK with:
+
+```sh
+dotnet add package Vericairn
+```
+
+`Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
+and assemblies. See the [SDK guide](docs/api-v1.md#the-sdk). The packages contain Community code only.
+Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
+
 ## What is here
 
 - `Vericairn.Records`: record formats 1 and 2 (canonical JSON, ULIDs, content hashes, signed records, devices
@@ -120,9 +147,9 @@ release and pins the one it runs on.
 
 Development is supported on all three. Requires the .NET SDK pinned in `global.json` and git on the PATH.
 Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
-every platform. Continuous integration builds and tests on all three operating systems for main and manual runs,
-and on Linux for pull requests. A separate workflow scans the commits of every pushed branch and pull request
-for secrets with a pinned, checksum-verified gitleaks.
+every platform. Continuous integration builds, tests, packs and checks local tool and SDK installation on all three
+operating systems for main, pull requests and manual runs. A separate workflow scans the commits of every pushed
+branch and pull request for secrets with a pinned, checksum-verified gitleaks.
 The release workflow builds the Secure Enclave helper on macOS. This repository's solution contains no iOS or Android
 client, so its build and tests make no mobile-platform qualification claim.
 

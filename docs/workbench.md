@@ -30,6 +30,10 @@ Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attent
 
 ## Running it
 
+Workbench continues to ship in self-contained archives with `vericairn` beside it. The `dotnet-vc` NuGet
+tool, invoked as `dotnet vc`, installs the command line only; it does not install Workbench or replace
+that companion executable. See the [installation draft](install.md).
+
 ```sh
 vericairn-workbench --estate <estate root> [--as <principal id>]
 ```
