@@ -2,6 +2,8 @@
 
 Every release of Vericairn carries its own documentation set, one directory per version under `docs/releases/<version>/`. A set is written for the release it documents and then frozen: nothing in a released set is edited afterwards, and a correction goes into the next version's set with a note that says what it corrects. The maintained documents at `docs/` are the drafts for the next release; the frozen copies in a set are the record of what shipped.
 
+The [0.6.0 set](0.6.0/README.md), prepared before its release build, follows published release 0.5.2. It covers Community goals and evaluations, the worker and coding-agent launchers, roster routing and asks, the progress report, and pairing with a runtime over the local network. It keeps the two record-format documents under their own names, as 0.5.2 did; from this set `documents.json` explicitly requires both alongside `record-format.md`. Acceptance and publication follow the documentation freeze and are recorded in the estate.
+
 ## What a set holds
 
 | Document | Written by | What it is |
@@ -13,6 +15,7 @@ Every release of Vericairn carries its own documentation set, one directory per 
 | `api-reference.md` | the build tooling (`vericairn-docs generate`) | Every API operation with parameters, bodies and responses, from the OpenAPI document the daemon serves |
 | `record-reference.md` | the build tooling (`vericairn-docs generate`) | Every record type with its subject rule and body fields, from the record type registry |
 | `record-format.md` | a person, frozen copy | The record format document as released |
+| `record-format-v1.md`, `record-format-v2.md` | a person, frozen copies | The base format and format 2's changes, both required by the declaration from 0.6.0 |
 | `api.md` | a person, frozen copy | The API document as released: transports, outcomes, problem codes |
 | `software.md` | a person, frozen copy | The software journey as released: the git adapter, checks, the release provider |
 | `workbench.md` | a person, frozen copy | Workbench as released: what exists, the keyboard, running it, the probe, limitations (declared from 0.4.0) |
