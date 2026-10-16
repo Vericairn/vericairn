@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Vericairn.Records.Canonical;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
+using Vericairn.Records.Model;
+using Vericairn.Records.Types;
+using Vericairn.Runtime.Providers;
+
+namespace Vericairn.Runtime.Workers;
+
+/// <summary>A named, local launcher configuration. Settings are machine bindings and never copied into records.</summary>
+/// <param name="Name">Portable configuration identity.</param>
+/// <param name="Launcher">The launcher served.</param>
+/// <param name="Policy">Explicit choices and restrictions, in the recorded execution-policy form.</param>
+/// <param name="Models">The model selectors this configuration admits; no ambient model is admitted.</param>
+/// <param name="Settings">Local launcher settings.</param>
+public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null);
+
+/// <summary>The scopes and values a launcher implements, independently of a configuration's narrower restrictions.</summary>
+/// <param name="Scopes">Supported choice scopes, in precedence order.</param>
+/// <param name="Efforts">The harness's own effort vocabulary; empty only when there is no effort control.</param>
+/// <param name="Providers">Supported model-provider identities.</param>
+/// <param name="Destinations">Supported logical inference destinations.</param>
+/// <param name="DataBoundaries">Supported protection policies, not inferred from a prompt.</param>
+/// <param name="ProviderDefault">Whether an explicit provider-default effort choice is supported.</param>
+public sealed record RunCapabilities(IReadOnlyList<string> Scopes, IReadOnlyList<string> Efforts, IReadOnlyList<string> Providers,
+    IReadOnlyList<string> Destinations, IReadOnlyList<string> DataBoundaries, bool ProviderDefault = false)
+{
+    /// <summary>A launcher without execution support admits no choices.</summary>
+    public static RunCapabilities Unsupported { get; } = new([], [], [], [], []);
+}
+
+/// <summary>One policy source; record identities and hashes pin the exact revision that supplied it.</summary>
+/// <param name="Scope">launcher, roster, goal, assignment or run.</param>
+/// <param name="Source">A portable identity, including a role suffix where applicable.</param>
+/// <param name="Policy">Choices and non-overridable restrictions.</param>
+/// <param name="Record">The contributing record, when any.</param>
+/// <param name="Hash">Its exact hash, when any.</param>
+public sealed record RunPolicySource(string Scope, string Source, JsonElement Policy, string? Record = null, string? Hash = null);
+
+/// <summary>Deterministic execution selection; communication settings are never an input.</summary>
+public static class RunSelection
+{
+    /// <summary>The precedence shared by every launcher, which may support fewer scopes.</summary>
+    public static readonly string[] Scopes = ["launcher", "roster", "goal", "assignment", "run"];
+
+    /// <summary>Resolve choices and retain every contributing source, including choices later overridden.</summary>
+    public static JsonObject Resolve(RunConfiguration configuration, RunCapabilities capabilities, IEnumerable<RunPolicySource> sources, JsonElement? overrides, JsonElement cap)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(capabilities);
+        ArgumentNullException.ThrowIfNull(sources);
+        if (!ExecutionPolicy.IsIdentity(configuration.Name) || !ExecutionPolicy.IsIdentity(configuration.Launcher))
+        {
+            throw new ProviderRefusedException("A launcher configuration needs portable identities.");
+        }
+
+        List<RunPolicySource> layers = [new("launcher", configuration.Name, configuration.Policy), .. sources];
+        if (overrides is JsonElement explicitChoices)
+        {
+            layers.Add(new("run", "explicit-run", JsonSerializer.SerializeToElement(new { choices = explicitChoices })));
+        }
+
+        layers = layers.OrderBy(s => Array.IndexOf(Scopes, s.Scope)).ToList();
+        var requested = new JsonObject();
+        var provenance = new JsonArray();
+        foreach (RunPolicySource source in layers)
+        {
+            var findings = new FindingList();
+            ExecutionPolicy.Validate(new BodyReader(source.Policy, "execution", findings, 2));
+            if (findings.HasErrors || !Scopes.Contains(source.Scope, StringComparer.Ordinal) || !capabilities.Scopes.Contains(source.Scope, StringComparer.Ordinal))
+            {
+                throw new ProviderRefusedException("The execution policy is invalid or uses a scope this launcher does not support.");
+            }
+
+            if (source.Policy.TryGetProperty("choices", out JsonElement choices))
+            {
+                foreach (JsonProperty choice in choices.EnumerateObject())
+                {
+                    requested[choice.Name] = choice.Value.GetString();
+                }
+            }
+
+            var entry = new JsonObject { ["scope"] = source.Scope, ["source"] = source.Source, ["policy"] = JsonNode.Parse(source.Policy.GetRawText()) };
+            if (source.Record is not null)
+            {
+                entry["record"] = source.Record;
+                entry["hash"] = source.Hash;
+            }
+
+            provenance.Add(entry);
+        }
+
+        foreach (RunPolicySource source in layers)
+        {
+            if (source.Policy.TryGetProperty("restrictions", out JsonElement restrictions))
+            {
+                Restrict(requested, restrictions, cap);
+            }
+        }
+
+        return new JsonObject
+        {
+            ["configuration"] = configuration.Name,
+            ["configurationHash"] = ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(configuration)))),
+            ["requested"] = requested,
+            ["provenance"] = provenance,
+        };
+    }
+
+    /// <summary>The recorded default and role policies, without discarding the roster's restrictions when a goal supplies its own role.</summary>
+    public static IReadOnlyList<RunPolicySource> Sources(EstateModel model, RecordEnvelope goal, RecordEnvelope assignment)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(goal);
+        ArgumentNullException.ThrowIfNull(assignment);
+        string role = WorkView.OrderOfAssignment(model, assignment) is RecordEnvelope order ? Routing.RoleOf(order) : Routing.DefaultRole;
+        var sources = new List<RunPolicySource>();
+        Add(RunWatchSettings.Roster(model, goal), "roster", true);
+        Add(goal, "goal", true);
+        Add(assignment, "assignment", false);
+        return sources;
+
+        void Add(RecordEnvelope? record, string scope, bool roles)
+        {
+            if (record is null)
+            {
+                return;
+            }
+
+            if (record.Body.TryGetProperty("execution", out JsonElement policy))
+            {
+                sources.Add(new(scope, scope, policy, record.Id, record.ComputedHash));
+            }
+
+            if (roles && record.Body.TryGetProperty("roles", out JsonElement entries))
+            {
+                foreach (JsonElement entry in entries.EnumerateArray().Where(r => r.GetProperty("role").GetString() == role))
+                {
+                    if (entry.TryGetProperty("execution", out JsonElement rolePolicy))
+                    {
+                        sources.Add(new(scope, role, rolePolicy, record.Id, record.ComputedHash));
+                    }
+                }
+            }
+        }
+    }
+
+    private static void Restrict(JsonObject choices, JsonElement restrictions, JsonElement cap)
+    {
+        foreach ((string restriction, string choice) in new[] { ("requiredModel", "model"), ("requiredEffort", "effort"), ("dataBoundary", "dataBoundary") })
+        {
+            if (restrictions.TryGetProperty(restriction, out JsonElement value) && choices[choice]?.GetValue<string>() != value.GetString())
+            {
+                throw new ProviderRefusedException($"The selected {choice} conflicts with an inherited {restriction} restriction.");
+            }
+        }
+
+        foreach ((string restriction, string choice) in new[] { ("permittedProviders", "provider"), ("permittedDestinations", "destination") })
+        {
+            if (restrictions.TryGetProperty(restriction, out JsonElement allowed) && !allowed.EnumerateArray().Any(v => v.GetString() == choices[choice]?.GetValue<string>()))
+            {
+                throw new ProviderRefusedException($"The selected {choice} is outside an inherited {restriction} restriction.");
+            }
+        }
+
+        if (restrictions.TryGetProperty("maxCurrency", out JsonElement cost)
+            && (AgentRuns.Amount(cap, "currency") is not long amount || amount > cost.GetProperty("amount").GetInt64() || AgentRuns.CurrencyUnit(cap) != cost.GetProperty("unit").GetString()))
+        {
+            throw new ProviderRefusedException("The run's currency reservation is absent or exceeds an inherited cost bound.");
+        }
+    }
+}
