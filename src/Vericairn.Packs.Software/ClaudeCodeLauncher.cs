@@ -28,6 +28,14 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public RunPreflight Probe(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RefuseManagedSettings();
+        return ClaudeCodeInventory.Establish(context, qualifying: true);
+    }
+
+    /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "system", "init");
 
     /// <inheritdoc />
@@ -59,7 +67,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             "Imports only a provisioned pro or max OAuth login into a fresh run configuration; implicit keychain login, managed accounts and environment credentials are not qualified.",
             "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
             "Excludes user, project and local setting sources and repository customizations; preserves and inventories the built-in goal evaluator. Selects nine built-in tools explicitly and refuses detected managed settings.",
-            "Qualifies only Claude Code 2.1.296 with every required flag confirmed by help, strict explicit MCP and two inventory checks. Tested with stand-in executables; no live Claude Code or sign-in qualification.",
+            "Shipped baseline: Claude Code 2.1.296. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Every required flag is confirmed by help, with strict explicit MCP and two inventory checks. Tested with stand-in executables; no live Claude Code or sign-in qualification.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "claude")]);
 

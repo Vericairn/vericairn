@@ -46,6 +46,9 @@ public static class Scopes
     /// <summary>Spend: grant a goal's budget by activating or resuming a goal the grantee sponsors; the operator holds it without a grant.</summary>
     public const string Spending = "spending";
 
+    /// <summary>Qualify and revoke exact harness versions from probes; only human grantees can exercise it.</summary>
+    public const string Qualify = "qualify";
+
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending];
+    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify];
 }

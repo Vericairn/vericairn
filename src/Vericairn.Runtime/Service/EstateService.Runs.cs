@@ -175,6 +175,7 @@ public sealed partial class EstateService
         environment["VERICAIRN_MCP_CONFIG"] = directory.McpConfiguration;
         environment["VERICAIRN_CONDITION"] = plan.Condition;
         LaunchContext launch;
+        RunPreflight preflight;
         string? admittedBinding;
         try
         {
@@ -195,7 +196,12 @@ public sealed partial class EstateService
             File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
             launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits, Element(plan.Selection)));
             environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
-            RunPreflight preflight = launcher.Preflight(launch);
+            preflight = launcher.Probe(launch);
+            lock (gate)
+            {
+                if (HarnessAdmission.Admit(session.Load(), launcher.Launcher, preflight) is JsonObject admission)
+                    plan.Selection["harnessAdmission"] = admission;
+            }
             admittedBinding = preflight.LocalBindingHash;
             RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
             plan.Selection["harnessVersion"] = preflight.HarnessVersion;
@@ -244,6 +250,11 @@ public sealed partial class EstateService
             if (!SelectionStillCurrent(model, goal!, plan, configuration, launcher, request))
             {
                 return RunProblem(pending, "not-started", "refused", "Execution defaults or restrictions changed during preparation; start a newly admitted run. Nothing was recorded.");
+            }
+
+            if (!HarnessAdmission.StillCurrent(model, launcher.Launcher, preflight, plan.Selection["harnessAdmission"]))
+            {
+                return RunProblem(pending, "not-started", "refused", "Harness qualification changed during preparation; nothing was recorded or dispatched.");
             }
 
             RunWatchSettings watch = RunWatchSettings.Resolve(model, goal!, launcher);
@@ -351,10 +362,19 @@ public sealed partial class EstateService
                 {
                     throw new ProviderRefusedException("Execution defaults or restrictions changed after the intent; no harness was dispatched.");
                 }
-                RunPreflight dispatchPreflight = launcher.Preflight(launch);
+                RunPreflight dispatchPreflight = launcher.Probe(launch);
+                // Probes start subprocesses and can take time. Judge authority again from the records after they finish.
+                dispatchModel = session.Load();
+                dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
+                if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
+                {
+                    throw new ProviderRefusedException("Execution defaults or restrictions changed during the final probes; no harness was dispatched.");
+                }
+                JsonObject? dispatchAdmission = HarnessAdmission.Admit(dispatchModel, launcher.Launcher, dispatchPreflight);
                 JsonObject dispatchEnvironment = RunEnvironment.Admit(configuration.EnvironmentPolicy, dispatchPreflight, environment,
                     [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
                 if (!JsonNode.DeepEquals(dispatchEnvironment, plan.Selection["environment"])
+                    || !JsonNode.DeepEquals(dispatchAdmission, plan.Selection["harnessAdmission"])
                     || (dispatchPreflight.ModelRevision ?? "unknown") != plan.Selection["resolvedRevision"]!.GetValue<string>()
                     || dispatchPreflight.HarnessVersion != plan.Selection["harnessVersion"]!.GetValue<string>()
                     || dispatchPreflight.LocalBindingHash != admittedBinding)

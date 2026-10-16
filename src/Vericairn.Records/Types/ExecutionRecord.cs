@@ -21,6 +21,7 @@ internal static class ExecutionRecord
             execution.Hash("configurationHash", true);
             Identity(execution, "resolvedRevision");
             Identity(execution, "harnessVersion");
+            if (execution.Nested("harnessAdmission", false) is BodyReader admission) Harness(context, execution, admission);
             Identity(execution, "role");
             execution.Enum("adapter", true, "disabled");
             string? package = execution.Text("contextPackage", true, 71);
@@ -149,6 +150,40 @@ internal static class ExecutionRecord
     private static void Identity(BodyReader reader, string field, bool required = true)
     {
         if (reader.Text(field, required, 160) is string value && !ExecutionPolicy.IsIdentity(value)) reader.Error("execution.identity", field, "A portable execution identity contains no machine path or environment value.");
+    }
+
+    private static void Harness(ValidationContext context, BodyReader execution, BodyReader admission)
+    {
+        string? kind = admission.Enum("kind", true, "baseline", "qualification");
+        string? launcher = admission.Enum("launcher", true, "codex", "claude-code");
+        string? version = admission.Text("version", true, 80);
+        if (version is not null && (!HarnessQualificationType.ExactVersion(version)
+            || !execution.Element.TryGetProperty("harnessVersion", out JsonElement harnessVersion) || harnessVersion.ValueKind != JsonValueKind.String || harnessVersion.GetString() != version))
+            context.Error("operation.harness-admission", "Harness admission names the execution's exact version.");
+        if (launcher != EstateModel.BodyString(context.Record, "provider"))
+            context.Error("operation.harness-admission", "Harness admission names the operation's launcher.");
+        BodyReader? probes = admission.Nested("probes", true);
+        if (probes is not null)
+        {
+            foreach (string name in HarnessQualificationType.ProbeNames) probes.Hash(name, true);
+            probes.NoOtherKeys();
+        }
+        if (kind == "qualification")
+        {
+            string? id = admission.Ulid("record", true);
+            string? hash = admission.Hash("hash", true);
+            RecordEnvelope? qualification = context.RequireReference("execution.harnessAdmission.record", id, "harness-qualification");
+            RecordEnvelope intent = context.Model.ById[context.Model.Chain(context.Record)[0]];
+            if (qualification is not null && (qualification.ComputedHash != hash
+                || EstateModel.BodyString(qualification, "status") != "qualified"
+                || EstateModel.BodyString(qualification, "launcher") != launcher || EstateModel.BodyString(qualification, "version") != version
+                || !GoalRules.Before(qualification, intent)
+                || (context.Model.SupersededBy.TryGetValue(qualification.Id, out string? next) && GoalRules.Before(context.Model.ById[next], intent))
+                || probes is null || !qualification.Body.TryGetProperty("probes", out JsonElement recorded)
+                || CanonicalJson.Serialize(recorded) != CanonicalJson.Serialize(probes.Element)))
+                context.Error("operation.harness-admission", "Harness admission pins the matching qualification and probe digests, unrevoked when the intent was recorded.");
+        }
+        admission.NoOtherKeys();
     }
 
     private static bool MatchesOrigin(RecordEnvelope origin, string scope, string name, JsonElement policy) =>

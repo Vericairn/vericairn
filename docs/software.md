@@ -526,8 +526,9 @@ new run would be fenced. The runs' own files, their state, output and MCP config
 the machine that ran them, never in a record or a repository.
 
 Limitations: the launchers are tested with stand-in processes; no live coding agent or live sign-in has been qualified.
-RUN-02 qualifies the launcher protocol for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`, using
-stand-in executables for version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
+RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`. RUN-03 lets an
+authorized human qualify another exact installed version from the same local probes, without a product release.
+Stand-in executables test version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
 help established the flag baselines; these qualification tests do not start a real coding agent or its configured MCP
 server. Windows has no graceful signal for a windowless process, so a harness that
 does not watch the stop file needs escalation. Files and keychains accessible to the worker's operating-system user
@@ -897,21 +898,76 @@ inventory check when another path check is undecidable.
 An input that cannot be canonically fingerprinted leaves deduplication and repetition unverified;
 its recognizable credential, network, path and inventory checks still run and can stop the run.
 
-### Native inventory qualification (RUN-02)
+### Native inventory qualification (RUN-02 and RUN-03)
 
-Qualification belongs to a launcher and an exact version range, not to a harness name in general:
+Qualification belongs to a launcher and one exact observed version. These compiled baselines remain admitted:
 
-| Launcher | Qualified version range | Admission evidence |
+| Launcher | Shipped baseline | Admission evidence |
 |---|---|---|
-| `codex` | `0.159.0-alpha.12.1` only; both endpoints are that exact version | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
-| `claude-code` | `2.1.296` only; both endpoints are that exact version | Exact `--version` response and documented flags in `--help`; fixed built-in tool selection; fresh login-only home; no external setting sources; strict, verified explicit MCP file; configuration and instruction inspection. |
+| `codex` | `0.159.0-alpha.12.1` | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
+| `claude-code` | `2.1.296` | Exact `--version` response and documented flags in `--help`; fixed built-in tool selection; fresh login-only home; no external setting sources; strict, verified explicit MCP file; configuration and instruction inspection. |
 | `generic` | None | No complete inventory implementation. Worker dispatch stays refused, before executing its command. |
 
-A missing flag, failed or malformed probe, missing required feature, unexpected enabled feature, unlisted version,
+A missing flag, failed or malformed probe, missing required feature, unexpected enabled feature, unqualified version,
 extra MCP server (even disabled), altered transport, duplicate MCP field or unaccounted MCP option refuses admission.
 Help must declare the short aliases used by the commands too: Codex's `-c` and Claude Code's `-p`.
 The generic launcher cannot inherit either native launcher's qualification. No version before or after the two exact
 versions above is implicitly qualified, including another Codex alpha build.
+
+An operator can qualify an updated installation with either command:
+
+```sh
+vericairn worker qualify --launcher codex --by <human-principal>
+vericairn worker qualify --launcher claude-code --by <human-principal>
+```
+
+Only a human with the operator role, or a human explicitly granted the `qualify` scope by an operator's authority
+record, can qualify or revoke. `local-engineering` and `administer` do not grant qualification. An agent or service
+principal cannot qualify any harness, even with a `qualify` grant. Authority is checked before the probes and again
+when the record is authored. Validation judges the grant at authorship: a later grant cannot authorize an earlier
+act, and withdrawing the grant does not erase an earlier authorized qualification.
+
+The command uses the runtime's installed executable, or the local `--setting command=<executable or JSON array>`
+binding. It prepares a temporary isolated workspace and harness home, imports only the permitted harness login,
+runs the launcher's own probes and removes that scratch state. It does not start a coding agent or the configured
+MCP server. The signed `harness-qualification` record uses record format 2 and holds only `launcher`, `version`,
+`status: "qualified"` and these six `probes` digests:
+
+| Probe | What is digested after the check succeeds |
+|---|---|
+| `version` | The exact bounded version response; no range inference. |
+| `flags` | The complete trimmed help responses whose option declarations were checked. |
+| `tools` | The closed built-in tool list, executable and entry-file content identities; Codex also includes its complete observed feature listing. |
+| `configuration` | The isolated configuration policy and platform identity, including disabled extensions and normalized command bindings. |
+| `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
+| `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests its reported authentication status. |
+
+Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
+The MCP check first compares the actual local command, arguments and environment to the generated configuration;
+only then does its digest normalize run-specific paths and acting-principal bindings. A record from another machine
+is usable only when all six local probe digests match. Different help, executable content, configuration boundaries
+or effective MCP facts require a new qualification. Every actual workspace is still inspected and its instruction
+content inventoried separately under RUN-01.
+
+Admission repeats the probes before intent and immediately before dispatch. The intent's additive
+`execution.harnessAdmission` names `kind: "baseline"` or `kind: "qualification"`, the launcher, version and probe
+digests. A qualification admission also pins its exact `record` id and `hash`. A missing, superseded, revoked or
+mismatching qualification refuses a non-baseline version. The final record check happens after the dispatch probes,
+so a revocation recorded while they run is also seen. The existing RUN-01 inventory policy and execution restrictions
+still apply; qualifying does not update or bypass that policy. WATCH-01 sees the same admitted inventory and selection.
+
+To revoke, an authorized human authors a new `harness-qualification` record with the original launcher, version and
+probe digests, `status: "revoked"`, and `supersedes` naming the original record. The CLI's existing
+`records new harness-qualification --by <human-principal> --supersedes <qualification-id> --body <body-file>`
+authors that revision; `records describe harness-qualification` describes its fields. A superseding record only
+revokes; requalification creates a new record from fresh probes. Earlier run intents retain their pinned admission
+as historical evidence. Revoking a record does not remove the shipped compiled baseline.
+
+Qualification establishes agreement with the launcher's checked protocol and isolation boundaries for that exact
+installation. It does not attest vendor provenance, execute the tools, prove a successful login or model call, certify
+model-dependent behavior, authorize work, accept results, or qualify an event format the launcher cannot observe.
+There is no inferred version range. The existing platform and containment limits below still apply. API v1 adds
+`POST /v1/harness-qualifications`; the MCP tool list is unchanged. Remote is not built.
 
 Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
 `request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,
@@ -933,8 +989,9 @@ in both the generated file and session overrides. This prevents a fresh home fro
 at startup. See the [Codex configuration schema](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json).
 
 The effective feature listing must confirm each required state. The remaining non-tool feature allowlist is explicit
-in [CodexInventory](../src/Vericairn.Packs.Software/CodexInventory.cs); the entire observed feature table and help
-identity contribute to the inventory hash. Only `auth.json` is imported into `CODEX_HOME`; the launcher generates
+in [CodexInventory](../src/Vericairn.Packs.Software/CodexInventory.cs). Effective feature states and help identity
+contribute to the inventory hash; the qualification's tool probe also digests the complete feature listing.
+Only `auth.json` is imported into `CODEX_HOME`; the launcher generates
 `config.toml`. Preflight permits only those files and empty probe scratch directories. It compares the generated
 configuration exactly and refuses detected system configuration or managed preference roots. Feature probes use the
 same overrides as dispatch, after preparation; the ambient user feature configuration is never the qualification.
@@ -975,8 +1032,8 @@ The executable and entry-file hashes must be explicitly admitted by the operator
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
 existing `worker-user`, workspace-audit and process-containment limitations. Cross-platform release qualification
-still requires the builder's three-platform CI run. API v1 stays additive, record format 2 is unchanged, and RUN-02
-adds no MCP tools.
+still requires the builder's three-platform CI run. API v1 stays additive; harness qualifications add a type within
+record format 2, never format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
 refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not

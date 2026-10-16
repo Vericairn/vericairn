@@ -37,7 +37,7 @@ internal static class CodexInventory
     internal static string Configuration(LaunchContext context) => "mcp_servers=" + CodexLauncher.Mcp(context) + "\nprojects=" + CodexLauncher.Projects(context)
         + "\nweb_search=\"disabled\"\nskills.bundled.enabled = false\n[features]\ngoals = true\n" + string.Join('\n', Enabled.Where(n => n != "goals").Select(n => n + " = true").Concat(Disabled.Select(n => n + " = false"))) + "\n";
 
-    internal static RunPreflight Establish(LaunchContext context)
+    internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
     {
         HarnessInventory.CommandPrefix(context, "codex");
         RefuseManagedConfiguration(context);
@@ -46,7 +46,7 @@ internal static class CodexInventory
         HarnessInventory.McpFile(context);
         IReadOnlyList<string> command = new CodexLauncher().Command(context);
         string binding = HarnessInventory.Binding(context, command);
-        string version = HarnessInventory.Version(context, "codex", "codex-cli " + Version, Version);
+        string version = HarnessInventory.Version(context, "codex", "codex-cli " + Version, Version, qualifying);
         string help = HarnessInventory.Probe(context, "codex", "--help");
         HarnessInventory.Flags("codex", help, "-c", "--config", "--enable", "--disable");
         string execHelp = HarnessInventory.Probe(context, "codex", "exec", "--help");
@@ -55,7 +55,7 @@ internal static class CodexInventory
         HarnessInventory.Flags("codex mcp list", mcpHelp, "--json");
         string features = HarnessInventory.Probe(context, "codex", [.. CodexLauncher.Overrides(context), "features", "list"]);
         IReadOnlyDictionary<string, bool> effective = Features(features);
-        CodexLauncher.VerifyMcp(context);
+        string mcp = CodexLauncher.VerifyMcp(context);
         CheckHome();
         string configuration = HarnessInventory.Digest(new
         {
@@ -67,7 +67,16 @@ internal static class CodexInventory
         });
         List<RunComponent> components = HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference");
         HarnessInventory.Recheck(context, command, binding, instructions, codex: true);
-        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding);
+        var probes = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["version"] = HarnessInventory.Digest("codex-cli " + version),
+            ["flags"] = HarnessInventory.Digest(new { help, execHelp, mcpHelp }),
+            ["tools"] = HarnessInventory.Digest(new { tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal), report = HarnessInventory.Digest(features), binary = HarnessInventory.Binary(context, HarnessProcess.Command(context.Settings, "codex")) }),
+            ["configuration"] = HarnessInventory.Digest(new { configuration, platform = HarnessInventory.Platform }),
+            ["login"] = HarnessInventory.Digest(new { boundary = "provisioned-login-only", present = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")) }),
+            ["mcp"] = mcp,
+        };
+        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding, Probes: new(Version, probes));
 
         void CheckHome()
         {

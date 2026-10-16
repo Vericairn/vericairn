@@ -98,6 +98,9 @@ public interface IAgentLauncher
     /// <summary>Establishes the complete effective inventory before intent. An unobservable inventory is unsupported.</summary>
     RunPreflight Preflight(LaunchContext context) => throw new ProviderRefusedException("This launcher cannot establish a complete tool, configuration, dependency and route inventory; RUN-01 dispatch is unsupported.");
 
+    /// <summary>Runs the same read-only probes without admitting a version. The worker must establish baseline or recorded qualification before dispatch.</summary>
+    RunPreflight Probe(LaunchContext context) => Preflight(context);
+
     /// <summary>Reported execution facts, without inferring them from usage, prose or the requested values.</summary>
     HarnessExecution? ReadExecution(string line) => null;
 

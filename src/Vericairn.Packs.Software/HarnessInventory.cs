@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -36,14 +37,38 @@ internal static class HarnessInventory
         return output.Trim();
     }
 
-    public static string Version(LaunchContext context, string executable, string expected, string version)
+    public static string Version(LaunchContext context, string executable, string expected, string version, bool qualifying = false)
     {
-        if (Probe(context, executable, "--version") != expected)
+        string output = Probe(context, executable, "--version");
+        if (!qualifying && output != expected)
         {
             throw new ProviderRefusedException($"The {executable} harness version is not qualified; only {version} is qualified by this launcher.");
         }
-        return version;
+        string prefix = executable == "codex" ? "codex-cli " : "";
+        string suffix = executable == "claude" ? " (Claude Code)" : "";
+        if (!output.StartsWith(prefix, StringComparison.Ordinal) || !output.EndsWith(suffix, StringComparison.Ordinal)
+            || output.Length <= prefix.Length + suffix.Length || !HarnessQualificationType.ExactVersion(output[prefix.Length..(output.Length - suffix.Length)]))
+        {
+            throw new ProviderRefusedException("The harness version probe did not report one exact bounded version; raw output was discarded.");
+        }
+        return output[prefix.Length..(output.Length - suffix.Length)];
     }
+
+    public static string Binary(LaunchContext context, IReadOnlyList<string> command) => Digest(new
+    {
+        executable = ContentHash.Sha256File(Executable(command, context.Environment)),
+        entries = EntryFiles(context, command).Select(ContentHash.Sha256File).ToArray(),
+    });
+
+    // The exact local transport has already been checked. Normalize only its run-specific paths, principal and bindings;
+    // retain code identities and environment names, so qualification can apply to a new run without storing any values.
+    public static string McpEvidence(LaunchContext context, string method) => Digest(new
+    {
+        method, server = "vericairn", transport = "stdio", binary = Binary(context, context.McpServer),
+        environment = context.McpEnvironment.Keys.Order(StringComparer.Ordinal).ToArray(), authority = "acting-principal", count = 1,
+    });
+
+    public static string Platform => System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
 
     public static void Flags(string executable, string help, params string[] required)
     {

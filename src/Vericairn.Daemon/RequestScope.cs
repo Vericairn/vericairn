@@ -187,6 +187,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/launchers"] = null,
         ["GET /v1/runs"] = null,
         ["POST /v1/runs"] = typeof(RunStartRequest),
+        ["POST /v1/harness-qualifications"] = typeof(HarnessQualifyRequest),
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
@@ -255,6 +256,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
+        [typeof(HarnessQualifyRequest)] = (_, r, d) => Acting(((HarnessQualifyRequest)r).By, d),
         [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
         [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
 
