@@ -253,7 +253,11 @@ public sealed class DaemonHost : IAsyncDisposable
 
                     // Tracked from the moment the connection is accepted, before TLS, so a compromise also closes handshakes under way.
                     listen.Use(host.Track(LoopbackMarker));
-                    listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
+                    listen.UseHttps(new HttpsConnectionAdapterOptions
+                    {
+                        ServerCertificateSelector = host.SelectCertificate,
+                        SslProtocols = TlsScreenStream.Protocols,
+                    });
                 });
             }
 

@@ -41,7 +41,7 @@ files, registered clones or installed contributions differ.
 | Profile | Transport | Authentication |
 |---|---|---|
 | Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
-| Loopback | TLS on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
+| Loopback | TLS 1.2 only on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
 | Local network, from 0.6.0 | Mutual TLS 1.2 at the address and port the operator configured; off unless configured, and on a wildcard or public address only when the operator allows it | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests bound to the estate and the runtime identity, under the device's permitted profiles |
 
 On Windows the pipe is created by Kestrel's named-pipe transport with its default, `CurrentUserOnly`, and no
@@ -65,6 +65,9 @@ made, accepts that certificate and no other, and consults no trust store, so a l
 rotation refuses the new certificate on its next connection and is made again from the endpoint file, as every
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
+
+Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
+are refused during the handshake, before any HTTP request is read.
 
 A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At` (RFC
 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the SHA-256
