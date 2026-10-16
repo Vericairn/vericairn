@@ -545,7 +545,7 @@ internal static class CliApp
         var connections = new Command("connections", "The runtimes this machine reaches over the local network: add one by pairing with a code, list them with their state, and remove one. Kept for this user on this machine, never in a repository.");
 
         var addressArgument = new Argument<string>("address") { Description = "Where the runtime listens: its address and port, as the pairing code's administrator gave them, for example 192.168.1.20:7443." };
-        var codeOption = new Option<string>("--code") { Description = "The pairing code, as shown: five groups of four characters.", Required = true };
+        var codeOption = new Option<string>("--code") { Description = "The pairing code, as shown: four groups of four characters (16 in all).", Required = true };
         var nameOption = new Option<string>("--name") { Description = "This device's descriptive name, never a machine path.", Required = true };
         var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default, the strongest this machine offers, or file, cng, secure-enclave or secret-service." };
         var presenceOption = new Option<bool?>("--presence") { Description = "Every signature needs its owner's presence (Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines." };
