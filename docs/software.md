@@ -212,7 +212,7 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It reads the tokens of the stream's final result. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
 | `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | The command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Generic process launch is not complete agent support: it knows nothing of the harness's goal, sign-in, usage or stop, and it is listed and run with that label. |
 
@@ -550,3 +550,9 @@ Goals and rosters hold partial overrides in `limits.watch`. Each field inherits 
 All fields are integers. The merged loop limits must satisfy `loopWarning < loopStop <= loopWindow`; incompatible partial overrides refuse launch before an intent is recorded. The worker resolves them again after workspace preparation, under the record lock, and pins the resolved values in `target.watch`, the roster revision in `target.watchRoster` when present, and the historical rate in `target.watchHistoryTokensPerMinute`. Later revisions affect later runs.
 
 For example, a roster may record `"limits":{"stallSeconds":300,"watch":{"loopWarning":3,"loopStop":6}}`; a goal may record `"limits":{"watch":{"burnMultiplier":3}}`. Every other field keeps its launcher default. `stallSeconds` follows goal, roster, launcher request setting, then the 600-second launcher default; its range remains 1–86,400.
+
+## Local scope of watching
+
+Remote is not built. WATCH-01 observes only a run launched and contained on the worker's own machine. It adds no remote execution, remote containment, remote record signing, relay, or Remote qualification. The local-network API remains its existing transport and authority model.
+
+Stand-in harness tests exercise the supported event shapes, rate and loop thresholds, attention failures and containment. They do not qualify a real Claude Code or Codex installation; a changed harness event format needs its own qualification. The command audit is an observation of emitted invocation events, which can arrive after an action began. It cannot prevent an already executed action, establish that an unreported action did not occur, or replace an isolation boundary.

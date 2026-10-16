@@ -43,7 +43,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         [
             "Runs claude -p \"/goal <condition>\" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's configuration> --strict-mcp-config in the workspace: Claude Code's own /goal, with the vericairn MCP server as its only MCP server.",
             "Imports only Claude Code's provisioned login into a fresh run configuration; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
-            "Reads the tokens of the stream's final result; it reads no price, so a cap in currency is charged in full.",
+            "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
             "Excludes user, project and local settings sources, disables hooks and refuses detected managed settings; remote managed policy is not qualified and managed accounts are unsupported.",
             "Implemented against claude --help and a stand-in process that speaks its stream; not yet qualified against a live Claude Code.",
         ],

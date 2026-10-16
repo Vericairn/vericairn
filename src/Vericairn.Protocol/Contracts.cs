@@ -71,9 +71,9 @@ public sealed record StatusResponse(string Text, JsonElement Json, bool HasError
 /// <summary>
 /// The progress report: where the estate stands, its work orders by state, each published release and
 /// what it contained, what comes next by release, the next eligible work and what waits on the operator. The same on every machine for
-/// the same records in its record-derived sections; agentClaims adds the latest local contributor claims.
+/// the same records in its record-derived sections; agentClaims adds local contributor claims and runSignals adds worker observations.
 /// </summary>
-/// <param name="Text">The report as text, with agent claims labelled separately.</param>
+/// <param name="Text">The report as text, with agent claims and worker observations labelled separately.</param>
 /// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>
 /// <param name="HasErrors">Whether the check the report shows found errors.</param>
 public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors);

@@ -1,6 +1,6 @@
 # API version 1
 
-This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Features marked "from 0.6.0" first
+This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.
 
@@ -269,7 +269,7 @@ written; after the write, its outcome under the same id, written with the record
 stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
 interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
 devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
-machine, are the design to come: the Remote profile, planned for 0.7.0, needs them, since a remote device's
+machine, remain a future design: the Remote profile is not built by WATCH-01, and would need them since a remote device's
 writes cannot rest on a key of the runtime's machine. Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
@@ -406,7 +406,7 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
 Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
-paired device by its own key, the design the Remote profile in 0.7.0 needs.
+paired device by its own key. Remote is not built; this API makes no claim of Remote support.
 
 ## Operations
 
@@ -651,3 +651,5 @@ Rate signals describe the observed sample, launcher reference, historical median
 `GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each signal's `attention` names an ask about the original run intent. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.
 
 A goal's existing proposal/revision body and the generic roster record endpoint accept `limits.watch` partial threshold overrides; roster limits also accept `stallSeconds`. The resolved order is launcher, current roster revision, then goal, as described in [the software guide](software.md#recorded-watching-settings-070). Invalid merged loop limits refuse run start before an intent or harness launch. The run operation's immutable target includes `watch` (JSON encoded as a string), optional `watchRoster` (the roster revision), and `watchHistoryTokensPerMinute`. No new run-request override bypasses these recorded limits.
+
+Watching observes the process boundary on the worker's machine. Remote execution and observation are not built or qualified by these additions.

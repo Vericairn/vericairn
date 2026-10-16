@@ -28,7 +28,7 @@ public sealed class TextDocument(string title, string text, string kind) : Docum
     public string Text { get; } = text;
 }
 
-/// <summary>The progress report as the runtime renders it from the records alone; the views' refresh renews it in place.</summary>
+/// <summary>The runtime's recorded progress, contributor claims and worker observations; refresh renews it in place.</summary>
 public sealed class ProgressDocument() : Document("Progress", "progress")
 {
     /// <summary>What the page says while the runtime gives no report.</summary>
@@ -1121,4 +1121,3 @@ public sealed class LivingDocumentsWorkspace : Document
             : AssignmentComposer.Refusal(sent.Problem);
     }
 }
-

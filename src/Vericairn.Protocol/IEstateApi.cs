@@ -15,7 +15,7 @@ public interface IEstateApi
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
-    /// <summary>The progress report, rendered from the records alone, with the same check status runs.</summary>
+    /// <summary>The recorded progress report with the same checks as status, plus labelled local agent claims and worker observations.</summary>
     ProgressResponse Progress();
 
     /// <summary>Validate every record and the manifest.</summary>

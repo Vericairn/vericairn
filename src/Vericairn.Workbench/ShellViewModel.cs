@@ -520,8 +520,7 @@ public sealed class ShellViewModel : Observable
         return page;
     }
 
-    /// <summary>The summary rows of home and an open report from one response of the runtime; without one, both say it is unavailable.</summary>
-    /// <summary>Polls the live progress claims without replacing the user's open editing documents.</summary>
+    /// <summary>Polls progress claims, worker observations and attention without replacing the user's open editing documents.</summary>
     public void RefreshProgress()
     {
         if (connection?.Api is IEstateApi api && Try(api.Progress) is ProgressResponse progress)
@@ -535,6 +534,7 @@ public sealed class ShellViewModel : Observable
         }
     }
 
+    /// <summary>The summary rows of home and an open report from one response of the runtime; without one, both say it is unavailable.</summary>
     private void FillProgress(ProgressResponse? progress)
     {
         Replace(Progress, ProgressView.Summary(progress?.Json ?? default));
