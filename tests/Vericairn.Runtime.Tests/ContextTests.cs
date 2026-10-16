@@ -62,8 +62,10 @@ public class ContextTests
         Assert.Equal("incomplete-context", service.Context("PRIOR").Problem!.Code);
     }
 
-    [Fact]
-    public void UnreadableOriginalsDiscloseNoPathSizeOrIdentity()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void UnreadableOriginalsDiscloseNoPathSizeOrIdentity(bool denyDirectory)
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")
         {
@@ -77,7 +79,9 @@ public class ContextTests
         AddDocument(estate, "docs/restricted.md", bytes);
         string path = Path.Combine(estate.Root, "docs/restricted.md");
         using EstateService service = EstateService.Open(estate.Root);
-        File.SetUnixFileMode(path, UnixFileMode.None);
+        string protectedSource = denyDirectory ? Path.GetDirectoryName(path)! : path;
+        UnixFileMode sourceMode = File.GetUnixFileMode(protectedSource);
+        File.SetUnixFileMode(protectedSource, UnixFileMode.None);
         try
         {
             ContextResponse denied = service.Context("H-1");
@@ -87,24 +91,32 @@ public class ContextTests
         }
         finally
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.SetUnixFileMode(protectedSource, sourceMode);
         }
 
         ContextPackage package = service.Context("H-1").Package!;
         string manifest = package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
         JsonElement document = package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
         string original = Path.Combine(estate.Root, "objects", ContentHash.Sha256(bytes)[7..]);
-        File.SetUnixFileMode(original, UnixFileMode.None);
+        string protectedObject = denyDirectory ? Path.GetDirectoryName(original)! : original;
+        UnixFileMode objectMode = File.GetUnixFileMode(protectedObject);
+        File.SetUnixFileMode(protectedObject, UnixFileMode.None);
         try
         {
             ContextReadResponse denied = service.ContextRead(manifest, document.GetProperty("key").GetString()!);
             Assert.Null(denied.Identity);
             Assert.Null(denied.Content);
             Assert.Equal("Completeness cannot be confirmed.", denied.Problem!.Message);
+            if (denyDirectory)
+            {
+                HandoffResponse handoff = service.Handoff();
+                Assert.Null(handoff.Package);
+                Assert.Equal("Completeness cannot be confirmed.", handoff.Problem!.Message);
+            }
         }
         finally
         {
-            File.SetUnixFileMode(original, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.SetUnixFileMode(protectedObject, objectMode);
         }
     }
 

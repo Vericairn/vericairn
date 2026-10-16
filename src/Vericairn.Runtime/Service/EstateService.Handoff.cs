@@ -109,7 +109,11 @@ public sealed partial class EstateService
                         return HandoffAssembly.Refuse("incomplete-handoff", retention.Message, []);
                     }
                 }
-                catch (Exception exception) when (exception is ObjectCorruptedException or IOException or UnauthorizedAccessException)
+                catch (UnauthorizedAccessException)
+                {
+                    return HandoffAssembly.Refuse("denied", ContextDenied, []);
+                }
+                catch (Exception exception) when (exception is ObjectCorruptedException or IOException)
                 {
                     return HandoffAssembly.Refuse("incomplete-handoff", "Hand-over refused: the exact originals and context manifest could not be retained and verified in this copy.", []);
                 }

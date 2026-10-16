@@ -195,12 +195,18 @@ internal static partial class ContextSelection
             }
         }
 
-        if (!File.Exists(path))
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
         }
 
-        byte[] bytes = File.ReadAllBytes(path);
+        // File.Exists also returns false on denied directory traversal. Only genuine absence is
+        // missing; access failures propagate to the context's generic, metadata-free refusal.
         return ContentHash.Sha256(bytes) == hash ? bytes : null;
     }
 }
