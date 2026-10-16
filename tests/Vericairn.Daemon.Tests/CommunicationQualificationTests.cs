@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Tests;
 using Vericairn.Sdk;
 
@@ -55,5 +56,32 @@ public class CommunicationQualificationTests
         Assert.Equal(records, estate.Load().Records.Count);
         Assert.Equal("short", client.Communication(estate.OperatorId).Fields["status"].Value);
         Assert.Equal("comprehensive", client.Communication(other).Fields["status"].Value);
+    }
+
+    [Fact]
+    public async Task D08B_TheSdkKeepsMandatoryAttentionAndEveryAskOptionAtNoneAndShort()
+    {
+        using var estate = new TestEstate(2);
+        var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Interrupted work","intent":"Inspect before retrying.","scope":["tests"],"exitQuestion":"Reconciled?","inputs":[],"deliverables":["results"]}""");
+        var assignment = estate.Add("assignment", estate.OperatorId, $$$"""{"contributor":"{{{estate.BuilderId}}}","brief":{"outcome":"Check the result.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no retry"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["checks pass"],"recovery":"Inspect the original effect."}}""", order.Reference);
+        var attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"local clone","note":"Inspect."}""", assignment.Reference);
+        var result = estate.Add("result", estate.BuilderId, """{"outcome":"partial","summary":"Needs attention.","outputs":[],"evidence":[],"checks":[{"name":"journey","outcome":"failed","summary":"The response was incomplete."}],"limitations":[],"unresolvedEffects":["The original widget effect remains uncertain."],"nextStep":"Inspect before retrying."}""", attempt.Reference);
+        var ask = estate.Add("ask", estate.BuilderId, $$"""{"to":"{{estate.OperatorId}}","question":"Retry?","recommendation":"Inspect first.","options":["Reconcile the original effect.","Abandon the retry."],"consequence":"The work waits without a retry.","state":"open"}""");
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(host.Endpoint);
+        Assert.True(client.CommunicationSet(new(estate.OperatorId, "person", new("none", "short", "short", "short", "short"), estate.OperatorId)).Ok);
+        int count = estate.Load().Records.Count;
+        IReadOnlyList<CommunicationAttention> attention = CommunicationPresentation.Attention(client, estate.OperatorId);
+        Assert.True(CommunicationPresentation.ShouldDeliver(client.Communication(estate.OperatorId).Fields["progress"].Value, "progress", attention));
+        string rendered = CommunicationPresentation.RenderAttention(attention);
+        foreach (string required in new[] { result.Id, result.ComputedHash, "The response was incomplete.", "The original widget effect remains uncertain.", ask.Id, "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
+        {
+            Assert.Contains(required, rendered, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(CanonicalJson.SerializePrettyUtf8(host.Service.Asks(estate.OperatorId).Json), CanonicalJson.SerializePrettyUtf8(client.Asks(estate.OperatorId).Json));
+        Assert.Equal(CanonicalJson.SerializePrettyUtf8(host.Service.Record(result.Id)!.Envelope), CanonicalJson.SerializePrettyUtf8(client.Record(result.Id)!.Envelope));
+        Assert.Equal(count, estate.Load().Records.Count);
+        Assert.Empty(client.Records("acceptance"));
     }
 }
