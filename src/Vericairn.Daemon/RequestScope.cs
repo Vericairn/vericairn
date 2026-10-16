@@ -47,6 +47,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) && !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
+            using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
             return await next(context).ConfigureAwait(false);
         }
 
@@ -138,6 +139,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/progress"] = null,
         ["GET /v1/handoff"] = null,
         ["POST /v1/resume"] = typeof(HandoffPackage),
+        ["GET /v1/context/work/{key}"] = null,
+        ["GET /v1/context/{manifest}/sources/{source}"] = null,
         ["GET /v1/validate"] = null,
         ["GET /v1/check"] = null,
         ["GET /v1/records/{id}"] = null,

@@ -1,5 +1,24 @@
 # API version 1
 
+## Context artifacts (0.7.0 addition)
+
+`GET /v1/context/work/{key}` (`Context`) prepares and retains a
+`vericairn.context/1` package. `GET /v1/context/{manifest}/sources/{source}`
+(`ContextRead`) returns the pinned identity and exact original bytes (base64 in
+JSON). A handle names a retained `vericairn.context-manifest/1` object and a
+runtime-issued source key, never a mutable path or the latest revision.
+Both operations recheck the requesting device under the runtime gate. A reader
+who loses access receives only `Completeness cannot be confirmed.` from the
+context operation, without source metadata. Transport authentication can refuse
+the request before the operation. Embedded/local-socket reads retain their OS
+authority. The existing boundary is estate-wide; no per-source ACL is claimed.
+
+The manifest and originals use existing content-addressed object custody;
+preparing context authors no record. Reads verify the object hash and, for
+records, its canonical record hash as well. Missing or corrupted bytes never
+fall back to a new revision. The SDK exposes the same operations. These are
+additive API v1 routes and introduce no record type. Remote is not built.
+
 This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.

@@ -104,6 +104,48 @@ internal static class Commands
         return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
     }));
 
+    /// <summary>Prepare and retain context through the runtime's common contract.</summary>
+    public static int ContextPrepare(string root, string workOrder, bool json) => WithApi(root, api =>
+    {
+        ContextResponse response = api.Context(workOrder);
+        Console.Out.Write(json ? JsonSerializer.Serialize(response.Package is null ? (object)response.Problem! : response.Package, ProtocolJson.Options) : response.Text);
+        return response.Problem is null ? Clean : Failed;
+    });
+
+    /// <summary>Retrieve verified original bytes, or the identity and base64 bytes as JSON.</summary>
+    public static int ContextRead(string root, string manifest, string source, bool original, string? output, bool json) => WithApi(root, api =>
+    {
+        if (!original)
+        {
+            return Fail("Context retrieval requires --original.");
+        }
+
+        ContextReadResponse response = api.ContextRead(manifest, source);
+        if (response.Problem is not null)
+        {
+            Console.Out.Write(json ? JsonSerializer.Serialize(response, ProtocolJson.Options) : response.Problem.Message + "\n");
+            return Failed;
+        }
+
+        if (output is not null)
+        {
+            using var file = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            file.Write(response.Content!);
+        }
+
+        if (json)
+        {
+            Console.Out.Write(JsonSerializer.Serialize(response, ProtocolJson.Options));
+        }
+        else if (output is null)
+        {
+            using Stream stream = Console.OpenStandardOutput();
+            stream.Write(response.Content!);
+        }
+
+        return Clean;
+    });
+
     public static int Handoff(string root, string? output, long? maxBytes, bool json) => WithApi(root, api =>
     {
         HandoffResponse response = api.Handoff(maxBytes);

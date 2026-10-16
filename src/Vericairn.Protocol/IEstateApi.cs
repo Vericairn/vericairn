@@ -27,6 +27,12 @@ public interface IEstateApi
     /// <summary>Compare a retained hand-over with this copy now, including additions, supersessions, missing records, the pin and observed state. Read-only.</summary>
     ResumeResponse ResumeHandoff(HandoffPackage package);
 
+    /// <summary>Retain the deterministic context package for a work order; no record or authority is authored.</summary>
+    ContextResponse Context(string workOrder);
+
+    /// <summary>Read a pinned original through a retained context manifest, rechecking access and hashes.</summary>
+    ContextReadResponse ContextRead(string manifest, string source);
+
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();
 

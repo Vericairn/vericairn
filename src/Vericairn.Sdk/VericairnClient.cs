@@ -161,6 +161,12 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
 
     /// <inheritdoc />
+    public ContextResponse Context(string workOrder) => Get<ContextResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder))!;
+
+    /// <inheritdoc />
+    public ContextReadResponse ContextRead(string manifest, string source) => Get<ContextReadResponse>("/v1/context/" + Uri.EscapeDataString(manifest) + "/sources/" + Uri.EscapeDataString(source))!;
+
+    /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
 
     /// <inheritdoc />

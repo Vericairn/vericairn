@@ -109,6 +109,10 @@ public sealed class ToolRegistry
                 (api, a) => { BriefResponse? b = api.Brief(Arg(a, "workOrder")); return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, false); }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
                 (api, a) => { ObserveResponse? o = api.Observe(Arg(a, "workOrder")); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
+            Read("context_prepare", "Retain a deterministic context package for a work order, with exact original identities and a complete withheld list. No record or authority is authored.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
+                (api, a) => { ContextResponse c = api.Context(Arg(a, "workOrder")); return new ToolCallResult(c.Text, c.Problem is not null); }),
+            Read("context_read", "Read the pinned original from a retained context manifest, never the latest revision. Rechecks access and verifies its hashes; returns original bytes as base64 with the same identity as the CLI and API.", ContextReadArguments(),
+                (api, a) => { ContextReadResponse c = api.ContextRead(Arg(a, "manifest"), Arg(a, "source")); return new ToolCallResult(JsonSerializer.Serialize(c, ProtocolJson.Options), c.Problem is not null); }),
             Read("record_get", "One record by id: its envelope with type, author, subject, hash, signatures and body, and whether it is current.", Arguments(("id", "Record id (ULID).")), "id",
                 (api, a) => { RecordResponse? r = api.Record(Arg(a, "id")); return r is null ? NotFound("record", Arg(a, "id")) : Json(r); }),
             Read("records_list", "The current records of one type, oldest first, as compact rows: id, type, hash and path; record_get fetches one in full.", Arguments(("type", "Record type, for example work-order, decision or release.")), "type",
@@ -179,6 +183,13 @@ public sealed class ToolRegistry
     }
 
     private static JsonObject NoArguments() => new() { ["type"] = "object", ["properties"] = new JsonObject(), ["additionalProperties"] = false };
+
+    private static JsonObject ContextReadArguments()
+    {
+        JsonObject schema = Arguments(("manifest", "The context manifest's sha256 identity."), ("source", "The runtime-issued source key in that manifest."));
+        schema["required"] = new JsonArray("manifest", "source");
+        return schema;
+    }
 
     private static JsonObject Arguments(params (string Name, string Description)[] arguments)
     {
