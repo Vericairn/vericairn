@@ -117,6 +117,9 @@ The owner-only configuration stays under `VericairnHome`, outside repositories a
 grant tools, MCP servers, environment variables or routes: native inventory admission still requires
 the shipped baseline or a matching current harness qualification. No MCP tool is added or changed;
 there is no configuration write tool, and configuration does not launch an agent or run probes.
+Harness qualification also remains outside the MCP tool list. Its API operation is machine-local:
+paired local-network devices are refused before probes; local socket and signed loopback requests
+retain the existing human authority checks.
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.

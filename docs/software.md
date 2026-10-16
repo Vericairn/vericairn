@@ -991,7 +991,10 @@ Qualification establishes agreement with the launcher's checked protocol and iso
 installation. It does not attest vendor provenance, execute the tools, prove a successful login or model call, certify
 model-dependent behavior, authorize work, accept results, or qualify an event format the launcher cannot observe.
 There is no inferred version range. The existing platform and containment limits below still apply. API v1 adds
-`POST /v1/harness-qualifications`; the MCP tool list is unchanged. Remote is not built.
+`POST /v1/harness-qualifications`, available only on the runtime's own machine over its local socket or
+signed loopback. Paired local-network devices receive `401` / `denied` before any local probe, including
+requests with a command override. The existing human authority checks still apply. The MCP tool list is
+unchanged. Remote is not built.
 
 Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
 `request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,
