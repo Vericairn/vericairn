@@ -76,9 +76,9 @@ public static partial class ExecutionPolicy
     /// <summary>Whether a value can be retained as an execution identity.</summary>
     public static bool IsIdentity(string value) => value is not null && IdentityPattern().IsMatch(value);
 
-    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,159}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,159}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex IdentityPattern();
 
-    [GeneratedRegex("^[A-Z]{3}$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^[A-Z]{3}\\z", RegexOptions.CultureInvariant)]
     private static partial Regex CurrencyPattern();
 }

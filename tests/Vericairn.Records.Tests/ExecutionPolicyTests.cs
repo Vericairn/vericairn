@@ -15,6 +15,7 @@ public class ExecutionPolicyTests
     [InlineData("{\"choices\":{\"model\":\"\"}}", false)]
     [InlineData("{\"choices\":{\"model\":\"../binding\"}}", false)]
     [InlineData("{\"choices\":{\"effort\":5}}", false)]
+    [InlineData("{\"choices\":{\"model\":\"model-a\\n\"}}", false)]
     [InlineData("{\"choices\":{\"fallback\":\"cheap\"}}", false)]
     [InlineData("{\"restrictions\":{\"permittedProviders\":[]}}", false)]
     [InlineData("{\"restrictions\":{\"maxCurrency\":{\"amount\":-1,\"unit\":\"USD\"}}}", false)]

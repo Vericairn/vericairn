@@ -121,7 +121,12 @@ public sealed partial class EstateService
             return RunProblem(pending, "not-started", "refused", "The remaining allowance cannot cover one unit plus in-flight headroom. Nothing was recorded.");
         }
 
-        // The launcher's own check comes before anything is recorded or prepared: Codex's goals feature, for one.
+        if (!launcher.ExecutionCapabilities.ClosedEnvironment)
+        {
+            return RunProblem(pending, "not-started", "refused", "This launcher cannot establish a complete tool, configuration, dependency and route inventory; dispatch is unsupported. Nothing was recorded or executed.");
+        }
+
+        // Even feature probes need a launcher that can account for what it loads; unsupported implementations execute nothing.
         Dictionary<string, string> environment = WorkerEnvironment.Build(WorkerOptions.Environment ?? WorkerEnvironment.Current(), launcher.EnvironmentNames);
         string? unverified;
         try
@@ -190,7 +195,7 @@ public sealed partial class EstateService
             RunPreflight preflight = launcher.Preflight(launch);
             RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
             plan.Selection["harnessVersion"] = preflight.HarnessVersion;
-            plan.Selection["environment"] = RunEnvironment.Admit(configuration.EnvironmentPolicy, preflight, environment);
+            plan.Selection["environment"] = RunEnvironment.Admit(configuration.EnvironmentPolicy, preflight, environment, [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
             launch = launch with { Execution = Element(plan.Selection) };
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
@@ -341,6 +346,15 @@ public sealed partial class EstateService
                 if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
                 {
                     throw new ProviderRefusedException("Execution defaults or restrictions changed after the intent; no harness was dispatched.");
+                }
+                RunPreflight dispatchPreflight = launcher.Preflight(launch);
+                JsonObject dispatchEnvironment = RunEnvironment.Admit(configuration.EnvironmentPolicy, dispatchPreflight, environment,
+                    [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
+                if (!JsonNode.DeepEquals(dispatchEnvironment, plan.Selection["environment"])
+                    || (dispatchPreflight.ModelRevision ?? "unknown") != plan.Selection["resolvedRevision"]!.GetValue<string>()
+                    || dispatchPreflight.HarnessVersion != plan.Selection["harnessVersion"]!.GetValue<string>())
+                {
+                    throw new ProviderRefusedException("The effective inventory or model resolution changed after admission; no harness was dispatched.");
                 }
                 lapsed = Lapsed(dispatchModel, plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)

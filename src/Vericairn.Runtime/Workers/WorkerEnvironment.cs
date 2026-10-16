@@ -36,6 +36,22 @@ public static class WorkerEnvironment
 
     private static readonly string[] CredentialPrefixes = ["AWS_", "AZURE_", "GOOGLE_", "GCP_", "GCLOUD_", "GH_", "GITHUB_", "GITLAB_", "NPM_", "NUGET_", "PYPI_", "CARGO_REGISTRY", "DOCKER_", "ANTHROPIC_", "OPENAI_", "CODEX_API", "SSH_AUTH"];
 
+    private static readonly string[] LoaderNames = ["BASH_ENV", "ENV", "ZDOTDIR", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONHOME", "RUBYOPT", "RUBYLIB", "PERL5OPT", "PERL5LIB", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "DOTNET_STARTUP_HOOKS", "DOTNET_ADDITIONAL_DEPS", "DOTNET_SHARED_STORE", "COMPLUS_ENABLEPROFILING", "CORECLR_ENABLE_PROFILING", "CORECLR_PROFILER", "CORECLR_PROFILER_PATH"];
+
+    /// <summary>Ambient load directives are not configuration grants: they can execute undeclared helpers before preflight.</summary>
+    public static bool IsLoadDirective(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        string upper = name.ToUpperInvariant();
+        return upper.StartsWith("LD_", StringComparison.Ordinal) || upper.StartsWith("DYLD_", StringComparison.Ordinal)
+            || upper.StartsWith("GIT_CONFIG", StringComparison.Ordinal) || upper.StartsWith("COMPLUS_", StringComparison.Ordinal)
+            || upper.StartsWith("CORECLR_", StringComparison.Ordinal) || LoaderNames.Contains(upper, StringComparer.Ordinal);
+    }
+
+    /// <summary>A portable variable name; values and machine bindings are deliberately not identities.</summary>
+    public static bool IsVariableName(string name) => !string.IsNullOrEmpty(name) && name.Length <= 160
+        && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '(' or ')');
+
     /// <summary>How environment variable names compare on this platform: without case on Windows, exactly elsewhere.</summary>
     public static StringComparer Names => OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -78,7 +94,7 @@ public static class WorkerEnvironment
         var environment = new Dictionary<string, string>(Names);
         foreach ((string name, string value) in source)
         {
-            if ((names.Contains(name) || name.StartsWith("LC_", StringComparison.Ordinal)) && !IsCredential(name))
+            if (IsVariableName(name) && (names.Contains(name) || name.StartsWith("LC_", StringComparison.Ordinal)) && !IsCredential(name) && !IsLoadDirective(name))
             {
                 environment[name] = value;
             }

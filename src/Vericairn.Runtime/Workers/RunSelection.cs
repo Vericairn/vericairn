@@ -28,8 +28,9 @@ public sealed record RunConfiguration(string Name, string Launcher, JsonElement 
 /// <param name="Destinations">Supported logical inference destinations.</param>
 /// <param name="DataBoundaries">Supported protection policies, not inferred from a prompt.</param>
 /// <param name="ProviderDefault">Whether an explicit provider-default effort choice is supported.</param>
+/// <param name="ClosedEnvironment">Whether the launcher implements complete effective inventory inspection and inherited environment controls.</param>
 public sealed record RunCapabilities(IReadOnlyList<string> Scopes, IReadOnlyList<string> Efforts, IReadOnlyList<string> Providers,
-    IReadOnlyList<string> Destinations, IReadOnlyList<string> DataBoundaries, bool ProviderDefault = false)
+    IReadOnlyList<string> Destinations, IReadOnlyList<string> DataBoundaries, bool ProviderDefault = false, bool ClosedEnvironment = false)
 {
     /// <summary>A launcher without execution support admits no choices.</summary>
     public static RunCapabilities Unsupported { get; } = new([], [], [], [], []);
