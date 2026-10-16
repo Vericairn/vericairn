@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.CommandLine;
+using System.CommandLine.Help;
+using Vericairn.Cli;
 using Vericairn.DocsTool;
 using Vericairn.Records.Model;
 
@@ -17,6 +20,48 @@ public class DocsTests
     private static readonly string[] Declared = ["README.md", "install.md", "operator-guide.md", "cli-reference.md", "api-reference.md", "record-reference.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
 
     private static readonly string[] Authored = ["README.md", "install.md", "operator-guide.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
+
+    [Fact]
+    public void EveryVisibleOptionIsDocumentedAtItsDeclaringCommand()
+    {
+        string output = CliHarness.TempDirectory("docs-options");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            Check(CliApp.Build(), string.Empty);
+
+            void Check(Command command, string path)
+            {
+                int start = path.Length == 0 ? 0 : reference.IndexOf(" `vericairn " + path + "`\n", StringComparison.Ordinal);
+                Assert.True(start >= 0, path);
+                int end = reference.IndexOf("\n#", start + 1, StringComparison.Ordinal);
+                // The root's option section can have its own heading; stop only at the first command.
+                if (path.Length == 0) end = reference.IndexOf("## `vericairn ", StringComparison.Ordinal);
+                string section = end < 0 ? reference[start..] : reference[start..end];
+                foreach (Option option in command.Options.Where(o => !o.Hidden && (path.Length == 0 || o is not HelpOption && o is not VersionOption)))
+                {
+                    string name = option.Name + (option.ValueType == typeof(bool) || option is HelpOption or VersionOption ? "`" : " <");
+                    Assert.Contains(name, section, StringComparison.Ordinal);
+                    Assert.Contains(option.Description ?? string.Empty, section, StringComparison.Ordinal);
+                }
+                foreach (Command child in command.Subcommands.Where(c => !c.Hidden)) Check(child, path.Length == 0 ? child.Name : path + " " + child.Name);
+            }
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
+
+    [Fact]
+    public void GeneratedCliReferenceHasNoTrailingWhitespace()
+    {
+        string output = CliHarness.TempDirectory("docs-whitespace");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            Assert.All(File.ReadAllLines(Path.Combine(output, "cli-reference.md")), line => Assert.Equal(line.TrimEnd(), line));
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
 
     [Fact]
     public void TheBuildToolingWritesTheReferencesAndTheManifestFromThisBuild()
@@ -53,11 +98,15 @@ public class DocsTests
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
 
-            // A command's own --version, the version to release, is documented; the built-in help and version options are not.
+            // A command's own --version, the version to release, is documented; built-in options are documented at the root.
             string submit = cli[cli.IndexOf("### `vericairn release submit`", StringComparison.Ordinal)..];
             submit = submit[..submit.IndexOf("\n### ", 5, StringComparison.Ordinal)];
             Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
-            Assert.DoesNotContain("`-?, -h, --help`", cli, StringComparison.Ordinal);
+            Assert.DoesNotContain("--help", submit, StringComparison.Ordinal);
+            string rootOptions = cli[..cli.IndexOf("## `vericairn ", StringComparison.Ordinal)];
+            Assert.Contains("--recipient <recipient>", rootOptions, StringComparison.Ordinal);
+            Assert.Contains("--for-assignment <for-assignment>", rootOptions, StringComparison.Ordinal);
+            Assert.Contains("--depth <depth>", rootOptions, StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
             string api = File.ReadAllText(Path.Combine(output, "api-reference.md"));
             Assert.Contains("## `POST /v1/records`", api, StringComparison.Ordinal);
