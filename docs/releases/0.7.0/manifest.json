@@ -1,9 +1,9 @@
 {
   "format": "vericairn.docs/1",
   "version": "0.7.0",
-  "commit": "5dbc5022ae4878bc53e7818d4d788cd1a739aeff",
+  "commit": "3830017e572a2c6ab537b55f15b8683f8d2fd178",
   "generatedAt": "2026-10-16",
-  "generator": "vericairn-docs generate 0.7.0-dev\u002B5dbc5022ae4878bc53e7818d4d788cd1a739aeff",
+  "generator": "vericairn-docs generate 0.7.0-dev\u002B3830017e572a2c6ab537b55f15b8683f8d2fd178",
   "recordFormat": {
     "reads": [
       1,
