@@ -13,7 +13,7 @@ namespace Vericairn.Runtime.Tests;
 /// recorded, its answer, when it gives one, being the launcher's refusal; and when the worker asks it for the command, after the
 /// intent is recorded and before the launch.
 /// </summary>
-internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Action<LaunchContext>? prepared = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null) : IAgentLauncher
+internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Action<LaunchContext>? prepared = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null, Action<LaunchContext>? beforeCommand = null) : IAgentLauncher
 {
     public string Launcher => inner.Launcher;
 
@@ -52,6 +52,7 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         command?.Invoke();
+        beforeCommand?.Invoke(context);
         return inner.Command(context);
     }
 

@@ -235,6 +235,17 @@ internal sealed class NativeProbe : IDisposable
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["execution"]?.GetValue<string>() is string execution)
+        {
+            string model = arguments[Array.IndexOf(arguments, "--model") + 1];
+            string effort = codex
+                ? JsonSerializer.Deserialize<string>(arguments.Single(a => a.StartsWith("model_reasoning_effort=", StringComparison.Ordinal)).Split('=', 2)[1])!
+                : arguments[Array.IndexOf(arguments, "--effort") + 1];
+            Console.WriteLine(JsonSerializer.Serialize(new { type = codex ? "thread.started" : "system", subtype = "init",
+                model = execution == "different" ? "model-a" : model, effort }));
+            // No usage or exact model revision is reported by this scenario.
+            return 0;
+        }
         if (behavior["actions"]?.GetValue<string>() is string actions)
         {
             string server = actions == "ambient" ? "ambient" : "vericairn";
