@@ -74,6 +74,7 @@ public class PairingTests
         Assert.Equal(harness.Estate.OperatorId, admission.By);
         Assert.Equal(device.ComputedHash, admission.Subject!.Hash);
         Assert.Equal(harness.OperatorDevice, Assert.Single(admission.Signatures).Device);
+        Assert.Contains(harness.OperatorDevice, EstateModel.BodyString(admission, "note"), StringComparison.Ordinal);
         Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
         Assert.Equal(0, harness.Socket.Check().Errors);
         DeviceRow row = Assert.Single(harness.Socket.Devices(), d => d.Id == connection.Device);

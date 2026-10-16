@@ -571,7 +571,7 @@ Arguments:
 - `<address>`: Where the runtime listens: its address and port, as the pairing code's administrator gave them, for example 192.168.1.20:7443.
 
 Options:
-- `--code <code>`: The pairing code, as shown: five groups of four characters. Required.
+- `--code <code>`: The pairing code, as shown: four groups of four characters (16 in all). Required.
 - `--name <name>`: This device's descriptive name, never a machine path. Required.
 - `--custody <custody>`: Key custody: default, the strongest this machine offers, or file, cng, secure-enclave or secret-service.
 - `--presence <presence>`: Every signature needs its owner's presence (Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines.

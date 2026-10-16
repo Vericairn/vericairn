@@ -188,6 +188,12 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 
 ## What holds a work order
 
+Release notes and the progress report omit superseded results. They list a current result in their release window as
+accepted work when a current acceptance pins the result's exact hash or the current revision and hash of its work
+order, following the attempt and assignment. The latter includes results written by another principal, without
+creating an acceptance of those results or changing who may accept them. Acceptance of an earlier work-order revision
+does not count for its current revision; every other current result in the window is listed as recorded, not yet accepted.
+
 A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
 `design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any
 revision) holds it until it is accepted. A record in its `blockedBy` holds it while it is open: an ask while it is
@@ -496,6 +502,13 @@ reservation. Admission recognizes an already
 reserved revision only when its predecessor was in flight with the identical target. Generic operations retain their
 reconciliation and retry rules.
 
+From 0.6.1, every revision after settlement also keeps every previously recorded body field unchanged
+(`operation.agent-run-settlement-kept`), including usage, the observation, liveness and the scope audit. Evidence may
+only be appended, and missing stop facts may be added under the existing chronology rules; recorded stop facts,
+including containment, cannot change. Previously absent optional fields may be added only where the record rules
+already permit them. This does not grant a new status transition. The ledger reads usage from the first settlement,
+so a later revision cannot refund a settled run's charges, including units charged at the cap because they were unreported.
+
 Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns).
 Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and
 output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the
@@ -549,7 +562,13 @@ At settlement the worker compares a physical file inventory captured after brief
 workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or
 Git environment variables, and the physical root must retain the baseline's identity. Content, symlink targets
 (without reading through the link), and Unix modes
-are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
+are compared, including deletions, renames, untracked files and ignored files. From 0.6.1 the audit also compares the
+run branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
+including side branches of merges. Their changed paths are unioned with the physical comparison, so restoring a path
+in the worktree or a later commit does not hide it, nor does checking out a different head. The original Git
+object/reference directory is pinned before launch; isolated Git metadata excludes agent-writable configuration,
+replacement refs, grafts, attributes and external diff drivers. Missing history or an unreadable branch makes the
+audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
 `path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
@@ -559,10 +578,13 @@ the audit is unavailable or incomplete, including submodules needing a separate 
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
 as clean. Non-regular files are rejected without reading their contents, and handle checks reject leaf replacement
 races. Each inventory runs in a helper process under a 30-second deadline and work limits, with bounded cleanup after
-timeout; pattern comparison has its own 30-second deadline. Missing helper support, timeouts and special files mark
+timeout. Committed history shares the settlement inventory's deadline, with at most 10,000 new commits and 100,000
+distinct committed paths and bounded metadata and Git output reads. Non-regular reference files are refused without
+blocking. Pattern comparison has its own 30-second deadline. Missing helper support, timeouts and special files mark
 the result incomplete. With `problem` present, counts can be partial and zero outside paths does not mean clean.
-This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent change.
-Git administration, changes outside the workspace and changes reverted before settlement are not inventoried.
+This observes the workspace and reachable history, not filesystem isolation or which actor made a concurrent change.
+Git administration itself, changes outside the workspace, uncommitted changes reverted before settlement and commits
+no longer reachable from the run branch are not inventoried as changed paths.
 
 ## A device keeps its identity
 
@@ -604,7 +626,17 @@ own format, and adds no type and no field:
   runtime cannot verify; a name with control or formatting characters is refused.
 - The admission is the administrator's, the operator's or a principal's holding `administer`, signed by the
   administrator's admitted device on the runtime's machine like every admission in format 2. Its note says
-  that the device's descriptive fields are its own statement.
+  that the device's descriptive fields are its own statement. From 0.6.1 it also names the device that obtained
+  the pairing code and the operator-role revision or `administer` grant used at issuance; this may differ from
+  the device signing the admission.
+
+The in-memory code retains that issuing device, its admission revision and its authority record. Loopback uses the
+requesting device; the local socket uses the admitted device selected to sign the administrator's admissions.
+Revoking that device's admission, or revoking or expiring that authority, invalidates the code and open exchanges;
+readmission, a restored grant or another admitted device cannot revive it. Renames, key rotations retaining admission
+and authority revisions retaining the role or scope without an expiry gap leave it valid. Hello and confirmation
+check this, and the estate write lock protects the final recheck before either record is written. The issuance log
+also names the device and authority; codes and their derived keys never enter records.
 
 On a normal completion the runtime writes both records; if admission validation refuses, it removes the newly
 written device record. The writes are sequential, not a crash-atomic transaction: an interruption between them can

@@ -139,6 +139,55 @@ public class AgentRunLedgerTests
     }
 
     [Theory]
+    [InlineData("usage", "{\"wallMinutes\":1,\"tokens\":0,\"unreported\":[]}")]
+    [InlineData("usage", "{\"wallMinutes\":0,\"tokens\":1000,\"unreported\":[]}")]
+    [InlineData("usage", null)]
+    [InlineData("scope", "{\"changed\":0,\"outsideCount\":0,\"outside\":[]}")]
+    [InlineData("scope", null)]
+    [InlineData("observed", "{\"summary\":\"A different outcome.\",\"at\":\"2026-10-13T12:00:40Z\"}")]
+    [InlineData("liveness", "{\"stallSeconds\":60,\"lastEventAt\":\"2026-10-13T12:00:39Z\"}")]
+    [InlineData("evidence", "[]")]
+    public void ASettledRevisionCannotRewriteItsRecordedFacts(string field, string? replacement)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10,"tokens":1000}""");
+        RecordEnvelope settled = ledger.Run("immutable", """{"wallMinutes":5,"attemptsPerStep":10,"tokens":1000}""",
+            """{"wallMinutes":1,"tokens":1000,"unreported":[]}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+        body["scope"] = System.Text.Json.Nodes.JsonNode.Parse("""{"changed":1,"outsideCount":1,"outside":["outside.txt"]}""");
+        body["liveness"] = System.Text.Json.Nodes.JsonNode.Parse("""{"stallSeconds":60,"lastEventAt":"2026-10-13T12:00:20Z"}""");
+        body["evidence"]!.AsArray().Add(System.Text.Json.Nodes.JsonNode.Parse("""{"summary":"The process exited."}"""));
+        RecordEnvelope prior = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: settled.Id);
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        if (replacement is null)
+        {
+            body.Remove(field);
+        }
+        else
+        {
+            body[field] = System.Text.Json.Nodes.JsonNode.Parse(replacement);
+        }
+
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        EstateModel model = ledger.Estate.Load();
+        Assert.Contains(model.Findings, f => f.Code == "operation.agent-run-settlement-kept" && f.Location == changed.ExpectedPath);
+        Assert.Equal(0, AgentRuns.Of(model, model.ById[ledger.Goal]).Remaining("tokens"));
+    }
+
+    [Fact]
+    public void ASettledRevisionCanAddEvidenceAndPreviouslyUnrecordedStopFacts()
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope settled = ledger.Run("additions", Small, Usage,
+            stop: """{"requestedAt":"2026-10-13T12:00:20Z","requestedBy":"worker","transmittedAt":"2026-10-13T12:00:22Z","transmission":"Sent.","containedAt":"2026-10-13T12:00:32Z"}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
+        body["stop"]!["acknowledgedAt"] = "2026-10-13T12:00:30Z";
+        body["stop"]!["acknowledgment"] = "Acknowledgment recovered from the event stream.";
+        body["evidence"]!.AsArray().Add(System.Text.Json.Nodes.JsonNode.Parse("""{"summary":"The acknowledgment was observed before containment."}"""));
+        ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: settled.Id);
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+    }
+
+    [Theory]
     [InlineData("scope", "{\"changed\":1,\"outsideCount\":2,\"outside\":[\"outside.txt\"]}", "operation.scope")]
     [InlineData("liveness", "{\"stallSeconds\":1,\"lastEventAt\":\"2026-10-13T12:00:20Z\",\"attentionAt\":\"2026-10-13T12:00:30Z\",\"stoppedAt\":\"2026-10-13T12:00:29Z\"}", "operation.liveness")]
     public void WorkerObservationsValidateScopeCountsAndStallFactOrder(string field, string json, string code)

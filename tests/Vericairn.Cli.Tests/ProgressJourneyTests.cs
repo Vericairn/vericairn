@@ -18,6 +18,45 @@ public class ProgressJourneyTests
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
     [Fact]
+    public void NotesPutOnlyTheLatestResultsUnderTheirAcceptedCurrentWorkOrders()
+    {
+        string root = CliHarness.TempDirectory("notes-current-results");
+        string scratch = CliHarness.TempDirectory("notes-current-results-scratch");
+        try
+        {
+            string op = Init(root);
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""")).Id;
+            Publish(root, scratch, op, product, "0.1.0", "2026-09-01T01:00:00Z");
+            Worked(root, scratch, op, builder, "W-1", "2026-09-01T02:00:00Z", accepted: false);
+            EstateModel model = EstateLoader.Load(root);
+            var order = Assert.Single(model.Current("work-order"));
+            var first = Assert.Single(model.Current("result"));
+            CliHarness.Outcome result = CliHarness.Ok("--estate", root, "--json", "records", "new", "result", "--by", builder, "--subject", $"attempt:{first.Subject!.Id}:{first.Subject.Hash}", "--supersedes", first.Id, "--at", "2026-09-01T02:04:00Z", "--body", CliHarness.WriteJson(scratch, "corrected-result.json", first.Body.GetRawText().Replace("Done.", "Corrected result.", StringComparison.Ordinal)));
+            CliHarness.Outcome revised = CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--supersedes", order.Id, "--at", "2026-09-01T02:05:00Z", "--body", CliHarness.WriteJson(scratch, "revised-order.json", order.Body.GetRawText().Replace("Order W-1", "Current W-1", StringComparison.Ordinal)));
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"work-order:{revised.Id}:{revised.Hash}", "--at", "2026-09-01T02:06:00Z", "--body", CliHarness.WriteJson(scratch, "accept-order.json", """{"statement":"Accepted work.","basis":[],"self":true}"""));
+            Worked(root, scratch, op, builder, "W-2", "2026-09-01T02:10:00Z", accepted: false);
+            Publish(root, scratch, op, product, "0.2.0", "2026-09-01T03:00:00Z");
+
+            string set = Path.Combine(scratch, "sets", "0.2.0");
+            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", set);
+            string notes = File.ReadAllText(Path.Combine(set, "release-notes.md"));
+            string accepted = notes[notes.IndexOf("## Work accepted", StringComparison.Ordinal)..notes.IndexOf("## Work recorded, not yet accepted", StringComparison.Ordinal)];
+            string open = notes[notes.IndexOf("## Work recorded, not yet accepted", StringComparison.Ordinal)..notes.IndexOf("## Decisions", StringComparison.Ordinal)];
+            Assert.Contains("### W-1: Current W-1", accepted, StringComparison.Ordinal);
+            Assert.Contains($"Result {result.Id} (completed)", accepted, StringComparison.Ordinal);
+            Assert.DoesNotContain(first.Id, notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("### W-1:", open, StringComparison.Ordinal);
+            Assert.Contains("### W-2:", open, StringComparison.Ordinal);
+            Assert.DoesNotContain(EstateLoader.Load(root).Current("acceptance"), a => a.Subject?.Id == result.Id);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void ProgressRendersEverySectionFromTheRecordsTheSameOnACopyAgreeingWithStatusAndTheNotes()
     {
         string root = CliHarness.TempDirectory("progress");

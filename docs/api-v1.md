@@ -92,7 +92,12 @@ and runtime clocks: clients may lag by up to five minutes, but never past the st
 ahead must correct its clock and sign afresh. There is no clock-skew allowance across the startup cutoff.
 
 Anything else is answered with `401` and a problem with code `denied`; revoking the device ends access from
-the next request on, with no restart. An already authenticated request also loses its right to write: under
+the next request on, with no restart. From 0.6.1 loopback checks the headers' signing time and resolves the device's
+current admitted standing before reading any body, as the local-network profile already does. The body-bound
+signature is verified only after the bounded body read; the headers alone do not prove possession of the key.
+After reading, admission and freshness are checked again, and a loopback key rotation during the read refuses the
+request. A failed header check takes the early-refusal path, with only the bounded discard described below.
+An already authenticated request also loses its right to write: under
 the estate's write lock, the runtime rechecks that the requesting device is current and admitted, not revoked,
 and still holds the exact key that verified the request. A rename with the same key still passes; a rotation
 requires signing afresh with the new key. Another admitted device of the same principal does not rescue the
@@ -117,8 +122,11 @@ the completed response. Closing Windows TCP with unread data can otherwise reset
 A peer that sends more than the discard bound, or keeps sending beyond its deadline, cannot require delivery
 after that bounded close.
 
-The HTTP body limit remains Kestrel's configured limit (30,000,000 bytes by default); pairing hello and confirm
-are limited to 16 KiB. A declared length above the limit is refused before reading; a streaming body is offered
+From 0.6.1 device-signed bodies on loopback and the local network are limited to 8 MiB (8,388,608 bytes), or Kestrel's
+configured limit if smaller. Their reads have an absolute 30-second deadline from the header check, shortened to the
+signature's remaining five-minute validity when less; received bytes do not restart it. Timeout returns `401` before
+bounded discard and cancels only the pending pipe read. Local-socket bodies retain Kestrel's configured limit
+(30,000,000 bytes by default); pairing hello and confirm remain limited to 16 KiB. A declared length above the limit is refused before reading; a streaming body is offered
 to authentication or binding only within its limit. The original body reader remains available for discard
 instead of becoming unreadable after a size-limit failure. Size refusals are `413`; cleanup does not raise the
 parsing limit.
@@ -262,7 +270,14 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    all of them secret: 80 bits from the system's cryptographic random generator, and nothing else, so no part
    of a code names it. A code works for ten minutes, pairs one device and is exhausted after five confirmations that do
    not match it; at most sixteen wait at once. The daemon keeps only the keys derived from a code, in memory,
-   so a restart forgets every code. The code is shown once; the administrator gives it, with the address, to
+   so a restart forgets every code. From 0.6.1 it also keeps the issuing device, that device's admission revision,
+   and the operator-role revision or `administer` grant used to issue it. On loopback the issuer is the requesting
+   device; on the local socket it is the admitted device selected to sign admissions for the administrator.
+   The issuance log names that device and authority, never the code. Losing that device's admission or revoking or
+   expiring the recorded authority invalidates the code and its open exchanges. A later readmission or restored
+   grant does not revive it; another device or grant of the administrator cannot rescue it. A rename or key rotation
+   that retains admission, or an authority revision that retains the role or scope without an expiry gap, does not
+   invalidate it. Invalidated codes do not occupy a waiting-code slot. The code is shown once; the administrator gives it, with the address, to
    the person at the new device, who types it (case, hyphens and spaces do not matter, and I, L and O read as
    1, 1 and 0).
 2. Each side derives two keys from the code with HKDF-SHA256 (RFC 5869): extract from the code's sixteen
@@ -280,7 +295,7 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    an address is never forgotten while its minute runs, so while 1,024 addresses are counted a new one waits;
    and once 4,096 such hellos have come in all within a minute, every hello waits for the next, which bounds
    the work of trying codes. A code the hello proves is refused when it has expired, was used or has no
-   attempts left. Otherwise the runtime answers a
+   attempts left, or its issuing device or authority no longer permits it. Otherwise the runtime answers a
    `PairingChallenge`: both nonces, the estate with its name, the runtime identity's public key, the
    fingerprint of the certificate it presented on this connection, the principal with its name and kind, the
    profiles, and the id, time and record format of the device record it will write, with an HMAC-SHA256 under
@@ -293,15 +308,17 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    platform, its custody and presence, its public key, the profiles), signs the record's content hash with
    the new key, and sends `POST /v1/pairing/confirm` with its key, its descriptive identity and that signature,
    with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields.
-6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used or has
-   no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
+6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used, lost its
+   issuing device or authority, or has no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
    code's five attempts; the last one closes every exchange of the code still open. It refuses a device name
    with control or formatting characters. It rebuilds the device record
    from its own challenge and the device's fields, verifies the signature with the key presented, writes the
    device record with that signature, the device's own, and then the admission by the administrator, signed
    by the administrator's admitted device; when the admission is refused the device record is removed again.
+   The issuer's admission and recorded authority are rechecked under the estate write lock before either record
+   is written, so revocation after confirmation validation still refuses both records with `401`.
    The device's name, platform, custody and presence are its own statement, which the runtime cannot verify,
-   and the admission's note says so. The code is used up. It answers `PairingCompleted`, the device and
+   and the admission's note says so and names the issuing device and authority. The code is used up. It answers `PairingCompleted`, the device and
    admission ids and the record's hash, with an HMAC-SHA256 under the runtime's key over the whole exchange.
 7. The device verifies that MAC and keeps the connection: the address, the estate, the runtime identity's
    public key, and its device's id and public key. A failure on the device removes the key it made, and a
@@ -380,7 +397,7 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 |---|---|
 | `GET /v1/health` | The daemon's identity: API and product version, estate, root, profile, record format, start time, process |
 | `GET /v1/status` | Status text and canonical status JSON, including the findings of this copy's repository checks |
-| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own; what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
+| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own, omitting superseded results and counting a current result as accepted work when a current acceptance pins its exact hash or its work order's current revision and hash (including another principal's results without accepting those result records; an earlier work-order revision's acceptance does not count); what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
@@ -437,6 +454,9 @@ are stored and validated but not enforced by routing or the worker. The worker e
 `RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
 fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
 target and cap stay pinned to the intent. Every record newly reserving allowance is checked for budget admission.
+From 0.6.1 all previously recorded settlement facts stay unchanged, including usage, scope and containment; the
+ledger takes usage from the first settlement. Evidence may only be appended, and missing stop facts or optional
+fields may be added only under the existing record and chronology rules, without granting a new status transition.
 Before admission the worker refuses linked `.vericairn` metadata and exports files without following links.
 
 Codex and Claude Code receive fresh configuration directories containing only their approved harness login. Codex
@@ -472,12 +492,18 @@ charged at its cap.
 - `scope`: `changed`, `outsideCount`, `outside`
   and optional `problem`. Settlement compares file inventories before launch and after boundary exit against
   repository-relative paths/globs in `brief.permittedChanges`. The inventory reads the physical workspace independently
-  of Git configuration and verifies its root identity against the launch baseline. Committed, renamed, deleted,
-  untracked and ignored changes count. Non-regular files, an unavailable helper or a deadline mark the audit incomplete;
+  of Git configuration and verifies its root identity against the launch baseline. From 0.6.1 it also compares the run
+  branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
+  including merged side branches. All changed paths count, including changes restored in the worktree or a later
+  commit. The pinned original object/reference directory is read through isolated Git metadata that loads no
+  agent-writable configuration, replacement refs, grafts, attributes or external diff drivers. Renamed, deleted,
+  untracked and ignored changes count. Missing history, non-regular files or references, an unavailable helper or a deadline mark the audit incomplete;
   each inventory and the pattern comparison have a 30-second deadline, with bounded helper cleanup. Outside changes or
   incomplete audit are flagged in the observed summary. At most 1000 outside names are listed; unsafe names are hashed.
-  With `problem` present, counts can be partial and zero outside paths does not mean clean. Git administration,
-  changes outside the workspace and changes reverted before settlement are excluded. This is a net observation, not
+  Committed history shares the settlement inventory's deadline, with at most 10,000 new commits and 100,000 distinct
+  committed paths and bounded metadata and Git output reads. With `problem` present, counts can be partial and zero
+  outside paths does not mean clean. Git administration itself, changes outside the workspace, uncommitted changes
+  reverted before settlement and commits no longer reachable from the run branch are excluded. This is an observation, not
   attribution, acceptance or a filesystem sandbox.
 
 A stop's acknowledgment and escalation follow transmission; containment follows all prior facts and does not follow

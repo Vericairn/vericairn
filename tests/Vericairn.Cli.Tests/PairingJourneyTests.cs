@@ -18,6 +18,14 @@ public class PairingJourneyTests
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
     [Fact]
+    public void ConnectionsHelpDescribesTheSixteenCharacterPairingCode()
+    {
+        string help = System.Text.RegularExpressions.Regex.Replace(CliHarness.Ok("connections", "add", "--help").Out, @"\s+", " ");
+        Assert.Contains("four groups of four characters (16 in all)", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("five groups", help, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ASecondDevicePairsActsWithinItsScopeAndIsRefusedOnceRevoked()
     {
         string root = CliHarness.TempDirectory("pair-estate");

@@ -14,7 +14,7 @@ internal static class ScopeHarness
 #pragma warning restore CA2255
     {
         string[] arguments = Environment.GetCommandLineArgs();
-        int at = arguments.Length == 3 && arguments[1] == WorkspaceScopeProbe.Marker ? 1 : -1;
+        int at = arguments.Length is 3 or 6 && arguments[1] == WorkspaceScopeProbe.Marker ? 1 : -1;
         if (at >= 0 && WorkspaceScopeProbe.TryRun(arguments[at..]) is int result)
         {
             Environment.Exit(result);

@@ -46,12 +46,13 @@ internal static class DaemonRoutes
         }
 
         IReadOnlyList<string> profiles = request.Profiles is { Count: > 0 } ? request.Profiles.Distinct(StringComparer.Ordinal).ToList() : [RequestAuthenticator.LocalNetworkProfile];
-        if (host.Service.PairingRefusal(request.Principal, request.By, profiles) is string refusal)
+        (PairingAuthority? issuer, string? refusal) = host.Service.PairingIssuer(request.Principal, request.By, profiles);
+        if (issuer is null)
         {
-            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", refusal);
+            return Problem(StatusCodes.Status422UnprocessableEntity, "refused", refusal!);
         }
 
-        (string? code, PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Issue(request.Principal, request.By, profiles);
+        (string? code, PairingRegistry.Pairing? pairing, string? problem) = host.Pairings.Issue(request.Principal, issuer, profiles);
         if (code is null || pairing is null)
         {
             return Problem(StatusCodes.Status409Conflict, "refused", problem ?? "No pairing code was issued.");
@@ -59,7 +60,7 @@ internal static class DaemonRoutes
 
         string? name = host.Service.PairingPlan(request.Principal).PrincipalName;
         string address = new IPEndPoint(IPAddress.Parse(served.Host), served.Port).ToString();
-        host.Log($"pairing {pairing.Id} issued by {request.By} for {request.Principal} ({string.Join(", ", profiles)}), until {RecordParser.FormatTimestamp(pairing.ExpiresAt)}");
+        host.Log($"pairing {pairing.Id} issued by {request.By}, device {issuer.Device}, authority {issuer.Authority}, for {request.Principal} ({string.Join(", ", profiles)}), until {RecordParser.FormatTimestamp(pairing.ExpiresAt)}");
         return Results.Json(new PairingIssued(PairingProtocol.Display(code), request.Principal, name, profiles, RecordParser.FormatTimestamp(pairing.ExpiresAt), PairingRegistry.Attempts, address, host.Service.Session.Manifest.Estate, host.Identity.Fingerprint), ProtocolJson.Options);
     }
 
@@ -131,11 +132,12 @@ internal static class DaemonRoutes
                 return Problem(StatusCodes.Status422UnprocessableEntity, "refused", descriptive);
             }
 
-            string note = $"Paired over the local network with a pairing code {pairing.By} issued at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
-            (WriteOutcome written, WriteOutcome? admitted) = host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.By, note);
+            string note = $"Paired over the local network with a pairing code {pairing.By} issued from device {pairing.Issuer.Device}, under authority {pairing.Issuer.Authority}, at {RecordParser.FormatTimestamp(pairing.IssuedAt)}; the device presented its key and signed its record. Its name, platform, custody and presence are its own statement, which the runtime cannot verify.";
+            (WriteOutcome written, WriteOutcome? admitted) = host.Service.PairDevice(exchange.Plan, pairing.Profiles, confirm.Device, confirm.Signature, pairing.Issuer, note);
             if (!written.Ok || admitted?.Written is null)
             {
-                return Results.Json(written.Problem ?? admitted?.Problem, ProtocolJson.Options, statusCode: StatusCodes.Status422UnprocessableEntity);
+                Problem? refused = written.Problem ?? admitted?.Problem;
+                return Results.Json(refused, ProtocolJson.Options, statusCode: refused?.Code == "denied" ? StatusCodes.Status401Unauthorized : StatusCodes.Status422UnprocessableEntity);
             }
 
             device = written.Written!.Id;

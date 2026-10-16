@@ -168,6 +168,13 @@ notes state, to the minute, and with no previous set at the previous publication
 the beginning instead. Until the version's publication is recorded they end at the second before they are
 generated.
 
+Only current results in that window are listed: a result superseded by a later result is omitted, even when the later
+result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
+that result's exact hash or its work order's current revision and hash. This includes another principal's results with
+no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
+work-order revision does not count for the current revision. Every remaining current result appears only under **Work
+recorded, not yet accepted**. The progress report uses the same classification for each published release.
+
 ## Coding agents: the worker and its launchers
 
 The worker contract, `vericairn.worker/1` (the estate's `design/goals.md` § 7), carries one assignment with a coding agent
@@ -331,6 +338,11 @@ cap remain those of its intent, and a dispatch timestamp cannot change or be add
 newly reserves allowance is checked for admission, including a revision; an existing reservation is recognized only
 for the same in-flight target. Generic operations retain their reconciliation and retry rules.
 
+From 0.6.1 a later revision cannot rewrite any settled fact, including usage, the observation, liveness, scope or
+containment. Evidence may only be appended; missing stop facts and previously absent optional fields may be added
+only under the existing record and chronology rules, without granting a new status transition. The ledger uses the
+first settlement's usage, so a revision cannot return spent allowance to the goal.
+
 Harnesses enter a containment boundary before executing: a Windows Job Object with no breakaway, or a new POSIX process
 group on Linux and macOS. Escalation terminates that boundary. Root exit alone does not establish containment: a
 successful inventory must show every remaining member exited, including kernel zombie exit state. Failed job or
@@ -429,7 +441,13 @@ At settlement the worker compares a physical file inventory captured after brief
 workspace after the whole process boundary exits. It enumerates the workspace itself, independent of `core.worktree`,
 `GIT_DIR`, replaced Git administration files or other agent-writable Git configuration. The physical root's identity
 must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
-are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
+are compared, including deletions, renames, untracked files and ignored files. From 0.6.1 the audit also compares the
+run branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
+including side branches of merges. The union of all changed paths counts, even when the worktree or a later commit
+restored a path, or the worktree checked out a different head. It pins the original Git object/reference directory
+before launch and reads objects through isolated Git metadata, without loading agent-writable Git configuration,
+replacement refs, grafts, attributes or external diff drivers. Missing history or an unreadable branch marks the
+audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
 `path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
@@ -439,11 +457,14 @@ the audit is unavailable or incomplete, including submodules needing a separate 
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
 as clean. Non-regular files are rejected before content reads; no-follow acquisition and handle checks reject leaf
 replacement races. Each inventory runs in a helper process with a 30-second deadline, at most 100,000 files and 1 GiB
-of content. Timeout terminates the helper, with bounded cleanup and stream-drain waits; missing helper support also
+of content. The settlement inventory's same deadline includes committed history, limited to 10,000 new commits and
+100,000 distinct committed paths, with bounded metadata and Git output reads. Non-regular reference files are refused
+without blocking. Timeout terminates the helper and its Git children, with bounded cleanup and stream-drain waits; missing helper support also
 marks the audit incomplete. Pattern comparison has its own 30-second deadline and bounded non-backtracking matching.
-With `problem` present, counts can be partial and zero outside paths does not establish a clean scope. This is a net
-workspace observation, not filesystem isolation or proof of which actor made a concurrent change; changes reverted
-before settlement are invisible. Git administration and changes outside the workspace are not inventoried.
+With `problem` present, counts can be partial and zero outside paths does not establish a clean scope. This is a
+workspace and reachable-history observation, not filesystem isolation or proof of which actor made a concurrent
+change. Uncommitted changes reverted before settlement and commits no longer reachable from the run branch are
+invisible. Git administration itself and changes outside the workspace are not inventoried as changed paths.
 
 ## The synthetic migration
 

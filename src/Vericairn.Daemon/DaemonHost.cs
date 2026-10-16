@@ -90,7 +90,7 @@ public sealed class DaemonHost : IAsyncDisposable
         Certificates = certificates;
         Identity = identity;
         Time = options.Time ?? TimeProvider.System;
-        Pairings = new PairingRegistry(Time);
+        Pairings = new PairingRegistry(Time, service.PairingAuthorityRefusal);
         Authenticator = new RequestAuthenticator(service, options.ReplayCapacity, () => Identity?.PublicKey, Time);
         Endpoint = new DaemonEndpoint(string.Empty, string.Empty, Environment.ProcessId, string.Empty, service.Root, ApiVersion.Current);
     }
@@ -489,6 +489,11 @@ public sealed class DaemonHost : IAsyncDisposable
         if (RequestAuthenticator.PairingRoutes.Contains(RequestAuthenticator.Operation(context)))
         {
             maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.PairingBodyLimit);
+        }
+        else if (context.Connection.LocalIpAddress is not null
+            || context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker)))
+        {
+            maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.SignedBodyLimit);
         }
 
         if (size is { IsReadOnly: false })

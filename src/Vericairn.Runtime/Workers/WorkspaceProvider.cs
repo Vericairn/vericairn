@@ -17,7 +17,9 @@ public sealed record PreparedWorkspace(string Path, string Branch, string Commit
 /// <param name="Files">Repository-relative names and content or link fingerprints.</param>
 /// <param name="Problem">Why the inventory is incomplete, when it is.</param>
 /// <param name="Identity">An opaque local fingerprint of the physical workspace directory, when supplied by the provider.</param>
-public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null, string? Identity = null);
+/// <param name="GitDirectory">The original Git object and reference directory, local only, pinned before launch.</param>
+/// <param name="CommittedPaths">Paths changed in the run branch's head or any commit since its baseline.</param>
+public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null, string? Identity = null, string? GitDirectory = null, IReadOnlyList<string>? CommittedPaths = null);
 
 /// <summary>
 /// The workspace contract, version 1 (vericairn.workspace/1): an isolated working tree of a repository on a work branch, made from this

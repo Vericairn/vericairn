@@ -78,7 +78,8 @@ public static class AgentRuns
         public JsonElement Cap => Intent.Body.TryGetProperty("cap", out JsonElement cap) ? cap : default;
 
         /// <summary>The usage its settlement recorded; undefined while it has none.</summary>
-        public JsonElement Usage => Latest.Body.TryGetProperty("usage", out JsonElement usage) ? usage : default;
+        public JsonElement Usage => Revisions.FirstOrDefault(r => Array.IndexOf(Settled, EstateModel.BodyString(r, "status")) >= 0) is RecordEnvelope settled
+            && settled.Body.TryGetProperty("usage", out JsonElement usage) ? usage : default;
 
         /// <summary>A string value of the intent's target.</summary>
         public string? Target(string key) =>

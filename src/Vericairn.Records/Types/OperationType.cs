@@ -212,6 +212,36 @@ public sealed class OperationType : IRecordType
         }
     }
 
+    /// <summary>A settled run can gain evidence and missing facts, but never replace the facts already recorded.</summary>
+    private static void SettlementKept(ValidationContext context, RecordEnvelope previous)
+    {
+        foreach (JsonProperty fact in previous.Body.EnumerateObject())
+        {
+            // Stop facts are individually immutable, with additions checked for chronology by Stop.
+            if (fact.Name == "stop")
+            {
+                continue;
+            }
+
+            bool kept = context.Record.Body.TryGetProperty(fact.Name, out JsonElement current);
+            if (kept && fact.Name == "evidence" && fact.Value.ValueKind == JsonValueKind.Array && current.ValueKind == JsonValueKind.Array)
+            {
+                kept = current.GetArrayLength() >= fact.Value.GetArrayLength()
+                    && fact.Value.EnumerateArray().Select(e => CanonicalJson.Serialize(e))
+                        .SequenceEqual(current.EnumerateArray().Take(fact.Value.GetArrayLength()).Select(e => CanonicalJson.Serialize(e)), StringComparer.Ordinal);
+            }
+            else
+            {
+                kept = kept && CanonicalJson.Serialize(current) == CanonicalJson.Serialize(fact.Value);
+            }
+
+            if (!kept)
+            {
+                context.Error("operation.agent-run-settlement-kept", $"A settled agent run keeps its recorded '{fact.Name}' unchanged; evidence may only be appended and new facts must satisfy the record rules.");
+            }
+        }
+    }
+
     /// <summary>A settled run's usage states, for each charged unit its cap states, what was spent or that it was not reported.</summary>
     private static void Reported(ValidationContext context, JsonElement cap, JsonElement usage)
     {
@@ -420,6 +450,11 @@ public sealed class OperationType : IRecordType
         else
         {
             string previousStatus = EstateModel.BodyString(previous, "status") ?? "?";
+            if (EstateModel.BodyString(previous, "action") == AgentRun && previousStatus is "known-failure" or "canceled" or "observed-success")
+            {
+                SettlementKept(context, previous);
+            }
+
             if (EstateModel.BodyString(previous, "action") == AgentRun
                 && (EstateModel.BodyString(context.Record, "action") != AgentRun
                     || (status == "dispatched" && previousStatus != "not-started")

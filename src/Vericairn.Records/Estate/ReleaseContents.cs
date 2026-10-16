@@ -9,14 +9,15 @@ namespace Vericairn.Records.Estate;
 /// What a release contained, derived from the records of its window: the one derivation that <c>vericairn docs notes</c> renders as a
 /// release's notes and the progress report lists for each published release. A window holds the records dated after its beginning and
 /// up to its end, so consecutive windows share no record and leave none out. A result of the window is part of what the release is known
-/// to contain only when an acceptance of its exact revision is on record; any other result is a claim to inspect.
+/// to contain when its exact revision or its work order's current revision is accepted. Superseded results are omitted;
+/// any other current result is a claim to inspect.
 /// </summary>
 public static class ReleaseContents
 {
-    /// <summary>A result of a window that an acceptance of its exact revision accepts.</summary>
+    /// <summary>A current result of a window whose exact revision or current work order is accepted.</summary>
     /// <param name="Result">The result.</param>
-    /// <param name="Acceptance">The earliest current acceptance of its exact revision.</param>
-    /// <param name="Order">The work order it is toward, as its attempt and assignment name it; null when that chain is broken.</param>
+    /// <param name="Acceptance">The earliest current acceptance of its exact revision, or otherwise of its work order's current revision.</param>
+    /// <param name="Order">The current revision of the work order it is toward; null when its attempt and assignment chain is broken.</param>
     public sealed record Accepted(RecordEnvelope Result, RecordEnvelope Acceptance, RecordEnvelope? Order);
 
     /// <summary>A published release and the window of records it contains.</summary>
@@ -39,24 +40,27 @@ public static class ReleaseContents
             .ToList();
     }
 
-    /// <summary>The results of a window: those an acceptance of their exact revision accepts, and the others, each in the window's order.</summary>
+    /// <summary>The current results of a window: those whose exact revision or current work order is accepted, and the others, each in the window's order.</summary>
     public static (IReadOnlyList<Accepted> Accepted, IReadOnlyList<RecordEnvelope> NotAccepted) Results(EstateModel model, IReadOnlyList<RecordEnvelope> window)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(window);
         var acceptances = new Dictionary<(string Id, string? Hash), RecordEnvelope>();
-        foreach (RecordEnvelope acceptance in model.Current("acceptance").Where(a => a.Subject is { Type: "result" }).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal))
+        foreach (RecordEnvelope acceptance in model.Current("acceptance").Where(a => a.Subject is { Type: "result" or "work-order" }).OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal))
         {
             acceptances.TryAdd((acceptance.Subject!.Id, acceptance.Subject.Hash), acceptance);
         }
 
         var accepted = new List<Accepted>();
         var notAccepted = new List<RecordEnvelope>();
-        foreach (RecordEnvelope result in window.Where(r => r.Type == "result"))
+        foreach (RecordEnvelope result in window.Where(r => r.Type == "result" && model.IsCurrent(r)))
         {
-            if (acceptances.TryGetValue((result.Id, result.ComputedHash), out RecordEnvelope? acceptance))
+            RecordEnvelope? order = OrderOf(model, result);
+            RecordEnvelope? current = order is null ? null : model.Latest(order);
+            if (acceptances.TryGetValue((result.Id, result.ComputedHash), out RecordEnvelope? acceptance) ||
+                (current is not null && acceptances.TryGetValue((current.Id, current.ComputedHash), out acceptance)))
             {
-                accepted.Add(new Accepted(result, acceptance, OrderOf(model, result)));
+                accepted.Add(new Accepted(result, acceptance, current));
             }
             else
             {

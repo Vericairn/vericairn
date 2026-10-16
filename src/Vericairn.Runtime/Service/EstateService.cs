@@ -2056,11 +2056,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// admission under the administrator, signed by the administrator's admitted device on this machine. When the admission is
     /// refused the device record is removed again, so a pairing records both or neither.
     /// </summary>
-    public (WriteOutcome Device, WriteOutcome? Admission) PairDevice(PairingPlan plan, IReadOnlyList<string> profiles, PairingDevice device, string signature, string by, string note)
+    public (WriteOutcome Device, WriteOutcome? Admission) PairDevice(PairingPlan plan, IReadOnlyList<string> profiles, PairingDevice device, string signature, PairingAuthority issuer, string note)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(profiles);
         ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(issuer);
         if (!RecordSigning.IsPublicKey(device.PublicKey))
         {
             return (Refuse("The device presented no usable P-256 public key."), null);
@@ -2069,6 +2070,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            if (PairingAuthorityRefusal(model, issuer) is string refusal)
+            {
+                return (WriteOutcome.Fail(new Problem("denied", refusal, [])), null);
+            }
+
             RecordDraft draft;
             string hash;
             try
@@ -2096,7 +2102,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             var admission = new JsonObject { ["principal"] = plan.Principal, ["status"] = "admitted", ["note"] = note };
             using JsonDocument document = JsonDocument.Parse(admission.ToJsonString());
-            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", by, document.RootElement, new RecordReference("device", plan.Record, written.Written!.Hash)), session.Load());
+            WriteOutcome admitted = WriteLocked(new RecordDraft("admission", issuer.Principal, document.RootElement, new RecordReference("device", plan.Record, written.Written!.Hash)), session.Load());
             if (!admitted.Ok)
             {
                 session.Discard(RecordAuthor.Create(draft, [signer]));
