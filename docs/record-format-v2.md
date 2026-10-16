@@ -4,9 +4,11 @@ Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) 
 now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
 it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2
 carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
-0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it, and 0.6.0
-continues to read formats 1 and 2 and write at most format 2. Release 0.6.0 implements goal evaluation and execution,
-routing and asks, and pairing; these additions do not require another format change.
+0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
+candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
+publication. This draft describes 0.6.1, which carries those additions with FIX-08's corrections and continues to read
+formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
+validation and the run ledger nevertheless need a build that understands their rules.
 
 ## Why a new format number
 
@@ -433,7 +435,7 @@ anything is written; `vericairn goal show <goal>` says whether the goal is ready
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.6.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.6.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 

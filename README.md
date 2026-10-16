@@ -7,10 +7,19 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The 0.6.0 code adds Community goals with record predicates and independent evaluations, the worker with Claude Code,
+The 0.6.1 code offers Community goals with record predicates and independent evaluations, the worker with Claude Code,
 Codex and generic launchers, roster routing and asks, the progress report, and pairing with a runtime over the local
-network. Workbench has a Goals workspace and shows asks and progress on Home. The [0.6.0 documentation set](docs/releases/0.6.0/README.md)
-describes these features and their limits; its preparation does not establish release acceptance or publication.
+network. Workbench has a Goals workspace and shows asks and progress on Home. The 0.6.0 candidate was withdrawn before
+publication after independent review; 0.6.1 carries those features with FIX-08's corrections. The
+[0.6.1 documentation set](docs/releases/0.6.1/README.md) describes the code and its limits; its preparation does not
+establish release acceptance or publication.
+
+Settled agent-run facts cannot be rewritten, and the scope audit checks the run branch's reachable committed changes
+even when a later commit or the worktree restores them. Loopback checks the device's admission before reading a body;
+device-signed bodies are limited to 8 MiB and 30 seconds, or less when the signature expires sooner. Pairing codes lose
+their authority when the issuing device loses admission or the authority used to issue them is revoked or expires.
+Release notes and progress omit superseded results and classify current results by acceptance of the result or the
+current work order. The guides describe the remaining limits, including goal limits that are recorded but not enforced.
 
 ## Releases
 
