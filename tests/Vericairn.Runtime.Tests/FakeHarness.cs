@@ -169,6 +169,8 @@ internal static class FakeHarness
         {
             IReadOnlyList<Vericairn.Runtime.Workers.RunComponent> inventory = ReportedLauncher.Inventory;
             if (scenario == "inventory-unexpected") inventory = [.. inventory, inventory[0] with { Id = "unexpected-hook", Kind = "hook" }];
+            if (scenario == "inventory-tool") inventory = [.. inventory, inventory[0] with { Id = "unexpected-tool", Kind = "tool" }];
+            if (scenario == "inventory-environment") inventory = [.. inventory, inventory[0] with { Id = "requesting-tool", Kind = "tool", Environment = ["UNADMITTED_TOOL_SETTING"] }];
             if (scenario == "inventory-route") inventory = [inventory[0] with { Destinations = ["undeclared-route"] }, .. inventory.Skip(1)];
             string revision = "revision-1";
             if (scenario == "inventory-changes")

@@ -24,7 +24,8 @@ not-applicable portions of the same design case are separate rows.
 | D08-B: phone evidence and hand-off | Not applicable | Remote is unbuilt. No phone evidence display, hand-off or acceptance behavior was exercised. Return this portion to the operator with the Remote work. |
 | D08-C: measured omission | Passed | A large multibyte optional original is withheld under a byte allocation. CLI and MCP preparation agree with the API; the generated CLI retrieval command and authenticated SDK retrieval return the pinned bytes. Original and derivative hashes are distinct. Editing the file makes the old pin unavailable and changes the prepared package; an unverified size becomes unknown. Final UTF-8 accounting includes the manifest, withheld entries, wrappers and accounting itself. Mandatory overflow returns no package. |
 | D08-C: Workbench context controls | Not applicable | Workbench has no context-allocation editor or pinned-original retrieval control. Its existing work and assignment routes are tested for complete context refusals. A future control needs CONTEXT-01 follow-up implementation and COMMS-02 qualification; API tests are not a claim that the control exists. |
-| D08-D: bounded optimized run | Deferred | **PLACEHOLDER — next COMMS-02 round, after RUN-01 and RUN-02 reach main. No pass is claimed.** See the run checklist below. |
+| D08-D: bounded run, adapter disabled | Passed | Round two exercises both native launcher adapters with stand-in executables at all three depths. The saved intent precedes dispatch and pins explicit model/effort, provenance, disabled adapter, admitted inventory, retained context hash and byte/token allocations. Observations keep reported model/effort separate from unknown facts; absent token usage reserves the full cap. All run revisions, retained context and canonical runs/status/progress/hand-over output remain byte-identical across view depths. Adapter requests, unallowlisted hooks, tools and environment needs, unsupported effort and model/provider/route fallback are refused before intent or dispatch. |
+| D08-D: adapter optimization | Deferred | EFF-01 in 0.8.0 owns eligible-text reduction, protected payload/tool-argument bypass, telemetry and routing controls, adapter failure/removal, and model/tokenizer qualification. Only the disabled path is passed here. |
 | D08-E: recorded interruption and lossy continuation | Passed | A successor uses saved hand-over bytes after the previous service ends and after an estate copy or daemon restart. Decisions, failed and unperformed checks, original operation identities and exact record bytes survive. CLI, SDK and Workbench resume expose changed record sources and preserve the retained basis. CLI/API/MCP context reads keep missing originals, unknown sizes, unknown tokens and irreversible loss explicit. Revoked MCP and authenticated API readers receive no omission identities, paths, hashes or sizes, including for a previously issued pin. |
 | D08-E: harness compaction and execution recovery | Deferred | Actual harness compaction, interrupted dispatch and model/tokenizer mismatch belong to RUN-01/RUN-02 integration and the next COMMS-02 round. These tests model an interrupted recorded workflow; they do not recover a provider conversation. |
 | D08-F: concise reviews and artifacts | Passed | Short work observations and Workbench reviews retain every finding and every unperformed check, including their explanations. CLI/MCP exports and API/SDK reads preserve canonical original records and decision words. Commits describe the behavior and validation without requiring the chat; independent assessment of their meaning remains outstanding. |
@@ -146,6 +147,18 @@ for the reasons listed above, and zero failed. The full Workbench suite also
 passed with `CI=true` and `DOTNET_PROCESSOR_COUNT=2`: 48 succeeded, one opt-in
 live-estate case skipped. No shared headless settings were changed.
 The corrected three-platform CI run remains the builder's next check.
+
+## Round two: bounded execution
+
+RUN-01 and RUN-02 were merged from `origin/main` at `cfd166c` for this round.
+The new attempt is `01M537TR608K7ND9JQ8ZPYKSEE`.
+[Communication run journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunJourneyTests.cs)
+add 14 passing cases: six native-launcher/depth combinations and eight refused
+selection or inventory requests. Every executable is a local stand-in. The
+checks inspect the intent from inside the pre-dispatch command boundary and
+verify retained context accounting before the stand-in runs. The targeted
+Release build passed with zero warnings/errors. Whole-suite validation and
+D08-E execution recovery follow in this round.
 
 ## Remaining gaps and next round
 
