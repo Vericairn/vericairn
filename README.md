@@ -17,15 +17,21 @@ describes these features, the COMMS-02 qualification evidence and the limits bel
 The last published release is [0.6.1](https://github.com/Vericairn/vericairn/releases/tag/v0.6.1), published on
 October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. Release 0.7.0 also carries
 FIX-09's bounded loopback authentication and recoverable notes window, and FIX-10's deterministic permitted-path
-matching and independent audit checks. NuGet installation goes live only after the operator publishes 0.7.0
+matching and independent audit checks. FIX-11 adds machine-local worker configuration, restricts harness
+qualification to the runtime's own machine and completes the generated CLI option reference.
+NuGet installation goes live only after the operator publishes 0.7.0
 and its Trusted Publishing workflow succeeds; this documentation does not claim those packages are already available.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
-needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. At this head, the shipped
-CLI and daemon have no loader for the explicit run configurations required by RUN-01: worker launches need an
-embedding host to supply `WorkerOptions.Configurations`, including model choices and an admitted inventory.
-The [software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes that
-integration gap and the qualification-route defect found during documentation review. The efficiency Adapter
+needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
+configure that machine's worker with `vericairn worker configure --launcher codex --model <model> --effort <effort>`
+(or `--launcher claude-code`); omit model and effort to show it. Repeated `--allow-model` and `--allow-effort`
+options narrow the permitted choices and never widen the qualified harness inventory. Configuration is per
+machine and is never recorded in the estate. Its Vericairn home must be outside every Git repository and estate;
+if your home directory is a repository, set `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them.
+Harness qualification is machine-local too: paired local-network devices are refused. The
+[software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes the setup and
+admission checks. The efficiency Adapter
 is absent until the planned 0.8.0 work, Remote is not built, and context tokens remain unknown without a
 qualified local tokenizer. Spending and containment limits remain as described in the guides.
 

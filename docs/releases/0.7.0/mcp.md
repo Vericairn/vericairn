@@ -110,11 +110,27 @@ selection provenance, admitted component identities, discrepancies and unknown f
 retains WATCH-01's execution and unexpected-tool signals without filtering the original command audit.
 MCP servers and their dependencies are themselves part of the launcher's complete environment admission.
 
+The stock CLI and daemon load machine-local model and effort defaults and optional allowlists for each
+native worker run, including agent goal steps. Set or show them on the worker's machine with
+`vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`);
+omit model and effort to show it. Repeated `--allow-model` and `--allow-effort` options narrow the choices
+and must include their defaults. Configuration is per machine and is never recorded in the estate.
+The owner-only files stay under `VericairnHome`; reads and writes are refused if that home is inside a
+Git repository or estate. If the user's home directory is a repository, set `VERICAIRN_HOME` outside all
+repositories and estates for the CLI and daemon before starting them. Configuration narrows and never
+widens the qualified inventory. It cannot grant tools, MCP servers, environment variables or routes:
+native inventory admission still requires
+the shipped baseline or a matching current harness qualification. No MCP tool is added or changed;
+there is no configuration write tool, and configuration does not launch an agent or run probes.
+Harness qualification also remains outside the MCP tool list. Its API operation is machine-local:
+paired local-network devices are refused before probes; local socket and signed loopback requests
+retain the existing human authority checks.
+
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
 The efficiency Adapter is disabled and unsupported until the planned EFF-01 work in 0.8.0. Native worker
 dispatch requires a complete inventory and either the exact codex-cli `0.159.0-alpha.12.1` or Claude Code
 `2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
 the release-specific MCP matrix above; it establishes no live-agent or sign-in qualification. The stock
-CLI/daemon configuration gap is described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
+CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not built or qualified by these features.

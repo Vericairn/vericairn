@@ -879,26 +879,24 @@ the launcher's supported efforts are admitted. Each set replaces that launcher's
 Unsupported efforts, malformed files, unknown fields and duplicate keys refuse; they never cause ambient
 fallback. An unknown configuration name is refused, and a missing configuration names this setup command.
 
-The owner-only files are `worker/codex.json` and `worker/claude-code.json` under the user's `VericairnHome`,
-outside repositories and records. They hold only `model`, `effort`, optional `allowedModels` and optional
+Configuration is per machine and is never recorded in the estate. The owner-only files are `worker/codex.json`
+and `worker/claude-code.json` under the user's `VericairnHome`. Reading or writing them is refused when that
+home lies inside a Git repository or an estate, including a repository containing the user's home directory.
+In that case set `VERICAIRN_HOME` to a machine-local directory outside all repositories and estates for both
+the CLI and daemon before starting them. The configuration file, its worker directory and the Vericairn home
+cannot be symbolic links or reparse points; resolved ancestor links cannot hide a repository or estate.
+The files hold only `model`, `effort`, optional `allowedModels` and optional
 `allowedEfforts`, all portable identities; never login material, secret values, machine paths or commands.
 The CLI and daemon read the file for each run and recheck it before intent and dispatch, including agent
 goal steps. A daemon restart is unnecessary. `worker configure` is a machine-local CLI operation with no
 HTTP or MCP write route and runs no probes. Hosts may still supply `WorkerOptions.Configurations`, or a
 launcher may supply its own configuration; those existing explicit configurations take precedence.
 
-The native environment policy derives from the inventory only after the shipped baseline or an exact
+Local configuration narrows permitted choices and never widens the qualified inventory. The native environment
+policy derives from the inventory only after the shipped baseline or an exact
 RUN-03 qualification admits the native probes. Configuration cannot add tools, servers, variables or
 routes. A host's explicit environment policy must still match that qualified inventory; it can refuse
 more, never admit an extension the launcher did not qualify.
-
-**Stock CLI/daemon integration gap.** At this head `WorkerOptions.Configurations` defaults to empty,
-neither native launcher supplies `Configuration`, and the stock CLI and daemon have no configuration loader.
-Thus their `worker run` and agent `goal step` paths refuse with "No matching explicit launcher configuration
-is available", even with `--execution model=... --execution effort=...`. An embedding host must supply the
-configuration and admitted inventory through the runtime API. `worker qualify` records probe evidence but
-cannot supply that configuration. The CLI refusal was reproduced during the 0.7.0 documentation review;
-no code was changed here.
 
 The complete environment inventory covers the harness, tools, skills, plugins, hooks, MCP servers,
 shell helpers, dependencies, and effective user and repository configuration. Preflight must account for
@@ -1008,13 +1006,6 @@ There is no inferred version range. The existing platform and containment limits
 signed loopback. Paired local-network devices receive `401` / `denied` before any local probe, including
 requests with a command override. The existing human authority checks still apply. The MCP tool list is
 unchanged. Remote is not built.
-
-**Qualification-route defect.** At this head that API route is absent from the daemon's machine-local
-local-network denylist, although it runs local probes and accepts a local `command` override. A paired device
-acting for an authorized human can reach it, subject to existing authentication, presence and qualification
-authority checks. The local-network refusal of `worker run` does not protect this route. This finding comes
-from code inspection of the route registry, authenticator and qualification service; a code correction and
-network regression test remain outside this documentation assignment.
 
 Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
 `request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,

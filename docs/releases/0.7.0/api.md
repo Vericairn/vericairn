@@ -347,7 +347,8 @@ What acts on the runtime's own machine is refused: `POST /v1/shutdown`,
 `/v1/devices`, `/v1/devices/rename`, `/v1/devices/rotate`, `/v1/devices/recovery`, `/v1/estate/export`,
 `/v1/pairings`, `/v1/runtime/certificate`, `/v1/releases/submit` and `/v1/releases/observe` (which use the
 release provider's credentials on that machine), `/v1/objects`, `/v1/runs` and `/v1/goals/{id}/step`, which
-launch coding agents there (stopping a run is not refused); applying an upgrade, though not its plan (`check`);
+launch coding agents there (stopping a run is not refused); `/v1/harness-qualifications`, which runs local
+probes and accepts a local command override; applying an upgrade, though not its plan (`check`);
 a record of type `device`; and any request that names a `recovery` key file. A refusal is `401` with a problem of code `denied`,
 and the connection is closed. The daemon always runs as a production host, so no answer carries a stack trace.
 
@@ -539,7 +540,7 @@ pairing does not qualify a Remote client.
 | `POST /v1/goals/{id}/accept` | Accept a goal's current revision, relying on its current evaluation (`GoalAcceptRequest`: by, statement). Refused, with every reason at once and before anything is written, unless the principal is the one who accepts it (decision 01M507XV4VBFYWMRN8WCXMXHX4: its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to while it holds the `accept-work` scope; an operator, only an operator, when an agent sponsors it), the goal was activated and has not ended, its current evaluation finds every condition met and is not the principal's, the principal authored none of its steps, and every record predicate holds now. Returns a `WriteOutcome` |
 | `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, and from 0.6.0 launcher or workspace, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
 | `GET /v1/launchers` | The registered coding-agent launchers, providers of `vericairn.launcher.agent/1`, as `ProviderRow`s of kind launcher. Registration is not dispatch admission: RUN-01 requires explicit configuration and a complete inventory; generic dispatch is refused. |
-| `POST /v1/harness-qualifications` | Qualify an exact native harness using local probes (`HarnessQualifyRequest`: launcher, by, optional settings); returns `WriteOutcome`. Only a human operator or human with an explicit `qualify` grant may author it. See [harness qualification](#harness-qualification-run-03). |
+| `POST /v1/harness-qualifications` | Qualify an exact native harness using local probes (`HarnessQualifyRequest`: launcher, by, optional settings); returns `WriteOutcome`. Machine-local: paired local-network devices are refused before probes or writes. Only a human operator or human with an explicit `qualify` grant may author it. See [harness qualification](#harness-qualification-run-03). |
 | `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused over the local network, and, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator, nor holds `local-engineering`, nor is the sponsor of the goal the run is charged to when the sponsor is a person (from 0.6.0), when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why) and the goal's sponsor recorded no custody exception in force for the goal (from 0.6.0; judged before the workspace is prepared and again when the intent is recorded, so an exception revised or expired meanwhile lifts nothing; a run launched under one names the exception in force when its intent was recorded, and the response says what it lifted; judged a last time immediately before the launch, when an exception that lapsed or a key that arrived after the intent launches nothing and the run's next revision is `canceled`, neither in flight nor charged, the response's status `canceled`), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
 | `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, whether its launcher is generic, optional event-stream `liveness` and settled workspace `scope`), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
 | `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The main observation wait is capped at 30 seconds, whatever grace the request names, with a bounded settlement wait after exit; the response reports what is observed so far, and clients poll for later facts. From 0.6.0 |
@@ -565,11 +566,12 @@ from its files and live store, even while a daemon serves it.
 
 ## Worker run observations
 
-The stock CLI and daemon currently leave `WorkerOptions.Configurations` empty, and neither native launcher
-supplies a default `RunConfiguration`. Consequently their run-start path refuses with "No matching explicit
-launcher configuration is available", even with explicit model and effort overrides. An embedding runtime host
-must supply the configuration, model catalog and environment admission policy. Harness qualification alone
-supplies none of these. This is a 0.7.0 integration gap, not a successful stock-CLI launch path.
+Before a native run, configure model and effort defaults on the runtime's machine with
+`vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`).
+The stock CLI and daemon read that machine's configuration for each run and agent goal step. Missing or
+invalid configuration refuses before intent; explicit API run choices cannot replace it. Optional allowlists
+narrow choices without widening the qualified inventory. See [explicit execution](#explicit-agent-run-execution-run-01-070)
+for the local configuration boundary and the recorded execution snapshot.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
@@ -950,6 +952,25 @@ an intent or routed assignment is stored. The same state is rechecked before dis
 fallback to the harness's environment. `provider-default` is explicitly requested and only allowed when
 declared; it never claims a known effort. `not-supported` requires a declared absence of effort control.
 
+The stock runtime reads native launcher defaults and optional model/effort allowlists from owner-only
+`worker/<launcher>.json` files under its user's `VericairnHome` for each run, including an agent goal step.
+Set or show them on that machine with `vericairn worker configure --launcher codex` (setting also requires
+`--model` and `--effort`; repeated `--allow-model` and `--allow-effort` narrow the allowed choices).
+This local CLI operation has no HTTP route and runs no probes. No restart is required. Missing
+configuration refuses before intent and names the setup command; API overrides cannot replace it or
+escape its allowlists. Native environment policy derives only from the inventory admitted by the shipped
+baseline or an exact current harness qualification; local configuration cannot add tools, servers,
+variables or routes. Configuration is per machine and is never recorded in the estate. Files contain portable
+choice identities only. Reads and writes are refused if the Vericairn home is inside a Git repository or estate.
+If the user's home directory is a repository, set `VERICAIRN_HOME` to a directory outside all repositories and
+estates for both the CLI and daemon before starting them. The run intent records the selected portable choices
+and configuration identity, not the local file or its location.
+
+`POST /v1/harness-qualifications` is machine-local: a paired local-network device receives `401` / `denied`
+before any probe or record write, even when it acts for an authorized human. Local socket and signed
+loopback requests remain available under the existing human qualification authority checks. Qualification
+does not launch an agent. The worker configuration command adds no API route.
+
 The intent records configuration identity, requested choices, provenance, resolved revision, harness
 version, role, disabled Adapter, environment policy and admitted inventory, allocation and package identity.
 `execution.contextPackage` identifies the CONTEXT-01 payload retained inside the run's local `context.json`.
@@ -989,8 +1010,8 @@ the qualification, preserving launcher, version and probes; requalification is a
 from release/platform `qualification` and the MCP orientation matrix. It proves neither live inference nor
 work acceptance; see [the format rules](record-format-v2.md#harness-qualifications-run-03).
 
-Known code defect at this head: the daemon's machine-local denylist omits this route. A paired device acting
-for an authorized human can therefore request probes on the runtime's machine, including the local `command`
-override, subject to the existing device, presence and qualification-authority checks. Do not infer that the
-local-network refusal of run start also protects qualification. This gap needs a code correction and regression
-coverage; this documentation change does not alter the implementation. Remote remains unbuilt.
+Qualification is machine-local. A paired local-network device receives `401` with problem code `denied`
+before probes or record writes, even when acting for an authorized human or supplying a local `command`
+override. The local socket and signed loopback retain the existing human authority checks. A qualification
+record can be used on another machine only when that machine's exact local probe digests match; the record
+does not permit network-triggered probes. Remote remains unbuilt.
