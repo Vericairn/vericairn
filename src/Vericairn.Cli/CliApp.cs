@@ -833,6 +833,7 @@ internal static partial class CliApp
         step.Options.Add(branchOption);
         step.Options.Add(baseOption);
         step.Options.Add(detachOption);
+        var executionOptions = new ExecutionOptions(step);
         step.SetAction(parseResult => Commands.GoalStep(
             parseResult.GetValue(estateOption)!,
             new Commands.GoalStepOptions(
@@ -843,7 +844,7 @@ internal static partial class CliApp
                 parseResult.GetValue(wallMinutesOption),
                 parseResult.GetValue(branchOption),
                 parseResult.GetValue(baseOption),
-                parseResult.GetValue(detachOption)),
+                parseResult.GetValue(detachOption), executionOptions.Read(parseResult)),
             parseResult.GetValue(jsonOption)));
         goal.Subcommands.Add(step);
 
@@ -900,6 +901,7 @@ internal static partial class CliApp
         run.Options.Add(wallMinutesOption);
         run.Options.Add(settingOption);
         run.Options.Add(detachOption);
+        var executionOptions = new ExecutionOptions(run);
         run.SetAction(parseResult => Commands.WorkerRun(
             parseResult.GetValue(estateOption)!,
             new Commands.WorkerRunOptions(
@@ -913,7 +915,7 @@ internal static partial class CliApp
                 parseResult.GetValue(baseOption),
                 parseResult.GetValue(wallMinutesOption),
                 parseResult.GetValue(settingOption) ?? [],
-                parseResult.GetValue(detachOption)),
+                parseResult.GetValue(detachOption), executionOptions.Read(parseResult)),
             parseResult.GetValue(jsonOption)));
         worker.Subcommands.Add(run);
 

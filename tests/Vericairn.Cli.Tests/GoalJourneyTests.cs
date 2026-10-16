@@ -228,6 +228,10 @@ public class GoalJourneyTests
     {
         string root = CliHarness.TempDirectory("j49-routed");
         string scratch = CliHarness.TempDirectory("j49-routed-scratch");
+        _ = CliHarness.Run("--help");
+        var registry = Vericairn.Runtime.Providers.ProviderRegistry.Current;
+        Vericairn.Runtime.Workers.IAgentLauncher original = registry.Launcher("claude-code")!;
+        registry.Register(new ReportedLauncher(original));
         try
         {
             // The operator, the goal's sponsor, signs with a file key held here; the builder is Claude Code with an admitted device here.
@@ -261,7 +265,8 @@ public class GoalJourneyTests
 
             // While the sponsor's key signs here without the sponsor's presence, the builder's run is refused and nothing is recorded.
             string report = Path.Combine(scratch, "stand-in.jsonl");
-            string[] step = ["--estate", root, "goal", "step", goal, "--by", op, "--repository", resource, "--setting", "command=" + FakeHarness.Setting("mcp", report)];
+            string[] step = ["--estate", root, "goal", "step", goal, "--by", op, "--repository", resource,
+                "--execution", "model=model-b", "--execution", "effort=low", "--setting", "command=" + FakeHarness.Setting("mcp", report)];
             CliHarness.Outcome refused = CliHarness.Run(step);
             Assert.Equal(2, refused.Code);
             Assert.Contains($"W-1 is routed to Builder through claude-code, and its run cannot start: The worker launches nothing while a device of an operator or of the goal's sponsor can sign without its owner's presence on this machine (design/goals.md § 10): Device {operatorDevice}", refused.Err, StringComparison.Ordinal);
@@ -277,6 +282,9 @@ public class GoalJourneyTests
             Assert.StartsWith($"step W-1  agent  run  {builder}\n  Routing assigned W-1 to its agent (assignment ", ran.Out, StringComparison.Ordinal);
             Assert.Contains($"It was launched under the custody exception {exception}", ran.Out, StringComparison.Ordinal);
             Assert.Contains("observed-success  claude-code as " + builder, ran.Out, StringComparison.Ordinal);
+            JsonElement execution = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray()).GetProperty("execution");
+            Assert.Equal("model-b", execution.GetProperty("requested").GetProperty("model").GetString());
+            Assert.Equal("low", execution.GetProperty("requested").GetProperty("effort").GetString());
             Assert.Contains("completed, awaiting review: The widget builds and its tests pass. Done.", CliHarness.Ok("--estate", root, "work", "observe", "W-1").Out, StringComparison.Ordinal);
 
             // W-1 awaits review; the next step, W-2, a reserved action, becomes an ask to the operator with its recommendation first.
@@ -301,6 +309,7 @@ public class GoalJourneyTests
         }
         finally
         {
+            registry.Register(original);
             CliHarness.Delete(root, scratch);
         }
     }

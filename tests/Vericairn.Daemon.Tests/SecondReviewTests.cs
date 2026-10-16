@@ -343,7 +343,7 @@ public class SecondReviewTests
         string builder = harness.Estate.BuilderId;
         VericairnClient api = harness.Socket;
         var registry = new ProviderRegistry();
-        registry.Register(new RunApiTests.StandInLauncher());
+        registry.Register(new ReportedLauncher(new RunApiTests.StandInLauncher()));
         registry.Register(new RunApiTests.DirectoryWorkspaces());
         harness.Host.Service.Providers = registry;
         harness.Host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), StopWait = TimeSpan.FromSeconds(2) };

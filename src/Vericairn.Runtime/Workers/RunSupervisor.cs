@@ -26,7 +26,8 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Elapsed">Monotonic time observed from launch through containment, when available.</param>
 /// <param name="Signals">The worker's event-stream observations.</param>
 /// <param name="Stop">A stop's facts, when one was asked.</param>
-public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null, TimeSpan? Elapsed = null, IReadOnlyList<RunSignal>? Signals = null);
+/// <param name="Execution">Reported execution facts, discrepancies and unknowns.</param>
+public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null, TimeSpan? Elapsed = null, IReadOnlyList<RunSignal>? Signals = null, JsonElement? Execution = null);
 
 /// <summary>
 /// The worker's supervision of one harness process (the estate's design/goals.md § 7, steps 4 and 6). It observes the process at
@@ -74,7 +75,7 @@ public sealed class RunSupervisor
     private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
     private readonly Func<RunSignal, string?>? signalAttention;
 
-    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution)
     {
         this.process = process;
         this.launcher = launcher;
@@ -87,7 +88,7 @@ public sealed class RunSupervisor
         this.attention = attention;
         this.workspace = workspace;
         this.permitted = permitted;
-        watch = new RunWatch(watchSettings, tokenCap, historyRate);
+        watch = new RunWatch(watchSettings, tokenCap, historyRate, execution);
         this.signalAttention = signalAttention;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
@@ -118,7 +119,7 @@ public sealed class RunSupervisor
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
     /// </summary>
-    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null, IReadOnlyList<string>? permitted = null, RunWatchSettings? watchSettings = null, decimal? historyRate = null, Func<RunSignal, string?>? signalAttention = null)
+    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null, IReadOnlyList<string>? permitted = null, RunWatchSettings? watchSettings = null, decimal? historyRate = null, Func<RunSignal, string?>? signalAttention = null, JsonElement? execution = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(environment);
@@ -175,7 +176,7 @@ public sealed class RunSupervisor
         };
         try
         {
-            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention);
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention, execution);
             supervisor.Save();
             return supervisor;
         }
@@ -314,7 +315,7 @@ public sealed class RunSupervisor
             }
 
             Save();
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray());
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), watch.ExecutionObserved);
             process.Close();
             return outcome;
         }
@@ -437,16 +438,19 @@ public sealed class RunSupervisor
                     {
                         lock (gate)
                         {
-                            string identity = action.Id + ":" + CommandAudit.Fingerprint(action);
-                            if (!actions.Add(identity))
+                            if (CommandAudit.TryFingerprint(action) is string fingerprint)
                             {
-                                continue;
-                            }
+                                string identity = action.Id + ":" + fingerprint;
+                                if (!actions.Add(identity))
+                                {
+                                    continue;
+                                }
 
-                            actionOrder.Enqueue(identity);
-                            if (actionOrder.Count > 4096)
-                            {
-                                actions.Remove(actionOrder.Dequeue());
+                                actionOrder.Enqueue(identity);
+                                if (actionOrder.Count > 4096)
+                                {
+                                    actions.Remove(actionOrder.Dequeue());
+                                }
                             }
 
                             foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted))
@@ -458,6 +462,14 @@ public sealed class RunSupervisor
                             {
                                 AddSignal(observation);
                             }
+                        }
+                    }
+                    if (launcher.ReadExecution(line) is HarnessExecution reported)
+                    {
+                        lock (gate)
+                        {
+                            foreach (RunSignal observation in watch.Reported(reported)) AddSignal(observation);
+                            state.Execution = watch.ExecutionObserved;
                         }
                     }
                 }

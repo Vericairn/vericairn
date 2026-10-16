@@ -37,6 +37,7 @@ public sealed class GoalType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
+        new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("title", "string", true, "Short title.", 2),
         new("objective", "string", true, "What the sponsor wants, in the sponsor's words.", 2),
         new("completion", "object[]", true, "The conditions that make it done, at least one: a record predicate {record: {type, subject?, product?, fields?, state?, min?, max?}}, checked from current records, counts the current records of the type about the subject (any revision of it), of the product (living documents), with each body field equal to its string and in the state status derives (ask, living-document, work-order), and holds when the count is within min and max (at least one when neither is given); an evidence statement {evidence, check} is judged by an evaluator who did none of the work.", 2),
@@ -70,6 +71,7 @@ public sealed class GoalType : IRecordType
         BodyReader? plan = body.Nested("plan", true);
         BodyReader? limits = body.Nested("limits", false);
         IReadOnlyList<BodyReader>? inputs = body.NestedArray("inputs", true, allowEmpty: true);
+        ExecutionPolicy.Read(body);
         body.NoOtherKeys();
         foreach (BodyReader condition in completion ?? [])
         {

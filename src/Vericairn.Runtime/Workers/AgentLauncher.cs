@@ -15,8 +15,9 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="McpEnvironment">The variables the MCP server needs to find the agent's key, which its configuration passes it.</param>
 /// <param name="Settings">The launcher's settings for this run, as the request names them.</param>
 /// <param name="Limits">Operational thresholds below the reserved cap, passed to supported native harness controls.</param>
+/// <param name="Execution">The admitted execution selection.</param>
 /// <param name="Environment">The environment the harness is started with, built from the allowlist.</param>
-public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment, RunLimits? Limits = null);
+public sealed record LaunchContext(string Workspace, string Condition, string Brief, string McpConfiguration, IReadOnlyList<string> McpServer, IReadOnlyDictionary<string, string> McpEnvironment, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Environment, RunLimits? Limits = null, JsonElement? Execution = null);
 
 /// <summary>What one line of a harness's output told the worker; a field left null told nothing.</summary>
 /// <param name="Tokens">The tokens the run has spent, as a total that replaces the tally.</param>
@@ -67,6 +68,12 @@ public interface IAgentLauncher
     /// </summary>
     string? Harness => null;
 
+    /// <summary>Scopes and execution values supported by this implementation; no declaration means no dispatch.</summary>
+    RunCapabilities ExecutionCapabilities => RunCapabilities.Unsupported;
+
+    /// <summary>An explicitly configured default, if the implementation supplies one; never the ambient harness configuration.</summary>
+    RunConfiguration? Configuration => null;
+
     /// <summary>The harness's own configuration variables that pass to it beside the worker's allowlist; never a credential, which never passes.</summary>
     IReadOnlyList<string> EnvironmentNames => [];
 
@@ -87,6 +94,12 @@ public interface IAgentLauncher
 
     /// <summary>Builds the run-specific harness configuration and environment outside the workspace before launch.</summary>
     LaunchContext Prepare(LaunchContext context) => context;
+
+    /// <summary>Establishes the complete effective inventory before intent. An unobservable inventory is unsupported.</summary>
+    RunPreflight Preflight(LaunchContext context) => throw new ProviderRefusedException("This launcher cannot establish a complete tool, configuration, dependency and route inventory; RUN-01 dispatch is unsupported.");
+
+    /// <summary>Reported execution facts, without inferring them from usage, prose or the requested values.</summary>
+    HarnessExecution? ReadExecution(string line) => null;
 
     /// <summary>The command line that starts the harness on the assignment: the executable first, then its arguments.</summary>
     IReadOnlyList<string> Command(LaunchContext context);

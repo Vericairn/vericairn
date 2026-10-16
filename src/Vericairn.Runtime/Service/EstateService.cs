@@ -1319,7 +1319,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         foreach (IAgentLauncher launcher in Providers.Launchers)
         {
-            rows.Add(Row(launcher.Launcher, "launcher", launcher.Descriptor));
+            rows.Add(Row(launcher.Launcher, "launcher", launcher.Descriptor) with { Execution = JsonSerializer.SerializeToElement(launcher.ExecutionCapabilities, ProtocolJson.Options) });
         }
 
         foreach (IWorkspaceProvider workspaces in Providers.Workspaces)

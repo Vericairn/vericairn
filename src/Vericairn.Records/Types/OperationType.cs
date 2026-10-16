@@ -57,6 +57,8 @@ public sealed class OperationType : IRecordType
         new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
         new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
         new("signals", "object[]", false, "Worker event-stream observations: code, severity (warning|critical), at, summary, optional fingerprint, count and attention (ask id). Raw invocation inputs never enter a record.", 2),
+        new("execution", "object", false, "Immutable admitted model, effort, provenance, disabled Adapter, environment inventory and context allocation, recorded before dispatch.", 2),
+        new("executionObserved", "object", false, "Harness reports at settlement, with discrepancies and facts still unknown; never inferred from the request.", 2),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
 
@@ -424,7 +426,7 @@ public sealed class OperationType : IRecordType
         var signalKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader signal in signals ?? [])
         {
-            string? code = signal.Enum("code", true, "network", "credentials", "scope", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement");
+            string? code = signal.Enum("code", true, "network", "credentials", "scope", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement", "execution", "tool-inventory");
             string? severity = signal.Enum("severity", true, "warning", "critical");
             signal.Timestamp("at", true);
             signal.Text("summary", true, 2000);
@@ -443,6 +445,7 @@ public sealed class OperationType : IRecordType
             }
         }
 
+        ExecutionRecord.Read(context, status);
         body.NoOtherKeys();
         if (context.Format >= 2)
         {

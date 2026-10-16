@@ -99,3 +99,18 @@ same values and asks it to refresh them at the next settled boundary.
 This changes the MCP tool list. The builder must regenerate `AGENTS.md` with
 `vericairn mcp orientation` from the updated runtime; pointer files retain their
 usual role. Remote is not built and is not qualified by this tool.
+
+## Explicit run execution (RUN-01)
+
+RUN-01 does not change the MCP tool list. No tool selects a model, enables the efficiency Adapter,
+launches a run or expands a tool inventory. The worker reads the recorded roster, goal and assignment
+execution policies and admits explicit run overrides through the existing CLI/API authority boundary.
+`record_get` exposes the intent's immutable `execution` and settlement's `executionObserved`, including
+selection provenance, admitted component identities, discrepancies and unknown facts. `estate_progress`
+retains WATCH-01's execution and unexpected-tool signals without filtering the original command audit.
+MCP servers and their dependencies are themselves part of the launcher's complete environment admission.
+
+Only portable identities, hashes and variable names enter these records; MCP configuration paths and
+secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
+The efficiency Adapter is disabled and unsupported here. Native worker dispatch without a qualified
+complete inventory is refused. Remote is not built or qualified by RUN-01.

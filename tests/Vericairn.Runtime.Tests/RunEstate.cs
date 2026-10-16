@@ -34,9 +34,9 @@ internal sealed class RunEstate : IDisposable
         Directory.CreateDirectory(Scratch);
         Service = EstateService.Open(Estate.Root);
         var registry = new ProviderRegistry();
-        registry.Register(new ClaudeCodeLauncher());
-        registry.Register(new CodexLauncher());
-        registry.Register(new GenericLauncher());
+        registry.Register(new ReportedLauncher(new ClaudeCodeLauncher()));
+        registry.Register(new ReportedLauncher(new CodexLauncher()));
+        registry.Register(new ReportedLauncher(new GenericLauncher()));
         registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         Service.Providers = registry;
         Service.WorkerOptions = (options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) }) with
