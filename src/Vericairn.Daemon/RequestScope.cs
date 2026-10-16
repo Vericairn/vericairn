@@ -140,6 +140,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/handoff"] = null,
         ["POST /v1/resume"] = typeof(HandoffPackage),
         ["GET /v1/context/work/{key}"] = null,
+        ["GET /v1/context/work/{key}/brief"] = null,
         ["GET /v1/context/original/{pin}"] = null,
         ["GET /v1/context/{manifest}/sources/{source}"] = null,
         ["GET /v1/validate"] = null,

@@ -25,6 +25,11 @@ Record canonical hashes and original-file byte hashes are separate. Originals
 remain separate from attributed derivatives, whose synthesis defaults to off.
 The package's content hash and serialized byte count are a sidecar over the
 canonical pretty UTF-8 payload. Changing the payload invalidates that identity.
+Mandatory originals remain inline. Default agent packages withhold optional
+material explicitly named by the work, its inputs or governing decisions; the
+remaining catalogue is outside selection and has a listing command. Standalone
+human briefs include the full selected scope. Context allocation is independent
+of a run spending cap and never authorizes truncating mandatory material.
 This contract needs no estate upgrade and introduces no record format 3.
 
 Context manifests and payloads are returned, never stored by a read, in both

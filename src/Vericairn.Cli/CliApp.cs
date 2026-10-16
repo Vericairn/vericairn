@@ -95,6 +95,9 @@ internal static class CliApp
     private static Command ContextFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
         var context = new Command("context", "Prepare measured context and retrieve pinned originals under current permission.");
+        var catalogue = new Command("catalogue", "List the current document revision catalogue without selecting or reading its bodies.");
+        catalogue.SetAction(p => Commands.ContextCatalogue(p.GetValue(estateOption)!, p.GetValue(jsonOption)));
+        context.Subcommands.Add(catalogue);
         var prepare = new Command("prepare", "Compute the context package for a work order without writing.");
         var work = new Argument<string>("work-order");
         var allocation = new Option<long?>("--max-bytes") { Description = "Remaining context input allocation in bytes, separate from the run spending cap. Mandatory overflow is refused." };

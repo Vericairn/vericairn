@@ -86,7 +86,7 @@ internal static class ContextAssembly
                 long included = source.ExcerptBytes ?? 0;
                 long? size = source.Original?.LongLength ?? source.Identity["bytes"]?.GetValue<long>();
                 JsonObject entry = identity.DeepClone().AsObject();
-                entry["reason"] = source.Original is null ? "unavailable" : source.ExcerptBytes is null ? "budget" : "excerpt";
+                entry["reason"] = source.Original is null ? "unavailable" : source.ExcerptBytes is null ? maxBytes is null ? "outside-next-step" : "budget" : "excerpt";
                 entry["state"] = source.Original is null ? source.State : "withheld-but-retrievable";
                 entry["originalBytes"] = size;
                 entry["includedBytes"] = included;
@@ -170,7 +170,7 @@ internal static class ContextAssembly
         return ContextAccounting.Measure(payload, maxBytes);
     }
 
-    internal static ContextResponse Select(JsonObject basis, IReadOnlyList<Source> selected, string presentation, long? maxBytes)
+    internal static ContextResponse Select(JsonObject basis, IReadOnlyList<Source> selected, string presentation, long? maxBytes, bool fullSelectedScope = false)
     {
         if (maxBytes is <= 0 or > CanonicalJson.MaxSafeInteger)
         {
@@ -178,8 +178,15 @@ internal static class ContextAssembly
                 new Problem("invalid", "The context byte allocation must be a positive safe integer.", []));
         }
 
-        ContextPackage full = Build(basis, selected, presentation, maxBytes);
-        if (maxBytes is not long cap || full.Bytes <= cap)
+        if (maxBytes is null)
+        {
+            ContextPackage unbounded = Build(basis, fullSelectedScope ? selected : selected.Select(s => s.Mandatory ? s : s with { Inline = false, ExcerptBytes = null }), presentation);
+            return new ContextResponse(Serialize(unbounded), unbounded, null);
+        }
+
+        long cap = maxBytes.Value;
+        ContextPackage full = Build(basis, selected, presentation, cap);
+        if (full.Bytes <= cap)
         {
             return new ContextResponse(Serialize(full), full, null);
         }

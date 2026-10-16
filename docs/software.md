@@ -12,7 +12,8 @@ path below is prepared for 0.7.0.
 
 For 0.7.0, the foundation's context package preserves exact originals apart from
 derived presentation. `vericairn context prepare <work-order>` computes the step's
-working instructions, effects, pinned inputs and current document catalogue.
+working instructions, effects and pinned inputs. Only optional documents named
+by the work, its inputs or governing decisions enter the selection.
 Required record and document originals come first. Optional originals not fully included have
 a withheld entry with their identity, reason, availability, measured or unknown
 size, dependency, reduction and generated retrieval route. Excerpts carry byte
@@ -20,6 +21,9 @@ extents and say `irreversible reduction of this representation; original retaine
 unavailable originals say `irreversible reduction; original unavailable`.
 
 The selection follows this work's assignments, results, decisions and effects.
+The remaining document catalogue is explicitly outside the selection.
+`vericairn context catalogue` lists its current revision identities without
+reading document bodies; MCP uses `records_list` with `type=document-revision`.
 A prerequisite work record is a pinned input; sharing a decision does not import
 another assignment or its historical file inputs. Required document references
 remain exact, including an older revision explicitly needed by this step. The
@@ -47,8 +51,10 @@ still git-ignored. Retention is not required for read-time retrieval.
 payload, including accounting and omission overhead. The allocation is supplied
 separately from a run's spending cap. Optional sources fit in deterministic
 order after mandatory material; a required original or complete manifest that
-cannot fit refuses the package. No cap means the full selected scope and
-`limit not set`, never a claim that it fits a model. Token counts are unknown:
+cannot fit refuses the package. With no allocation, preparation and MCP briefs
+inline mandatory material and withhold named optional originals, with their
+sizes and retrieval commands. A standalone human `work brief` keeps the full
+selected scope and reports `limit not set`, never a model-fit claim. Token counts are unknown:
 this build has no qualified local tokenizer and adds no package or network
 tokenization call. A worker must establish its model's input bound, existing
 context, framing and reserves before relying on a fit claim.

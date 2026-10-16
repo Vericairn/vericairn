@@ -219,7 +219,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public BriefResponse? Brief(string workOrder)
+    public BriefResponse? Brief(string workOrder) => ReadBrief(workOrder, true);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null) => ReadBrief(workOrder, false, maxBytes);
+
+    private BriefResponse? ReadBrief(string workOrder, bool fullSelectedScope, long? maxBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -238,7 +243,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return null;
             }
 
-            return BriefLocked(model, files, order);
+            return BriefLocked(model, files, order, fullSelectedScope: fullSelectedScope, maxBytes: maxBytes);
         }
     }
 

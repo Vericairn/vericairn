@@ -19,6 +19,7 @@ public static class OpenApiDocument
         ("GET", "/v1/handoff"),
         ("POST", "/v1/resume"),
         ("GET", "/v1/context/work/{key}"),
+        ("GET", "/v1/context/work/{key}/brief"),
         ("GET", "/v1/context/original/{pin}"),
         ("GET", "/v1/context/{manifest}/sources/{source}"),
         ("GET", "/v1/validate"),
@@ -114,7 +115,7 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
             }
 
-            if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}")
+            if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}" or "/v1/context/work/{key}/brief")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional context allocation in canonical payload bytes, separate from a run spending cap. Mandatory originals, manifest and accounting must fit or the package is refused." });
             }
@@ -387,6 +388,7 @@ public static class OpenApiDocument
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
+        ("GET", "/v1/context/work/{key}/brief") => "BriefResponse: measured agent brief; mandatory originals inline, named optional sources withheld unless a context allocation is given and they fit. Writes nothing.",
         ("GET", "/v1/context/work/{key}") => "ContextResponse: compute a deterministic work context package and exact originals; writes nothing.",
         ("GET", "/v1/context/original/{pin}") => "ContextReadResponse: self-contained pinned identity and exact bytes from immutable records or a matching working-tree document. Rechecks access and hashes; writes nothing.",
         ("GET", "/v1/context/{manifest}/sources/{source}") => "ContextReadResponse: legacy manifest handles return original-unavailable after access checking; prepare again for a self-contained pin.",

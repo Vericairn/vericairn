@@ -38,6 +38,8 @@ public class ContextApiTests
         }
 
         Assert.Null(client.Brief("C-1")!.Problem);
+        Assert.Equal(harness.Host.Service.BriefContext("C-1")!.Markdown, client.BriefContext("C-1")!.Markdown);
+        Assert.Equal("context-over-budget", client.BriefContext("C-1", 1)!.Problem!.Code);
         Assert.Empty(harness.Host.Service.Objects());
         Assert.Equal(writes, LocalNetworkLedger.Read(directory).Count);
         Assert.True(harness.Host.Service.DeviceRevoke(new RevokeRequest(paired.Device, harness.Estate.OperatorId, "Withdraw read permission.")).Ok);

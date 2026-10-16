@@ -51,10 +51,12 @@ custody or an editable authority ledger. Context payloads are not object-store
 objects and are not limited by that store's per-object limit.
 
 The optional `maxBytes` query on context preparation is the admitted **context
-input allocation**, separate from any run spending cap. With no cap, all
-available selected sources are included and accounting says `limit not set`.
-Under a cap, mandatory originals remain complete and optional sources are
-selected deterministically. The whole manifest, withheld entries and accounting
+input allocation**, separate from any run spending cap. Without an allocation,
+only mandatory originals are inlined; named optional originals have withheld
+entries with sizes and retrieval pins, even when they are small. Accounting
+says `limit not set`, not that it fits a model. With an allocation, mandatory
+originals remain complete and optional bodies are included deterministically
+when they fit. The whole manifest, withheld entries and accounting
 must fit too, or `context-over-budget` returns no package. `accounting.bytes`
 measures the exact final canonical pretty UTF-8 payload including that report;
 `remainingBytes` and `overageBytes` use the same count. The package sidecar pins
@@ -78,6 +80,19 @@ Retrieval uses `original-unavailable` for a missing pinned original and
 `invalid-context` for failed verification, always without returned bytes.
 `invalid`, `not-found` and `denied` also appear in these response bodies;
 transport authentication may instead reject the request with HTTP 401.
+
+Selection includes mandatory working material and optional documents explicitly
+named by the work, its inputs or governing decisions. The remaining catalogue
+is outside the selection, with `vericairn context catalogue`,
+`GET /v1/records?type=document-revision` and the equivalent `records_list` call
+provided for listing its identities without reading bodies.
+
+`GET /v1/context/work/{key}/brief` (`BriefContext`) is the agent-facing brief.
+Its default is mandatory originals plus the withheld list; `maxBytes` can admit
+optional bodies when they fit. MCP `work_brief` uses this route. The standalone
+human `GET /v1/work/{key}/brief` and `work brief`, including its JSON form, keep
+§ 9's full selected scope with no cap. Neither form imports unmentioned
+catalogue bodies.
 
 `GET /v1/work/{key}/brief` keeps its existing machine fields and human lead and
 adds the package under `json.context`, including its withheld list and measured

@@ -54,6 +54,9 @@ public interface IEstateApi
     /// <summary>The brief of a work order, or null when no work order has that key or id.</summary>
     BriefResponse? Brief(string workOrder);
 
+    /// <summary>A measured agent brief: mandatory originals and named optional sources withheld unless an allocation is given and they fit.</summary>
+    BriefResponse? BriefContext(string workOrder, long? maxBytes = null);
+
     /// <summary>What an observer sees of a work order, or null.</summary>
     ObserveResponse? Observe(string workOrder);
 

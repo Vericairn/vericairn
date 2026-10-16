@@ -17,6 +17,31 @@ namespace Vericairn.Cli.Tests;
 public class ContextJourneyTests
 {
     [Fact]
+    public void DefaultAgentBriefWithholdsNamedOptionalTextAndListsTheUnselectedCatalogue()
+    {
+        using var estate = new HandoffEstate();
+        byte[] optional = Encoding.UTF8.GetBytes("OPTIONAL SOURCE BODY " + new string('o', 100_000));
+        Document(estate, "docs/named.md", optional);
+        Document(estate, "docs/unrelated.md", Encoding.UTF8.GetBytes(new string('u', 1_000_000)));
+        estate.Add("work-order", estate.OperatorId, """{"key":"C-1","kind":"ordinary","title":"Context","intent":"Read docs/named.md for background.","scope":["work"],"exitQuestion":"Complete?","inputs":[],"deliverables":["result"]}""");
+        using EstateService api = EstateService.Open(estate.Root);
+        var registry = new ToolRegistry(api, null);
+        ToolCallResult agent = registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1" });
+        Assert.False(agent.IsError);
+        Assert.DoesNotContain("OPTIONAL SOURCE BODY", agent.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("docs/unrelated.md", agent.Text, StringComparison.Ordinal);
+        Assert.Contains("docs/named.md", agent.Text, StringComparison.Ordinal);
+        Assert.Contains("vericairn context catalogue", agent.Text, StringComparison.Ordinal);
+        Assert.Contains("OPTIONAL SOURCE BODY", CliHarness.Ok("--estate", estate.Root, "work", "brief", "C-1").Out, StringComparison.Ordinal);
+        Assert.Contains("OPTIONAL SOURCE BODY", registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "300000" }).Text, StringComparison.Ordinal);
+        Assert.True(registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "1" }).IsError);
+        string catalogue = CliHarness.Ok("--estate", estate.Root, "context", "catalogue").Out;
+        Assert.Contains("docs/unrelated.md", catalogue, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('u', 100), catalogue, StringComparison.Ordinal);
+        Assert.Empty(api.Objects());
+    }
+
+    [Fact]
     public async Task OriginalStdoutPreservesArbitraryBytesWithoutTextEncodingOrFraming()
     {
         using var estate = new HandoffEstate();

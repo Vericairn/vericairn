@@ -17,10 +17,43 @@ namespace Vericairn.Runtime.Tests;
 public class ContextTests
 {
     [Fact]
+    public void DefaultPreparationSelectsOnlyNamedOptionalSourcesAndWithholdsTheirBodies()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        byte[] mandatory = Encoding.UTF8.GetBytes("Required working instructions.");
+        RecordEnvelope required = AddDocument(estate, "docs/required.md", mandatory);
+        AddDocument(estate, "docs/named.md", Encoding.UTF8.GetBytes("OPTIONAL NAMED BODY"));
+        AddDocument(estate, "docs/input.md", Encoding.UTF8.GetBytes("OPTIONAL INPUT BODY"));
+        AddDocument(estate, "docs/catalogue.md", Encoding.UTF8.GetBytes(new string('z', 2_000_000)));
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Rule","stake":"medium","statement":"Keep originals.","summary":"Keep originals.","synthesis":"Preserve the source.","effects":["retain originals"],"notAuthorized":[],"documents":["docs/named.md"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+        JsonObject input = JsonNode.Parse(HandoffTests.Order)!.AsObject();
+        input["key"] = "PRIOR";
+        input["intent"] = "Read docs/input.md for background.";
+        RecordEnvelope prior = estate.Add("work-order", estate.OperatorId, input.ToJsonString());
+        JsonObject order = JsonNode.Parse(HandoffTests.Order)!.AsObject();
+        order["inputs"] = new JsonArray(new JsonObject { ["id"] = required.Id, ["type"] = required.Type },
+            new JsonObject { ["id"] = decision.Id, ["type"] = decision.Type }, new JsonObject { ["id"] = prior.Id, ["type"] = prior.Type });
+        estate.Add("work-order", estate.OperatorId, order.ToJsonString());
+        using EstateService service = EstateService.Open(estate.Root);
+        ContextPackage package = service.Context("H-1").Package!;
+        JsonElement payload = package.Payload;
+        Assert.DoesNotContain(payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray(),
+            s => s.GetProperty("path").GetString() == "docs/catalogue.md");
+        Assert.All(payload.GetProperty("originals").EnumerateArray(), s => Assert.True(s.GetProperty("mandatory").GetBoolean()));
+        Assert.Equal(mandatory, Convert.FromBase64String(payload.GetProperty("originals").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document").GetProperty("content").GetString()!));
+        Assert.Equal(["docs/input.md", "docs/named.md"], payload.GetProperty("withheld").EnumerateArray()
+            .Where(s => s.GetProperty("kind").GetString() == "document").Select(s => s.GetProperty("path").GetString()).ToArray());
+        Assert.True(package.Bytes < 100_000);
+        Assert.Contains("vericairn context catalogue", payload.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("OPTIONAL NAMED BODY", service.Brief("H-1")!.Markdown, StringComparison.Ordinal);
+        Assert.Contains(service.Context("H-1", 200_000).Package!.Payload.GetProperty("originals").EnumerateArray(), s => !s.GetProperty("mandatory").GetBoolean());
+    }
+
+    [Fact]
     public void PreparingBriefsContextAndHandoffsWritesNothingIntoTheEstate()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/source.md for context.", StringComparison.Ordinal));
         AddDocument(estate, "docs/source.md", Encoding.UTF8.GetBytes("An original to read."));
         using EstateService service = EstateService.Open(estate.Root);
         string[] Snapshot() => Directory.GetFiles(estate.Root, "*", SearchOption.AllDirectories)
@@ -56,7 +89,7 @@ public class ContextTests
         ContextResponse response = service.Context("H-1");
         Assert.Null(response.Problem);
         Assert.DoesNotContain(response.Package!.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == unrelated.Id);
-        Assert.Single(response.Package.Payload.GetProperty("withheld").EnumerateArray());
+        Assert.Empty(response.Package.Payload.GetProperty("withheld").EnumerateArray());
         Assert.Contains(response.Package.Payload.GetProperty("originals").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == affecting.Id && s.GetProperty("mandatory").GetBoolean());
         Assert.Equal("incomplete-context", service.Context("OTHER").Problem!.Code);
     }
@@ -93,7 +126,7 @@ public class ContextTests
         }
 
         using var estate = new TestEstate(recordFormat: 2);
-        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/restricted.md for context.", StringComparison.Ordinal));
         byte[] bytes = Encoding.UTF8.GetBytes("An access-controlled original.");
         AddDocument(estate, "docs/restricted.md", bytes);
         string path = Path.Combine(estate.Root, "docs/restricted.md");
@@ -148,7 +181,7 @@ public class ContextTests
     public void PayloadsAreNotConstrainedByAnObjectStoreTheyNeverWrite()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read " + string.Join(" ", Enumerable.Range(0, 13).Select(i => "docs/source-" + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".md")), StringComparison.Ordinal));
         byte[] bytes = Encoding.UTF8.GetBytes(new string('a', 512 * 1024));
         for (int i = 0; i < 13; i++)
         {
@@ -156,9 +189,9 @@ public class ContextTests
         }
 
         using EstateService service = EstateService.Open(estate.Root);
-        ContextResponse refused = service.Context("H-1");
-        Assert.Null(refused.Problem);
-        Assert.True(refused.Package!.Bytes > EstateLayout.MaxObjectBytes);
+        BriefResponse brief = service.Brief("H-1")!;
+        Assert.Null(brief.Problem);
+        Assert.True(brief.Json.GetProperty("context").GetProperty("bytes").GetInt64() > EstateLayout.MaxObjectBytes);
         Assert.Empty(service.Objects());
     }
 
@@ -166,7 +199,7 @@ public class ContextTests
     public void BriefCarriesTheSharedPackageAndMeasuresBothCompleteRenderings()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/missing.md for context.", StringComparison.Ordinal));
         RecordEnvelope assignment = estate.Add("assignment", estate.OperatorId, $$$"""{"contributor":"{{{estate.BuilderId}}}","brief":{{{RunEstate.Brief}}}}""", order.Reference);
         RecordEnvelope attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:05Z","workspace":"widget clone","note":"Continue."}""", assignment.Reference);
         RecordEnvelope result = estate.Add("result", estate.BuilderId, """{"outcome":"partial","summary":"One check failed: café.","outputs":[],"evidence":[],"checks":[{"name":"tests","outcome":"failed","summary":"Still broken."}],"limitations":["No publication."],"unresolvedEffects":["Original operation remains uncertain."],"nextStep":"Reconcile the original operation before retrying."}""", attempt.Reference);
@@ -188,7 +221,7 @@ public class ContextTests
         Assert.Equal(ContentHash.Sha256(json), brief.JsonMeasurement.Hash);
         Assert.Equal(json.LongLength, brief.Json.GetProperty("accounting").GetProperty("bytes").GetInt64());
         JsonElement context = brief.Json.GetProperty("context");
-        Assert.Equal(service.Context("H-1").Package!.Hash, context.GetProperty("hash").GetString());
+        Assert.Equal(service.Context("H-1").Package!.Hash, service.BriefContext("H-1")!.Json.GetProperty("context").GetProperty("hash").GetString());
         Assert.Single(context.GetProperty("payload").GetProperty("withheld").EnumerateArray());
         Assert.Contains(context.GetProperty("payload").GetProperty("originals").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == result.Id);
     }
@@ -228,11 +261,11 @@ public class ContextTests
     public void BudgetCountsTheFinalUtf8PayloadIncludingWithheldEntriesAndItsOwnAccounting()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/large.md for context.", StringComparison.Ordinal));
         byte[] optional = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("café 漢字\n", 20_000)));
         AddDocument(estate, "docs/large.md", optional);
         using EstateService service = EstateService.Open(estate.Root);
-        ContextPackage unlimited = service.Context("H-1").Package!;
+        ContextPackage unlimited = service.Brief("H-1")!.Json.GetProperty("context").Deserialize<ContextPackage>(ProtocolJson.Options)!;
         Assert.Equal("limit not set", unlimited.Payload.GetProperty("accounting").GetProperty("capSource").GetString());
         long cap = unlimited.Bytes / 2;
         ContextResponse response = service.Context("H-1", cap);
@@ -335,7 +368,7 @@ public class ContextTests
     public void PinnedRecordsSurviveRevisionsButDocumentsRequireMatchingWorkingTreeBytes()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/context.md for context.", StringComparison.Ordinal));
         byte[] bytes = Encoding.UTF8.GetBytes("Original café.\n");
         RecordEnvelope revision = AddDocument(estate, "docs/context.md", bytes);
         using EstateService service = EstateService.Open(estate.Root);
@@ -369,7 +402,7 @@ public class ContextTests
     public void PinsCannotSubstituteAnotherPathRevisionHashOrEstate()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/source.md for context.", StringComparison.Ordinal));
         AddDocument(estate, "docs/source.md", Encoding.UTF8.GetBytes("Pinned source."));
         using EstateService service = EstateService.Open(estate.Root);
         JsonElement entry = service.Context("H-1").Package!.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources")
@@ -396,10 +429,10 @@ public class ContextTests
         using var estate = new TestEstate(recordFormat: 2);
         RecordEnvelope revision = AddDocument(estate, "docs/missing.md", Encoding.UTF8.GetBytes("not kept"));
         File.Delete(Path.Combine(estate.Root, "docs/missing.md"));
-        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/missing.md for context.", StringComparison.Ordinal));
         using EstateService service = EstateService.Open(estate.Root);
         ContextPackage package = service.Context("H-1").Package!;
-        JsonElement withheld = Assert.Single(package.Payload.GetProperty("withheld").EnumerateArray());
+        JsonElement withheld = Assert.Single(package.Payload.GetProperty("withheld").EnumerateArray(), s => s.GetProperty("kind").GetString() == "document");
         Assert.Equal("missing", withheld.GetProperty("state").GetString());
         Assert.Equal(JsonValueKind.Null, withheld.GetProperty("originalBytes").ValueKind);
         Assert.Contains("--original", withheld.GetProperty("retrieve").GetString(), StringComparison.Ordinal);

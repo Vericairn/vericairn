@@ -10,7 +10,7 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Runtime.Service;
 
-/// <summary>The working instructions and effects of one step, their pinned inputs, and the optional document catalogue.</summary>
+/// <summary>The working instructions and effects of one step, their pinned inputs, and only the optional documents they name.</summary>
 internal static partial class ContextSelection
 {
     internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order)
@@ -82,11 +82,26 @@ internal static partial class ContextSelection
             }
         }
 
+        // Optional material is named by the work, its inputs or governing decisions, never
+        // inferred merely from catalogue membership. An exact revision reference stays exact.
+        List<RecordEnvelope> naming = model.Records.Where(r => required.Contains(r.Id) &&
+            r.Type is not ("estate" or "principal" or "device" or "admission" or "authority" or "roster" or "document-revision")).ToList();
+        var documents = new HashSet<string>(requiredDocuments, StringComparer.Ordinal);
+        documents.UnionWith(naming.SelectMany(References).Where(id => model.ById.TryGetValue(id, out RecordEnvelope? r) && r.Type == "document-revision"));
+        List<string> names = naming.SelectMany(r => Strings(r.Body)).ToList();
+        foreach (RecordEnvelope revision in model.Current("document-revision"))
+        {
+            if (names.Any(value => NamesPath(value, EstateModel.BodyString(revision, "path")!)))
+            {
+                documents.Add(revision.Id);
+            }
+        }
+
         Dictionary<string, RecordFile> byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
-        var sources = model.Records.Where(r => required.Contains(r.Id) || (r.Type == "document-revision" && model.IsCurrent(r)))
+        var sources = model.Records.Where(r => required.Contains(r.Id) || documents.Contains(r.Id))
             .Select(r => ContextAssembly.Record(r, byPath[r.ExpectedPath], required.Contains(r.Id),
-                required.Contains(r.Id) ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; document catalogue")).ToList();
-        foreach (RecordEnvelope revision in model.OfType("document-revision").Where(r => requiredDocuments.Contains(r.Id) || model.IsCurrent(r)))
+                required.Contains(r.Id) ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; named by the work, its inputs or governing decisions")).ToList();
+        foreach (RecordEnvelope revision in model.OfType("document-revision").Where(r => documents.Contains(r.Id)))
         {
             string path = EstateModel.BodyString(revision, "path")!;
             string hash = EstateModel.BodyString(revision, "hash")!;
@@ -98,7 +113,7 @@ internal static partial class ContextSelection
                 ["revisionHash"] = revision.ComputedHash, ["byteHash"] = hash,
                 // A declaration alone does not verify a retained size.
                 ["bytes"] = bytes?.LongLength,
-            }, bytes, mandatory, mandatory ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; document catalogue"));
+            }, bytes, mandatory, mandatory ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; named by the work, its inputs or governing decisions"));
         }
 
         return sources;
@@ -113,13 +128,40 @@ internal static partial class ContextSelection
         ["asOf"] = model.Records.OrderBy(r => r.At, StringComparer.Ordinal).LastOrDefault()?.At,
         ["asOfMethod"] = "latest recorded timestamp in the observed file set; not live external health",
         ["scope"] = scope,
-        ["selection"] = order is null ? "deterministic complete record selection; every retained record original is mandatory" : "deterministic working instructions and effects, governing decisions, exact input records and signature devices; prerequisite work remains an input, not another active assignment; historical file bodies outside this step are not selected; mandatory originals before optional catalogue sources",
+        ["selection"] = order is null ? "deterministic complete record selection; every retained record original is mandatory" : "deterministic working instructions and effects, governing decisions, exact input records and signature devices; prerequisite work remains an input, not another active assignment; historical file bodies outside this step are not selected; mandatory originals before explicitly named optional sources; unmentioned catalogue entries are outside this selection",
+        ["outsideSelection"] = order is null ? null : new JsonObject
+        {
+            ["scope"] = "The rest of the document catalogue is outside this selection, not withheld material. Listing it does not read its original bodies.",
+            ["list"] = "vericairn context catalogue",
+            ["api"] = "/v1/records?type=document-revision",
+            ["mcp"] = "records_list with type=document-revision",
+        },
         ["audience"] = "authorized estate reader",
         ["access"] = "estate-wide read permission; rechecked on retrieval",
         ["nextTask"] = order is null ? "Review current state before continuing on another surface or copy." : "Continue the recorded work; inspect current constraints and return contract.",
         ["communication"] = "presentation supplied by the caller; no depth selection by the context contract",
         ["execution"] = null,
     };
+
+    private static bool NamesPath(string value, string path)
+    {
+        int start = 0;
+        while ((start = value.IndexOf(path, start, StringComparison.Ordinal)) >= 0)
+        {
+            int end = start + path.Length;
+            if ((start == 0 || !PathCharacter(value[start - 1])) && (end == value.Length || !PathCharacter(value[end]) ||
+                (value[end] == '.' && (end + 1 == value.Length || char.IsWhiteSpace(value[end + 1])))))
+            {
+                return true;
+            }
+
+            start = end;
+        }
+
+        return false;
+    }
+
+    private static bool PathCharacter(char value) => char.IsLetterOrDigit(value) || value is '/' or '.' or '_' or '-';
 
     private static bool AddChain(EstateModel model, HashSet<string> selected, RecordEnvelope record)
     {

@@ -21,8 +21,14 @@ receives no source metadata. These read tools author nothing and write nothing.
 Regenerate the estate orientation when adopting this changed tool list and
 `context_read` argument schema. Remote is not built.
 
-`context_prepare` accepts an optional `maxBytes` decimal string for the remaining
-context allocation. Its text block is the exact measured canonical payload,
+`context_prepare` and `work_brief` accept an optional `maxBytes` decimal string for the remaining
+context allocation. Without it, both inline mandatory material and withhold
+all selected optional sources. Only documents named by the work, its inputs
+or governing decisions are optional selections. The rest of the catalogue is
+explicitly outside selection; `vericairn context catalogue` or `records_list`
+with `type=document-revision` lists it without reading original bodies.
+A standalone human `work brief` still includes the full selected scope.
+The `context_prepare` text block is the exact measured canonical payload,
 including withheld entries and injected accounting. Mandatory overflow produces
 an error and no package. Tokens are unknown; the surrounding MCP transport and
 the model provider's hidden framing are not measured as model input.

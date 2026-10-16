@@ -32,7 +32,7 @@ public sealed partial class EstateService
         }
     }
 
-    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true)
+    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true, bool fullSelectedScope = false)
     {
         List<FindingDto> errors = model.Findings.Where(f => f.Severity == Severity.Error)
             .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)).ToList();
@@ -68,26 +68,27 @@ public sealed partial class EstateService
                 new FindingDto("error", "context.original-unavailable", s.Identity["path"]!.GetValue<string>(), s.Dependency)).ToList()));
         }
 
-        JsonObject basis = ContextSelection.Basis(model, "This work step's instructions, governing decisions, effects and pinned input records, plus the current document catalogue. Referenced prerequisite work remains an input, not another assignment. Historical file bodies outside this step, unrelated records, output objects and unrecorded conversation are outside this selection.", order);
+        JsonObject basis = ContextSelection.Basis(model, "This work step's instructions, governing decisions, effects and pinned input records, plus optional documents named by that work, its inputs and governing decisions. Referenced prerequisite work remains an input, not another assignment. Historical file bodies outside this step, unrelated records, output objects and unrecorded conversation are outside this selection.", order);
         if (!checkBatches)
         {
             basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";
         }
-        return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order), maxBytes);
+        return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order, includeDocumentCatalogue: false), maxBytes, fullSelectedScope);
     }
 
-    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true)
+    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null)
     {
-        ContextResponse context = ContextLocked(model, files, order, checkBatches: checkBatches);
+        ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope);
         if (context.Package is not { } package)
         {
             return new BriefResponse(context.Text, Element(new JsonObject { ["problem"] = JsonSerializer.SerializeToNode(context.Problem, ProtocolJson.Options) }), Problem: context.Problem);
         }
 
         JsonObject json = JsonNode.Parse(WorkView.RenderBriefJson(model, order))!.AsObject();
+        json["documentsScope"] = "The documents field is the catalogue, not the context selection. The context manifest alone names selected sources; list the catalogue with vericairn context catalogue.";
         json["context"] = JsonSerializer.SerializeToNode(package, ProtocolJson.Options);
         ContextPackage machine = ContextAccounting.Measure(json, null);
-        (string text, ContextTextMeasurement measurement) = ContextRendering.Render(WorkView.RenderBrief(model, order), package);
+        (string text, ContextTextMeasurement measurement) = ContextRendering.Render(WorkView.RenderBrief(model, order, includeDocumentCatalogue: false), package);
         return new BriefResponse(text, machine.Payload, measurement, JsonMeasurement: new ContextTextMeasurement(machine.Hash, machine.Bytes, "exact canonical pretty UTF-8 of the complete machine brief, including its context package and accounting"));
     }
 

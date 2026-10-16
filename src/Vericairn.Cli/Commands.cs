@@ -104,6 +104,25 @@ internal static class Commands
         return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
     }));
 
+    /// <summary>List current document revision identities without reading their original bodies.</summary>
+    public static int ContextCatalogue(string root, bool json) => WithApi(root, api =>
+    {
+        var rows = api.Records("document-revision").Select(r => new { r.Id, r.Hash, Path = r.Envelope.GetProperty("body").GetProperty("path").GetString() }).ToList();
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
+        }
+        else
+        {
+            foreach (var row in rows)
+            {
+                Console.Out.WriteLine($"{row.Path}  revision {row.Id}  {row.Hash}");
+            }
+        }
+
+        return Clean;
+    });
+
     /// <summary>Compute context without writing through the runtime's common contract.</summary>
     public static int ContextPrepare(string root, string workOrder, bool json, long? maxBytes = null) => WithApi(root, api =>
     {

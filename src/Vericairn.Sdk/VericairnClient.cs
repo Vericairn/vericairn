@@ -161,6 +161,10 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
 
     /// <inheritdoc />
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null) => Get<BriefResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) + "/brief" +
+        (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)), allowNotFound: true);
+
+    /// <inheritdoc />
     public ContextResponse Context(string workOrder, long? maxBytes = null) => Get<ContextResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) +
         (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
 
