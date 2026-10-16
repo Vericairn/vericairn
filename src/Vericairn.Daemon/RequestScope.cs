@@ -13,10 +13,11 @@ namespace Vericairn.Daemon;
 /// What a device-signed request may do once the runtime has bound it, from 0.6.0: it acts for its device's own principal only. The
 /// check reads the request object the operation will receive, after binding, never the body a second time, so no encoding, spelling
 /// or repetition in the body can make the check and the operation read different principals. A request of a type this does not know
-/// is refused, so a new operation is held to a principal before it can be reached by a device. Requests over the local socket carry
+/// is refused, so a new operation is held to a principal before it can be reached by a device. A write carries the device's identity
+/// and verified key to the service, which rechecks its standing under the estate's write lock. Requests over the local socket carry
 /// no device, and the operating system's identity of their caller stands for them as before.
 /// </summary>
-internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null) : IEndpointFilter
+internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null, Action? beforeWrite = null) : IEndpointFilter
 {
     /// <inheritdoc />
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -43,9 +44,14 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         }
 
         bool write = HttpMethods.IsPost(context.HttpContext.Request.Method);
-        if (!device.LocalNetwork || !write)
+        if (!write)
         {
             return await next(context).ConfigureAwait(false);
+        }
+
+        if (!device.LocalNetwork)
+        {
+            return await WriteAsync(context, next, device).ConfigureAwait(false);
         }
 
         // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
@@ -71,7 +77,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         object? result;
         try
         {
-            result = await next(context).ConfigureAwait(false);
+            result = await WriteAsync(context, next, device).ConfigureAwait(false);
         }
         catch
         {
@@ -81,6 +87,15 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
 
         Keep(id, at, device, operation, result, failed: false);
         return result;
+    }
+
+    /// <summary>Carries the verified device and key to each write, where the service rechecks them under its gate.</summary>
+    private async ValueTask<object?> WriteAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next, AuthenticatedDevice device)
+    {
+        using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
+        beforeWrite?.Invoke();
+        object? result = await next(context).ConfigureAwait(false);
+        return request.Refusal is Problem denied ? Denied(context.HttpContext, device, denied.Message) : result;
     }
 
     /// <summary>

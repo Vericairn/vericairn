@@ -23,12 +23,14 @@ namespace Vericairn.Daemon;
 /// <summary>A device a request was authenticated as, on loopback or the local network: what the request may act for once it is bound.</summary>
 /// <param name="Identity">The device's identity.</param>
 /// <param name="Principal">The principal it acts for, and the only one its requests may name as acting.</param>
+/// <param name="PublicKey">The current key that verified its signature, rechecked under the estate's write lock.</param>
 /// <param name="LocalNetwork">Whether the request came over the local network.</param>
-internal sealed record AuthenticatedDevice(string Identity, string Principal, bool LocalNetwork);
+internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork);
 
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
-/// the daemon serves, the signing time must be within the permitted skew when the request starts and still once its body is in,
+/// the daemon serves, the signing time must be since this instance started accepting requests, no later than its clock and within
+/// the permitted age when the request starts and still once its body is in,
 /// a JSON body must be UTF-8 without a byte order mark, the signature must verify over the method, the request target, the time
 /// and the body (and, on the local network, the estate and this runtime's identity), and a signature is accepted once, in
 /// whichever of its equivalent forms it comes. On the local network the device must also be permitted that profile and present a
@@ -89,6 +91,7 @@ internal sealed class RequestAuthenticator
     private readonly ReplayCache replays;
     private readonly Func<string?> identity;
     private readonly TimeProvider time;
+    private DateTimeOffset acceptingSince = DateTimeOffset.MaxValue;
 
     /// <summary>
     /// An authenticator for the estate a service holds, on the runtime's clock; <paramref name="identity"/> gives the runtime identity's
@@ -101,6 +104,15 @@ internal sealed class RequestAuthenticator
         this.time = time;
         replays = new ReplayCache(replayCapacity);
     }
+
+    /// <summary>Sets the instance's signing cutoff immediately before its listeners open; it is never rounded down.</summary>
+    internal void StartAccepting() => acceptingSince = time.GetUtcNow();
+
+    /// <summary>
+    /// The first whole-second signing time this instance accepts. Publishing readiness after this time lets existing clients sign
+    /// immediately, without rounding the cutoff down and admitting a replay from a restart within the same second.
+    /// </summary>
+    internal DateTimeOffset FirstSigningTime => DateTimeOffset.FromUnixTimeSeconds(acceptingSince.ToUnixTimeSeconds() + 1);
 
     /// <summary>The operation a request reaches, as its method and route pattern, for example POST /v1/shutdown; the path itself when no route matched.</summary>
     internal static string Operation(HttpContext context)
@@ -121,9 +133,9 @@ internal sealed class RequestAuthenticator
             return Denied($"Loopback requests are signed by an admitted device: send {RequestSigning.DeviceHeader}, {RequestSigning.SignedAtHeader} and {RequestSigning.SignatureHeader}, or use the local socket.");
         }
 
-        if (!Fresh(signedAt))
+        if (Freshness(signedAt) is Problem freshness)
         {
-            return Denied(Stale);
+            return freshness;
         }
 
         if (await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false) is not (byte[] digest, byte[] body))
@@ -137,9 +149,9 @@ internal sealed class RequestAuthenticator
         }
 
         // Fresh still once the body is in: a body that arrives later does not carry a signature past its five minutes.
-        if (!Fresh(signedAt))
+        if (Freshness(signedAt) is Problem late)
         {
-            return Denied(Stale);
+            return late;
         }
 
         DeviceStanding? standing = service.Standing(device);
@@ -153,7 +165,7 @@ internal sealed class RequestAuthenticator
             return problem;
         }
 
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: false);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: false);
         return null;
     }
 
@@ -186,9 +198,9 @@ internal sealed class RequestAuthenticator
             return refused;
         }
 
-        if (!Fresh(signedAt))
+        if (Freshness(signedAt) is Problem freshness)
         {
-            return Denied(Stale);
+            return freshness;
         }
 
         // Signed for this estate and this runtime's identity (version 2), so no other runtime accepts it, nor this one what was
@@ -212,9 +224,9 @@ internal sealed class RequestAuthenticator
 
         // Once the body is in, the time again, and the device as the records say it is now: revoked, rotated to another key or
         // withdrawn from the profile while its body arrived, it is refused as it would have been at its head.
-        if (!Fresh(signedAt))
+        if (Freshness(signedAt) is Problem late)
         {
-            return Denied(Stale);
+            return late;
         }
 
         DeviceStanding? standing = service.Standing(device);
@@ -234,7 +246,7 @@ internal sealed class RequestAuthenticator
             return Denied($"{operation} acts on the runtime's own machine and is refused over the local network; run it on that machine.");
         }
 
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: true);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: true);
         return null;
     }
 
@@ -351,8 +363,24 @@ internal sealed class RequestAuthenticator
         return null;
     }
 
-    private bool Fresh(string signedAt) =>
-        RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) && (time.GetUtcNow() - at).Duration() <= RequestSigning.MaxSkew;
+    private Problem? Freshness(string signedAt)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        if (!RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) || (now - at).Duration() > RequestSigning.MaxSkew)
+        {
+            return Denied(Stale);
+        }
+
+        if (at < acceptingSince)
+        {
+            return Denied("The signing time is earlier than this runtime instance began accepting requests; sign the request afresh.");
+        }
+
+        // A signature dated ahead could be replayed after a restart before its signed time, so the lead for a fast client clock stays a few seconds.
+        return at > now + RequestSigning.MaxLead
+            ? Denied("The signing time is more than five seconds ahead of the runtime's clock; synchronize the client clock and sign the request afresh.")
+            : null;
+    }
 
     /// <summary>
     /// The digest a request's signature covers: version 1 on loopback, version 2 for the estate and runtime identity bound in on the

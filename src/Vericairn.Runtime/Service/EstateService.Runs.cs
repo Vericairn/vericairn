@@ -425,7 +425,16 @@ public sealed partial class EstateService
         }
 
         var directory = new RunDirectory(estate, found.Id);
-        StopRequest asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+        StopRequest asked;
+        lock (gate)
+        {
+            if (RequestDeviceRefusal(session.Load()) is Problem denied)
+            {
+                return StopProblem(run, denied.Code, denied.Message);
+            }
+
+            asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+        }
         RunObservedState? observed = ReadSteadily(directory);
         bool supervised = Fresh(observed);
         if (supervised)

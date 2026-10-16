@@ -252,7 +252,10 @@ named) has passed, the worker kills its process tree; containment is its exit, o
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
 and the run stays in flight. Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
 an agent sponsors) and the principal who started the run stop it, on every profile; anyone else is refused before anything
-is asked of the run. The command waits for what the worker observes for at most 30 seconds, whatever grace it names, and
+is asked of the run. For a device-signed request, the runtime rechecks the requesting device's admission and
+authenticated key (and its local-network permission on that profile) under the estate's write lock before
+storing the stop for the worker; revocation after authentication cannot queue a new stop.
+The command waits for what the worker observes for at most 30 seconds, whatever grace it names, and
 then prints what it has; the settlement records the rest.
 
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
@@ -262,7 +265,9 @@ nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>
 [--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
 Community's conductor, one step in sequence; Pro's program plans and schedules many. Like `worker run`,
 it runs on the runtime's machine and is refused through the local-network listener. On loopback, its `by`
-is the signing device's principal; the local socket uses its caller's operating-system identity. The goal must be active, and the
+is the signing device's principal, and its admission and authenticated key are rechecked under the estate's
+write lock before its records are stored, including a grouped assignment and run intent or ask. The local
+socket uses its caller's operating-system identity. The goal must be active, and the
 principal an operator, the goal's sponsor when the sponsor is a person, or a principal holding `local-engineering`, which
 is how the builder dispatches agents under the operator's authority; an agent that sponsors a goal takes its steps only
 under `local-engineering`, like any agent, since an operator decides for that goal. A person who sponsors a goal assigns

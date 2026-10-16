@@ -22,7 +22,8 @@ public interface IRequestSigner
 /// signing time and a signature over the method, the request target, the time and the body hash. Loopback signs version 1, as API v1
 /// clients always have. The local network signs version 2, from 0.6.0, which also binds the estate and the runtime identity the device
 /// paired with; only the request for the runtime identity's proof, sent before the runtime has proven which identity answers, is
-/// signed version 1 there. The daemon accepts a signature only from a device admitted now, within five minutes of its time, and once.
+/// signed version 1 there. The daemon accepts a signature only from a device admitted now, signed since this instance began accepting
+/// requests, no later than its clock, no more than five minutes old, and once.
 /// </summary>
 public static class RequestSigning
 {
@@ -41,8 +42,15 @@ public static class RequestSigning
     /// <summary>Header carrying the base64url signature.</summary>
     public const string SignatureHeader = "Vericairn-Signature";
 
-    /// <summary>How far a signing time may be from the daemon's clock.</summary>
+    /// <summary>The maximum age of a request's signing time; times more than <see cref="MaxLead"/> ahead and times before the instance's startup are refused.</summary>
     public static TimeSpan MaxSkew { get; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How far ahead of the runtime's clock a signing time may be: enough for a client clock that runs a little fast, since signing
+    /// times have whole-second precision, and short enough that a request signed ahead can be replayed only after a restart within
+    /// these seconds.
+    /// </summary>
+    public static TimeSpan MaxLead { get; } = TimeSpan.FromSeconds(5);
 
     private const string TimeFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 

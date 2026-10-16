@@ -517,6 +517,12 @@ and every request, is the one its device record names, and `profiles` decides wh
 network admits only a device whose current record permits `local-network`. A paired device's key stays on its
 own machine, so `vericairn devices list` on the runtime's machine does not show it as held there.
 
+Authentication does not reserve admission for a later write. The runtime rechecks the requesting device under
+the estate's write lock, against the records then: it must still be admitted, not revoked, on the key that
+authenticated the request and permitted `local-network`. A revocation, key rotation or profile withdrawal
+recorded after authentication prevents the request's write, even if another device of its principal can sign
+records on the runtime's machine. The failed request is kept in the local-network ledger; it adds no record.
+
 A paired device's key signs no record after its own. A record it asks for over the local network is authored
 by its principal and signed, as every API write is, by an admitted device of that principal whose key the
 runtime's machine holds, or written unsigned where the charter allows it; the runtime refuses the write when

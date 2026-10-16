@@ -22,8 +22,11 @@ namespace Vericairn.Daemon.Tests;
 /// </summary>
 internal sealed class LocalNetworkHarness : IAsyncDisposable
 {
-    private LocalNetworkHarness(TestEstate estate, DaemonHost host, VericairnClient socket, ManualTime time, string deviceHome, string operatorDevice)
+    private readonly DaemonOptions options;
+
+    private LocalNetworkHarness(TestEstate estate, DaemonHost host, VericairnClient socket, ManualTime time, string deviceHome, string operatorDevice, DaemonOptions options)
     {
+        this.options = options;
         Estate = estate;
         Host = host;
         Socket = socket;
@@ -36,10 +39,10 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 
     public TestEstate Estate { get; }
 
-    public DaemonHost Host { get; }
+    public DaemonHost Host { get; private set; }
 
     /// <summary>The administrator's client on the runtime's own machine, over the local socket.</summary>
-    public VericairnClient Socket { get; }
+    public VericairnClient Socket { get; private set; }
 
     /// <summary>The clock pairing codes, request signatures and the certificate schedule are judged by, unless the harness runs on the system clock.</summary>
     public ManualTime Time { get; }
@@ -70,10 +73,11 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
-        var time = new ManualTime(DateTimeOffset.UtcNow);
+        var time = new ManualTime(DateTimeOffset.UtcNow, running: true);
+        var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity };
         DaemonHost host = await DaemonHost.StartAsync(
             estate.Root,
-            options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity },
+            options: options,
             cancellationToken: TestContext.Current.CancellationToken);
         var socket = new VericairnClient(host.Endpoint);
 
@@ -84,7 +88,16 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         Assert.True(admitted.Ok, admitted.Problem?.Message);
         string deviceHome = Path.Combine(Path.GetTempPath(), "vericairn-second-machine-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(deviceHome);
-        return new LocalNetworkHarness(estate, host, socket, time, deviceHome, device.Written.Id);
+        return new LocalNetworkHarness(estate, host, socket, time, deviceHome, device.Written.Id, options);
+    }
+
+    /// <summary>A new runtime instance over the same estate, identity and clock, with an empty replay cache.</summary>
+    public async Task RestartAsync()
+    {
+        Socket.Dispose();
+        await Host.DisposeAsync();
+        Host = await DaemonHost.StartAsync(Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
+        Socket = new VericairnClient(Host.Endpoint);
     }
 
     /// <summary>A pairing code the operator issues for a principal.</summary>
@@ -118,14 +131,19 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     }
 }
 
-/// <summary>A clock a test moves by hand.</summary>
-internal sealed class ManualTime(DateTimeOffset start) : TimeProvider
+/// <summary>A clock a test moves by hand; optionally follows the system clock between advances, as SDK clients do.</summary>
+internal sealed class ManualTime(DateTimeOffset start, bool running = false) : TimeProvider
 {
     private DateTimeOffset now = start;
+    private TimeSpan offset;
 
-    public override DateTimeOffset GetUtcNow() => now;
+    public override DateTimeOffset GetUtcNow() => running ? DateTimeOffset.UtcNow + offset : now;
 
-    public void Advance(TimeSpan by) => now += by;
+    public void Advance(TimeSpan by)
+    {
+        now += by;
+        offset += by;
+    }
 }
 
 /// <summary>
