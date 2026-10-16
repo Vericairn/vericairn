@@ -27,7 +27,8 @@ not-applicable portions of the same design case are separate rows.
 | D08-D: bounded run, adapter disabled | Passed | Round two exercises both native launcher adapters with stand-in executables at all three depths. The saved intent precedes dispatch and pins explicit model/effort, provenance, disabled adapter, admitted inventory, retained context hash and byte/token allocations. Observations keep reported model/effort separate from unknown facts; absent token usage reserves the full cap. All run revisions, retained context and canonical runs/status/progress/hand-over output remain byte-identical across view depths. Adapter requests, unallowlisted hooks, tools and environment needs, unsupported effort and model/provider/route fallback are refused before intent or dispatch. |
 | D08-D: adapter optimization | Deferred | EFF-01 in 0.8.0 owns eligible-text reduction, protected payload/tool-argument bypass, telemetry and routing controls, adapter failure/removal, and model/tokenizer qualification. Only the disabled path is passed here. |
 | D08-E: recorded interruption and lossy continuation | Passed | A successor uses saved hand-over bytes after the previous service ends and after an estate copy or daemon restart. Decisions, failed and unperformed checks, original operation identities and exact record bytes survive. CLI, SDK and Workbench resume expose changed record sources and preserve the retained basis. CLI/API/MCP context reads keep missing originals, unknown sizes, unknown tokens and irreversible loss explicit. Revoked MCP and authenticated API readers receive no omission identities, paths, hashes or sizes, including for a previously issued pin. |
-| D08-E: harness compaction and execution recovery | Deferred | Actual harness compaction, interrupted dispatch and model/tokenizer mismatch belong to RUN-01/RUN-02 integration and the next COMMS-02 round. These tests model an interrupted recorded workflow; they do not recover a provider conversation. |
+| D08-E: interrupted execution and inventory changes | Passed | Stand-in dispatch is interrupted both before and after its dispatch record is saved. A successor retains the original identity, context and reservation, records uncertainty, refuses retries on both branches, and reconciles that operation before admitting a fresh run. Both native launchers refuse an inventory changed after admission, preserve the failed intent and require fresh admission. Reported model mismatches stay critical at every depth, with requested and observed values separate. |
+| D08-E: compaction and tokenizer/model semantics | Deferred | Follow-up COMMS-02 harness qualification must exercise actual compaction and provider-conversation recovery. EFF-01 in 0.8.0 owns tokenizer/model-fit qualification. Stand-ins report model facts but perform no inference, compaction or tokenization; exact model revision, token counts and model fit stay unknown or unclaimed. |
 | D08-F: concise reviews and artifacts | Passed | Short work observations and Workbench reviews retain every finding and every unperformed check, including their explanations. CLI/MCP exports and API/SDK reads preserve canonical original records and decision words. Commits describe the behavior and validation without requiring the chat; independent assessment of their meaning remains outstanding. |
 | D08-F: template protection and old instances | Deferred | TPL-COMMS-01, 0.8.0 or later: generated and quoted fields, locked sections, versioned instances and no silent upgrade. No template check is reported passed. |
 | HANDOFF-01 unchanged | Passed | All 12 combinations of three depths and four frequencies retain hand-over refusal, no overwrite, mandatory overflow, invalid-package rejection and resume changes. Reads create no observations, operations or acceptances. |
@@ -77,6 +78,7 @@ change.
 | `ad7dc60` | Workbench ignored refused context briefs: a work page became empty and an assignment was reported missing. Both now show the refusal and every finding, including the unavailable required original. |
 | `ed3c452` | Workbench showed review summaries without their findings. Existing and newly submitted reviews now display all findings, severity and location at every depth. |
 | `656a091` | Work observations omitted review summaries/findings and check explanations. CLI, MCP and API observations now retain all of them, including reasons for unperformed checks. |
+| `00727cb` | An uncertain assignment could launch again on another branch with spare concurrency/budget. Shared admission now requires reconciliation under the original identity before another run, including through record authoring. Both interrupted-dispatch journeys reproduced the bypass; their fixed paths and all 48 ledger cases pass. |
 
 The initial whole-suite run also exposed a timing assumption in the existing
 worker token-budget test, corrected in `7590bc7`: the run settles before the
@@ -157,8 +159,11 @@ add 14 passing cases: six native-launcher/depth combinations and eight refused
 selection or inventory requests. Every executable is a local stand-in. The
 checks inspect the intent from inside the pre-dispatch command boundary and
 verify retained context accounting before the stand-in runs. The targeted
-Release build passed with zero warnings/errors. Whole-suite validation and
-D08-E execution recovery follow in this round.
+Release build passed with zero warnings/errors.
+[Execution recovery journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunRecoveryTests.cs)
+add six passing cases: two interruption boundaries, two changed native
+inventories and two reported model mismatches. The separate reconciliation fix
+also adds one record-admission regression. Whole-suite validation follows.
 
 ## Remaining gaps and next round
 

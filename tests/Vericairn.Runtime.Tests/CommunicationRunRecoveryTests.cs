@@ -113,6 +113,95 @@ public class CommunicationRunRecoveryTests
         }
     }
 
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void D08E_ChangedNativeInventoryRefusesDispatchAndRetainsTheAdmittedIntent(string harness)
+    {
+        RunEstate run = null!;
+        string? changedSource = null;
+        string? admittedExecution = null;
+        string? admittedId = null;
+        bool change = true;
+        using var fixture = new NativeRun(harness, (probe, context) =>
+        {
+            if (!change) return;
+            Assert.False(File.Exists(probe.Report));
+            AgentRuns.Run admitted = Assert.Single(AgentRuns.All(run.Estate.Load()));
+            Assert.Equal("not-started", admitted.Status);
+            admittedId = admitted.Id;
+            admittedExecution = CanonicalJson.Serialize(admitted.Intent.Body.GetProperty("execution"));
+            changedSource = Path.Combine(context.Workspace, "AGENTS.md");
+            Assert.False(File.Exists(changedSource));
+            File.WriteAllText(changedSource, "Instructions changed after inventory admission.\n");
+        });
+        run = fixture.Run;
+        RunResponse refused = fixture.Start();
+        Assert.False(refused.Ok, refused.Message);
+        Assert.Equal("known-failure", refused.Status);
+        Assert.Equal(admittedId, refused.Run);
+        Assert.Contains("inventory", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.Probe.Report));
+        AgentRuns.Run failed = AgentRuns.Find(run.Estate.Load(), refused.Run)!;
+        Assert.Equal(["not-started", "known-failure"], failed.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.False(failed.Dispatched);
+        Assert.All(failed.Revisions, r => Assert.Equal(admittedExecution, CanonicalJson.Serialize(r.Body.GetProperty("execution"))));
+        RunRow row = run.Row(refused.Run);
+        Assert.Empty(row.Charged.EnumerateObject());
+        Assert.Equal(0, row.Usage!.Value.GetProperty("wallMinutes").GetInt64());
+        Assert.Empty(row.ExecutionObserved!.Value.GetProperty("reports").EnumerateArray());
+        Assert.Contains(row.ExecutionObserved.Value.GetProperty("unknown").EnumerateArray(), v => v.GetString() == "inventoryHash");
+        Assert.Equal(CommunicationRunJourneyTests.RetainedContext(run, refused.Run).Hash, row.Execution!.Value.GetProperty("contextPackage").GetString());
+
+        // Restore the source, then require fresh admission. The failed intent's inventory is never relabeled.
+        File.Delete(changedSource!);
+        change = false;
+        run.Reopen();
+        RunResponse retried = fixture.Start();
+        Assert.True(retried.Ok, retried.Message);
+        Assert.Equal("observed-success", run.Settled(retried.Run).Status);
+        Assert.NotEqual(refused.Run, retried.Run);
+        Assert.True(File.Exists(fixture.Probe.Report));
+        Assert.Equal(admittedExecution, CanonicalJson.Serialize(run.Row(refused.Run).Execution!.Value));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void D08E_AReportedModelMismatchKeepsTheRequestAndUnknownModelFitHonest(string harness)
+    {
+        using var fixture = new NativeRun(harness);
+        fixture.Probe.Behavior("execution", "different");
+        RunEstate run = fixture.Run;
+        RunResponse started = run.Service.RunStart(new(run.Assignment, fixture.Probe.Launcher.Launcher, run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
+            Settings: fixture.Probe.Context.Settings, Execution: RunEstate.Json("""{"model":"model-b","effort":"low"}""")));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("known-failure", settled.Status);
+        Assert.Equal("model-b", settled.Execution!.Value.GetProperty("requested").GetProperty("model").GetString());
+        JsonElement facts = settled.ExecutionObserved!.Value;
+        Assert.Equal("model-a", Assert.Single(facts.GetProperty("reports").EnumerateArray()).GetProperty("model").GetString());
+        Assert.Equal("model", Assert.Single(facts.GetProperty("discrepancies").EnumerateArray()).GetString());
+        Assert.Contains(facts.GetProperty("unknown").EnumerateArray(), v => v.GetString() == "modelRevision");
+        RunSignal signal = Assert.Single(settled.Signals!, s => s.Code == "execution");
+        Assert.Equal("critical", signal.Severity);
+        Assert.NotNull(signal.Attention);
+        ContextPackage package = CommunicationRunJourneyTests.RetainedContext(run, started.Run);
+        Assert.Equal(package.Hash, settled.Execution.Value.GetProperty("contextPackage").GetString());
+        Assert.Equal(JsonValueKind.Null, package.Payload.GetProperty("accounting").GetProperty("tokens").ValueKind);
+        Assert.Equal("not claimed", package.Payload.GetProperty("accounting").GetProperty("modelFit").GetString());
+        byte[] canonical = CommunicationRunJourneyTests.Canonical(settled);
+        foreach (string depth in CommunicationResolution.Depths)
+        {
+            CommunicationProfile profile = run.Service.Communication(run.Estate.OperatorId, view: new("none", depth, depth, depth, depth));
+            string progress = run.Service.Progress().Text;
+            Assert.Contains(signal.Summary, CommunicationPresentation.Protected(profile, "result", settled.Identity, "Model discrepancy.", progress), StringComparison.Ordinal);
+            Assert.Equal(canonical, CommunicationRunJourneyTests.Canonical(run.Row(started.Run)));
+        }
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     private static string Revise(RunEstate run, RecordEnvelope prior, JsonObject body) => RunEstate.Ok(run.Service.NewRecord(new("operation", run.Estate.OperatorId,
         RunEstate.Json(body.ToJsonString()), Subject: $"assignment:{prior.Subject!.Id}:{prior.Subject.Hash}", Supersedes: prior.Id))).Id;
 }
