@@ -195,4 +195,43 @@ public class CommunicationQualificationTests
 
         Assert.Throws<HttpRequestException>(() => client.ContextRead(pin));
     }
+
+    [Fact]
+    public async Task D08F_AShortSdkReviewKeepsAllFindingsAndUnperformedChecksWithUnchangedArtifacts()
+    {
+        using var estate = new TestEstate(2);
+        var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-REVIEW","kind":"ordinary","title":"Review the result","intent":"Keep every finding visible.","scope":["tests"],"exitQuestion":"Reviewed?","inputs":[],"deliverables":["result"]}""");
+        var assignment = estate.Add("assignment", estate.OperatorId, $$$"""{"contributor":"{{{estate.BuilderId}}}","brief":{"outcome":"Inspect the result.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no publication"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["all findings visible"],"recovery":"Inspect the checks."}}""", order.Reference);
+        var attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"local clone","note":"Inspect."}""", assignment.Reference);
+        var result = estate.Add("result", estate.BuilderId, """{"outcome":"partial","summary":"Ready for review.","outputs":[],"evidence":[],"checks":[{"name":"platform matrix","outcome":"not-performed","summary":"The other platforms have not run."},{"name":"live harness","outcome":"skipped","summary":"No real coding agent was launched."}],"limitations":["Independent review remains."],"unresolvedEffects":[],"nextStep":"Inspect all findings."}""", attempt.Reference);
+        var review = estate.Add("review", estate.OperatorId, """{"independence":"operator","outcome":"findings","summary":"Two issues remain.","findings":[{"severity":"error","summary":"The returned identity is wrong.","location":"src/identity.cs"},{"severity":"warning","summary":"The platform evidence is incomplete.","location":"tests/platform.cs"}]}""", result.Reference);
+        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(host.Endpoint);
+        Assert.True(client.CommunicationSet(new(estate.OperatorId, "person", new(Progress: "none", Result: "short"), estate.OperatorId)).Ok);
+        int count = estate.Load().Records.Count;
+        ObserveResponse observed = client.Observe("COMMS-REVIEW")!;
+        Assert.Equal(host.Service.Observe("COMMS-REVIEW")!.Text, observed.Text);
+        foreach (string depth in CommunicationResolution.Depths)
+        {
+            CommunicationProfile profile = client.Communication(estate.OperatorId, view: new(Result: depth));
+            string text = CommunicationPresentation.Protected(profile, "result", result.Id, "Review the original findings and checks.", observed.Text);
+            Assert.Contains($"result ({depth})", text, StringComparison.Ordinal);
+            foreach (string required in new[] { "Two issues remain.", "The returned identity is wrong.", "src/identity.cs", "The platform evidence is incomplete.", "tests/platform.cs", "platform matrix: not-performed", "The other platforms have not run.", "live harness: skipped", "No real coding agent was launched.", "Independent review remains." })
+            {
+                Assert.Contains(required, text, StringComparison.Ordinal);
+            }
+
+            foreach (var record in new[] { result, review })
+            {
+                RecordResponse fetched = client.Record(record.Id)!;
+                Assert.Equal(record.ComputedHash, fetched.Hash);
+                Assert.Equal(File.ReadAllBytes(Path.Combine(estate.Root, record.ExpectedPath)), CanonicalJson.SerializePrettyUtf8(fetched.Envelope));
+            }
+
+            Assert.Equal(CanonicalJson.SerializePrettyUtf8(observed.Json), CanonicalJson.SerializePrettyUtf8(client.Observe("COMMS-REVIEW")!.Json));
+        }
+
+        Assert.Equal(count, estate.Load().Records.Count);
+        Assert.Empty(client.Records("acceptance"));
+    }
 }

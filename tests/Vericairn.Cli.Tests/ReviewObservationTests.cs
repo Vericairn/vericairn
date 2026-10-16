@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -43,6 +44,34 @@ public class ReviewObservationTests
     }
 
     private static JsonElement Json(string text) => JsonSerializer.Deserialize<JsonElement>(text);
+
+    [Fact]
+    public void D08F_ConciseDecisionAndReviewArtifactsKeepTheirCanonicalOriginals()
+    {
+        using var estate = new HandoffEstate();
+        using EstateService api = EstateService.Open(estate.Root);
+        string decision = Ok(api.NewRecord(new("decision", estate.OperatorId, Json($$"""{"title":"Review before accepting","statement":"Inspect every finding; no acceptance is authorized.","summary":"Review the original.","synthesis":"Short presentation preserves the original obligations.","effects":["Inspect every finding."],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["No acceptance."]}"""))));
+        string review = Ok(api.NewRecord(new("review", estate.OperatorId, Json("""{"independence":"self","outcome":"findings","summary":"One issue remains.","findings":[{"severity":"warning","summary":"Independent review has not been performed.","location":"docs/review.md"}]}"""), $"decision:{decision}:{api.Record(decision)!.Hash}")));
+        string canonicalDecision = CliHarness.Ok("--estate", estate.Root, "--json", "decisions", decision).Out;
+        byte[] canonicalReview = CanonicalJson.SerializePrettyUtf8(api.Record(review)!.Envelope);
+        var mcp = new ToolRegistry(api, null);
+        foreach (string depth in CommunicationResolution.Depths)
+        {
+            string human = CliHarness.Ok("--estate", estate.Root, "--depth", depth, "decisions", decision).Out;
+            Assert.Contains($"decision ({depth})", human, StringComparison.Ordinal);
+            Assert.Contains("Inspect every finding; no acceptance is authorized.", human, StringComparison.Ordinal);
+            Assert.Contains("No acceptance.", human, StringComparison.Ordinal);
+            Assert.Equal(canonicalDecision, CliHarness.Ok("--estate", estate.Root, "--depth", depth, "--json", "decisions", decision).Out);
+            Assert.Equal(canonicalReview, System.Text.Encoding.UTF8.GetBytes(CliHarness.Ok("--estate", estate.Root, "--depth", depth, "records", "show", review).Out));
+        }
+
+        ToolCallResult fetched = mcp.Call("record_get", new JsonObject { ["id"] = review });
+        Assert.False(fetched.IsError);
+        Assert.Equal(canonicalReview, CanonicalJson.SerializePrettyUtf8(Json(fetched.Text).GetProperty("envelope")));
+        Assert.Contains("Independent review has not been performed.", fetched.Text, StringComparison.Ordinal);
+        Assert.Empty(api.Records("acceptance"));
+    }
+
     private static string Ok(WriteOutcome outcome)
     {
         Assert.True(outcome.Ok, JsonSerializer.Serialize(outcome.Problem, ProtocolJson.Options));
