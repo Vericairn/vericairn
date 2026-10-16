@@ -270,7 +270,14 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    all of them secret: 80 bits from the system's cryptographic random generator, and nothing else, so no part
    of a code names it. A code works for ten minutes, pairs one device and is exhausted after five confirmations that do
    not match it; at most sixteen wait at once. The daemon keeps only the keys derived from a code, in memory,
-   so a restart forgets every code. The code is shown once; the administrator gives it, with the address, to
+   so a restart forgets every code. From 0.6.1 it also keeps the issuing device, that device's admission revision,
+   and the operator-role revision or `administer` grant used to issue it. On loopback the issuer is the requesting
+   device; on the local socket it is the admitted device selected to sign admissions for the administrator.
+   The issuance log names that device and authority, never the code. Losing that device's admission or revoking or
+   expiring the recorded authority invalidates the code and its open exchanges. A later readmission or restored
+   grant does not revive it; another device or grant of the administrator cannot rescue it. A rename or key rotation
+   that retains admission, or an authority revision that retains the role or scope without an expiry gap, does not
+   invalidate it. Invalidated codes do not occupy a waiting-code slot. The code is shown once; the administrator gives it, with the address, to
    the person at the new device, who types it (case, hyphens and spaces do not matter, and I, L and O read as
    1, 1 and 0).
 2. Each side derives two keys from the code with HKDF-SHA256 (RFC 5869): extract from the code's sixteen
@@ -288,7 +295,7 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    an address is never forgotten while its minute runs, so while 1,024 addresses are counted a new one waits;
    and once 4,096 such hellos have come in all within a minute, every hello waits for the next, which bounds
    the work of trying codes. A code the hello proves is refused when it has expired, was used or has no
-   attempts left. Otherwise the runtime answers a
+   attempts left, or its issuing device or authority no longer permits it. Otherwise the runtime answers a
    `PairingChallenge`: both nonces, the estate with its name, the runtime identity's public key, the
    fingerprint of the certificate it presented on this connection, the principal with its name and kind, the
    profiles, and the id, time and record format of the device record it will write, with an HMAC-SHA256 under
@@ -301,15 +308,17 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    platform, its custody and presence, its public key, the profiles), signs the record's content hash with
    the new key, and sends `POST /v1/pairing/confirm` with its key, its descriptive identity and that signature,
    with an HMAC-SHA256 under the device's key over the challenge, the challenge's MAC and its own fields.
-6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used or has
-   no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
+6. The runtime refuses a confirmation of an exchange it did not open, of a code that expired, was used, lost its
+   issuing device or authority, or has no attempts left meanwhile, and one whose MAC does not match, which ends the exchange and uses one of the
    code's five attempts; the last one closes every exchange of the code still open. It refuses a device name
    with control or formatting characters. It rebuilds the device record
    from its own challenge and the device's fields, verifies the signature with the key presented, writes the
    device record with that signature, the device's own, and then the admission by the administrator, signed
    by the administrator's admitted device; when the admission is refused the device record is removed again.
+   The issuer's admission and recorded authority are rechecked under the estate write lock before either record
+   is written, so revocation after confirmation validation still refuses both records with `401`.
    The device's name, platform, custody and presence are its own statement, which the runtime cannot verify,
-   and the admission's note says so. The code is used up. It answers `PairingCompleted`, the device and
+   and the admission's note says so and names the issuing device and authority. The code is used up. It answers `PairingCompleted`, the device and
    admission ids and the record's hash, with an HMAC-SHA256 under the runtime's key over the whole exchange.
 7. The device verifies that MAC and keeps the connection: the address, the estate, the runtime identity's
    public key, and its device's id and public key. A failure on the device removes the key it made, and a

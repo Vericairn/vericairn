@@ -54,15 +54,17 @@ internal sealed class PairingRegistry
     private const int MaxRemembered = 64;
 
     private readonly TimeProvider time;
+    private readonly Func<PairingAuthority, string?> authorityRefusal;
     private readonly object gate = new();
     private readonly List<Pairing> pairings = [];
     private readonly Dictionary<string, (DateTimeOffset Since, int Count)> failures = new(StringComparer.Ordinal);
     private (DateTimeOffset Since, int Count) failuresInAll;
     private long opened;
 
-    internal PairingRegistry(TimeProvider time)
+    internal PairingRegistry(TimeProvider time, Func<PairingAuthority, string?> authorityRefusal)
     {
         this.time = time;
+        this.authorityRefusal = authorityRefusal;
     }
 
     /// <summary>Where a pairing stands.</summary>
@@ -76,23 +78,36 @@ internal sealed class PairingRegistry
 
         /// <summary>Its device is recorded; the code pairs nothing more.</summary>
         Used,
+
+        /// <summary>Its issuing device or administrator's authority was revoked; the code cannot revive.</summary>
+        Revoked,
     }
 
     /// <summary>Issues a code for a principal under an administrator; refused while too many codes wait.</summary>
-    internal (string? Code, Pairing? Pairing, string? Problem) Issue(string principal, string by, IReadOnlyList<string> profiles)
+    internal (string? Code, Pairing? Pairing, string? Problem) Issue(string principal, PairingAuthority issuer, IReadOnlyList<string> profiles)
     {
         lock (gate)
         {
             DateTimeOffset now = time.GetUtcNow();
             Sweep(now);
-            if (pairings.Count(p => p.Stage != Stage.Used && now < p.ExpiresAt) >= MaxPending)
+            foreach (Pairing pending in pairings)
+            {
+                _ = Refusal(pending, now);
+            }
+
+            if (authorityRefusal(issuer) is string refusal)
+            {
+                return (null, null, refusal);
+            }
+
+            if (pairings.Count(p => p.Stage is Stage.Pending or Stage.Completing && now < p.ExpiresAt) >= MaxPending)
             {
                 return (null, null, $"{MaxPending} pairing codes are waiting already; use them or let them expire first.");
             }
 
             string code = PairingProtocol.NewCode();
             (byte[] runtimeKey, byte[] deviceKey) = PairingProtocol.Keys(code);
-            var pairing = new Pairing(Ulid.NewUlid().Value, runtimeKey, deviceKey, principal, by, profiles, now, now + Lifetime);
+            var pairing = new Pairing(Ulid.NewUlid().Value, runtimeKey, deviceKey, principal, issuer, profiles, now, now + Lifetime);
             pairings.Add(pairing);
             return (code, pairing, null);
         }
@@ -233,20 +248,30 @@ internal sealed class PairingRegistry
     }
 
     /// <summary>Why a pairing whose code was proved cannot go on; the refusal names no device and nothing of the estate.</summary>
-    private static string? Refusal(Pairing pairing, DateTimeOffset now) => pairing.Stage switch
+    private string? Refusal(Pairing pairing, DateTimeOffset now)
     {
-        Stage.Used => "This pairing code was used already; a code pairs one device. Ask the administrator for a new one.",
-        Stage.Completing => "Another device is completing this pairing code right now.",
-        _ when now >= pairing.ExpiresAt => $"This pairing code expired at {RecordParser.FormatTimestamp(pairing.ExpiresAt)}; ask the administrator for a new one.",
-        _ when pairing.AttemptsLeft <= 0 => $"This pairing code has had {Attempts} confirmations that did not match it; ask the administrator for a new one.",
-        _ => null,
-    };
+        if (pairing.Stage == Stage.Pending && authorityRefusal(pairing.Issuer) is not null)
+        {
+            pairing.Stage = Stage.Revoked;
+            pairing.Exchanges.Clear();
+        }
+
+        return pairing.Stage switch
+        {
+            Stage.Used => "This pairing code was used already; a code pairs one device. Ask the administrator for a new one.",
+            Stage.Completing => "Another device is completing this pairing code right now.",
+            Stage.Revoked => "This pairing code lost its issuing device or administrator's authority; ask the administrator for a new one.",
+            _ when now >= pairing.ExpiresAt => $"This pairing code expired at {RecordParser.FormatTimestamp(pairing.ExpiresAt)}; ask the administrator for a new one.",
+            _ when pairing.AttemptsLeft <= 0 => $"This pairing code has had {Attempts} confirmations that did not match it; ask the administrator for a new one.",
+            _ => null,
+        };
+    }
 
     /// <summary>Forgets codes long past their expiry, and the oldest ended ones beyond the most remembered, wiping their keys; and stale failure counts.</summary>
     private void Sweep(DateTimeOffset now)
     {
         List<Pairing> forgotten = [.. pairings.Where(p => p.Stage != Stage.Completing && now >= p.ExpiresAt + Remembered)];
-        forgotten.AddRange(pairings.Except(forgotten).Where(p => p.Stage == Stage.Used || now >= p.ExpiresAt).OrderBy(p => p.IssuedAt).Take(Math.Max(0, pairings.Count - forgotten.Count - MaxRemembered)));
+        forgotten.AddRange(pairings.Except(forgotten).Where(p => p.Stage is Stage.Used or Stage.Revoked || now >= p.ExpiresAt).OrderBy(p => p.IssuedAt).Take(Math.Max(0, pairings.Count - forgotten.Count - MaxRemembered)));
         foreach (Pairing old in forgotten)
         {
             CryptographicOperations.ZeroMemory(old.RuntimeKey);
@@ -262,7 +287,7 @@ internal sealed class PairingRegistry
     }
 
     /// <summary>One issued code: the keys it gives, whom it pairs for and under whom, and how far it has got.</summary>
-    internal sealed class Pairing(string id, byte[] runtimeKey, byte[] deviceKey, string principal, string by, IReadOnlyList<string> profiles, DateTimeOffset issuedAt, DateTimeOffset expiresAt)
+    internal sealed class Pairing(string id, byte[] runtimeKey, byte[] deviceKey, string principal, PairingAuthority issuer, IReadOnlyList<string> profiles, DateTimeOffset issuedAt, DateTimeOffset expiresAt)
     {
         /// <summary>The pairing's id in the daemon's log; not part of the code.</summary>
         public string Id { get; } = id;
@@ -273,7 +298,9 @@ internal sealed class PairingRegistry
 
         public string Principal { get; } = principal;
 
-        public string By { get; } = by;
+        public PairingAuthority Issuer { get; } = issuer;
+
+        public string By => Issuer.Principal;
 
         public IReadOnlyList<string> Profiles { get; } = profiles;
 

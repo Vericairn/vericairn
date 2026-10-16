@@ -620,7 +620,17 @@ own format, and adds no type and no field:
   runtime cannot verify; a name with control or formatting characters is refused.
 - The admission is the administrator's, the operator's or a principal's holding `administer`, signed by the
   administrator's admitted device on the runtime's machine like every admission in format 2. Its note says
-  that the device's descriptive fields are its own statement.
+  that the device's descriptive fields are its own statement. From 0.6.1 it also names the device that obtained
+  the pairing code and the operator-role revision or `administer` grant used at issuance; this may differ from
+  the device signing the admission.
+
+The in-memory code retains that issuing device, its admission revision and its authority record. Loopback uses the
+requesting device; the local socket uses the admitted device selected to sign the administrator's admissions.
+Revoking that device's admission, or revoking or expiring that authority, invalidates the code and open exchanges;
+readmission, a restored grant or another admitted device cannot revive it. Renames, key rotations retaining admission
+and authority revisions retaining the role or scope without an expiry gap leave it valid. Hello and confirmation
+check this, and the estate write lock protects the final recheck before either record is written. The issuance log
+also names the device and authority; codes and their derived keys never enter records.
 
 On a normal completion the runtime writes both records; if admission validation refuses, it removes the newly
 written device record. The writes are sequential, not a crash-atomic transaction: an interruption between them can

@@ -210,7 +210,7 @@ public class SecondReviewTests
     public void C5_AnAddressStillCountedIsNeverForgottenANewOneWaitsAndAllFailuresHaveABudget()
     {
         var time = new ManualTime(DateTimeOffset.UtcNow);
-        var registry = new PairingRegistry(time);
+        var registry = new PairingRegistry(time, _ => null);
 
         // An address that sent too many failed hellos is refused for its minute.
         for (int i = 0; i < PairingRegistry.MaxFailures; i++)
@@ -272,8 +272,9 @@ public class SecondReviewTests
     public void C6_TheLastFailedConfirmationClosesEveryExchangeOfTheCodeAndTheCapHoldsAsExchangesOpen()
     {
         var time = new ManualTime(DateTimeOffset.UtcNow);
-        var registry = new PairingRegistry(time);
-        (string? code, PairingRegistry.Pairing? issued, _) = registry.Issue(Records.Identity.Ulid.NewUlid().Value, Records.Identity.Ulid.NewUlid().Value, ["local-network"]);
+        var registry = new PairingRegistry(time, _ => null);
+        var issuer = new PairingAuthority(Records.Identity.Ulid.NewUlid().Value, "device", "admission", "authority");
+        (string? code, PairingRegistry.Pairing? issued, _) = registry.Issue(Records.Identity.Ulid.NewUlid().Value, issuer, ["local-network"]);
         Assert.True(PairingProtocol.TryParse(code, out string secret));
         (byte[] runtimeKey, byte[] deviceKey) = PairingProtocol.Keys(secret);
         var plan = new PairingPlan(Records.Identity.Ulid.NewUlid().Value, "2026-10-15T12:00:00Z", 2, Records.Identity.Ulid.NewUlid().Value, "Estate", issued!.Principal, "Agent", "agent");

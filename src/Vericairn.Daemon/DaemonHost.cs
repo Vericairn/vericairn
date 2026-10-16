@@ -90,7 +90,7 @@ public sealed class DaemonHost : IAsyncDisposable
         Certificates = certificates;
         Identity = identity;
         Time = options.Time ?? TimeProvider.System;
-        Pairings = new PairingRegistry(Time);
+        Pairings = new PairingRegistry(Time, service.PairingAuthorityRefusal);
         Authenticator = new RequestAuthenticator(service, options.ReplayCapacity, () => Identity?.PublicKey, Time);
         Endpoint = new DaemonEndpoint(string.Empty, string.Empty, Environment.ProcessId, string.Empty, service.Root, ApiVersion.Current);
     }
