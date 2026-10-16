@@ -29,7 +29,10 @@ public static partial class CommandAudit
         return ContentHash.Sha256(Encoding.UTF8.GetBytes(action.Tool + "\n" + CanonicalJson.Serialize(action.Input)));
     }
 
-    /// <summary>Flags recognizable network, credential and out-of-brief path attempts without retaining their arguments.</summary>
+    /// <summary>
+    /// Flags recognizable network, credential and out-of-brief path attempts without retaining their arguments.
+    /// A failed check propagates to the worker's audit-unverified handler; only completed checks establish violations.
+    /// </summary>
     public static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted)
     {
         ArgumentNullException.ThrowIfNull(action);
@@ -86,15 +89,8 @@ public static partial class CommandAudit
             {
                 if (action.Input.TryGetProperty(field, out JsonElement cwd) && cwd.ValueKind == JsonValueKind.String)
                 {
-                    try
-                    {
-                        working = Path.GetFullPath(cwd.GetString()!, workspace);
-                        if (working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
-                        {
-                            codes.Add("scope");
-                        }
-                    }
-                    catch (ArgumentException)
+                    working = Path.GetFullPath(cwd.GetString()!, workspace);
+                    if (working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
                     {
                         codes.Add("scope");
                     }
@@ -104,17 +100,7 @@ public static partial class CommandAudit
             foreach (string path in paths)
             {
                 // Reading the exported brief is part of every assignment. It does not authorize changing worker metadata.
-                string resolved;
-                try
-                {
-                    resolved = Path.GetFullPath(path.Replace('\\', '/'), working);
-                }
-                catch (ArgumentException)
-                {
-                    codes.Add("scope");
-                    continue;
-                }
-
+                string resolved = Path.GetFullPath(path.Replace('\\', '/'), working);
                 bool briefRead = readsBrief && resolved == Path.Combine(Path.GetFullPath(workspace), ".vericairn", "brief.md");
                 if (!briefRead && !PermittedPaths.Allows(resolved, workspace, permitted))
                 {
@@ -129,7 +115,7 @@ public static partial class CommandAudit
         {
             "network" => "The worker observed an invocation that attempts network access.",
             "credentials" => "The worker observed an invocation targeting credentials or a secret store.",
-            "scope" => "The worker observed an invocation targeting a path outside the assignment's permitted paths or an unresolved path.",
+            "scope" => "The worker observed an invocation targeting a path outside the assignment's permitted paths.",
             _ => "The worker could not fully interpret an invocation; its command audit is incomplete.",
         }, fingerprint)).ToArray();
     }

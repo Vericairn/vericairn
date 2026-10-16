@@ -39,4 +39,8 @@ public class PermittedPathsTests
         Assert.True(PermittedPaths.Matches(new string('a', 500), pattern));
         Assert.False(PermittedPaths.Matches(new string('a', 500) + "b", pattern));
     }
+
+    [Fact]
+    public void PathInspectionFailuresPropagateWithoutAFalseVerdict() =>
+        Assert.Throws<ArgumentException>(() => PermittedPaths.Allows("src/a.cs", "invalid\0workspace", ["src/"]));
 }

@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
-using System.Text.RegularExpressions;
-
 namespace Vericairn.Runtime.Workers;
 
 /// <summary>The assignment's repository-relative path patterns, shared by the event and settlement audits.</summary>
@@ -74,7 +72,10 @@ public static class PermittedPaths
         return current[path.Length];
     }
 
-    /// <summary>Checks an invocation path within the physical workspace; expansion and links are not assumed safe.</summary>
+    /// <summary>
+    /// Checks an invocation path within the physical workspace; expansion and links are not assumed safe.
+    /// Inspection failures propagate to the worker's audit-unverified handler, never becoming a false verdict.
+    /// </summary>
     public static bool Allows(string path, string workspace, IReadOnlyList<string> permitted)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -85,39 +86,32 @@ public static class PermittedPaths
             return false;
         }
 
-        try
-        {
-            string root = Path.GetFullPath(workspace);
-            string full = Path.GetFullPath(path.Replace('\\', '/'), root);
-            string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
-            if (!Relative(relative))
-            {
-                return false;
-            }
-
-            string current = root;
-            foreach (string part in relative.Split('/'))
-            {
-                current = Path.Combine(current, part);
-                try
-                {
-                    if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    {
-                        return false;
-                    }
-                }
-                catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-                {
-                    // A path the invocation proposes creating need not exist yet.
-                }
-            }
-
-            return permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
-                .Where(Relative).Any(pattern => Matches(relative, pattern));
-        }
-        catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or RegexMatchTimeoutException)
+        string root = Path.GetFullPath(workspace);
+        string full = Path.GetFullPath(path.Replace('\\', '/'), root);
+        string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+        if (!Relative(relative))
         {
             return false;
         }
+
+        string current = root;
+        foreach (string part in relative.Split('/'))
+        {
+            current = Path.Combine(current, part);
+            try
+            {
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                {
+                    return false;
+                }
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // A path the invocation proposes creating need not exist yet.
+            }
+        }
+
+        return permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
+            .Where(Relative).Any(pattern => Matches(relative, pattern));
     }
 }
