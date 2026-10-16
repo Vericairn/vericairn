@@ -490,6 +490,11 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.PairingBodyLimit);
         }
+        else if (context.Connection.LocalIpAddress is not null
+            || context.Features.Get<IConnectionItemsFeature>()?.Items is { } items && (items.ContainsKey(LoopbackMarker) || items.ContainsKey(LocalNetworkMarker)))
+        {
+            maximum = Math.Min(maximum ?? long.MaxValue, RequestAuthenticator.SignedBodyLimit);
+        }
 
         if (size is { IsReadOnly: false })
         {

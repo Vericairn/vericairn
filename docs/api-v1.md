@@ -92,7 +92,12 @@ and runtime clocks: clients may lag by up to five minutes, but never past the st
 ahead must correct its clock and sign afresh. There is no clock-skew allowance across the startup cutoff.
 
 Anything else is answered with `401` and a problem with code `denied`; revoking the device ends access from
-the next request on, with no restart. An already authenticated request also loses its right to write: under
+the next request on, with no restart. From 0.6.1 loopback checks the headers' signing time and resolves the device's
+current admitted standing before reading any body, as the local-network profile already does. The body-bound
+signature is verified only after the bounded body read; the headers alone do not prove possession of the key.
+After reading, admission and freshness are checked again, and a loopback key rotation during the read refuses the
+request. A failed header check takes the early-refusal path, with only the bounded discard described below.
+An already authenticated request also loses its right to write: under
 the estate's write lock, the runtime rechecks that the requesting device is current and admitted, not revoked,
 and still holds the exact key that verified the request. A rename with the same key still passes; a rotation
 requires signing afresh with the new key. Another admitted device of the same principal does not rescue the
@@ -117,8 +122,11 @@ the completed response. Closing Windows TCP with unread data can otherwise reset
 A peer that sends more than the discard bound, or keeps sending beyond its deadline, cannot require delivery
 after that bounded close.
 
-The HTTP body limit remains Kestrel's configured limit (30,000,000 bytes by default); pairing hello and confirm
-are limited to 16 KiB. A declared length above the limit is refused before reading; a streaming body is offered
+From 0.6.1 device-signed bodies on loopback and the local network are limited to 8 MiB (8,388,608 bytes), or Kestrel's
+configured limit if smaller. Their reads have an absolute 30-second deadline from the header check, shortened to the
+signature's remaining five-minute validity when less; received bytes do not restart it. Timeout returns `401` before
+bounded discard and cancels only the pending pipe read. Local-socket bodies retain Kestrel's configured limit
+(30,000,000 bytes by default); pairing hello and confirm remain limited to 16 KiB. A declared length above the limit is refused before reading; a streaming body is offered
 to authentication or binding only within its limit. The original body reader remains available for discard
 instead of becoming unreadable after a size-limit failure. Size refusals are `413`; cleanup does not raise the
 parsing limit.

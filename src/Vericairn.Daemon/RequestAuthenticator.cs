@@ -49,6 +49,12 @@ internal sealed class RequestAuthenticator
     /// <summary>The most a pairing message's body may hold: what reaches the runtime without a credential is read only this far.</summary>
     internal const long PairingBodyLimit = 16 * 1024;
 
+    /// <summary>The most a device-signed request buffers, matching the estate's maximum object size.</summary>
+    internal const long SignedBodyLimit = 8 * 1024 * 1024;
+
+    /// <summary>The absolute body-read deadline after the device's header check passes.</summary>
+    internal static readonly TimeSpan BodyReadTimeout = TimeSpan.FromSeconds(30);
+
     /// <summary>The route of the runtime identity's proof, whose request is signed as on loopback.</summary>
     internal const string ProofRoute = "GET " + RuntimeIdentityScheme.Path;
 
@@ -85,7 +91,7 @@ internal sealed class RequestAuthenticator
 
     private const string Stale = "The signing time is malformed or more than five minutes from the runtime's clock.";
 
-    private const string Late = "The request's body did not arrive within five minutes of its signing time; sign it afresh.";
+    private const string Late = "The request's body did not arrive within 30 seconds or within five minutes of its signing time; sign it afresh.";
 
     private readonly EstateService service;
     private readonly ReplayCache replays;
@@ -138,6 +144,12 @@ internal sealed class RequestAuthenticator
             return freshness;
         }
 
+        DeviceStanding? admitted = service.Standing(device);
+        if (admitted is null || admitted.Admission != "admitted")
+        {
+            return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
+        }
+
         if (await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false) is not (byte[] digest, byte[] body))
         {
             return Denied(Late);
@@ -158,6 +170,11 @@ internal sealed class RequestAuthenticator
         if (standing is null || standing.Admission != "admitted")
         {
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
+        }
+
+        if (standing.PublicKey != admitted.PublicKey)
+        {
+            return Denied("The device's current key changed while the request body arrived; sign it afresh.");
         }
 
         if (Signed(standing, signedAt, digest, signature) is Problem problem)
@@ -384,7 +401,8 @@ internal sealed class RequestAuthenticator
 
     /// <summary>
     /// The digest a request's signature covers: version 1 on loopback, version 2 for the estate and runtime identity bound in on the
-    /// local network. Null when the body does not arrive before the signature is stale: the pending pipe read is cancelled then.
+    /// local network. Null when the body does not arrive within thirty seconds or before the signature is stale; oversized bodies
+    /// are refused before buffering beyond the limit. The pending pipe read alone is cancelled at the deadline.
     /// The host completes the refusal before bounded cleanup of the unread body; none of those bytes can reach an operation.
     /// </summary>
     private async Task<(byte[] Digest, byte[] Body)?> DigestAsync(HttpContext context, string signedAt, (string Estate, string Identity)? binding)
@@ -396,10 +414,15 @@ internal sealed class RequestAuthenticator
             return null;
         }
 
+        if (request.ContentLength > SignedBodyLimit)
+        {
+            throw new BadHttpRequestException($"The request body exceeds its limit of {SignedBodyLimit} bytes.", StatusCodes.Status413PayloadTooLarge);
+        }
+
         byte[] body;
         PipeReader reader = request.BodyReader;
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
-        deadline.CancelAfter(left);
+        using var timeout = new CancellationTokenSource(left < BodyReadTimeout ? left : BodyReadTimeout, time);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, timeout.Token);
         try
         {
             using var buffer = new MemoryStream();
@@ -414,6 +437,12 @@ internal sealed class RequestAuthenticator
                 {
                     reader.AdvanceTo(bytes.Start, bytes.End);
                     return null;
+                }
+
+                if (bytes.Length > SignedBodyLimit - buffer.Length)
+                {
+                    reader.AdvanceTo(bytes.Start, bytes.Start);
+                    throw new BadHttpRequestException($"The request body exceeds its limit of {SignedBodyLimit} bytes.", StatusCodes.Status413PayloadTooLarge);
                 }
 
                 foreach (ReadOnlyMemory<byte> segment in bytes)
