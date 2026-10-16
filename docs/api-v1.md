@@ -27,8 +27,11 @@ served the `localNetwork` endpoint (`host`, `port`, `identity`, the runtime iden
 refuses to start while another answers for the same estate; a stale endpoint file or socket left by a
 crashed daemon never blocks the next owner. The CLI follows the same rule on every estate command except
 the four named at the end of Operations: it reads the endpoint file, checks that the daemon answers, and
-otherwise opens the estate itself with the embedded runtime. Both routes produce the same records, the
-same refusals and the same status bytes; nothing lives only in the daemon.
+otherwise opens the estate itself with the embedded runtime. Both routes use the same estate operations and
+validation. The daemon also owns listeners, pairing exchanges and supervision that can continue after a client exits;
+those do not survive a one-command embedded runtime. Status and progress include repository checks, and goal predicates
+over living documents can read local covered paths, so equal records alone do not guarantee equal views when those
+files, registered clones or installed contributions differ.
 
 ## Transports
 
@@ -42,6 +45,9 @@ On Windows the pipe is created by Kestrel's named-pipe transport with its defaul
 other pipe security. Its access list allows only the owner of the daemon's process token: the account that
 started the daemon or, for a daemon run elevated, the owner Windows gives elevated processes (by default the
 Administrators group), so that only administrators' elevated processes reach it.
+
+The owner-only file modes described here are set on Unix. On Windows these configuration and connection files inherit
+their directories' access controls; use a user-private state directory. Platform key stores have their own custody rules.
 
 The runtime certificate is self-signed ECDSA P-256, valid 180 days, kept with its key as `runtime-certificate.p12`
 beside the live store, in a file owner-only from the moment it is written and a directory the daemon makes
@@ -78,8 +84,8 @@ be at or after the instant this runtime instance began accepting requests and no
 A request signed before that cutoff is refused with `401` / `denied` and a message to **sign the request afresh**.
 The cutoff retains its subsecond precision: rounding it down would admit a replay after a restart within the
 same second. Startup publishes readiness after the next whole second, so clients using the existing timestamp
-format can sign immediately. The replay cache remains in memory; with a nondecreasing runtime clock, no request
-accepted by an earlier instance can pass the new cutoff. A signing time more than five seconds ahead is refused,
+format can sign immediately. The replay cache remains in memory; with a nondecreasing runtime clock, a request
+whose signing time predates the new instance cannot pass its cutoff. A signing time more than five seconds ahead is refused,
 since a request signed ahead could be replayed after a restart before its signed time; the five seconds allow
 for a client clock that runs a little fast, and bound that replay to a restart within them. Synchronize client
 and runtime clocks: clients may lag by up to five minutes, but never past the startup cutoff; a client further
@@ -254,7 +260,7 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    profiles (`local-network` unless others are named), the administrator's authority and that the admission
    can be signed here, and issues 16 characters of Crockford's base32 alphabet, shown in four groups of four,
    all of them secret: 80 bits from the system's cryptographic random generator, and nothing else, so no part
-   of a code names it. A code works for ten minutes, pairs one device and survives five confirmations that do
+   of a code names it. A code works for ten minutes, pairs one device and is exhausted after five confirmations that do
    not match it; at most sixteen wait at once. The daemon keeps only the keys derived from a code, in memory,
    so a restart forgets every code. The code is shown once; the administrator gives it, with the address, to
    the person at the new device, who types it (case, hyphens and spaces do not matter, and I, L and O read as
@@ -299,7 +305,9 @@ admission as `vericairn devices admit` signs it. The exchange is scheme `vericai
    admission ids and the record's hash, with an HMAC-SHA256 under the runtime's key over the whole exchange.
 7. The device verifies that MAC and keeps the connection: the address, the estate, the runtime identity's
    public key, and its device's id and public key. A failure on the device removes the key it made, and a
-   failure anywhere records nothing. Pairing again replaces this machine's earlier connections to the same
+   failed or lost final confirmation does not prove that the runtime recorded nothing: it may already hold the
+   device and admission. Inspect `devices list` on the runtime and revoke an unwanted admission before pairing again.
+   Pairing again replaces this machine's earlier connections to the same
    estate that pin another runtime identity, which the runtime replaced, or that are for the same principal;
    their devices stay admitted until an administrator revokes them.
 
@@ -312,7 +320,8 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 
 ### Threat model
 
-- Someone watching the network sees TLS only.
+- Someone watching the network sees TLS traffic and the TLS 1.2 handshake's certificates, including their signatures,
+  as described above; the pairing messages are encrypted.
 - Someone between the device and the runtime who ends TLS with a certificate of their own cannot make the
   runtime's MAC name that certificate without the code, and the device's hello names the certificate the
   device saw, so the runtime finds no code for a hello relayed to it either. The device stops at step 5,
@@ -354,8 +363,9 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A captured request is accepted once, within five minutes of its signing time, only over a connection whose
   certificate the device's key issued, and only by the runtime it was signed for; no flood makes the runtime
   forget a signature before it is stale, and a copy whose body is held back until then is refused. With a
-  nondecreasing runtime clock, restarting cannot admit it again: requests predating the new instance's startup
-  are refused, and future signing times are never accepted.
+  nondecreasing runtime clock, requests whose signing time predates the new instance's startup are refused.
+  Signing times up to five seconds ahead are accepted, so a restart within that lead can admit a captured request
+  again; the startup rule and its clock requirement above describe that bound.
 - No certificate makes either side connect anywhere: the local network speaks TLS 1.2 only, so a certificate that
   names an address is refused in clear before the platform's TLS reads it, on every platform, and nothing a
   certificate names is fetched.
@@ -369,8 +379,8 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 | Method and path | Meaning |
 |---|---|
 | `GET /v1/health` | The daemon's identity: API and product version, estate, root, profile, record format, start time, process |
-| `GET /v1/status` | Status text and the canonical status JSON that is identical on every machine |
-| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`, identical on every machine for the same records; and whether the check it shows found errors). Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own; what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
+| `GET /v1/status` | Status text and canonical status JSON, including the findings of this copy's repository checks |
+| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own; what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
@@ -383,12 +393,12 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release (applying is refused over the local network) |
 | `GET /v1/documents` | The declared living documents (`DocumentRow`: path, repository, declaration, title, state current, due or unavailable, level, reasons, latest clearance, unavailable contributions, notes) |
 | `POST /v1/documents/{id}/reviews` | Review a living document by its declaration (`DocumentReviewRequest`: by, outcome, summary, findings, commit, and from 0.6.0 independence). The runtime reads the content, records its hash, the covered paths' identity and the triggers the review answers, records the reviewer's independence and runs the declared checks; a failed check, or the declaration's `clearedBy`, refuses a clearance. An estate file's revisions decide its reviewer's independence, and a stated one that differs is refused; for a document of another repository the runtime records the one stated, or without one `self` for a principal with the builder role and otherwise its judgement from the estate's records ([record-format-v2.md](record-format-v2.md#living-documents-due)). Returns a `WriteOutcome`. |
-| `GET /v1/goals`, `GET /v1/goals/{id}` | The current goals (`GoalRow`: id, hash, title, status, sponsor and the sponsor's name), and one goal by the id of any of its revisions (`GoalResponse`: the text `vericairn goal show` prints and its canonical JSON, identical on every machine for the same records: the goal's record and revision, its sponsor, its status, `proposed` before any status and `achieved` once accepted, the budget its activation grants unit by unit, each condition's verdict, `met`, `not-met` or `unknown`, with its reason and the records it read, beside the current evaluation's verdict, the evaluation, the steps, who accepts it, whether it is ready for acceptance and what stands in the way, and its acceptance). An id that names no goal is answered 404 |
+| `GET /v1/goals`, `GET /v1/goals/{id}` | The current goals (`GoalRow`: id, hash, title, status, sponsor and the sponsor's name), and one goal by the id of any of its revisions (`GoalResponse`: the text `vericairn goal show` prints and its canonical JSON (living-document predicates also depend on the content and contributions available here): the goal's record and revision, its sponsor, its status, `proposed` before any status and `achieved` once accepted, the budget its activation grants unit by unit, each condition's verdict, `met`, `not-met` or `unknown`, with its reason and the records it read, beside the current evaluation's verdict, the evaluation, the steps, who accepts it, whether it is ready for acceptance and what stands in the way, and its acceptance). An id that names no goal is answered 404 |
 | `GET /v1/asks`, `GET /v1/asks?to=<principal>` | What waits on a principal, or on every principal, from 0.6.0 (`AsksResponse`: the text `vericairn ask` prints and its canonical JSON, format `vericairn.asks/1`, the same on every machine for the same records). For each principal with an ask still open or notified: its waiting asks oldest first, at most three in one delivery (`delivered`, each with its position, its recommendation first, the question, the consequence of leaving it unanswered, its options, its goal and its subject) and the rest waiting in order behind them (`queued`, by id and position). An answered or withdrawn ask waits on no one. Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it in its `answers`, and no MCP tool records one |
-| `GET /v1/goals/{id}/next` | A goal's steps routed from the runtime's machine, from 0.6.0 (`NextResponse`: the text `vericairn goal next` prints and its canonical JSON, format `vericairn.next/1`): the goal's ledger and why a new run of it would be fenced; each step of its work with the state status derives, what holds each planned one, and for each eligible one its route, the principal its role's roster reaches or why none is available ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)), with every candidate and why it is or is not available, whether the goal's budget allows the step now, and for an agent the custody guard on the runtime's machine; the step that comes next, the first eligible one whose route acts; and the goal's asks. It reads that machine's launchers and keys, so unlike the goal view it is not the same on every machine. Reading it records and starts nothing; an id that names no goal is answered 404 |
+| `GET /v1/goals/{id}/next` | A goal's steps routed from the runtime's machine, from 0.6.0 (`NextResponse`: the text `vericairn goal next` prints and its canonical JSON, format `vericairn.next/1`): the goal's ledger and why a new run of it would be fenced; each step of its work with the state status derives, what holds each planned one, and for each eligible one its route, the principal its role's roster reaches or why none is available ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)), with every candidate and why it is or is not available, whether the goal's budget allows the step now, and for an agent the custody guard on the runtime's machine; the step that comes next, the first eligible one whose route acts; and the goal's asks. It reads that machine's launchers and keys, so it is a view of that machine's ability to carry the work. Reading it records and starts nothing; an id that names no goal is answered 404 |
 | `POST /v1/goals/{id}/step` | Take an active goal's next step, one at a time, from 0.6.0 (`GoalStepRequest`: by, and for an agent's step the repository, the launcher's settings, wallMinutes, branch and base): the first eligible step whose route acts, as `GET /v1/goals/{id}/next` routes it from the runtime's machine. Refused over the local network because it runs the worker on this machine; on loopback `by` must be the signing device's principal. A step is taken by an operator, by the goal's sponsor when the sponsor is a person, or by a principal holding `local-engineering`, which is how the builder dispatches agents under the operator's authority; anyone else is refused before anything is recorded. An agent's step goes on with the assignment that holds it, or, when none does, routing signs an assignment to the agent, marked `routedWith: run`, and stores it only with the run's intent, after the worker's whole preflight, the two judged together, their content checks included, before either is stored, under a journal on the runtime's machine; an assignment whose run's intent was not stored holds nothing of its step, and `GET /v1/reconcile` reports such a batch as `batch.incomplete` until the step is held again or is no longer planned: a refusal of that preflight (no repository or an unknown one, a cap under one wall minute, a setting the launcher does not take, the custody guard with no custody exception in force, the goal's budget, the launcher's verification, the workspace's preparation) records nothing, the assignment included. A harness that cannot start after the intent is recorded leaves the assignment and the run, recorded as a known failure that spent nothing. A person's step, or a reserved one routed to a person who holds it, is assigned to that person and asked of them, the assignment (marked `routedWith: ask`) and the ask naming it stored the same way; a step no principal is available for is asked of who decides for the goal and assigned to no one. Every routed brief prohibits the reserved actions unless a grant in force covers one, and names the grant that lets its principal carry a reserved step. Every ask states its recommendation and the consequence of leaving it unanswered, and its subject is the work order. With every eligible step held it records nothing and says what holds each. It activates, funds, accepts and answers nothing. Returns a `GoalStepResponse` (goal, outcome `run`, `ask` or `none`, message, ok, the step's key, its route, the principal reached, the assignment and the ask written, the `RunResponse`, problem) |
 | `POST /v1/goals` | Propose a goal, or a revision of one (`GoalProposeRequest`: by, the goal record's `body`, `supersedes` naming the current revision): a proposal authorizes and funds nothing, and a revision starts again from `proposed`. Anyone may propose a new goal; a revision is refused, before anything is written, unless its author is the sponsor of the revision it supersedes, a person, or an operator when an agent sponsors that goal (decision 01M50A8KHJT1MSSS84KZKHKRHB); anyone else proposes the change as an ask to the sponsor. Returns a `WriteOutcome` |
-| `POST /v1/goals/{id}/activate`, `pause`, `resume`, `stop` | A goal's lifecycle (`GoalActionRequest`: by, an optional note): activate a proposed goal, or resume a paused, budget-limited or blocked one, which grants its budget; pause an active goal; stop a goal that has not ended, which records it abandoned. Each is by who decides for the goal: its sponsor, a person, who to activate or resume holds the operator role or a grant of the `spending` scope, or an operator when an agent sponsors it; an agent never activates a goal. Each is refused out of order, and after the goal ended or was achieved. Returns a `WriteOutcome` |
+| `POST /v1/goals/{id}/activate`, `pause`, `resume`, `stop` | A goal's lifecycle (`GoalActionRequest`: by, an optional note): activate a proposed goal, or resume a paused, budget-limited or blocked one, which grants its budget; pause an active goal; stop a goal that has not ended, which records it abandoned. Activation and resumption are by who decides for the goal: its sponsor, a person holding the operator role or a grant of `spending`, or an operator when an agent sponsors it. Pausing and stopping are also available to the sponsor when the sponsor is an agent; an agent never activates a goal. Each is refused out of order, and after the goal ended or was achieved. Returns a `WriteOutcome` |
 | `POST /v1/goals/{id}/evaluate` | Record the evaluation of a goal's current revision (`GoalEvaluateRequest`: by, summary, `verdicts`, each a `GoalVerdict` of the condition's position from 1, the verdict `met`, `not-yet` or `impossible`, the reason and the ids of the records read). The runtime gives each record predicate its own verdict with the records it read and refuses an evaluator's verdict that contradicts it, except `impossible` for one it does not find met; each evidence statement needs the evaluator's verdict, and one found met names the records read. Refused for a principal that authored one of the goal's steps. Returns a `WriteOutcome` |
 | `POST /v1/goals/{id}/accept` | Accept a goal's current revision, relying on its current evaluation (`GoalAcceptRequest`: by, statement). Refused, with every reason at once and before anything is written, unless the principal is the one who accepts it (decision 01M507XV4VBFYWMRN8WCXMXHX4: its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to while it holds the `accept-work` scope; an operator, only an operator, when an agent sponsors it), the goal was activated and has not ended, its current evaluation finds every condition met and is not the principal's, the principal authored none of its steps, and every record predicate holds now. Returns a `WriteOutcome` |
 | `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, and from 0.6.0 launcher or workspace, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
@@ -417,6 +427,12 @@ creates another copy. The other three load this copy (and, for compare, the othe
 from its files and live store, even while a daemon serves it.
 
 ## Worker run observations
+
+A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
+flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
+observed containment. In 0.6.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
+`stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
 `RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
 fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
@@ -487,7 +503,7 @@ record was rejected:
 | `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit, a request above the HTTP body limit or a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
-| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
+| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
 
 `conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
@@ -501,15 +517,15 @@ is nothing to record yet, and a refusal is its `problem`, not an HTTP status. Th
 hand-over (`POST /v1/goals/{id}/step` and `POST /v1/work/takeover`, from 0.6.0), with a `GoalStepResponse` or a
 `TakeoverResponse`. A read of a missing subject answers 404 with an empty body.
 
-Exit status and HTTP status report whether the operation itself completed, except on the release and run routes,
-which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step and
+takeover routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
 in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family
 
 | Command | Does |
 |---|---|
-| `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` serves the local socket only; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
+| `vericairn runtime serve` | Serve the estate in this process until Ctrl+C or `runtime stop`; refuses when a daemon already serves it; `--no-loopback` disables loopback TLS; a configured local-network listener still serves; `--detached` writes the daemon's output to `daemon.log` beside the live store instead of the standard streams, which is how `runtime start` runs it |
 | `vericairn runtime start` | Start a daemon in the background and wait until it answers; the daemon writes to `daemon.log` beside the estate's live store, and one that stops before serving is reported with what it wrote there and where the log is |
 | `vericairn runtime stop` | Ask the daemon to stop and wait until it has |
 | `vericairn runtime status` | Whether a daemon serves the estate and where (the local socket, loopback, and the local network with the runtime identity's fingerprint), or whether commands run the embedded runtime; and the local-network address configured |
@@ -572,8 +588,7 @@ certificate; `RuntimeIdentity(nonce)` asks for a proof, which a runtime gives ov
 From 0.6.0, `GET /v1/devices` and `vericairn devices list --json` give each device's `profiles`; `vericairn
 runtime status --json` adds `localNetwork`, the address configured, and its `daemon` carries the
 `localNetwork` endpoint when one is served, as the endpoint file does. A loopback request signed by a device
-whose principal is not the one the request names as acting, which earlier releases accepted, is refused; such a
-request goes over the local socket, or is signed by a device of the principal it acts for.
+whose principal is not the one the request names as acting is refused. Sign a device-authenticated request with a device of the principal it acts for.
 
 `vericairn estate upgrade --json` prints the plan with camel-case names (`fromPin`, `toPin`, `fromFormat`,
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the

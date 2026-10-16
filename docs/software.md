@@ -162,7 +162,8 @@ which step 2 reads from the draft. `vericairn docs notes --from <previous> --to 
 writes the set's release notes from the estate's records and records their window in the manifest
 (`notes: {from, to}`, the records dated after `from` and up to `to`). The notes begin where the notes of
 the previous set, the directory `<previous>` names beside `<set>`, ended, so no record falls between two
-sets. For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
+sets for records present when generation runs. A record imported later with an earlier date can still be missed.
+For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
 notes state, to the minute, and with no previous set at the previous publication; `--since <time>` names
 the beginning instead. Until the version's publication is recorded they end at the second before they are
 generated.
@@ -184,15 +185,15 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
 recorded through the MCP tools as its checks, and the brief's prohibited effects, the goal's constraints and only the
-changes the brief permits as its constraints, on one line. Every flag is one that `claude --help`, `codex --help` or
-`codex exec --help` lists. The `command` setting of each launcher names another executable, or a JSON array of one and
+changes the brief permits as its constraints, on one line. The launcher argument construction and configuration checks are covered by the launcher tests; the limits of
+that qualification are stated below. The `command` setting of each launcher names another executable, or a JSON array of one and
 its leading arguments. No launcher reads a price, so a cap in currency is charged in full.
 
 `vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--detach]`:
 
 1. Refuses, before anything is recorded: an agent that is not the assignment's contributor, or has no admitted device
    whose key this machine holds (its MCP server would list only the read-only tools); a recording principal that is
-   neither the operator nor holds `local-engineering`; work that belongs to no goal, or to several active goals unless
+   neither the operator, nor holds `local-engineering`, nor is the goal's sponsor when the sponsor is a person; work that belongs to no goal, or to several active goals unless
    `--goal` names one; a goal that is not active, or whose budget does not allow the run (record-format-v2.md, [An agent
    run and its goal's ledger](record-format-v2.md#an-agent-run-and-its-goals-ledger)), in which case a crossed cap marks
    the goal `budget-limited`; a branch another run in flight works on; a repository with no clone registered here
@@ -265,7 +266,7 @@ poll `worker runs` for the later facts. On Windows the stop file is the transmis
 none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts
 nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>] [--setting name=value]...
 [--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
-Community's conductor, one step in sequence; Pro's program plans and schedules many. Like `worker run`,
+Community's conductor, one step per call; multi-step planning and scheduling are outside this implementation. Like `worker run`,
 it runs on the runtime's machine and is refused through the local-network listener. On loopback, its `by`
 is the signing device's principal, and its admission and authenticated key are rechecked under the estate's
 write lock before its records are stored, including a grouped assignment and run intent or ask. The local
@@ -280,7 +281,7 @@ prohibited unless a grant in force covers it, with the grant that lets the agent
 stores it only with the run's intent, after the worker's whole preflight, the two judged together, their content checks
 included, before either is stored. The store is not atomic, so the runtime writes a journal of the pair on its machine
 first, and routing marks the assignment `routedWith: run`: an assignment whose run's intent was never stored holds nothing
-of its step, a step is never held by half a pair, and `vericairn reconcile` reports the pair as `batch.incomplete`, naming
+of its step, a step is never held by half a pair, and `vericairn estate reconcile` reports the pair as `batch.incomplete`, naming
 what was stored, until the step is held again or is no longer planned; nothing stored is removed. The run starts through
 the worker with the launcher routing chose and the settings given, all as `worker run` does, the custody precondition
 included; without `--detach` the command follows the run until it settles. Every refusal before the intent records
@@ -314,6 +315,12 @@ remain accessible to the harness; use a dedicated user for credential isolation.
 configuration limitations below apply. No MCP tool launches or stops a run.
 
 ### Launch accounting and containment
+
+A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
+flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
+observed containment. In 0.6.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
+`stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state
 writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
@@ -406,8 +413,9 @@ The worker observes stdout event-stream liveness with a monotonic clock; stderr 
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
 that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
 in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
-principal, about the run (no notification is sent). At twice the limit it transmits a stop and contains the whole
-launch boundary. New stdout events reset the silence timer but never erase an earlier attention fact. A failed
+principal, about the run (no notification is sent). At twice the limit it requests a stop and attempts to contain the whole
+launch boundary; containment is recorded only after exit is observed. New stdout events reset the silence timer but
+never erase an earlier attention fact. A failed
 attention write is retried and does not prevent containment. Settlement records `liveness`: `stallSeconds`,
 `lastEventAt`, optional `attentionAt`, `attention` (the ask id), and `stoppedAt`; run-list responses expose the same
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
