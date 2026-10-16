@@ -947,6 +947,8 @@ public class WorkerTests
         Assert.NotNull(row.Stop.AcknowledgedAt);
         Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
         Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());
+        // The goal-status record follows the run's settlement in a separate write.
+        WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
         Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
     }
 
