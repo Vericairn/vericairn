@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Presentation;
 using Vericairn.Records.Canonical;
 
 namespace Vericairn.Workbench.Tests;
@@ -138,5 +139,29 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         Assert.Equal(CanonicalJson.SerializePrettyUtf8(JsonSerializer.Deserialize<HandoffPackage>(saved, ProtocolJson.Options)!.Payload), CanonicalJson.SerializePrettyUtf8(successor.Package!.Payload));
         Assert.Equal(operation.Written.Id, Assert.Single(api.Records("operation")).Id);
         Assert.Empty(api.Records("acceptance"));
+    }
+
+    [Fact]
+    public void WatchSummaryKeepsEveryWorkerObservationAtEveryDepthAndFrequency()
+    {
+        JsonElement report = Seed.Json("""{"format":"vericairn.progress/1","agentClaims":[{"attempt":"fixture-attempt","phase":"build","note":"Optional live claim."}],"runSignals":[{"run":"fixture-run","signals":[{"severity":"warning","code":"loop","summary":"The worker observed five repeated actions.","attention":"fixture-ask"},{"severity":"critical","code":"loop","summary":"The worker observed ten repeated actions.","attention":null},{"severity":"warning","code":"audit-unverified","summary":"Invocation scope could not be verified.","attention":null}]}]}""");
+        byte[] original = CanonicalJson.SerializePrettyUtf8(report);
+        ProgressRow[] expected = ProgressView.Summary(report, "verbose", onDemand: false).Where(row => row.Heading.StartsWith("Worker ·", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(3, expected.Length);
+        foreach (string frequency in CommunicationResolution.Frequencies)
+        {
+            foreach (string depth in CommunicationResolution.Depths)
+            {
+                IReadOnlyList<ProgressRow> summary = ProgressView.Summary(report, frequency, onDemand: false);
+                Assert.Equal(expected, summary.Where(row => row.Heading.StartsWith("Worker ·", StringComparison.Ordinal)));
+                CommunicationProfile profile = CommunicationResolution.Resolve(null, null, [], new(frequency, depth, depth, depth, depth));
+                string human = CommunicationPresentation.Protected(profile, "status", "worker observations", "Inspect required attention.", string.Join('\n', summary.Select(row => row.Detail)));
+                Assert.All(expected, row => Assert.Contains(row.Detail, human, StringComparison.Ordinal));
+                Assert.Contains("attention recording pending", human, StringComparison.Ordinal);
+                Assert.Contains("Invocation scope could not be verified.", human, StringComparison.Ordinal);
+                if (frequency == "none") { Assert.DoesNotContain("Optional live claim.", human, StringComparison.Ordinal); }
+                Assert.Equal(original, CanonicalJson.SerializePrettyUtf8(report));
+            }
+        }
     }
 }
