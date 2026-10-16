@@ -25,7 +25,7 @@ internal static partial class Commands
 
     public static int CommunicationShow(string root, CommunicationSelection selection, bool preview, bool json) => WithApi(root, api =>
     {
-        CommunicationProfile profile = api.Communication(selection.Recipient, selection.Assignment, selection.Values("status"));
+        CommunicationProfile profile = api.Communication(selection.Recipient, selection.Assignment, json ? null : selection.Values("status"));
         Console.Out.Write(json ? CanonicalJson.SerializePretty(JsonSerializer.SerializeToElement(profile, ProtocolJson.Options)) : CommunicationPresentation.Describe(profile) + (preview ? "\nPreview\n" + CommunicationPresentation.Preview(profile) : string.Empty));
         return profile.Unavailable is null && profile.Conflicts.Count == 0 ? Clean : HasErrors;
     });

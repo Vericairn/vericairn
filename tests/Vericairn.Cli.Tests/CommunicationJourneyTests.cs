@@ -20,6 +20,8 @@ public class CommunicationJourneyTests
         string shortJson = CliHarness.Run("--estate", estate.Root, "--recipient", estate.OperatorId, "--depth", "short", "--json", "status").Out;
         string fullJson = CliHarness.Run("--estate", estate.Root, "--recipient", estate.OperatorId, "--depth", "comprehensive", "--json", "status").Out;
         Assert.Equal(shortJson, fullJson);
+        Assert.Equal("standard", CliHarness.Ok("--estate", estate.Root, "--recipient", estate.OperatorId, "--depth", "short", "--json", "communication", "show")
+            .Json.GetProperty("fields").GetProperty("status").GetProperty("value").GetString());
         string shortText = CliHarness.Run("--estate", estate.Root, "--recipient", estate.OperatorId, "--depth", "short", "status").Out;
         string fullText = CliHarness.Run("--estate", estate.Root, "--recipient", estate.OperatorId, "--depth", "comprehensive", "status").Out;
         Assert.NotEqual(shortText, fullText);

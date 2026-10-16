@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
@@ -58,6 +59,10 @@ public class CommunicationServiceTests
         WriteOutcome changed = service.CommunicationSet(setting with { Authority = grant.Written!.Id });
         Assert.True(changed.Ok, changed.Problem?.Message);
         Assert.Equal(estate.BuilderId, service.Communication(estate.OperatorId).Revisions.Single().By);
+        JsonElement provenance = JsonSerializer.SerializeToElement(service.Communication(estate.OperatorId), ProtocolJson.Options).GetProperty("revisions")[0];
+        Assert.True(provenance.TryGetProperty("authority", out JsonElement source));
+        Assert.Equal(grant.Written.Id, source.GetString());
+        Assert.Equal(grant.Written.Hash, provenance.GetProperty("authorityHash").GetString());
         Assert.True(service.CommunicationDelegate(new(estate.OperatorId, estate.OperatorId, estate.BuilderId, "person", Status: "revoked", Expected: grant.Written.Hash)).Ok);
         Assert.False(service.CommunicationSet(setting with { Authority = grant.Written.Id, Expected = changed.Written!.Hash }).Ok);
         Assert.False(service.CommunicationDelegate(new(estate.BuilderId, estate.OperatorId, estate.BuilderId, "person")).Ok);

@@ -601,7 +601,7 @@
                       <Button Content="Save this scope" Click="OnSaveCommunication" />
                       <Button Content="Reset this scope to inheritance" Click="OnResetCommunication" />
                     </StackPanel>
-                    <SelectableTextBlock Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication write outcome" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication write outcome" />
                     <TextBlock Text="Recorded values and sources" FontWeight="SemiBold" />
                     <SelectableTextBlock Text="{Binding Effective}" TextWrapping="Wrap" Focusable="True" />
                     <TextBlock Text="Preview of this draft" FontWeight="SemiBold" />

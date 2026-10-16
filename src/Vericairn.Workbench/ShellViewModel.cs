@@ -819,7 +819,10 @@ public sealed partial class ShellViewModel : Observable
             return null;
         }
 
-        var page = new AssignmentDocument(row.Key, node, row.ContributorName ?? row.Contributor);
+        RecordResponse? original = Try(() => connection.Api.Record(assignmentId)!);
+        CommunicationProfile profile = AssignmentCommunication(assignmentId);
+        if (original is null) { profile = profile with { Unavailable = "The exact assignment source is unavailable; the view cannot confirm completeness." }; }
+        var page = new AssignmentDocument(row.Key, node, row.ContributorName ?? row.Contributor, profile, original);
         Open(page);
         return page;
     }
@@ -872,7 +875,7 @@ public sealed partial class ShellViewModel : Observable
             JsonElement body = record.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             string heading = record.Type == "result" ? $"Review result {record.Id[..12]}" : $"Review {record.Type} {record.Id[..12]}";
             string original = record.Type == "result" ? RenderResult(record, body) + "\n\nComplete original record:\n" + JsonSerializer.Serialize(record.Envelope, Pretty) : JsonSerializer.Serialize(record.Envelope, Pretty);
-            string summary = CommunicationPresentation.Protected(communication, record.Type == "result" ? "result" : "decision", record.Id + " at " + record.Hash, Str(body, "summary") ?? heading, original);
+            string summary = CommunicationPresentation.Protected(ResultCommunication(record), record.Type == "result" ? "result" : "decision", record.Id + " at " + record.Hash, Str(body, "summary") ?? heading, original);
             var reviews = new List<ReviewRow>();
             foreach (RecordResponse review in Try(() => connection.Api.Records("review")) ?? [])
             {

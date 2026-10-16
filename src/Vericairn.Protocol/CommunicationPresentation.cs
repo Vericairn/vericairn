@@ -57,6 +57,8 @@ public static class CommunicationPresentation
         foreach (CommunicationLayer revision in profile.Revisions)
         {
             text.Append(revision.Current ? "Current " : "Historical ").Append(revision.Scope).Append(" revision ").Append(revision.Record).Append(" at ").Append(revision.Hash).Append(" by ").Append(revision.By).Append('\n');
+            if (revision.Authority is not null) { text.Append("  authority ").Append(revision.Authority).Append(" at ").Append(revision.AuthorityHash).Append('\n'); }
+            if (revision.Basis is not null) { text.Append("  basis decision ").Append(revision.Basis).Append(" at ").Append(revision.BasisHash).Append('\n'); }
         }
 
         if (profile.Conflicts.Count > 0)
@@ -120,7 +122,7 @@ public static class CommunicationPresentation
                 attention.Add(new("required-decision", asks.Text));
             }
         });
-        foreach (string type in new[] { "verification", "result", "review", "operation", "work-status" })
+        foreach (string type in new[] { "verification", "result", "review", "operation" })
         {
             Read(() =>
             {
@@ -135,9 +137,10 @@ public static class CommunicationPresentation
                         "result" when Items(body, "unresolvedEffects").Count > 0 => "uncertain-effect",
                         "result" when Items(body, "checks").Any(c => Str(c, "outcome") == "failed") => "failed-check",
                         "result" when Items(body, "checks").Any(c => Str(c, "outcome") is not ("pass" or "passed")) => "unknown-check",
-                        "review" when Str(body, "outcome") is not ("pass" or "passed") => "failed-check",
-                        "operation" when Str(body, "status") is not ("observed-success" or "canceled") => "uncertain-effect",
-                        "work-status" when Str(body, "status") == "blocked" => "blocker",
+                        "review" when Str(body, "outcome") == "fail" => "failed-check",
+                        "review" when Str(body, "outcome") is not ("pass" or "passed") => "required-decision",
+                        "operation" when Str(body, "status") == "known-failure" => "incident",
+                        "operation" when Str(body, "status") is not ("observed-success" or "canceled" or "not-started") => "uncertain-effect",
                         _ => null,
                     };
                     if (kind is not null)
@@ -147,6 +150,27 @@ public static class CommunicationPresentation
                 }
             });
         }
+
+        Read(() =>
+        {
+            ProgressResponse progress = api.Progress();
+            if (progress.Json.TryGetProperty("eligible", out JsonElement eligible))
+            {
+                foreach (JsonElement held in Items(eligible, "held"))
+                {
+                    attention.Add(new("blocker", held.GetRawText() + "\n", Str(held, "id"), "work-order"));
+                }
+            }
+        });
+        Read(() =>
+        {
+            foreach (GoalRow goal in api.Goals().Where(g => g.Status is "blocked" or "budget-limited"))
+            {
+                GoalResponse? details = api.Goal(goal.Id);
+                attention.Add(details is null ? new("unknown-check", "The current goal details are unavailable.\n", goal.Id, "goal") :
+                    new(goal.Status == "blocked" ? "blocker" : "exhausted-budget", details.Text + details.Json.GetRawText() + "\n", goal.Id, "goal"));
+            }
+        });
 
         Read(() =>
         {

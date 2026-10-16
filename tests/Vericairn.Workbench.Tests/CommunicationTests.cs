@@ -22,6 +22,8 @@ public class CommunicationTests(HeadlessFixture fixture)
             CommunicationDocument page = await fixture.Ui(shell.OpenCommunication);
             Assert.Same(page, shell.SelectedDocument);
             Assert.NotNull(window.FindControl<MenuItem>("CommunicationMenu"));
+            await fixture.Ui(() => Assert.All(Probe.Measure(window).Where(target => !target.Exempt),
+                target => Assert.True(target.MeetsMinimum, $"{target.Type} {target.Name}: {target.Width} x {target.Height}")));
             Assert.Contains(person, page.Effective, StringComparison.Ordinal);
             await fixture.Ui(() => { page.StatusDepth = "comprehensive"; page.ProgressFrequency = "none"; page.Save(); });
             Assert.Equal("comprehensive", shell.Api!.Communication(person).Fields["status"].Value);
@@ -76,5 +78,31 @@ public class CommunicationTests(HeadlessFixture fixture)
         page.Prepare();
         Assert.Equal(original, page.PackageJson);
         Assert.Contains("handoff (comprehensive)", page.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AssignmentAndResultPagesUseTheirExactAssignmentsOverride()
+    {
+        string root = Seed.Temp("wb-communication-assignment");
+        string person = Seed.Init(root);
+        var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-communication-assignment-prefs"))) { ActingOverride = person };
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        IEstateApi api = shell.Api!;
+        Assert.True(api.NewRecord(new("work-order", person, Seed.Json("""{"key":"COMM-1","kind":"ordinary","title":"Build","intent":"Full intent.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}"""))).Ok);
+        WriteOutcome assigned = api.Assign(new("COMM-1", person, person, Seed.Json("""{"outcome":"Build it.","sources":[],"permittedChanges":["work"],"prohibitedEffects":["no publication"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["tests"],"recovery":"Record a result."}""")));
+        Assert.True(assigned.Ok, assigned.Problem?.Message);
+        string assignment = assigned.Written!.Id;
+        string attempt = api.Attempt(new(assignment, person, "local clone", "Build it.")).Written!.Id;
+        WriteOutcome result = api.Result(new(attempt, person, Seed.Json("""{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"Review."}""")));
+        Assert.True(result.Ok, result.Problem?.Message);
+        Assert.True(api.CommunicationSet(new(person, "assignment", new(Result: "short", Handoff: "short"), person, assignment)).Ok);
+        await fixture.Ui(shell.Refresh);
+        AssignmentDocument page = (await fixture.Ui(() => shell.OpenAssignment(assignment)))!;
+        Assert.Contains("handoff (short)", page.BriefText, StringComparison.Ordinal);
+        Assert.Contains(api.Record(assignment)!.Envelope.GetRawText(), page.BriefText, StringComparison.Ordinal);
+        ReviewWorkspace review = (await fixture.Ui(() => shell.OpenReview(result.Written!.Id)))!;
+        Assert.Contains("result (short)", review.SummaryText, StringComparison.Ordinal);
+        Assert.Contains(result.Written!.Hash, review.SummaryText, StringComparison.Ordinal);
+        Assert.Contains("Complete original record", review.SummaryText, StringComparison.Ordinal);
     }
 }

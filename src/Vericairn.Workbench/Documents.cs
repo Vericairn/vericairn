@@ -315,7 +315,7 @@ public sealed record AttemptView(string Id, string By, string StartedAt, string 
 public sealed class AssignmentDocument : Document
 {
     /// <summary>Builds the page from the assignment node of the work order's brief document.</summary>
-    public AssignmentDocument(string key, JsonElement assignment, string contributorName) : base($"Assignment {Str(assignment, "id")?[..12]}", "assignment")
+    public AssignmentDocument(string key, JsonElement assignment, string contributorName, CommunicationProfile? communication = null, RecordResponse? original = null) : base($"Assignment {Str(assignment, "id")?[..12]}", "assignment")
     {
         Key = key;
         Id = Str(assignment, "id") ?? string.Empty;
@@ -336,6 +336,14 @@ public sealed class AssignmentDocument : Document
         lines.Add("Recovery: " + (Str(brief, "recovery") ?? string.Empty));
         BriefText = string.Join("\n", lines);
         Note = Str(assignment, "note") ?? string.Empty;
+        if (communication is not null)
+        {
+            string complete = original is null ? "\n\nAssignment view (original record unavailable):\n" + assignment.GetRawText()
+                : "\n\nComplete original assignment:\n" + original.Envelope.GetRawText();
+            BriefText = CommunicationPresentation.Protected(communication, "handoff", Id + " at " + Hash,
+                "The delegated outcome, limits and original source follow.", BriefText + complete);
+        }
+
         var attempts = new List<AttemptView>();
         if (assignment.TryGetProperty("attempts", out JsonElement at) && at.ValueKind == JsonValueKind.Array)
         {

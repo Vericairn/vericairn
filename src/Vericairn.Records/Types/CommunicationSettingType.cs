@@ -9,6 +9,8 @@ namespace Vericairn.Records.Types;
 /// <summary>An attributable presentation profile; an empty values object resets its scope to inheritance.</summary>
 public sealed class CommunicationSettingType : IRecordType
 {
+    private static readonly string[] ScopeKeys = ["scope", "recipient", "assignment", "grantee"];
+
     /// <inheritdoc />
     public string Name => "communication-setting";
     /// <inheritdoc />
@@ -112,4 +114,7 @@ public sealed class CommunicationSettingType : IRecordType
             context.Error("communication.conflict", "Several current revisions exist for this communication scope; reconcile them explicitly, never select the last arrival.");
         }
     }
+
+    internal static bool SameScope(RecordEnvelope left, RecordEnvelope right) => left.Type == right.Type &&
+        ScopeKeys.All(key => EstateModel.BodyString(left, key) == EstateModel.BodyString(right, key));
 }

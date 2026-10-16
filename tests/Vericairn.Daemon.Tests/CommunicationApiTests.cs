@@ -17,6 +17,7 @@ public class CommunicationApiTests
     public async Task SdkReadsAndWritesTheSameAttributableProfileAsTheRuntime()
     {
         using var estate = new TestEstate(2);
+        estate.Add("work-order", estate.OperatorId, """{"key":"COMM-1","kind":"ordinary","title":"A brief","intent":"Complete intent.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
         await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         WriteOutcome saved = client.CommunicationSet(new(estate.OperatorId, "person", new(Status: "comprehensive"), estate.OperatorId));
@@ -30,6 +31,9 @@ public class CommunicationApiTests
         JsonElement paths = contract.RootElement.GetProperty("paths");
         Assert.Equal("getCommunication", paths.GetProperty("/v1/communication").GetProperty("get").GetProperty("operationId").GetString());
         Assert.True(paths.GetProperty("/v1/communication/delegations").TryGetProperty("post", out _));
+        BriefResponse brief = client.BriefFor("COMM-1", estate.OperatorId, view: new(Handoff: "short"))!;
+        Assert.Contains("handoff (short)", brief.Markdown, StringComparison.Ordinal);
+        Assert.Equal(client.Brief("COMM-1")!.Json.GetRawText(), brief.Json.GetRawText());
     }
 
     [Fact]
@@ -44,5 +48,10 @@ public class CommunicationApiTests
         Assert.Throws<HttpRequestException>(() => agent.CommunicationDelegate(new(person, person, harness.Estate.BuilderId, "person")));
         Assert.Equal("shipped", agent.Communication(person).Fields["status"].Source);
         Assert.Empty(harness.Estate.Load().OfType("communication-setting"));
+        WriteOutcome own = harness.Socket.CommunicationSet(new(person, "person", new(Status: "standard"), person));
+        Assert.True(own.Ok, own.Problem?.Message);
+        RecordResponse record = harness.Socket.Record(own.Written!.Id)!;
+        Assert.Equal(person, record.Envelope.GetProperty("by").GetString());
+        Assert.Equal(harness.OperatorDevice, record.Envelope.GetProperty("signatures")[0].GetProperty("device").GetString());
     }
 }

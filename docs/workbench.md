@@ -46,6 +46,11 @@ decisions, failed or unknown checks, blockers, uncertain effects, incidents
 and exhausted budgets remain in attention at every frequency, including
 `none`. Unavailable settings and attention sources are labeled explicitly.
 
+Assignment pages and their result reviews read the exact assignment override
+for the selected person. Opening another assignment reads its own scope. An
+assignment from another work order is unavailable for that work brief, and
+full presentation remains visible.
+
 No presentation choice changes a draft's pinned hash, permission, acceptance
 or exported handoff bytes. Remote is not built and has no communication UI.
 

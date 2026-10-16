@@ -71,4 +71,19 @@ public sealed partial class ShellViewModel
             }
         }
     }
+
+    private CommunicationProfile AssignmentCommunication(string assignment)
+    {
+        if (connection?.Api is not { } api || CommunicationRecipient() is not string recipient) { return communication; }
+        return Try(() => api.Communication(recipient, assignment)) ?? communication with { Unavailable = "The assignment's communication profile is unavailable." };
+    }
+
+    private CommunicationProfile ResultCommunication(RecordResponse result)
+    {
+        if (result.Type != "result" || connection?.Api is not { } api) { return communication; }
+        string? attemptId = result.Envelope.TryGetProperty("subject", out var subject) ? Str(subject, "id") : null;
+        RecordResponse? attempt = attemptId is null ? null : Try(() => api.Record(attemptId)!);
+        string? assignmentId = attempt is { Type: "attempt" } && attempt.Envelope.TryGetProperty("subject", out var assigned) && Str(assigned, "type") == "assignment" ? Str(assigned, "id") : null;
+        return assignmentId is null ? communication with { Unavailable = "The result's exact assignment could not be read; full presentation is retained." } : AssignmentCommunication(assignmentId);
+    }
 }

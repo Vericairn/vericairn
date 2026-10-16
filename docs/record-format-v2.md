@@ -766,3 +766,19 @@ Resolution uses shipped defaults, estate defaults, the recipient's estate
 values, their assignment values and a one-view override, in that order, for
 each field. One-view values are never records. Full records, evidence and
 canonical output remain unchanged by presentation depth.
+
+Communication conflicts also appear in `reconcile`. A reconciliation about a
+personal setting or delegation is the recipient's action, even when another
+principal holds estate administration. Estate-default reconciliation requires
+administration. It may keep one of the direct successors of a profile, or
+settle independent first profiles at exactly the same scope (including the
+same grantee for a delegation). It cannot cross recipients or scopes. Nothing
+is deleted. An invalid imported preference or reconciliation is unavailable
+for presentation; it cannot quietly select an untrusted value.
+
+New writes recheck that delegated consent is current and unexpired at the
+runtime's present time, including generic `records/new` writes. Historical
+validation still checks when an existing record was authored, so a later
+revocation preserves its earlier authorized history. Backdating a new record
+cannot reuse revoked consent. Unknown fields in the new setting, values and
+delegation request contracts are refused explicitly. Remote is not built.

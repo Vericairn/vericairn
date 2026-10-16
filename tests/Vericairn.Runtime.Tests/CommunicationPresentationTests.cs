@@ -79,4 +79,27 @@ public class CommunicationPresentationTests
         Assert.Contains("shipped", shortView.Markdown, StringComparison.Ordinal);
         Assert.Contains("Freshness", shortView.Markdown, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void AssignmentValuesCannotBeAppliedToAnUnrelatedWorkBrief()
+    {
+        using var estate = new TestEstate(2);
+        foreach (string key in new[] { "A", "B" })
+        {
+            estate.Add("work-order", estate.OperatorId, $$"""{"key":"{{key}}","kind":"ordinary","title":"Build","intent":"Complete original intent.","scope":["src/"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
+        }
+
+        using EstateService service = EstateService.Open(estate.Root);
+        using JsonDocument brief = JsonDocument.Parse("""{"outcome":"Build it.","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["tests"],"recovery":"Record a result."}""");
+        WriteOutcome assigned = service.Assign(new("A", estate.BuilderId, estate.OperatorId, brief.RootElement));
+        Assert.True(assigned.Ok, assigned.Problem?.Message);
+        string assignment = assigned.Written!.Id;
+        Assert.True(service.CommunicationSet(new(estate.OperatorId, "assignment", new(Handoff: "short"), estate.OperatorId, assignment)).Ok);
+        Assert.Equal("assignment", service.Communication(estate.OperatorId, assignment).Fields["handoff"].Source);
+        Assert.Contains("handoff (short)", service.BriefFor("A", estate.OperatorId, assignment)!.Markdown, StringComparison.Ordinal);
+        BriefResponse unrelated = service.BriefFor("B", estate.OperatorId, assignment)!;
+        Assert.Contains("does not belong", unrelated.Markdown, StringComparison.Ordinal);
+        Assert.Contains("Complete original intent.", unrelated.Markdown, StringComparison.Ordinal);
+        Assert.Equal(service.Brief("B")!.Json.GetRawText(), unrelated.Json.GetRawText());
+    }
 }

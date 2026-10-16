@@ -25,6 +25,8 @@ public class CommunicationAttentionTests
         IReadOnlyList<CommunicationAttention> attention = CommunicationPresentation.Attention(api, "person");
         Assert.All(CommunicationPresentation.MandatoryKinds, kind => Assert.Contains(attention, a => a.Kind == kind));
         Assert.Contains(attention, a => a.Kind == "failed-check" && a.Record == "check-failed");
+        Assert.Contains(attention, a => a.Kind == "blocker" && a.Record == "held-work");
+        Assert.Contains(attention, a => a.Kind == "blocker" && a.Record == "blocked-goal");
         Assert.True(CommunicationPresentation.ShouldDeliver("none", "progress", attention));
         string rendered = CommunicationPresentation.RenderAttention(attention);
         Assert.All(source.Records, record => Assert.Contains(record.Envelope.GetRawText(), rendered, StringComparison.Ordinal));
@@ -59,6 +61,9 @@ public class CommunicationAttentionTests
             {
                 nameof(IEstateApi.Records) => Records.Where(r => r.Type == (string)args![0]!).ToList(),
                 nameof(IEstateApi.Asks) => new AsksResponse("Complete question and consequence.", Json("""{"principals":[{"waiting":1}]}""")),
+                nameof(IEstateApi.Progress) => new ProgressResponse("Complete progress.", Json("""{"eligible":{"held":[{"id":"held-work","relations":[{"id":"dependency","holds":true,"state":"planned"}]}]}}"""), false),
+                nameof(IEstateApi.Goals) => new List<GoalRow> { new("blocked-goal", "sha256:goal", "A goal", "blocked", "person", null) },
+                nameof(IEstateApi.Goal) => new GoalResponse("Complete blocker and next step.", Json("""{"id":"blocked-goal","status":"blocked"}""")),
                 nameof(IEstateApi.Runs) => new RunsResponse(
                     [new RunRow("run", "identity", "generic", null, null, "goal", null, "known-failure", Json("{}"), null, Json("{}"), null, null, false, true,
                         Signals: [new("incident", "critical", "now", "Complete incident")])],

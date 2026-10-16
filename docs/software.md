@@ -58,7 +58,18 @@ operator's exact existing decision as an explicit personal record. It is a
 separate authorized write after reader deployment; builds and reads never
 perform that migration or invent anyone else's preference.
 
-This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Its worker and launchers first appeared
+The protection boundaries are explicit:
+
+| Protection | What enforces it |
+|---|---|
+| Own setting, delegated consent and attribution | Record validation and the runtime's current-authority check, including generic record writes |
+| Stale and merged edits | Expected hashes and visible conflicts; the recipient reconciles personal branches |
+| Complete originals and stable machine output | Shared first-party renderers and byte-for-byte regression checks |
+| Required attention at every frequency | Structured asks, checks, blocked results, uncertain effects and worker/budget observations in first-party surfaces |
+| Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
+| Remote | Not built; no implementation or qualification claimed |
+
+This draft describes the 0.6.1 code with the unreleased FIX-09 corrections and 0.7.0 additions described here, including COMMS-01. Its worker and launchers first appeared
 in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
 the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
 path below is prepared for 0.7.0.
