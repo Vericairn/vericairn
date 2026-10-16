@@ -26,7 +26,7 @@ The generated files are retained as emitted. The CLI reference includes `worker 
 
 The repository README and maintained drafts were checked against code and regression cases and committed at `10f7c22`, then reconciled with FIX-11 at `ddec89e`. As in 0.6.1, the API, both record-format documents, software, Workbench and MCP drafts are copied byte for byte into this set. `api.md` and `api-v1.md` are identical copies of `docs/api-v1.md`, preserving the drafts' relative links. The communication adoption procedure and qualification report are also frozen copies. Installation, operator, limitations, format-index and overview guides are revised for this release. The installation guide incorporates the new NuGet draft alongside the archive journeys.
 
-**The release builder writes the release notes from the estate's records.** `release-notes.md` is intentionally only a heading and `<!-- The builder writes these notes from the estate's records. -->`. The builder must use the widened start `--since 2026-10-16T04:29:43Z` with `--from 0.6.1 --to 0.7.0`, as explained in the operator guide, to recover records missed by the clone used for 0.6.1's notes. No notes window is claimed in the manifest before that work. The set remains under preparation until those notes are supplied; index its final checksums when it is frozen. Earlier published and withdrawn sets remain unchanged.
+`release-notes.md` renders the estate's records through the 0.7.0 command line, from a fresh clone of the estate's main at `5750ebe` taken after every pending record was merged. Its window begins at 2026-10-16T04:29:43Z, widened with `--since` so the nine records that the clone used for 0.6.1's notes lacked land in this set, and ends at 2026-10-16T23:45:03Z; both bounds are in `manifest.json`. Records dated between 04:29:43 and 04:39:05 UTC that 0.6.1's notes already listed may appear in both sets. The notes classify current results as accepted work when an acceptance pins their exact hash or their work order's current revision and hash; that classification creates no acceptance of a result. The set is frozen for its release build, and its checksums are indexed in `../frozen-sha256.json`. Earlier published and withdrawn sets remain unchanged.
 
 | Document | What it answers |
 |---|---|
@@ -43,9 +43,9 @@ The repository README and maintained drafts were checked against code and regres
 | [mcp.md](mcp.md) | Supported protocol, reads and five narrow writes, configuration and limitations |
 | [communication-adoption.md](communication-adoption.md) | Explicit adoption of the first-party operator's recorded preference |
 | [communication-qualification.md](communication-qualification.md) | Communication/context regression evidence and deferred qualifications |
-| [release-notes.md](release-notes.md) | Placeholder reserved for the release builder |
+| [release-notes.md](release-notes.md) | Estate records rendered by 0.7.0 from 2026-10-16T04:29:43Z, widened to recover the records 0.6.1's notes missed |
 | [limitations-and-platforms.md](limitations-and-platforms.md) | Machine-local configuration, automation versus qualification, platform, custody, worker and network limits |
-| [manifest.json](manifest.json) | Generation version/commit, required documents, commands, operations, types and format compatibility |
+| [manifest.json](manifest.json) | Generation version/commit, required documents, commands, operations, types, format compatibility and the notes' record window |
 
 ## Checking the version and set
 
@@ -55,7 +55,7 @@ vericairn docs check docs/releases/0.7.0
 dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare docs/releases/0.7.0
 ```
 
-With the NuGet tool, replace `vericairn` with `dotnet vc`. A packaged release prints `0.7.0+<commit>`; an ordinary source build retains `-dev`. `doctor` reports runtime, custody, format and daemon information. Workbench's target bar shows the estate's own pin, which changes only through upgrade. The structural docs check and comparison do not judge prose, complete the builder's notes, qualify a platform or accept a release.
+With the NuGet tool, replace `vericairn` with `dotnet vc`. A packaged release prints `0.7.0+<commit>`; an ordinary source build retains `-dev`. `doctor` reports runtime, custody, format and daemon information. Workbench's target bar shows the estate's own pin, which changes only through upgrade. The structural docs check and comparison do not judge prose, qualify a platform or accept a release.
 
 ## Where to get it
 

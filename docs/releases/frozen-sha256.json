@@ -186,6 +186,27 @@
       "release-notes.md": "sha256:a0fd1592809360657307fd0975b76ab5fbdb1dfc1d81258f9f524ad3d1b537d7",
       "software.md": "sha256:40a668721e08e04401655a9436ae9aef8686f1e17222897f209d73690fa65e1a",
       "workbench.md": "sha256:18393d10e59eab06d4d61736297afb3d928ca15a8645b3d208f63f9a75dd5475"
+    },
+    "0.7.0": {
+      "README.md": "sha256:32c3ecc2220d5dc41539e0b09cf2cd7acbb570a6ca037c2286fed55805642a4f",
+      "api-reference.md": "sha256:d9cefae71a1c76629c817d7d509b20abc2b4878d659a67e3278cc42e0257ba15",
+      "api-v1.md": "sha256:67332f77173a14e08db464e09b4c10c0804f2695a1ddd8102c37d9ce9b09043d",
+      "api.md": "sha256:67332f77173a14e08db464e09b4c10c0804f2695a1ddd8102c37d9ce9b09043d",
+      "cli-reference.md": "sha256:6c3d0775565c75b9657b52c9d278b076ffc31a524abe56af69d036a8686b2098",
+      "communication-adoption.md": "sha256:139ccec24a8cca85aaf4523b2e09ac5ae6e541ea285c7ac96f595d810d8ab84c",
+      "communication-qualification.md": "sha256:3a1667e9599284cface6642c410915d7252da66b2bb7db04da5fb98bfe3732cb",
+      "install.md": "sha256:c4d2a8b8d49fa1517aa50e0867b38ac5bd7019fe5b6ad388741d6fd6ed4450a9",
+      "limitations-and-platforms.md": "sha256:8a858f9e84829c5474871d16cd448ff74738d9865d6f529a81f2c49e0084e00e",
+      "manifest.json": "sha256:c4f444755c1c4fe3b4ad51d000dea8ab9051d53ef8232092becdc76ed4ecdb90",
+      "mcp.md": "sha256:05da1c1e1359056140273d33d4a02720797c472469aeb95df00fed0e1f94d742",
+      "operator-guide.md": "sha256:107b960fb14b54aa362ad4bb1c5fbe6d54381113b13805b307d236a0c30547ab",
+      "record-format-v1.md": "sha256:fe45a43ea60f3785e85775e794fe64344594cad70eb92424a00e4a44bf99eefc",
+      "record-format-v2.md": "sha256:468f37e905117e556b19c56356194ce3995a6cdf363bcce6801e8ced3a54af2b",
+      "record-format.md": "sha256:9873820d093438ab3d861709383927664892fa20a12f4272f9118184a817668b",
+      "record-reference.md": "sha256:b6801c5403e1ab21853cb276e47003a72887eb706886299b664c2738c10cbdbb",
+      "release-notes.md": "sha256:258d2b993ae898f86dce2249efeae78b5c12c2d38acad3716ecf4b17fdeaf130",
+      "software.md": "sha256:727f5a1d3c0b41f092deebc7ced33055c5bc440a24d7d255a182adbb7bc17b34",
+      "workbench.md": "sha256:f0d41b14b5ab8f789e1ac9f87b54de53fe5ae83b8e31e25e24513586a640b8b7"
     }
   }
 }
