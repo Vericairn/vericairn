@@ -453,7 +453,7 @@ negative. Elapsed wall usage and stop grace use a monotonic clock; recorded obse
 
 The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
-that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
+that default, the roster's `limits.stallSeconds` overrides that setting, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the records current when it is recorded
 in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
 principal, about the run (no notification is sent). At twice the limit it requests a stop and attempts to contain the whole
 launch boundary; containment is recorded only after exit is observed. New stdout events reset the silence timer but
@@ -531,3 +531,22 @@ Every new signal kind and severity gets one ask about the run's exact intent, ad
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
+
+## Recorded watching settings (0.7.0)
+
+Goals and rosters hold partial overrides in `limits.watch`. Each field inherits from the launcher, then the current revision of the goal's named roster (or the estate's current roster), then the goal. A goal's role overrides do not remove roster limits. The operator or authorized administrator revises the roster; the goal's existing revision authority controls its limits. Request settings cannot replace these thresholds.
+
+| Field | Launcher default | Recorded range |
+|---|---|---|
+| `normalTokensPerMinute` | Claude Code 20,000; Codex 30,000; generic 10,000 | 1–1,000,000,000 |
+| `burnMultiplier` | 4 | 2–100 |
+| `burnMinimumTokens` | 10,000 | 1–1,000,000,000,000 |
+| `burnWindowSeconds` | 60 | 1–86,400 |
+| `burnCapPercent` | 25 | 1–100 |
+| `loopWarning` | 5 | 2–1,000 |
+| `loopStop` | 10 | 3–10,000 |
+| `loopWindow` | 20 | 3–10,000 |
+
+All fields are integers. The merged loop limits must satisfy `loopWarning < loopStop <= loopWindow`; incompatible partial overrides refuse launch before an intent is recorded. The worker resolves them again after workspace preparation, under the record lock, and pins the resolved values in `target.watch`, the roster revision in `target.watchRoster` when present, and the historical rate in `target.watchHistoryTokensPerMinute`. Later revisions affect later runs.
+
+For example, a roster may record `"limits":{"stallSeconds":300,"watch":{"loopWarning":3,"loopStop":6}}`; a goal may record `"limits":{"watch":{"burnMultiplier":3}}`. Every other field keeps its launcher default. `stallSeconds` follows goal, roster, launcher request setting, then the 600-second launcher default; its range remains 1–86,400.

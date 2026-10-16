@@ -47,7 +47,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             "Excludes user, project and local settings sources, disables hooks and refuses detected managed settings; remote managed policy is not qualified and managed accounts are unsupported.",
             "Implemented against claude --help and a stand-in process that speaks its stream; not yet qualified against a live Claude Code.",
         ],
-        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CLAUDE_CONFIG_DIR"];

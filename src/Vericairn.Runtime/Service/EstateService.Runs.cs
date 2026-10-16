@@ -187,7 +187,13 @@ public sealed partial class EstateService
                 return RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded.");
             }
 
-            plan = plan with { StallSeconds = StallSeconds(goal!, settings, launcher), Watch = launcher.WatchDefaults,
+            RunWatchSettings watch = RunWatchSettings.Resolve(model, goal!, launcher);
+            if (watch.Refusal is string watchRefusal)
+            {
+                return RunProblem(pending, "not-started", "refused", watchRefusal + " Nothing was recorded.");
+            }
+
+            plan = plan with { StallSeconds = StallSeconds(model, goal!, settings, launcher), Watch = watch,
                 HistoryRate = RunWatch.History(AgentRuns.Of(model, goal!).Runs, launcher.Launcher) };
             var target = new JsonObject
             {
@@ -203,6 +209,11 @@ public sealed partial class EstateService
             };
             target["capMode"] = "soft";
             target["watch"] = JsonSerializer.Serialize(plan.Watch, ProtocolJson.Options);
+            if (RunWatchSettings.Roster(model, goal!) is RecordEnvelope watchRoster)
+            {
+                target["watchRoster"] = watchRoster.Id;
+            }
+
             target["watchHistoryTokensPerMinute"] = plan.HistoryRate?.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
             if (excepted is not null)
             {
@@ -696,14 +707,26 @@ public sealed partial class EstateService
             return (null, $"Run {busy.Id} works on branch {branch} of {repository} and is in flight; one run works in a workspace at a time, so name another branch or wait for it to settle.", null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), StallSeconds(goal, request.Settings, launcher)), null, null);
+        RunWatchSettings watch = RunWatchSettings.Resolve(model, goal, launcher);
+        if (watch.Refusal is string watchRefusal)
+        {
+            return (null, watchRefusal, null);
+        }
+
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }
 
-    private static int StallSeconds(RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)
+    private static int StallSeconds(EstateModel model, RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)
     {
         if (goal.Body.TryGetProperty("limits", out JsonElement limits) && AgentRuns.Amount(limits, "stallSeconds") is long goalStall)
         {
             return (int)goalStall;
+        }
+
+        if (RunWatchSettings.Roster(model, goal) is RecordEnvelope roster && roster.Body.TryGetProperty("limits", out JsonElement rosterLimits)
+            && AgentRuns.Amount(rosterLimits, "stallSeconds") is long rosterStall)
+        {
+            return (int)rosterStall;
         }
 
         return settings?.TryGetValue("stall-seconds", out string? stall) == true

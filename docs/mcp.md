@@ -40,3 +40,5 @@ The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authen
 `estate_progress` includes the latest claim for each attempt, labelled as a claim. It is never evidence of liveness, permitted scope, or acceptance. Interim notes are local to this runtime and survive its restart; another machine sees recorded phase completions only.
 
 From 0.7.0, `estate_progress` also shows worker-observed command, rate and loop signals with their severity and attention records. These observations come from the worker's harness-event audit, not from `work_progress`. No progress tool changes a stop, a budget, an acceptance, or the worker's liveness clock.
+
+Watching thresholds are recorded in goal and roster `limits.watch`, with bounded integer fields and goal-over-roster-over-launcher precedence. MCP progress notes cannot change those thresholds or the worker's observations. The run intent pins the settings and roster revision current at launch; [the software guide](software.md#recorded-watching-settings-070) gives defaults, ranges and examples.

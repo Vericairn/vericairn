@@ -52,7 +52,7 @@ public sealed class CodexLauncher : IAgentLauncher
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
             "Implemented against codex --help, codex exec --help and a stand-in process that speaks its events; not yet qualified against a live Codex.",
         ],
-        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CODEX_HOME"];
