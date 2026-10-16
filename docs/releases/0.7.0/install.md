@@ -103,7 +103,18 @@ A format-2 decision needs `stake` and `notAuthorized`; scripts that author decis
 
 Install the chosen coding-agent harness separately and provision its login under the operating-system user that runs the worker. `vericairn worker launchers` lists `claude-code`, `codex` and `generic` with their settings, but generic dispatch is refused. The native baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`. Other exact versions require an authorized person's `worker qualify` record under RUN-03 and matching local probes. Codex's goals feature and the complete supported inventories are checked before dispatch. Qualification establishes the launcher protocol, not live inference, sign-in or provider billing.
 
-**Configuration gap in this build:** the stock CLI and daemon supply no RUN-01 configuration loader, and the native launchers supply no default configuration. They refuse worker launch until an embedding host supplies `WorkerOptions.Configurations` with explicit model, effort and environment policy. The `--configuration` option selects such a supplied configuration; it does not create one. Installing or requalifying a harness alone does not resolve this gap. See the operator guide and `software.md` for the intended configured-host journey and the qualification-route defect.
+Before a native run or an agent goal step, set that machine's model and effort defaults:
+
+```sh
+vericairn worker configure --launcher codex --model <model> --effort high
+vericairn worker configure --launcher codex
+```
+
+Replace `<model>` with your chosen model selector; use `--launcher claude-code` for Claude Code. Setting requires both model and effort; omitting choices shows the configuration (`--json` is available). Repeated `--allow-model` and `--allow-effort` options narrow permitted choices and must include their defaults. With no model allowlist only the default model is permitted; with no effort allowlist the launcher's supported efforts are permitted. Each set replaces that launcher's defaults and allowlists. Configuration never widens the qualified inventory or adds tools, servers, environment variables or routes. The stock runtime derives its environment policy only after a baseline or exact current qualification admits the native inventory.
+
+Configuration is per machine and is never recorded in the estate. Its owner-only files are `worker/codex.json` and `worker/claude-code.json` under the user's Vericairn home. Reads and writes are refused when that home is inside a Git repository or estate. If your home directory is a repository, set `VERICAIRN_HOME` to a machine-local directory outside all repositories and estates for the CLI and daemon before starting them. Both read the configuration for each run and agent goal step; changing its choices needs no daemon restart. Missing configuration refuses before intent and names the setup command. Installing or qualifying a harness alone supplies no model or effort default. Explicit run overrides cannot bypass local allowlists or inherited restrictions.
+
+Harness qualification is machine-local as well: `POST /v1/harness-qualifications` refuses a paired local-network device before probes or record writes. The runtime's local socket and signed loopback retain the existing human authority checks. See section 18 of the operator guide and `software.md` for the complete setup and admission rules.
 
 The worker's agent-side MCP process currently resolves the archive command `vericairn`; keep that executable on PATH. A NuGet-only worker run is not covered by the package installation checks. The efficiency Adapter is absent until the planned 0.8.0 work and enabling it is refused. Remote is not built. Context packages report exact bytes, with tokens and model fit unknown without a qualified local tokenizer.
 
