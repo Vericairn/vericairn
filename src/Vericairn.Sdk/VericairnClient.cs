@@ -155,6 +155,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public HandoffResponse Handoff(long? maxBytes = null) => Get<HandoffResponse>("/v1/handoff" + (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
 
     /// <inheritdoc />
+    public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
+
+    /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
 
     /// <inheritdoc />

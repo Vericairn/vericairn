@@ -16,6 +16,7 @@ public static class OpenApiDocument
         ("GET", "/v1/status"),
         ("GET", "/v1/progress"),
         ("GET", "/v1/handoff"),
+        ("POST", "/v1/resume"),
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
@@ -188,7 +189,11 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
+        if (path is "/v1/resume")
+        {
+            responses["200"] = new JsonObject { ["description"] = "ResumeResponse: every difference, or an invalid-handoff problem. This POST is a read; it authors no record." };
+        }
+        else if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
             DaemonResponses(path, responses);
         }
@@ -278,6 +283,7 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
@@ -322,6 +328,7 @@ public static class OpenApiDocument
 
     private static string RequestSchema(string path) => path switch
     {
+        "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
         "/v1/work/assign" => "AssignRequest",
         "/v1/work/attempt" => "AttemptRequest",
@@ -361,6 +368,7 @@ public static class OpenApiDocument
     {
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
         ("GET", "/v1/status") => "Current status: human text and the canonical JSON that is identical on every machine.",
+        ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
         ("GET", "/v1/progress") => "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",

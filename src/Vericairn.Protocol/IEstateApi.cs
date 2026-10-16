@@ -21,6 +21,9 @@ public interface IEstateApi
     /// <summary>Prepare a complete, portable hand-over from all records. A byte limit refuses overflow; nothing is truncated or authored.</summary>
     HandoffResponse Handoff(long? maxBytes = null);
 
+    /// <summary>Compare a retained hand-over with this copy now, including additions, supersessions, missing records, the pin and observed state. Read-only.</summary>
+    ResumeResponse ResumeHandoff(HandoffPackage package);
+
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();
 

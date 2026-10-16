@@ -51,6 +51,12 @@ internal static class CliApp
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(progress);
 
+        var resume = new Command("resume", "Show every record, pin and observed-state change since a retained hand-over. The world may have moved; this restarts nothing.");
+        var resumePackage = new Argument<string>("package") { Description = "The retained hand-over JSON file, or - for standard input." };
+        resume.Arguments.Add(resumePackage);
+        resume.SetAction(parseResult => Commands.Resume(parseResult.GetValue(estateOption)!, parseResult.GetValue(resumePackage)!, parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(resume);
+
         var handoff = new Command("handoff", "Prepare a complete record-derived hand-over; refuse missing sources or overflow. Remote is not built.");
         var handoffOut = new Option<string?>("--out") { Description = "Retain the portable package in a new file; never overwrite." };
         var handoffLimit = new Option<long?>("--max-bytes") { Description = "Optional payload byte limit; no truncation. No limit when omitted." };

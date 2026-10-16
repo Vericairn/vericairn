@@ -22,6 +22,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/status", () => Results.Json(service.Status(), ProtocolJson.Options));
         app.MapGet($"{v}/progress", () => Results.Json(service.Progress(), ProtocolJson.Options));
         app.MapGet($"{v}/handoff", (long? maxBytes) => Results.Json(service.Handoff(maxBytes), ProtocolJson.Options));
+        app.MapPost($"{v}/resume", (HandoffPackage package) => Results.Json(service.ResumeHandoff(package), ProtocolJson.Options));
         app.MapGet($"{v}/validate", () => Results.Json(service.Validate(), ProtocolJson.Options));
         app.MapGet($"{v}/check", () => Results.Json(service.Check(), ProtocolJson.Options));
         app.MapGet($"{v}/records/{{id}}", (string id) => service.Record(id) is RecordResponse record ? Results.Json(record, ProtocolJson.Options) : Results.NotFound());

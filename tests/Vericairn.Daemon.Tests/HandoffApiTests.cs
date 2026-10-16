@@ -15,6 +15,25 @@ public class HandoffApiTests
     public HandoffApiTests() => DaemonTestHome.Ensure();
 
     [Fact]
+    public async Task AuthenticatedHandoffAndResumeAreReadsWithoutAWriteLedgerEntry()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId);
+        using VericairnClient client = VericairnClient.LocalNetwork(paired, harness.Signer(paired));
+        string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!;
+        int writes = LocalNetworkLedger.Read(directory).Count;
+        int records = harness.Estate.Load().Records.Count;
+        HandoffResponse handoff = client.Handoff();
+        Assert.Null(handoff.Problem);
+        ResumeResponse response = client.ResumeHandoff(handoff.Package!);
+        Assert.Null(response.Problem);
+        Assert.False(response.Json!.Value.GetProperty("changed").GetBoolean());
+        Assert.Equal(harness.Host.Service.ResumeHandoff(handoff.Package!).Text, response.Text);
+        Assert.Equal(writes, LocalNetworkLedger.Read(directory).Count);
+        Assert.Equal(records, harness.Estate.Load().Records.Count);
+    }
+
+    [Fact]
     public async Task HandoffIsTheSameThroughTheSdkAndRefusesOverflowWithoutTruncation()
     {
         using var estate = new TestEstate(recordFormat: 2);

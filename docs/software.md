@@ -523,3 +523,14 @@ provider state are outside that selection. The sidecar measures and hashes the
 canonical payload; token counts and model-context fit are not claimed. A copy
 with the same records and pin produces the same package. Records remain originals,
 apart from the deterministic presentation, with synthesis off.
+
+`vericairn resume handoff.json` compares that retained basis to the current copy.
+Use `--json` for the full machine comparison or `resume -` to read the package
+from standard input. It includes added and superseded records, missing or
+changed originals, the full pin and observed-state differences. It compares
+identities rather than time windows, so an older timestamp on an imported record
+cannot hide it. Unchanged records do not prove an unchanged external world.
+Resume exits 0 for a valid comparison, 1 when the current view has errors or
+missing/changed originals, and 2 for an invalid baseline. It submits nothing and
+never rewrites the retained package. Review changes and current authority before
+continuing under the existing assignment and original operation identities.

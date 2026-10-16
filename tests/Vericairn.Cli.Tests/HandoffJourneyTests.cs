@@ -15,6 +15,30 @@ namespace Vericairn.Cli.Tests;
 public class HandoffJourneyTests
 {
     [Fact]
+    public void ANewSurfaceResumesTheRetainedPackageWithoutSubmittingWork()
+    {
+        using var estate = new HandoffEstate();
+        string package = CliHarness.Ok("--estate", estate.Root, "--json", "handoff").Out;
+        RecordEnvelope ask = estate.Add("ask", estate.BuilderId, $$"""{"to":"{{estate.OperatorId}}","question":"Continue?","recommendation":"Review first.","consequence":"Work waits.","state":"open"}""");
+        int count = estate.Load().Records.Count;
+        string scratch = CliHarness.TempDirectory("resume-input");
+        try
+        {
+            string path = CliHarness.WriteJson(scratch, "handoff.json", package);
+            CliHarness.Outcome result = CliHarness.Ok("--estate", estate.Root, "--json", "resume", path);
+            Assert.Equal(ask.Id, Assert.Single(result.Json.GetProperty("added").EnumerateArray()).GetProperty("id").GetString());
+            Assert.Contains("The world may have moved", CliHarness.Ok("--estate", estate.Root, "resume", path).Out, StringComparison.Ordinal);
+            Assert.Equal(count, estate.Load().Records.Count);
+            File.WriteAllText(path, "{}");
+            Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "resume", path).Code);
+        }
+        finally
+        {
+            CliHarness.Delete(scratch);
+        }
+    }
+
+    [Fact]
     public void HandoffKeepsEveryOriginalAndIsIdenticalOnAnotherCopy()
     {
         using var estate = new HandoffEstate();

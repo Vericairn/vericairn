@@ -670,3 +670,25 @@ Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
 by the caller; the read does not store another status ledger or grant authority.
 Remote is not built.
+
+`POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,
+`payload`). The SDK operation is `ResumeHandoff(package)`. Despite its POST body,
+this is a read: signed requests use their ordinary read access and create no
+write-ledger entry, signature or record. `ResumeResponse` contains `text`, `json`,
+`hasErrors` and `problem`. An invalid, truncated, changed or foreign baseline
+returns HTTP 200 with an `invalid-handoff` problem and no comparison. The hash is
+an integrity check, not a signature or proof of who generated the artifact.
+Existing request body limits still apply; large packages can be compared through
+the embedded runtime or local socket within that transport's limit.
+
+A successful `vericairn.resume/1` comparison lists every added record (including
+backdated arrivals and intermediate revisions), every new supersession edge,
+missing originals, records changed in place, the complete pin before and after
+(including artifact hashes and record format), and every observed-state change
+with before/after values. Changed arrays are kept whole. Invalid current records
+remain visible through findings and source changes; their derived state is
+explicitly unavailable and `hasErrors` is true. Missing and replaced originals
+also set `hasErrors`. A missing record is not assumed to have been superseded.
+Even an unchanged view says **the world may have moved**. Reading a resume never
+starts work, retries an effect, imports records or accepts a result; the old
+package grants nothing and current authority must be re-established.

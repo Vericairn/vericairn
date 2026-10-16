@@ -70,6 +70,19 @@ internal static class Commands
         return progress.HasErrors ? HasErrors : Clean;
     });
 
+    public static int Resume(string root, string input, bool json) => WithBody(input, body => WithApi(root, api =>
+    {
+        HandoffPackage? package = body.Deserialize<HandoffPackage>(ProtocolJson.Options);
+        if (package is null)
+        {
+            return Fail("A retained hand-over package is required.");
+        }
+
+        ResumeResponse response = api.ResumeHandoff(package);
+        Console.Out.Write(json ? response.Json is JsonElement view ? CanonicalJson.SerializePretty(view) : JsonSerializer.Serialize(response.Problem, ProtocolJson.Options) : response.Text);
+        return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
+    }));
+
     public static int Handoff(string root, string? output, long? maxBytes, bool json) => WithApi(root, api =>
     {
         HandoffResponse response = api.Handoff(maxBytes);

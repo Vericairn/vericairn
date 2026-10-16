@@ -16,3 +16,10 @@ public sealed record HandoffPackage(string Hash, long Bytes, JsonElement Payload
 /// <param name="Package">The retained package on success; null on refusal.</param>
 /// <param name="Problem">Refusal with all missing or invalid sources; null on success.</param>
 public sealed record HandoffResponse(string Text, HandoffPackage? Package, Problem? Problem);
+
+/// <summary>Every observed difference since a retained hand-over; it never restarts work or restores authority.</summary>
+/// <param name="Text">Complete human rendering.</param>
+/// <param name="Json">Machine comparison, or null when the retained package is invalid.</param>
+/// <param name="HasErrors">Whether current records are invalid, missing or changed in place.</param>
+/// <param name="Problem">Why the baseline could not be used; null on a comparison.</param>
+public sealed record ResumeResponse(string Text, JsonElement? Json, bool HasErrors, Problem? Problem);

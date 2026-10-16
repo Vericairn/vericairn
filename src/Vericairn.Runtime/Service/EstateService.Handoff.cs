@@ -9,6 +9,17 @@ namespace Vericairn.Runtime.Service;
 public sealed partial class EstateService
 {
     /// <inheritdoc />
+    public ResumeResponse ResumeHandoff(HandoffPackage package)
+    {
+        lock (gate)
+        {
+            IReadOnlyList<RecordFile> files = session.Files();
+            EstateModel model = EstateLoader.Load(session.Root, files);
+            return HandoffComparison.Compare(package, model, files);
+        }
+    }
+
+    /// <inheritdoc />
     public HandoffResponse Handoff(long? maxBytes = null)
     {
         lock (gate)

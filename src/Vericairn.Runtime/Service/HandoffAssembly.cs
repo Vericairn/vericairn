@@ -73,6 +73,7 @@ internal static class HandoffAssembly
             ["generator"] = "vericairn.handoff/1",
             ["estate"] = model.Manifest!.Estate,
             ["recordFormat"] = model.Manifest.RecordFormat,
+            ["pin"] = JsonSerializer.SerializeToNode(model.Manifest, ProtocolJson.Options),
             ["latestRecordedAt"] = model.Records.OrderBy(r => r.At, StringComparer.Ordinal).LastOrDefault()?.At,
             ["scope"] = "All records held by this estate copy, including superseded originals; for an authorized estate reader continuing on another surface or copy.",
             ["exclusions"] = new JsonArray("Source-file contents, output objects, unrecorded provider state and conversation are outside this record-only selection."),
