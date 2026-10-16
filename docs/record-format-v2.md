@@ -767,3 +767,49 @@ It includes source identities and facts and is null when unknown. A newer
 record reporting an older observation does not advance freshness. Ordinary
 reads and automation never manufacture a human observation. Hand-over and
 resume are derived artifacts, not new record types or editable status records.
+
+## Communication configuration (COMMS-01)
+
+`communication-setting` and `communication-delegation` are additive format-2
+record types. A pre-COMMS-01 loader reports `record.unknown-type` for either type;
+it does not silently interpret the setting as an observation or ignore it. An
+estate must use a COMMS-01-capable reader before authoring these records. This
+adds no format 3 and changes no older record's meaning.
+
+A setting has `scope` (`estate`, `person`, `assignment`), `values`, and a
+`recipient` except for estate defaults. Assignment scope also names the exact
+`assignment`. Values are independently optional: `progress` is `none`,
+`completion-and-need`, `milestones` or `verbose`; `status`, `decision`, `result`
+and `handoff` are `short`, `standard` or `comprehensive`. Omission inherits;
+`values: {}` resets the scope. Revisions supersede the previous record and keep
+the scope and recipient. Concurrent current profiles are explicit conflicts.
+
+A person authors their own settings. An administrator can set estate defaults,
+which cannot replace a person's explicit values. Another author must pin an
+active, unexpired `communication-delegation` with `authority` and
+`authorityHash`. That grant is authored by the recipient, names the `grantee`
+and exact personal or assignment scope, and has `status: active` or `revoked`.
+A revision revokes it without invalidating earlier authorized history. A
+setting's optional `basis` and `basisHash` preserve an exact decision of its
+recipient. The envelope always identifies and signs the actual author.
+
+Resolution uses shipped defaults, estate defaults, the recipient's estate
+values, their assignment values and a one-view override, in that order, for
+each field. One-view values are never records. Full records, evidence and
+canonical output remain unchanged by presentation depth.
+
+Communication conflicts also appear in `reconcile`. A reconciliation about a
+personal setting or delegation is the recipient's action, even when another
+principal holds estate administration. Estate-default reconciliation requires
+administration. It may keep one of the direct successors of a profile, or
+settle independent first profiles at exactly the same scope (including the
+same grantee for a delegation). It cannot cross recipients or scopes. Nothing
+is deleted. An invalid imported preference or reconciliation is unavailable
+for presentation; it cannot quietly select an untrusted value.
+
+New writes recheck that delegated consent is current and unexpired at the
+runtime's present time, including generic `records/new` writes. Historical
+validation still checks when an existing record was authored, so a later
+revocation preserves its earlier authorized history. Backdating a new record
+cannot reuse revoked consent. Unknown fields in the new setting, values and
+delegation request contracts are refused explicitly. Remote is not built.

@@ -718,13 +718,20 @@ public sealed partial class EstateService
         // This snapshot includes the signed pending assignment. The run's existing grouped-write preflight
         // must admit it with the intent before launch. A stranded older batch is reconciled by that write;
         // ordinary briefs and hand-overs still refuse while the batch remains incomplete.
-        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false);
+        string? recipient = CommunicationRecipient(model, goal);
+        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false, profile: Communication(recipient, recipient is null ? null : assignment.Id));
         if (contextBrief.Problem is not null)
         {
             return (null, contextBrief.Problem.Message, null);
         }
 
         return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+    }
+
+    private static string? CommunicationRecipient(EstateModel model, RecordEnvelope goal)
+    {
+        string? sponsor = EstateModel.BodyString(goal, "sponsor");
+        return model.CurrentPrincipal(sponsor) is { } person && EstateModel.BodyString(person, "kind") == "human" ? sponsor : null;
     }
 
     private static int StallSeconds(EstateModel model, RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)

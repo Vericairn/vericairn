@@ -24,7 +24,7 @@ public static class ApiVersion
 public sealed record FindingDto(string Severity, string Code, string Location, string Message);
 
 /// <summary>Why a request was not carried out: a reason and, for rejected records, the findings.</summary>
-/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict is reserved and nothing answers with it yet.</param>
+/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict (a stale or divergent communication revision).</param>
 /// <param name="Message">Explanation with the permitted next action.</param>
 /// <param name="Findings">Findings behind a rejection; may be empty.</param>
 public sealed record Problem(string Code, string Message, IReadOnlyList<FindingDto> Findings);

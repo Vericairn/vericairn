@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Vericairn.Protocol;
@@ -27,4 +30,24 @@ public sealed record ContextReadResponse(JsonElement? Identity, byte[]? Content,
 /// <param name="Hash">SHA-256 of the UTF-8 text, independent of the serialized package identity.</param>
 /// <param name="Bytes">Actual UTF-8 bytes of the final text.</param>
 /// <param name="Method">Counting method and scope.</param>
-public sealed record ContextTextMeasurement(string Hash, long Bytes, string Method);
+public sealed record ContextTextMeasurement(string Hash, long Bytes, string Method)
+{
+    /// <summary>Measure a client presentation, including its new accounting line, without changing its protected original.</summary>
+    public static (string Text, ContextTextMeasurement Measurement) Presentation(string body)
+    {
+        long count = 0;
+        while (true)
+        {
+            string text = "Presentation measurement: " + count.ToString(CultureInfo.InvariantCulture) +
+                " UTF-8 bytes for this complete rendering including this line; tokens unknown; limit not set for this rendering; model fit not claimed.\n\n" + body;
+            byte[] bytes = Encoding.UTF8.GetBytes(text);
+            if (count == bytes.LongLength)
+            {
+                return (text, new ContextTextMeasurement("sha256:" + Convert.ToHexStringLower(SHA256.HashData(bytes)), count,
+                    "exact UTF-8 bytes of the complete presentation, including its accounting line; identity is an excluded sidecar"));
+            }
+
+            count = bytes.LongLength;
+        }
+    }
+}

@@ -270,7 +270,7 @@ public class DaemonTests
     }
 
     [Fact]
-    public void TheContractNamesEveryProblemCodeAClientCanReceiveAndMarksConflictReserved()
+    public void TheContractNamesEveryProblemCodeAClientCanReceiveIncludingCommunicationConflicts()
     {
         using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
         string description = document.RootElement.GetProperty("info").GetProperty("description").GetString()!;
@@ -282,7 +282,8 @@ public class DaemonTests
             Assert.Contains(code, listed);
         }
 
-        Assert.Contains("conflict is reserved and nothing answers with it yet", listed);
+        Assert.Contains("conflict", listed);
+        Assert.DoesNotContain("conflict is reserved", description, StringComparison.Ordinal);
     }
 
     [Fact]

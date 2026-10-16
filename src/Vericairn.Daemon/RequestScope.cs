@@ -134,6 +134,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
     {
         ["GET /v1/health"] = null,
+        ["GET /v1/communication"] = null,
+        ["POST /v1/communication"] = typeof(CommunicationSetRequest),
+        ["POST /v1/communication/delegations"] = typeof(CommunicationDelegateRequest),
         ["GET /v1/status"] = null,
         ["POST /v1/status/observations"] = typeof(EstateObserveRequest),
         ["GET /v1/progress"] = null,
@@ -225,6 +228,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
         [typeof(HandoffPackage)] = (_, _, _) => null,
+        [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
+        [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
         [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),

@@ -76,7 +76,7 @@ public sealed partial class EstateService
         return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order, includeDocumentCatalogue: false), maxBytes, fullSelectedScope);
     }
 
-    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null)
+    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true, bool fullSelectedScope = true, long? maxBytes = null, CommunicationProfile? profile = null)
     {
         ContextResponse context = ContextLocked(model, files, order, maxBytes, checkBatches, fullSelectedScope);
         if (context.Package is not { } package)
@@ -88,7 +88,8 @@ public sealed partial class EstateService
         json["documentsScope"] = "The documents field is the catalogue, not the context selection. The context manifest alone names selected sources; list the catalogue with vericairn context catalogue.";
         json["context"] = JsonSerializer.SerializeToNode(package, ProtocolJson.Options);
         ContextPackage machine = ContextAccounting.Measure(json, null);
-        (string text, ContextTextMeasurement measurement) = ContextRendering.Render(WorkView.RenderBrief(model, order, includeDocumentCatalogue: false), package);
+        string lead = WorkView.RenderBrief(model, order, includeDocumentCatalogue: false);
+        (string text, ContextTextMeasurement measurement) = ContextRendering.Render(profile is null ? lead : CommunicationPresentation.Brief(lead, profile), package);
         return new BriefResponse(text, machine.Payload, measurement, JsonMeasurement: new ContextTextMeasurement(machine.Hash, machine.Bytes, "exact canonical pretty UTF-8 of the complete machine brief, including its context package and accounting"));
     }
 

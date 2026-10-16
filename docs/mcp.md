@@ -34,8 +34,10 @@ an error and no package. Tokens are unknown; the surrounding MCP transport and
 the model provider's hidden framing are not measured as model input.
 
 `work_brief` now includes the same context content, its complete withheld list
-and readable mandatory originals after its existing lead. Its text includes an
-exact UTF-8 byte measurement. The work brief and `context_prepare` compute and return artifacts without
+and readable mandatory originals after its lead. COMMS-01's `recipient` and
+`assignment` arguments resolve that lead and communication section. The entire
+resulting text, including those additions, has an exact UTF-8 byte measurement;
+personal depth does not change canonical context content. The work brief and `context_prepare` compute and return artifacts without
 writing anything. Only worker dispatch retains a copy, in the run's local
 directory under the Vericairn home. Unavailable required
 material refuses the brief and sets the MCP error flag.
@@ -79,3 +81,21 @@ From 0.7.0, `estate_progress` also shows worker-observed command, rate and loop 
 Watching thresholds are recorded in goal and roster `limits.watch`, with bounded integer fields and goal-over-roster-over-launcher precedence. MCP progress notes cannot change those thresholds or the worker's observations. The run intent pins the settings and roster revision current at launch; [the software guide](software.md#recorded-watching-settings-070) gives defaults, ranges and examples.
 
 Remote is not built. These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
+
+## Communication read (COMMS-01)
+
+The additive `communication_get` tool takes optional `recipient` and
+`assignment` ids. It returns the effective progress frequency and four depths,
+all contributing revisions and authors, conflicts and freshness. No recipient
+means estate defaults, without inventing a personal choice. It is visible on
+read-only connections and writes nothing. There is no MCP setting-write or
+delegation tool. Unsupported runtimes return an explicitly unavailable profile.
+
+`work_brief` accepts optional `recipient` and `assignment` ids. Its complete
+original brief remains present, with the effective communication values and
+their sources in a separate section. A worker's exported brief captures the
+same values and asks it to refresh them at the next settled boundary.
+
+This changes the MCP tool list. The builder must regenerate `AGENTS.md` with
+`vericairn mcp orientation` from the updated runtime; pointer files retain their
+usual role. Remote is not built and is not qualified by this tool.

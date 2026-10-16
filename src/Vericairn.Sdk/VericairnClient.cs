@@ -146,6 +146,25 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public HealthResponse Health() => Get<HealthResponse>("/v1/health")!;
 
     /// <inheritdoc />
+    public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        try
+        {
+            return Get<CommunicationProfile>("/v1/communication" + CommunicationQuery(recipient, assignment, view))!;
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This runtime does not support communication settings.");
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome CommunicationSet(CommunicationSetRequest request) => Post<CommunicationSetRequest, WriteOutcome>("/v1/communication", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) => Post<CommunicationDelegateRequest, WriteOutcome>("/v1/communication/delegations", request)!;
+
+    /// <inheritdoc />
     public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
 
     /// <inheritdoc />
@@ -161,8 +180,16 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
 
     /// <inheritdoc />
-    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null) => Get<BriefResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) + "/brief" +
-        (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)), allowNotFound: true);
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        string query = CommunicationQuery(recipient, assignment, view);
+        if (maxBytes is not null)
+        {
+            query += (query.Length == 0 ? "?" : "&") + "maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return Get<BriefResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) + "/brief" + query, allowNotFound: true);
+    }
 
     /// <inheritdoc />
     public ContextResponse Context(string workOrder, long? maxBytes = null) => Get<ContextResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) +
@@ -194,6 +221,10 @@ public sealed class VericairnClient : IEstateApi, IDisposable
 
     /// <inheritdoc />
     public DecisionResponse? Decision(string id) => Get<DecisionResponse>("/v1/decisions/" + Uri.EscapeDataString(id), allowNotFound: true);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief" + CommunicationQuery(recipient, assignment, view), allowNotFound: true);
 
     /// <inheritdoc />
     public BriefResponse? Brief(string workOrder) => Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief", allowNotFound: true);
@@ -383,6 +414,18 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         credential?.Dispose();
     }
 
+    private static string CommunicationQuery(string? recipient, string? assignment, CommunicationValues? view)
+    {
+        var query = new Dictionary<string, string?> { ["recipient"] = recipient, ["assignment"] = assignment };
+        foreach ((string key, string? value) in (view ?? new CommunicationValues()).Fields)
+        {
+            query[key] = value;
+        }
+
+        string suffix = string.Join('&', query.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
+        return suffix.Length == 0 ? string.Empty : "?" + suffix;
+    }
+
     private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;
 
     private static string Fingerprint(X509Certificate certificate) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(certificate.GetRawCertData()));
@@ -416,7 +459,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         where TResponse : class
     {
         using HttpResponseMessage response = http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options).GetAwaiter().GetResult();
-        if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK)
+        if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK or HttpStatusCode.Conflict)
         {
             return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
         }

@@ -89,7 +89,11 @@ provided for listing its identities without reading bodies.
 
 `GET /v1/context/work/{key}/brief` (`BriefContext`) is the agent-facing brief.
 Its default is mandatory originals plus the withheld list; `maxBytes` can admit
-optional bodies when they fit. MCP `work_brief` uses this route. The standalone
+optional bodies when they fit. It accepts the same recipient, assignment and
+communication view queries as the human brief. MCP `work_brief` uses this route
+and keeps COMMS-01's recipient and assignment arguments. Personal depth changes
+only the measured Markdown presentation; canonical JSON and its context
+identities remain independent of the recipient. The standalone
 human `GET /v1/work/{key}/brief` and `work brief`, including its JSON form, keep
 § 9's full selected scope with no cap. Neither form imports unmentioned
 catalogue bodies.
@@ -98,7 +102,8 @@ catalogue bodies.
 adds the package under `json.context`, including its withheld list and measured
 payload. The complete machine brief has its own `json.accounting`; the additive
 `jsonMeasurement` sidecar hashes and measures that entire canonical JSON. The
-complete Markdown includes readable originals, the manifest and withheld list;
+complete Markdown includes the resolved communication lead and section,
+readable originals, the manifest and withheld list;
 `markdownMeasurement` pins its exact UTF-8 bytes, including the accounting line
 in the text. Neither human depth nor a change to the lead can silently reduce
 the context contract. A context refusal appears as the additive `problem` and
@@ -644,9 +649,7 @@ record was rejected:
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
-
-`conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,
-and it stays named so that no client that knows it breaks.
+| `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting | 409 |
 
 The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
 they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there
@@ -863,3 +866,51 @@ subject and hashes of the pre-write record set, full pin and status. It records
 an `observation` with kind `estate`, requiring record format 2; format 1 is
 refused with an explicit-upgrade instruction. This is an attributable observation
 of recorded status, not evidence of live external health or acceptance.
+
+## Communication settings (COMMS-01)
+
+These additive API v1 operations require a COMMS-01-capable runtime:
+
+| Operation | Meaning |
+|---|---|
+| `GET /v1/communication` | Effective values, their sources, all scoped revisions, conflicts, observation time and revision-set hash. Optional `recipient` and `assignment` select the personal scope. Optional `progress`, `status`, `decision`, `result`, `handoff` are one-view overrides only. |
+| `POST /v1/communication` | Replace the complete values of a scope; `values: {}` resets it to inheritance. |
+| `POST /v1/communication/delegations` | The recipient explicitly grants or revokes changes to one personal scope. |
+
+A write names `by` (the actual author), `scope`, `recipient` (except estate
+defaults), `assignment` (assignment scope only), and `expected` (the prior
+record's hash, omitted only for a first setting). A setting also supplies
+`values`, optional `authority` (an explicit delegation record) and optional
+`basis` (an existing decision). The runtime pins authority and basis hashes.
+A delegation instead supplies `grantee`, `status` (`active` or `revoked`) and an
+optional `expires` timestamp. A stale or divergent edit returns HTTP 409 with
+problem code `conflict`; refresh and reconcile rather than silently retrying.
+Signed requests bind `by` to the authenticated device's principal.
+
+Each returned revision includes its exact setting hash and actual author,
+plus `authority`/`authorityHash` and `basis`/`basisHash` when present. A brief
+refuses to apply an override belonging to another work order; its Markdown
+labels that configuration unavailable while retaining complete content.
+
+The SDK exposes `Communication`, `CommunicationSet` and
+`CommunicationDelegate`. Existing API implementations inherit explicit
+unsupported responses for these new methods. An older HTTP runtime's 404 on
+the read becomes an unavailable profile, never a claim that defaults were
+applied. Unknown recipients, assignments and unsupported values are labeled
+unavailable. Missing personal records use the stated defaults. Reads author
+nothing. Existing canonical status, progress, brief and record JSON do not
+vary with any recipient or one-view selection. Remote is not built.
+
+`GET /v1/work/{key}/brief` additionally accepts the same optional recipient,
+assignment and five one-view parameters. The SDK method is `BriefFor`.
+Its Markdown carries the effective profile, source revisions and freshness;
+its canonical `json` member is unchanged and its original obligations remain
+complete. This is presentation input, never authority for an extra effect.
+
+Unknown fields in communication write requests or their `values` are rejected
+instead of being silently ignored. Invalid imported configuration is reported
+as unavailable; conflicts keep all competing source identities. Generic record
+writes cannot bypass current delegation checks by supplying an earlier `at`.
+The existing reconciliation operation allows the recipient to resolve their
+own communication branches, including independent first profiles at one scope;
+an administrator cannot choose another person's preference.

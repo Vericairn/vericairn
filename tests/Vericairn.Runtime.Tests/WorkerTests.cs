@@ -626,7 +626,6 @@ public class WorkerTests
         };
         run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = environment, Vericairn = ["vericairn-under-test"] };
         string report = run.Report("claude");
-        string preparedBrief = run.Service.Brief("W-1")!.Markdown;
 
         RunResponse started = run.Start("claude-code", "claude", report);
         Assert.True(started.Ok, started.Message);
@@ -664,7 +663,7 @@ public class WorkerTests
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
         string exportedBrief = File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md"));
-        Assert.StartsWith(preparedBrief[..preparedBrief.IndexOf("\n\n## Context package", StringComparison.Ordinal)], exportedBrief, StringComparison.Ordinal);
+        Assert.Contains(WorkView.RenderBrief(model, WorkView.FindOrder(model, "W-1")!, includeDocumentCatalogue: false), exportedBrief, StringComparison.Ordinal);
         Assert.Contains("## Context package", exportedBrief, StringComparison.Ordinal);
         Assert.Contains("The worker must admit it together with its run intent before dispatch", exportedBrief, StringComparison.Ordinal);
         Assert.Equal(Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(exportedBrief)), recorded.Intent.Body.GetProperty("evidence")[0].GetProperty("hash").GetString());
@@ -676,6 +675,9 @@ public class WorkerTests
         Assert.Equal("vericairn.context/1", retained.GetProperty("format").GetString());
         Assert.False(custody.ContextFile.StartsWith(run.Estate.Root, StringComparison.Ordinal));
         Assert.Empty(run.Service.Objects());
+        Assert.Contains("assignment " + run.Assignment, exportedBrief, StringComparison.Ordinal);
+        Assert.Contains("Communication for " + run.Estate.OperatorId, exportedBrief, StringComparison.Ordinal);
+        Assert.Contains("Freshness:", exportedBrief, StringComparison.Ordinal);
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(workspace, ".vericairn", ".gitignore")));
         Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
         JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();

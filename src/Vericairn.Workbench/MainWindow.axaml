@@ -12,6 +12,7 @@
       <MenuItem Header="_Estate">
         <MenuItem Header="_Open or connect" InputGesture="Ctrl+O" Click="OnFocusOpen" />
         <MenuItem Header="_Refresh" InputGesture="F5" Click="OnRefresh" />
+        <MenuItem Name="CommunicationMenu" Header="_Communication settings" Click="OnOpenCommunication" />
         <MenuItem Header="Record my _observation of the estate" Click="OnObserveEstate" />
       </MenuItem>
       <MenuItem Header="_Runtime" Name="RuntimeMenu">
@@ -125,6 +126,16 @@
                 </ListBox.ItemTemplate>
               </ListBox>
               <TextBlock Text="Progress, from the records (Enter opens the report)" FontWeight="SemiBold" Margin="0,8,0,0" />
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <TextBlock Text="This status view's depth" VerticalAlignment="Center" />
+                <ComboBox ItemsSource="{Binding StatusViewDepths}" SelectedItem="{Binding StatusViewDepth}" MinWidth="160" AutomationProperties.Name="One-view status depth" />
+              </StackPanel>
+              <Expander Header="Current status and communication" IsExpanded="False">
+                <ScrollViewer MaxHeight="240">
+                  <SelectableTextBlock Text="{Binding HumanStatus}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Personalized current status" />
+                </ScrollViewer>
+              </Expander>
+              <Button Content="Communication settings" Click="OnOpenCommunication" MinHeight="28" HorizontalAlignment="Left" />
               <ListBox Name="ProgressList" Focusable="True" ItemsSource="{Binding Progress}" MaxHeight="280" AutomationProperties.Name="Progress summary" DoubleTapped="OnOpenProgress">
                 <ListBox.ItemTemplate>
                   <DataTemplate x:DataType="pres:ProgressRow">
@@ -206,6 +217,7 @@
                 <ScrollViewer>
                   <StackPanel Margin="8" Spacing="8">
                     <TextBlock Text="{Binding Heading}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding Communication}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication profile" />
                     <TextBlock Text="{Binding Kind2}" Opacity="0.8" />
                     <TextBlock Text="{Binding Intent}" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ExitQuestion}" TextWrapping="Wrap" FontStyle="Italic" />
@@ -561,6 +573,39 @@
                         </DataTemplate>
                       </ListBox.ItemTemplate>
                     </ListBox>
+                  </StackPanel>
+                </ScrollViewer>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:CommunicationDocument">
+                <ScrollViewer>
+                  <StackPanel Margin="12" Spacing="8">
+                    <TextBlock Text="Communication settings" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock Text="Choose a scope and recipient, then refresh before editing. Inherit uses the next applicable source. Required attention and complete originals remain available at every setting." TextWrapping="Wrap" />
+                    <TextBlock Text="Scope" />
+                    <ComboBox ItemsSource="{Binding Scopes}" SelectedItem="{Binding Scope}" MinWidth="180" AutomationProperties.Name="Communication scope" />
+                    <TextBox Text="{Binding Recipient}" PlaceholderText="Recipient principal id" AutomationProperties.Name="Communication recipient" />
+                    <TextBox Text="{Binding Assignment}" PlaceholderText="Assignment id (assignment scope only)" AutomationProperties.Name="Communication assignment" />
+                    <TextBox Text="{Binding Authority}" PlaceholderText="Delegation record id (when changing another person's setting)" AutomationProperties.Name="Communication delegation" />
+                    <Button Content="Refresh this scope" Click="OnRefreshCommunication" HorizontalAlignment="Left" />
+                    <TextBlock Text="Progress frequency" />
+                    <ComboBox ItemsSource="{Binding Frequencies}" SelectedItem="{Binding ProgressFrequency}" MinWidth="240" AutomationProperties.Name="Progress frequency" />
+                    <TextBlock Text="Status depth" />
+                    <ComboBox ItemsSource="{Binding Depths}" SelectedItem="{Binding StatusDepth}" MinWidth="180" AutomationProperties.Name="Status depth" />
+                    <TextBlock Text="Decision depth" />
+                    <ComboBox ItemsSource="{Binding Depths}" SelectedItem="{Binding DecisionDepth}" MinWidth="180" AutomationProperties.Name="Decision depth" />
+                    <TextBlock Text="Result depth" />
+                    <ComboBox ItemsSource="{Binding Depths}" SelectedItem="{Binding ResultDepth}" MinWidth="180" AutomationProperties.Name="Result depth" />
+                    <TextBlock Text="Handoff depth" />
+                    <ComboBox ItemsSource="{Binding Depths}" SelectedItem="{Binding HandoffDepth}" MinWidth="180" AutomationProperties.Name="Handoff depth" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                      <Button Content="Save this scope" Click="OnSaveCommunication" />
+                      <Button Content="Reset this scope to inheritance" Click="OnResetCommunication" />
+                    </StackPanel>
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication write outcome" />
+                    <TextBlock Text="Recorded values and sources" FontWeight="SemiBold" />
+                    <SelectableTextBlock Text="{Binding Effective}" TextWrapping="Wrap" Focusable="True" />
+                    <TextBlock Text="Preview of this draft" FontWeight="SemiBold" />
+                    <SelectableTextBlock Text="{Binding Preview}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication preview" />
                   </StackPanel>
                 </ScrollViewer>
               </DataTemplate>

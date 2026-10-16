@@ -12,6 +12,18 @@ public interface IEstateApi
     /// <summary>The daemon's or embedded runtime's identity and what it serves.</summary>
     HealthResponse Health();
 
+    /// <summary>The recipient's effective communication values, revisions, conflicts and freshness; a read never authors a record.</summary>
+    CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        new(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This API implementation does not support communication settings.");
+
+    /// <summary>Replace or reset one profile with an expected prior hash; only its owner or explicit delegate may change it.</summary>
+    WriteOutcome CommunicationSet(CommunicationSetRequest request) =>
+        WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication settings.", []));
+
+    /// <summary>Grant or revoke permission to change one's own communication setting.</summary>
+    WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) =>
+        WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication delegation.", []));
+
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
@@ -55,7 +67,20 @@ public interface IEstateApi
     BriefResponse? Brief(string workOrder);
 
     /// <summary>A measured agent brief: mandatory originals and named optional sources withheld unless an allocation is given and they fit.</summary>
-    BriefResponse? BriefContext(string workOrder, long? maxBytes = null);
+    BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null);
+
+    /// <summary>A personalized brief with complete original obligations and an explicit communication section; its canonical JSON is unchanged.</summary>
+    BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        BriefResponse? brief = Brief(workOrder);
+        if (brief is null || brief.Problem is not null)
+        {
+            return brief;
+        }
+
+        (string text, ContextTextMeasurement measurement) = ContextTextMeasurement.Presentation(CommunicationPresentation.Brief(brief.Markdown, Communication(recipient, assignment, view)));
+        return brief with { Markdown = text, MarkdownMeasurement = measurement };
+    }
 
     /// <summary>What an observer sees of a work order, or null.</summary>
     ObserveResponse? Observe(string workOrder);

@@ -9,10 +9,15 @@ namespace Vericairn.Protocol;
 /// <summary>The OpenAPI description of API version 1: the single definition of routes that the daemon serves, the SDK calls and the contract tests check.</summary>
 public static class OpenApiDocument
 {
+    private static readonly string[] CommunicationParameterNames = ["recipient", "assignment", "progress", "status", "decision", "result", "handoff"];
+
     /// <summary>Every route of version 1 with its method; the contract tests assert the daemon maps exactly these.</summary>
     public static IReadOnlyList<(string Method, string Path)> Routes { get; } =
     [
         ("GET", "/v1/health"),
+        ("GET", "/v1/communication"),
+        ("POST", "/v1/communication"),
+        ("POST", "/v1/communication/delegations"),
         ("GET", "/v1/status"),
         ("POST", "/v1/status/observations"),
         ("GET", "/v1/progress"),
@@ -105,6 +110,12 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
+            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief" or "/v1/context/work/{key}/brief")
+            {
+                operation["parameters"] = new JsonArray(CommunicationParameterNames
+                    .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
+            }
+
             if (method == "GET" && path == "/v1/records")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
@@ -117,7 +128,9 @@ public static class OpenApiDocument
 
             if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}" or "/v1/context/work/{key}/brief")
             {
-                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional context allocation in canonical payload bytes, separate from a run spending cap. Mandatory originals, manifest and accounting must fit or the package is refused." });
+                JsonArray parameters = operation["parameters"] is JsonArray existing ? (JsonArray)existing.DeepClone() : new JsonArray();
+                parameters.Add(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional context allocation in canonical payload bytes, separate from a run spending cap. Mandatory originals, manifest and accounting must fit or the package is refused." });
+                operation["parameters"] = parameters;
             }
 
             if (method == "GET" && path == "/v1/asks")
@@ -127,7 +140,7 @@ public static class OpenApiDocument
 
             if (path.Contains('{', StringComparison.Ordinal))
             {
-                JsonArray parameters = operation["parameters"] as JsonArray ?? new JsonArray();
+                var parameters = operation["parameters"] is JsonArray existingParameters ? (JsonArray)existingParameters.DeepClone() : new JsonArray();
                 foreach (string name in path.Split('/').Where(s => s.StartsWith('{')).Select(s => s.Trim('{', '}')))
                 {
                     parameters.Add(new JsonObject { ["name"] = name, ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" } });
@@ -162,7 +175,7 @@ public static class OpenApiDocument
                 ["title"] = "Vericairn API",
                 ["version"] = ApiVersion.Current,
                 ["description"] = "One versioned API that every client uses. Authority is evaluated by the runtime behind it; a client presents, requests and observes. "
-                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider; conflict is reserved and nothing answers with it yet), "
+                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
                     + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1). "
@@ -296,6 +309,9 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
+            ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
+            ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
@@ -343,6 +359,8 @@ public static class OpenApiDocument
 
     private static string RequestSchema(string path) => path switch
     {
+        "/v1/communication" => "CommunicationSetRequest",
+        "/v1/communication/delegations" => "CommunicationDelegateRequest",
         "/v1/status/observations" => "EstateObserveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
@@ -383,6 +401,9 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/communication") => "The effective recipient profile with every contributing revision, conflicts and freshness. Query values override this view only. No record is authored.",
+        ("POST", "/v1/communication") => "Replace or reset one scoped communication profile with its expected prior hash. Only its owner or an explicit delegate may change it; stale edits return conflict.",
+        ("POST", "/v1/communication/delegations") => "A person grants or revokes permission to change one scope of their communication setting, with the expected prior hash.",
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
         ("GET", "/v1/status") => "Current status: human text and the canonical JSON that is identical on every machine.",
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",

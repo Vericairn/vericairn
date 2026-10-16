@@ -79,6 +79,7 @@ public class HandoffJourneyTests
             Assert.Equal(ContentHash.Sha256(bytes), original.GetProperty("byteHash").GetString());
             Assert.Empty(payload.GetProperty("withheld").EnumerateArray());
             string text = CliHarness.Ok("--estate", estate.Root, "handoff").Out;
+            Assert.StartsWith("Presentation measurement: " + System.Text.Encoding.UTF8.GetByteCount(text).ToString(System.Globalization.CultureInfo.InvariantCulture) + " UTF-8 bytes", text, StringComparison.Ordinal);
             Assert.Contains("Continue?", text, StringComparison.Ordinal);
             Assert.Contains("Limit not set", text, StringComparison.Ordinal);
             Assert.Contains("Originals (complete)", text, StringComparison.Ordinal);
@@ -139,11 +140,11 @@ internal sealed class HandoffEstate : IDisposable
     public string OperatorId { get; }
     public string BuilderId { get; }
 
-    public RecordEnvelope Add(string type, string by, string body, string? id = null)
+    public RecordEnvelope Add(string type, string by, string body, string? id = null, long format = 2)
     {
         using JsonDocument json = JsonDocument.Parse(body);
         clock = clock.AddSeconds(1);
-        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, json.RootElement, null, null, clock, id, 2));
+        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, json.RootElement, null, null, clock, id, format));
         RecordAuthor.Write(Root, record);
         return record.Envelope;
     }

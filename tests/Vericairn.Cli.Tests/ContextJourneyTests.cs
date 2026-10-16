@@ -25,8 +25,10 @@ public class ContextJourneyTests
         Document(estate, "docs/unrelated.md", Encoding.UTF8.GetBytes(new string('u', 1_000_000)));
         estate.Add("work-order", estate.OperatorId, """{"key":"C-1","kind":"ordinary","title":"Context","intent":"Read docs/named.md for background.","scope":["work"],"exitQuestion":"Complete?","inputs":[],"deliverables":["result"]}""");
         using EstateService api = EstateService.Open(estate.Root);
+        Assert.True(api.CommunicationSet(new(estate.OperatorId, "person", new(Handoff: "short"), estate.OperatorId)).Ok);
         var registry = new ToolRegistry(api, null);
-        ToolCallResult agent = registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1" });
+        ToolCallResult agent = registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1", ["recipient"] = estate.OperatorId });
+        Assert.Contains("handoff (short)", agent.Text, StringComparison.Ordinal);
         Assert.False(agent.IsError);
         Assert.DoesNotContain("OPTIONAL SOURCE BODY", agent.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("docs/unrelated.md", agent.Text, StringComparison.Ordinal);
