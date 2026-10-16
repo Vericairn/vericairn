@@ -9,6 +9,28 @@ namespace Vericairn.Runtime.Tests;
 
 public class RunWatchTests
 {
+    [Theory]
+    [InlineData("Read", true)]
+    [InlineData("mcp__vericairn__work_brief", true)]
+    [InlineData("mcp__ambient__work_brief", false)]
+    [InlineData("mcp__vericairn-extra__work_brief", false)]
+    [InlineData("mcp__vericairn__nested__work_brief", false)]
+    [InlineData("mcp__Read__work_brief", false)]
+    [InlineData("mcp__vericairn__", false)]
+    [InlineData("harness", false)]
+    public void ActionAndReportedToolChecksShareExactMcpServerAdmission(string tool, bool admitted)
+    {
+        JsonElement selection = JsonSerializer.SerializeToElement(new
+        {
+            environment = new { inventory = new[] { new { id = "Read", kind = "tool" }, new { id = "vericairn", kind = "mcp" }, new { id = "harness", kind = "harness" } } },
+        });
+        var watch = new RunWatch(new RunWatchSettings(), null, null, selection);
+        Assert.Equal(!admitted, watch.Action(new("call", tool, JsonSerializer.SerializeToElement(new { }))).Any(s => s.Code == "tool-inventory"));
+        var observation = new RunExecutionObservation(selection);
+        observation.Add(new(Tools: [tool]));
+        Assert.Equal(!admitted, observation.Snapshot()["discrepancies"]!.AsArray().Any(d => d!.GetValue<string>() == "tools"));
+    }
+
     [Fact]
     public void BurnUsesAMinimumSampleTheLauncherReferenceHistoryAndCap()
     {

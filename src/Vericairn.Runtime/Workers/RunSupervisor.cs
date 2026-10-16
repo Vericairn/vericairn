@@ -438,16 +438,19 @@ public sealed class RunSupervisor
                     {
                         lock (gate)
                         {
-                            string identity = action.Id + ":" + CommandAudit.Fingerprint(action);
-                            if (!actions.Add(identity))
+                            if (CommandAudit.TryFingerprint(action) is string fingerprint)
                             {
-                                continue;
-                            }
+                                string identity = action.Id + ":" + fingerprint;
+                                if (!actions.Add(identity))
+                                {
+                                    continue;
+                                }
 
-                            actionOrder.Enqueue(identity);
-                            if (actionOrder.Count > 4096)
-                            {
-                                actions.Remove(actionOrder.Dequeue());
+                                actionOrder.Enqueue(identity);
+                                if (actionOrder.Count > 4096)
+                                {
+                                    actions.Remove(actionOrder.Dequeue());
+                                }
                             }
 
                             foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted))

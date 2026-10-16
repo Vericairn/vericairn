@@ -5,6 +5,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -54,19 +56,75 @@ public class RunExecutionTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
-    [Fact]
-    public void ContextIdentityAndAllocationAreRecordedWithoutInventingMeasurement()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IntentPinsTheRetainedContextAndItsByteAllocationWithoutInventingTokens(bool bounded)
     {
         using var run = new RunEstate(budget: """{"wallMinutes":60,"attemptsPerStep":3,"tokens":1000}""");
-        string hash = Vericairn.Records.Hashing.ContentHash.Sha256("synthetic-package"u8);
+        var allocation = new JsonObject { ["inputTokens"] = 600, ["outputTokens"] = 300 };
+        if (bounded) allocation["maxBytes"] = 1_000_000;
         RunResponse started = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
             Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude-silent", run.Report("package")) },
-            Allocation: RunEstate.Json("""{"inputTokens":600,"outputTokens":300}"""), ContextPackage: hash));
+            Allocation: RunEstate.Json(allocation.ToJsonString())));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);
-        Assert.Equal(hash, settled.Execution!.Value.GetProperty("contextPackage").GetString());
-        Assert.Equal(600, settled.Execution.Value.GetProperty("allocation").GetProperty("inputTokens").GetInt64());
+        var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        using JsonDocument retained = JsonDocument.Parse(File.ReadAllBytes(directory.ContextFile));
+        ContextPackage package = retained.RootElement.GetProperty("context").Deserialize<ContextPackage>(ProtocolJson.Options)!;
+        Assert.True(ContextAccounting.Verify(package));
+        JsonElement intent = AgentRuns.Find(run.Estate.Load(), started.Run)!.Intent.Body.GetProperty("execution");
+        Assert.Equal(package.Hash, intent.GetProperty("contextPackage").GetString());
+        Assert.Equal(intent.GetRawText(), settled.Execution!.Value.GetRawText());
+        JsonElement recorded = intent.GetProperty("allocation");
+        JsonElement accounting = package.Payload.GetProperty("accounting");
+        Assert.Equal(600, recorded.GetProperty("inputTokens").GetInt64());
+        Assert.Equal(300, recorded.GetProperty("outputTokens").GetInt64());
+        Assert.Equal(package.Bytes, recorded.GetProperty("context").GetProperty("bytes").GetInt64());
+        Assert.Equal("bytes", recorded.GetProperty("context").GetProperty("units").GetString());
+        Assert.Equal(accounting.GetProperty("maxBytes").GetRawText(), recorded.GetProperty("context").GetProperty("maxBytes").GetRawText());
+        if (bounded) Assert.Equal(1_000_000, accounting.GetProperty("maxBytes").GetInt64());
+        else Assert.Equal(JsonValueKind.Null, accounting.GetProperty("maxBytes").ValueKind);
+        Assert.Equal(JsonValueKind.Null, accounting.GetProperty("tokens").ValueKind);
+        Assert.Equal("not claimed", accounting.GetProperty("modelFit").GetString());
+        Assert.False(directory.ContextFile.StartsWith(run.Estate.Root, StringComparison.Ordinal));
+        Assert.Empty(run.Service.Objects());
         Assert.Equal(1000, settled.Charged.GetProperty("tokens").GetInt64());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ACallerCannotLabelTheRunWithAnUnrelatedContextPackage()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("unrelated-package");
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
+            Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", report) },
+            ContextPackage: ContentHash.Sha256("unrelated-package"u8)));
+        Assert.False(refused.Ok);
+        Assert.Contains("context-package", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Runs().Runs);
+        Assert.False(File.Exists(report));
+        Assert.Empty(run.Service.Objects());
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(9007199254740992)]
+    public void AnInsufficientOrInvalidContextAllocationRefusesBeforeIntent(long maxBytes)
+    {
+        using var run = new RunEstate();
+        string report = run.Report("context-refused");
+        RunResponse refused = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource,
+            Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("claude", report) },
+            Allocation: JsonSerializer.SerializeToElement(new { maxBytes })));
+        Assert.False(refused.Ok);
+        Assert.Contains(maxBytes == 1 ? "Context over budget" : "allocation", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Runs().Runs);
+        Assert.False(File.Exists(report));
+        Assert.Empty(run.Service.Objects());
     }
 
     [Fact]
@@ -123,7 +181,7 @@ public class RunExecutionTests
         JsonElement selection = found.Intent.Body.GetProperty("execution");
         Assert.Equal("model-a", selection.GetProperty("requested").GetProperty("model").GetString());
         Assert.Equal("disabled", selection.GetProperty("adapter").GetString());
-        Assert.Equal("unknown", selection.GetProperty("contextPackage").GetString());
+        Assert.True(ContentHash.IsValid(selection.GetProperty("contextPackage").GetString()));
         Assert.Equal(selection.GetRawText(), found.Latest.Body.GetProperty("execution").GetRawText());
         Assert.Contains("model", found.Latest.Body.GetProperty("executionObserved").GetProperty("unknown").EnumerateArray().Select(v => v.GetString()));
         Assert.Equal(0, run.Service.Check().Errors);

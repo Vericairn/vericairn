@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Tests;
@@ -47,13 +48,20 @@ public sealed class WorkerJourneyTests : IDisposable
         try
         {
             (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
-            string package = Vericairn.Records.Hashing.ContentHash.Sha256("package"u8);
             CliHarness.Ok("--estate", root, "worker", "run", assignment, "--launcher", "claude-code", "--agent", builder, "--by", op, "--repository", resource,
-                "--configuration", "claude-code", "--execution", "model=model-b", "--execution", "effort=low", "--input-tokens", "200", "--output-tokens", "100", "--context-package", package,
+                "--configuration", "claude-code", "--execution", "model=model-b", "--execution", "effort=low", "--input-tokens", "200", "--output-tokens", "100", "--context-bytes", "1000000",
                 "--setting", "command=" + FakeHarness.Setting("execution", Path.Combine(scratch, "report.jsonl")));
             JsonElement run = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());
+            using EstateService api = EstateService.Open(root);
+            var custody = new RunDirectory(api.Session.Manifest.Estate, run.GetProperty("run").GetString()!);
+            using JsonDocument retained = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+            JsonElement package = retained.RootElement.GetProperty("context");
             Assert.Equal("model-b", run.GetProperty("execution").GetProperty("requested").GetProperty("model").GetString());
-            Assert.Equal(package, run.GetProperty("execution").GetProperty("contextPackage").GetString());
+            Assert.Equal(package.GetProperty("hash").GetString(), run.GetProperty("execution").GetProperty("contextPackage").GetString());
+            Assert.Equal(package.GetProperty("bytes").GetInt64(), run.GetProperty("execution").GetProperty("allocation").GetProperty("context").GetProperty("bytes").GetInt64());
+            Assert.Equal(1_000_000, run.GetProperty("execution").GetProperty("allocation").GetProperty("context").GetProperty("maxBytes").GetInt64());
+            Assert.Equal(CanonicalJson.Serialize(run.GetProperty("execution")), CanonicalJson.Serialize(Vericairn.Records.Estate.AgentRuns.Find(api.Session.Load(), run.GetProperty("run").GetString()!)!.Intent.Body.GetProperty("execution")));
+            Assert.Empty(api.Objects());
             Assert.Equal(200, run.GetProperty("execution").GetProperty("allocation").GetProperty("inputTokens").GetInt64());
             Assert.Equal("low", Assert.Single(run.GetProperty("executionObserved").GetProperty("reports").EnumerateArray()).GetProperty("effort").GetString());
             Assert.Contains("efforts:", CliHarness.Ok("--estate", root, "worker", "launchers").Out, StringComparison.Ordinal);

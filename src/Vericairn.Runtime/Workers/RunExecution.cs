@@ -55,13 +55,18 @@ public sealed class RunExecutionObservation
     private static readonly string[] AllocationFields = ["inputTokens", "outputTokens"];
     private static readonly string[] Facts = ["model", "modelRevision", "effort", "provider", "destination", "harnessVersion", "tools", "inventoryHash"];
     private readonly JsonObject selection;
+    private readonly RunToolInventory tools;
     private readonly JsonArray reports = [];
     private readonly HashSet<string> known = new(StringComparer.Ordinal);
     private readonly HashSet<string> discrepancies = new(StringComparer.Ordinal);
     private bool incomplete;
 
     /// <summary>Starts observation from an immutable intent snapshot.</summary>
-    public RunExecutionObservation(JsonElement selection) => this.selection = JsonNode.Parse(selection.GetRawText())!.AsObject();
+    public RunExecutionObservation(JsonElement selection)
+    {
+        this.selection = JsonNode.Parse(selection.GetRawText())!.AsObject();
+        tools = new(selection);
+    }
 
     /// <summary>Reads a harness report, never narrative or tool output. Invalid identities remain unknown.</summary>
     public void Add(HarnessExecution report)
@@ -114,8 +119,7 @@ public sealed class RunExecutionObservation
             {
                 entry["tools"] = new JsonArray(report.Tools.Order(StringComparer.Ordinal).Select(t => (JsonNode)t).ToArray());
                 known.Add("tools");
-                HashSet<string> admitted = selection["environment"]?["inventory"]?.AsArray().Select(t => t!["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal) ?? [];
-                if (report.Tools.Any(t => !admitted.Contains(t)))
+                if (report.Tools.Any(t => !tools.Contains(t)))
                 {
                     discrepancies.Add("tools");
                 }
@@ -141,15 +145,17 @@ public sealed class RunExecutionObservation
 
     internal static string Hash(JsonNode value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));
 
-    internal static JsonObject Allocation(JsonElement? allocation, JsonElement cap)
+    internal static JsonObject Allocation(JsonElement? allocation, JsonElement cap, out long? maxBytes)
     {
         var result = new JsonObject();
+        maxBytes = null;
         if (allocation is JsonElement supplied)
         {
             var findings = new Records.Model.FindingList();
             var reader = new BodyReader(supplied, "allocation", findings, 2);
             long? input = reader.Number("inputTokens", false, 0, CanonicalJson.MaxSafeInteger);
             long? output = reader.Number("outputTokens", false, 0, CanonicalJson.MaxSafeInteger);
+            maxBytes = reader.Number("maxBytes", false, 1, CanonicalJson.MaxSafeInteger);
             reader.NoOtherKeys();
             if (findings.HasErrors || supplied.ValueKind != JsonValueKind.Object || (input ?? 0) + (output ?? 0) > (AgentRuns.Amount(cap, "tokens") ?? long.MaxValue))
             {

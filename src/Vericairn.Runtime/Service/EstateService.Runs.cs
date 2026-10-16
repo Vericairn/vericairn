@@ -768,16 +768,16 @@ public sealed partial class EstateService
         }
 
         JsonObject selection;
+        long? maxBytes;
         try
         {
             selection = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, assignment), request.Execution, Element(cap));
             selection["role"] = Routing.RoleOf(order);
-            selection["allocation"] = RunExecutionObservation.Allocation(request.Allocation, Element(cap));
+            selection["allocation"] = RunExecutionObservation.Allocation(request.Allocation, Element(cap), out maxBytes);
             if (request.ContextPackage is not null && !ContentHash.IsValid(request.ContextPackage))
             {
                 return (null, "A context-package identity must be its exact content hash.", null);
             }
-            selection["contextPackage"] = request.ContextPackage ?? "unknown";
             selection["adapter"] = "disabled";
         }
         catch (ProviderRefusedException exception)
@@ -789,11 +789,27 @@ public sealed partial class EstateService
         // must admit it with the intent before launch. A stranded older batch is reconciled by that write;
         // ordinary briefs and hand-overs still refuse while the batch remains incomplete.
         string? recipient = CommunicationRecipient(model, goal);
-        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false, profile: Communication(recipient, recipient is null ? null : assignment.Id));
+        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, recipient is null ? null : assignment.Id));
         if (contextBrief.Problem is not null)
         {
             return (null, contextBrief.Problem.Message, null);
         }
+
+        JsonElement package = contextBrief.Json.GetProperty("context");
+        string packageHash = package.GetProperty("hash").GetString()!;
+        if (request.ContextPackage is not null && request.ContextPackage != packageHash)
+        {
+            return (null, "The supplied context-package identity differs from the package assembled for this run.", null);
+        }
+
+        selection["contextPackage"] = packageHash;
+        JsonElement accounting = package.GetProperty("payload").GetProperty("accounting");
+        selection["allocation"]!["context"] = new JsonObject
+        {
+            ["units"] = accounting.GetProperty("units").GetString(),
+            ["bytes"] = accounting.GetProperty("bytes").GetInt64(),
+            ["maxBytes"] = JsonNode.Parse(accounting.GetProperty("maxBytes").GetRawText()),
+        };
 
         return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }

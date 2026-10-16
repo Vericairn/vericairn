@@ -112,6 +112,14 @@ machine brief) and `brief.md` in its existing local run directory under the
 Vericairn home. That is the dispatch custody chosen here; it never adds context
 objects or records to the estate repository. The existing workspace export is
 still git-ignored. Retention is not required for read-time retrieval.
+The intent's `execution.contextPackage` pins the actual CONTEXT-01 payload inside
+that machine brief. Its `execution.allocation.context` copies the payload's
+accounting (`units: bytes`, `bytes`, `maxBytes`); an unset limit stays null.
+`worker run` and `goal step` accept `--context-bytes` (API `allocation.maxBytes`)
+as a separate byte allocation, which CONTEXT-01 enforces before any intent or
+routed assignment is recorded. `--context-package` is an optional assertion of
+the assembled run package's identity: a mismatch refuses. A standalone package
+with a different snapshot or selection is not substituted for the run's package.
 
 `context prepare --max-bytes <allocation>` uses exact UTF-8 bytes of the final
 payload, including accounting and omission overhead. The allocation is supplied
@@ -866,8 +874,9 @@ requires fresh admission. A refusal before the intent writes no run or routed as
 after the intent but before launch settles an unstarted failure with zero usage. The intent's `execution`
 snapshot is immutable and includes the requested choices and provenance, configuration identity, resolved
 revision, harness version, role, `adapter: disabled`, environment inventory, allocation and context-package
-identity. Missing allocation counts and package identity stay explicitly unknown. RUN-01 records identity
-and allocation only; CONTEXT-01 owns package construction, withheld content and measurements.
+identity. The package identity and its byte accounting come from CONTEXT-01, which owns construction,
+withheld content and measurements. Missing token allocations stay explicitly unknown; byte counts do
+not supply model tokens, harness overhead or a fit claim. The package body stays in local run custody.
 
 Settlement's `executionObserved` keeps distinct harness reports, discrepancies and still-unknown facts.
 The worker never fills missing actual model, effort, revision, provider, destination, version or inventory
@@ -876,6 +885,13 @@ incomplete-report observation. A discrepancy remains even if a later report retu
 choice. WATCH-01 receives the admitted selection and inventory: execution discrepancies and unadmitted
 tool invocations produce critical signals and use its existing attention and stop path. All original
 command, credentials, network, scope, loop and burn-rate auditing remains in place.
+Codex's `command_execution` and `file_change` events are matched to its qualified `exec_command` and
+`apply_patch` tools. MCP invocation and reported tool names retain their `mcp__server__tool` identity
+and match only an exactly admitted MCP server component; a tool or harness with that server's name
+does not admit its namespace. FIX-10's per-check audit isolation preserves completed verdicts and the
+inventory check when another path check is undecidable.
+An input that cannot be canonically fingerprinted leaves deduplication and repetition unverified;
+its recognizable credential, network, path and inventory checks still run and can stop the run.
 
 ### Native inventory qualification (RUN-02)
 

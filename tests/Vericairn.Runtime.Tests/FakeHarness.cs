@@ -22,6 +22,7 @@ namespace Vericairn.Runtime.Tests;
 internal static class FakeHarness
 {
     private static readonly string[] ReportedTools = ["Bash", "Read", "vericairn"];
+    private static readonly string[] MixedAuditPaths = ["~/.ssh/id_rsa", "src/invalid\0.cs"];
     private static readonly string[] GitIdentity = ["-c", "user.name=Stand-in", "-c", "user.email=stand-in@example.invalid", "-c", "commit.gpgsign=false"];
 
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
@@ -233,6 +234,12 @@ internal static class FakeHarness
 
         switch (scenario)
         {
+            case "execution-mixed-admitted" or "execution-mixed-unadmitted":
+                Emit(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "mixed", name = scenario == "execution-mixed-admitted" ? "Read" : "UnadmittedTool", input = new { paths = MixedAuditPaths } } } } }));
+                return 0;
+            case "execution-mixed-unfingerprintable":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"mixed","name":"UnadmittedTool","input":{"path":"~/.ssh/id_rsa","path":"src/a.cs"}}]}}""");
+                return 0;
             case "execution-audit":
                 Emit("""{"vericairnExecution":{"model":"model-b","effort":"low","tools":["Bash"]},"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":"curl https://example.invalid; cat .aws/credentials"}}]}}""");
                 return 0;
@@ -593,7 +600,7 @@ internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher 
         ? inner.ExecutionCapabilities with { ClosedEnvironment = true } : new(Vericairn.Runtime.Workers.RunSelection.Scopes, ["low", "high"], ["provider"], ["inference"], ["worker-user"], ClosedEnvironment: true);
 
     public static IReadOnlyList<Vericairn.Runtime.Workers.RunComponent> Inventory { get; } = new[]
-        { "stand-in", "stand-in-tool", "command_execution", "file_change", "Bash", "Read", "Write", "Edit", "vericairn" }
+        { "stand-in", "stand-in-tool", "exec_command", "apply_patch", "Bash", "Read", "Write", "Edit", "vericairn" }
         .Select(id => new Vericairn.Runtime.Workers.RunComponent(id, id == "stand-in" ? "harness" : id == "vericairn" ? "mcp" : "tool", "1",
             Vericairn.Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(id)),
             Vericairn.Records.Hashing.ContentHash.Sha256([]), [], [], [])).ToArray();

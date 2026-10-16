@@ -235,6 +235,22 @@ internal sealed class NativeProbe : IDisposable
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["actions"]?.GetValue<string>() is string actions)
+        {
+            string server = actions == "ambient" ? "ambient" : "vericairn";
+            string tool = "mcp__" + server + "__work_brief";
+            Console.WriteLine(JsonSerializer.Serialize(new { type = codex ? "thread.started" : "system", subtype = "init", tools = new[] { codex ? "exec_command" : "Read", tool } }));
+            if (codex)
+            {
+                Console.WriteLine("""{"type":"item.started","item":{"type":"command_execution","id":"command","command":"echo ready"}}""");
+                Console.WriteLine(JsonSerializer.Serialize(new { type = "item.started", item = new { type = "mcp_tool_call", id = "mcp", server, tool = "work_brief", arguments = new { } } }));
+            }
+            else
+            {
+                Console.WriteLine("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"read","name":"Read","input":{"file_path":".vericairn/brief.md"}}]}}""");
+                Console.WriteLine(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "mcp", name = tool, input = new { } } } } }));
+            }
+        }
         Console.WriteLine("{\"type\":\"result\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}");
         return 0;
     }

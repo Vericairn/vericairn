@@ -670,6 +670,7 @@ public class WorkerTests
         var custody = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         Assert.Equal(exportedBrief, File.ReadAllText(custody.BriefFile));
         using JsonDocument retainedContext = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+        Assert.Equal(retainedContext.RootElement.GetProperty("context").GetProperty("hash").GetString(), recorded.Intent.Body.GetProperty("execution").GetProperty("contextPackage").GetString());
         JsonElement retained = retainedContext.RootElement.GetProperty("context").GetProperty("payload");
         Assert.NotEmpty(retained.GetProperty("originals").EnumerateArray());
         Assert.Equal("vericairn.context/1", retained.GetProperty("format").GetString());

@@ -837,8 +837,13 @@ revisions. It includes `configuration`, `configurationHash`, `requested`, `prove
 
 - `provenance` entries contain scope, source, policy, and the exact contributing record id and hash for
   recorded policies. Overwritten choices remain inspectable.
-- `allocation` contains known input/output token counts and an `unknown` list. `contextPackage` is an
-  exact content hash or `unknown`; RUN-01 stores no package body, withheld list or measurements.
+- `allocation` contains known input/output token reservations and an `unknown` list. Its optional
+  `context` object contains CONTEXT-01 accounting's `units: bytes`, positive safe-integer `bytes` and
+  `maxBytes` (null for an unset limit, otherwise a positive safe integer at least as large as `bytes`).
+  With that accounting, `contextPackage` must be an exact content hash; older snapshots may say
+  `unknown` and omit context accounting. New runs pin the assembled payload, never a caller's
+  unverified label. No package body or withheld original enters the run record or estate objects.
+  Byte measurements do not establish model tokens or fit; token reservations remain separate.
 - `environment` contains policy id, inventory hash, admitted variable names and the complete inventory.
   Each component has id, kind, version, content hash, configuration hash, environment names, destinations
   and dependencies. Kinds are harness, tool, skill, plugin, hook, mcp, helper, dependency and configuration.

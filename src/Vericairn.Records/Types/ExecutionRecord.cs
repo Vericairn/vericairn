@@ -72,6 +72,21 @@ internal static class ExecutionRecord
                 allocation.Number("inputTokens", false, 0, CanonicalJson.MaxSafeInteger);
                 allocation.Number("outputTokens", false, 0, CanonicalJson.MaxSafeInteger);
                 allocation.StringArray("unknown", true, allowEmpty: true, maxItemLength: 40);
+                if (allocation.Nested("context", false) is BodyReader input)
+                {
+                    input.Enum("units", true, "bytes");
+                    long? bytes = input.Number("bytes", true, 1, CanonicalJson.MaxSafeInteger);
+                    if (input.Element.TryGetProperty("maxBytes", out JsonElement limit) && limit.ValueKind == JsonValueKind.Null)
+                    {
+                        input.Allow("maxBytes");
+                    }
+                    else if (input.Number("maxBytes", true, 1, CanonicalJson.MaxSafeInteger) is long maxBytes && bytes > maxBytes)
+                    {
+                        context.Error("operation.execution", "The retained context payload fits its explicit byte allocation.");
+                    }
+                    if (package is null or "unknown") context.Error("operation.execution", "Context accounting pins the exact package identity.");
+                    input.NoOtherKeys();
+                }
                 allocation.NoOtherKeys();
             }
 

@@ -15,6 +15,37 @@ namespace Vericairn.Runtime.Tests;
 public class NativeAdmissionTests
 {
     [Theory]
+    [InlineData("codex", false)]
+    [InlineData("claude", false)]
+    [InlineData("codex", true)]
+    [InlineData("claude", true)]
+    public void WatchUsesTheNativeInventoryForBuiltinsAndExactMcpServers(string harness, bool ambient)
+    {
+        using var fixture = new NativeRun(harness);
+        fixture.Probe.Behavior("actions", ambient ? "ambient" : "admitted");
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = fixture.Run.Settled(started.Run);
+        Assert.Equal(ambient ? "known-failure" : "observed-success", settled.Status);
+        if (ambient)
+        {
+            // Either the report or the invocation can arrive first and trigger containment.
+            Assert.Contains(settled.Signals!, s => s.Code is "tool-inventory" or "execution" && s.Severity == "critical");
+            Assert.NotNull(settled.Stop!.ContainedAt);
+        }
+        else
+        {
+            Assert.Empty(settled.Signals!);
+            Assert.Empty(settled.ExecutionObserved!.Value.GetProperty("discrepancies").EnumerateArray());
+        }
+        var custody = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);
+        using JsonDocument retained = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+        Assert.Equal(retained.RootElement.GetProperty("context").GetProperty("hash").GetString(), settled.Execution!.Value.GetProperty("contextPackage").GetString());
+        Assert.Empty(fixture.Run.Service.Objects());
+        Assert.Equal(0, fixture.Run.Service.Check().Errors);
+    }
+
+    [Theory]
     [InlineData("codex")]
     [InlineData("claude")]
     public void NativeInventoriesAreAdmittedWithTheirIdentityAndRecordedBeforeDispatch(string harness)

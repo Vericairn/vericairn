@@ -469,7 +469,7 @@ internal static partial class Commands
     /// <summary>What <c>vericairn worker run</c> was given.</summary>
     internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach, RunChoices? Choices = null);
 
-    internal sealed record RunChoices(string? Configuration, string[] Execution, long? InputTokens, long? OutputTokens, string? ContextPackage);
+    internal sealed record RunChoices(string? Configuration, string[] Execution, long? InputTokens, long? OutputTokens, string? ContextPackage, long? ContextBytes = null);
 
     private static readonly string[] ExecutionCapabilityLists = ["scopes", "efforts", "providers", "destinations", "dataBoundaries"];
 
@@ -480,11 +480,12 @@ internal static partial class Commands
         Dictionary<string, string>? values = ParseSettings(choices?.Execution ?? [], out problem);
         if (values is null) return false;
         if (values.Count > 0) execution = JsonSerializer.SerializeToElement(values);
-        if (choices?.InputTokens is not null || choices?.OutputTokens is not null)
+        if (choices?.InputTokens is not null || choices?.OutputTokens is not null || choices?.ContextBytes is not null)
         {
             var counts = new Json.JsonObject();
             if (choices.InputTokens is long input) counts["inputTokens"] = input;
             if (choices.OutputTokens is long output) counts["outputTokens"] = output;
+            if (choices.ContextBytes is long maxBytes) counts["maxBytes"] = maxBytes;
             allocation = Element(counts);
         }
         return true;

@@ -299,8 +299,8 @@ public sealed record NextResponse(string Text, JsonElement Json);
 /// <param name="Base">For an agent's step, what a new work branch starts from.</param>
 /// <param name="Configuration">Named local launcher configuration.</param>
 /// <param name="Execution">Explicit run choices.</param>
-/// <param name="Allocation">Input and output allocation.</param>
-/// <param name="ContextPackage">Exact package hash; omitted means unknown.</param>
+/// <param name="Allocation">Input and output token reservations, and optional maxBytes for the context payload, measured separately.</param>
+/// <param name="ContextPackage">Optional expected hash of the assembled run context; a mismatch refuses dispatch.</param>
 public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
@@ -482,8 +482,8 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="Settings">The launcher's settings by name, for example command.</param>
 /// <param name="Configuration">Named local launcher configuration; the launcher identity when omitted.</param>
 /// <param name="Execution">Explicit execution choices; never ambient defaults.</param>
-/// <param name="Allocation">Input tokens and output reserve, separate from measured usage.</param>
-/// <param name="ContextPackage">Exact context-package content hash; omitted means unknown.</param>
+/// <param name="Allocation">Input tokens and output reserve, separate from measured usage; optional maxBytes bounds the context payload independently.</param>
+/// <param name="ContextPackage">Optional expected hash of the assembled run context; the intent always pins the actual package.</param>
 public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
 
 /// <summary>Ask a run to stop.</summary>

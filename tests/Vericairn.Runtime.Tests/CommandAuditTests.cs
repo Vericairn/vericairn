@@ -178,10 +178,12 @@ public class CommandAuditTests
     {
         var launcher = new CodexLauncher();
         HarnessAction started = Assert.Single(launcher.ReadActions("""{"type":"item.started","item":{"type":"command_execution","id":"c1","command":"cat src/a.cs"}}"""));
+        Assert.Equal("exec_command", started.Tool);
         HarnessAction completed = Assert.Single(launcher.ReadActions("""{"type":"item.completed","item":{"type":"command_execution","id":"c1","command":"cat src/a.cs","aggregated_output":"curl https://example.invalid","exit_code":0}}"""));
         Assert.Equal(CommandAudit.Fingerprint(started), CommandAudit.Fingerprint(completed));
         Assert.Empty(CommandAudit.Inspect(completed, Workspace(), ["src/"]));
         HarnessAction change = Assert.Single(launcher.ReadActions("""{"type":"item.completed","item":{"type":"file_change","id":"f1","changes":[{"path":"outside.txt","kind":"add"}]}}"""));
+        Assert.Equal("apply_patch", change.Tool);
         Assert.Contains(CommandAudit.Inspect(change, Workspace(), ["src/"]), s => s.Code == "scope");
         HarnessAction mcp = Assert.Single(launcher.ReadActions("""{"type":"item.started","item":{"type":"mcp_tool_call","id":"m1","server":"files","tool":"read","arguments":{"path":".aws/credentials"}}}"""));
         Assert.Contains(CommandAudit.Inspect(mcp, Workspace(), ["src/"]), s => s.Code == "credentials");

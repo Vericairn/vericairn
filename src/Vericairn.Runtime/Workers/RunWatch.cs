@@ -17,9 +17,8 @@ internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decima
     private readonly Queue<(TimeSpan At, long Tokens)> samples = new([(TimeSpan.Zero, 0)]);
     private long lastTokens;
     private readonly RunExecutionObservation? execution = selection is JsonElement admitted ? new RunExecutionObservation(admitted) : null;
-    private readonly HashSet<string>? tools = selection is JsonElement snapshot && snapshot.TryGetProperty("environment", out JsonElement environment)
-        ? environment.GetProperty("inventory").EnumerateArray().Where(c => c.GetProperty("kind").GetString() is "tool" or "mcp")
-            .Select(c => c.GetProperty("id").GetString()!).ToHashSet(StringComparer.Ordinal) : null;
+    private readonly RunToolInventory? tools = selection is JsonElement snapshot && snapshot.TryGetProperty("environment", out _)
+        ? new(snapshot) : null;
 
     public JsonElement? ExecutionObserved => execution is null ? null : JsonSerializer.SerializeToElement(execution.Snapshot());
 
@@ -42,11 +41,16 @@ internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decima
 
     public IReadOnlyList<RunSignal> Action(HarnessAction action)
     {
-        string fingerprint = CommandAudit.Fingerprint(action);
+        string? fingerprint = CommandAudit.TryFingerprint(action);
         var observations = new List<RunSignal>();
         if (tools is not null && !tools.Contains(action.Tool))
         {
             observations.Add(new RunSignal("tool-inventory", "critical", Now(), "The worker observed an invocation of a tool outside the intent's admitted inventory.", fingerprint));
+        }
+        if (fingerprint is null)
+        {
+            observations.Add(new RunSignal("audit-unverified", "warning", Now(), "The worker could not fingerprint an invocation; inventory and completed command checks still apply, but repetition is unverified."));
+            return observations;
         }
         recent.Enqueue(fingerprint);
         repeats[fingerprint] = repeats.GetValueOrDefault(fingerprint) + 1;
