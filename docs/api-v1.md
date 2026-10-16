@@ -437,6 +437,9 @@ are stored and validated but not enforced by routing or the worker. The worker e
 `RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
 fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
 target and cap stay pinned to the intent. Every record newly reserving allowance is checked for budget admission.
+From 0.6.1 all previously recorded settlement facts stay unchanged, including usage, scope and containment; the
+ledger takes usage from the first settlement. Evidence may only be appended, and missing stop facts or optional
+fields may be added only under the existing record and chronology rules, without granting a new status transition.
 Before admission the worker refuses linked `.vericairn` metadata and exports files without following links.
 
 Codex and Claude Code receive fresh configuration directories containing only their approved harness login. Codex

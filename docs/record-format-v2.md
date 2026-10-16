@@ -496,6 +496,13 @@ reservation. Admission recognizes an already
 reserved revision only when its predecessor was in flight with the identical target. Generic operations retain their
 reconciliation and retry rules.
 
+From 0.6.1, every revision after settlement also keeps every previously recorded body field unchanged
+(`operation.agent-run-settlement-kept`), including usage, the observation, liveness and the scope audit. Evidence may
+only be appended, and missing stop facts may be added under the existing chronology rules; recorded stop facts,
+including containment, cannot change. Previously absent optional fields may be added only where the record rules
+already permit them. This does not grant a new status transition. The ledger reads usage from the first settlement,
+so a later revision cannot refund a settled run's charges, including units charged at the cap because they were unreported.
+
 Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns).
 Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and
 output counts. A malformed or incomplete usage event, arithmetic overflow, or an unfinished Codex turn leaves the

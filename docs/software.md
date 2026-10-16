@@ -331,6 +331,11 @@ cap remain those of its intent, and a dispatch timestamp cannot change or be add
 newly reserves allowance is checked for admission, including a revision; an existing reservation is recognized only
 for the same in-flight target. Generic operations retain their reconciliation and retry rules.
 
+From 0.6.1 a later revision cannot rewrite any settled fact, including usage, the observation, liveness, scope or
+containment. Evidence may only be appended; missing stop facts and previously absent optional fields may be added
+only under the existing record and chronology rules, without granting a new status transition. The ledger uses the
+first settlement's usage, so a revision cannot return spent allowance to the goal.
+
 Harnesses enter a containment boundary before executing: a Windows Job Object with no breakaway, or a new POSIX process
 group on Linux and macOS. Escalation terminates that boundary. Root exit alone does not establish containment: a
 successful inventory must show every remaining member exited, including kernel zombie exit state. Failed job or
