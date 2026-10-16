@@ -469,7 +469,7 @@ public class WorkerTests
         Assert.Null(given["environment"]!["ANTHROPIC_API_KEY"]);
         List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
-        Assert.Equal("{\"disableAllHooks\":true,\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
+        Assert.Equal("{\"hooks\":{},\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
     }
 
     [Fact]
@@ -480,9 +480,9 @@ public class WorkerTests
         RunResponse started = run.Start("codex", "codex-ambient", report);
         Assert.False(started.Ok);
         Assert.Contains("effective MCP configuration", started.Message, StringComparison.Ordinal);
-        Assert.Equal("known-failure", run.Row(started.Run).Status);
+        Assert.Equal("not-started", started.Status);
+        Assert.Empty(run.Service.Runs().Runs);
         Assert.All(FakeHarness.Reports(report), given => Assert.DoesNotContain("exec", given["arguments"]!.AsArray().Select(a => a!.GetValue<string>())));
-        Assert.False(run.Row(started.Run).Charged.TryGetProperty("wallMinutes", out _));
     }
 
     [Fact]
@@ -658,7 +658,7 @@ public class WorkerTests
         List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         string workspace = given["directory"]!.GetValue<string>();
         string mcp = arguments[arguments.IndexOf("--mcp-config") + 1];
-        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], arguments);
+        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"hooks\":{},\"enabledPlugins\":{}}", "--tools", "Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation", "--model", "model-a", "--effort", "high"], arguments);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
@@ -670,6 +670,7 @@ public class WorkerTests
         var custody = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         Assert.Equal(exportedBrief, File.ReadAllText(custody.BriefFile));
         using JsonDocument retainedContext = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+        Assert.Equal(retainedContext.RootElement.GetProperty("context").GetProperty("hash").GetString(), recorded.Intent.Body.GetProperty("execution").GetProperty("contextPackage").GetString());
         JsonElement retained = retainedContext.RootElement.GetProperty("context").GetProperty("payload");
         Assert.NotEmpty(retained.GetProperty("originals").EnumerateArray());
         Assert.Equal("vericairn.context/1", retained.GetProperty("format").GetString());
@@ -704,7 +705,7 @@ public class WorkerTests
     }
 
     [Fact]
-    public void CodexVerifiesItsGoalsFeatureBeforeTheRunIsRecordedAndAddsUpEachTurnsTokens()
+    public void StandInFeatureRefusalsLeaveNoIntentAndCodexEventsAddUpEachTurnsTokens()
     {
         using var run = new RunEstate();
         run.Service.WorkerOptions = run.Service.WorkerOptions with { Vericairn = ["vericairn-under-test"] };
@@ -993,8 +994,8 @@ public class WorkerTests
     public void AHarnessThatCannotStartIsAKnownFailureThatSpentNothing()
     {
         using var run = new RunEstate();
-        string missing = Path.Combine(run.Scratch, "no-such-harness");
-        RunResponse failed = run.Service.RunStart(new RunStartRequest(run.Assignment, "claude-code", run.Estate.BuilderId, run.Estate.OperatorId, run.Resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = missing }));
+        HookedLauncher.Install(run, command: () => throw new Vericairn.Runtime.Providers.ProviderRefusedException("The synthetic executable disappeared after preflight."));
+        RunResponse failed = run.Start("claude-code", "claude", run.Report("never-launched"));
         Assert.False(failed.Ok);
         Assert.Equal("provider", failed.Problem!.Code);
         Assert.Equal("known-failure", failed.Status);

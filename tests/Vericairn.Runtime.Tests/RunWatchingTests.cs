@@ -256,7 +256,7 @@ public class RunWatchingTests
         RunResponse started = run.Start(launcher, scenario, run.Report("audit"));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);
-        Assert.Equal(["credentials", "network", "scope"], settled.Signals!.Select(s => s.Code).Order(StringComparer.Ordinal));
+        Assert.Equal(launcher == "codex" ? ["credentials", "network", "scope", "tool-inventory"] : ["credentials", "network", "scope"], settled.Signals!.Select(s => s.Code).Order(StringComparer.Ordinal));
         Assert.All(settled.Signals!, s => Assert.Equal(1, s.Count));
         Assert.All(settled.Signals!, s => Assert.NotNull(s.Attention));
         Assert.Equal("known-failure", settled.Status);
@@ -268,7 +268,7 @@ public class RunWatchingTests
         Assert.DoesNotContain("I claim", record, StringComparison.Ordinal);
         Assert.Equal(0, run.Service.Check().Errors);
         run.Reopen();
-        Assert.Equal(3, run.Row(started.Run).Signals!.Count);
+        Assert.Equal(launcher == "codex" ? 4 : 3, run.Row(started.Run).Signals!.Count);
     }
 
     private static void WaitUntil(Func<bool> condition) => Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(20)), "The worker observation did not arrive.");

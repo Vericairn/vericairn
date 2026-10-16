@@ -914,3 +914,52 @@ writes cannot bypass current delegation checks by supplying an earlier `at`.
 The existing reconciliation operation allows the recipient to resolve their
 own communication branches, including independent first profiles at one scope;
 an administrator cannot choose another person's preference.
+
+## Explicit agent-run execution (RUN-01, 0.7.0)
+
+API v1 adds optional fields to `RunStartRequest` and to an agent's `GoalStepRequest`:
+
+| Field | Meaning |
+| --- | --- |
+| `configuration` | Named local launcher configuration; an unknown name refuses the run. |
+| `execution` | Explicit choice object: optional `model`, `effort`, `provider`, `destination`, `dataBoundary`, `adapter`. Values are portable identities. |
+| `allocation` | Optional nonnegative safe-integer `inputTokens` and `outputTokens`; their sum cannot exceed the run's token reservation when present. Optional positive safe-integer `maxBytes` bounds the CONTEXT-01 payload independently. Omitted token counts stay unknown. |
+| `contextPackage` | Optional expected `sha256:` identity of the context assembled for this run. A mismatch refuses before intent; omission still records the actual package hash. |
+
+`ProviderRow.execution` describes a launcher's `scopes`, native `efforts`, `providers`, `destinations`,
+`dataBoundaries`, `providerDefault` and `closedEnvironment` capabilities. It is absent for other provider
+kinds. `RunRow.execution` exposes the immutable intent snapshot and `RunRow.executionObserved` exposes
+settled actual reports, discrepancies and unknowns. Both are absent on older runs with no such record;
+absence is not an inferred choice. The OpenAPI document includes these additive properties.
+
+Selection precedence is launcher configuration, roster and its role, goal and its role, assignment, then
+explicit run choices. Every contributing record id and exact hash is retained, together with overwritten
+choices. Restrictions accumulate across all scopes. Neither API override nor goal role replacement can
+remove a required model/effort, exact revision pin, permitted provider/destination, data boundary or cost
+bound. Missing required choices, unsupported native effort, an unknown revision under an exact pin, an
+unexpected component, undeclared route or incomplete inventory returns a refused `RunResponse` before
+an intent or routed assignment is stored. The same state is rechecked before dispatch. There is no silent
+fallback to the harness's environment. `provider-default` is explicitly requested and only allowed when
+declared; it never claims a known effort. `not-supported` requires a declared absence of effort control.
+
+The intent records configuration identity, requested choices, provenance, resolved revision, harness
+version, role, disabled Adapter, environment policy and admitted inventory, allocation and package identity.
+`execution.contextPackage` identifies the CONTEXT-01 payload retained inside the run's local `context.json`.
+`execution.allocation.context` copies its accounting's `units: bytes`, exact `bytes` and `maxBytes`
+(null when no byte limit was set). This describes the canonical payload, not the complete human brief,
+model tokens, provider framing or a model-fit claim. The complete context and rendered brief remain in
+local run custody; no context objects are added to the estate. The CLI accepts the byte bound as
+`--context-bytes` for both `worker run` and `goal step`.
+The inventory uses portable ids and hashes, environment-variable names, dependency ids and logical routes;
+secret values and machine paths are never returned in these fields. Settlement adds reports of actual
+model/revision, effort, provider, destination, harness version, tools and complete inventory hash when the
+harness supplies them. Missing fields stay unknown. Differences are preserved and signal WATCH-01 through
+`execution`; a tool invocation outside the admitted inventory signals `tool-inventory`. Both are critical
+and use the existing attention/stop behavior. No original command audit is filtered.
+
+Codex and Claude Code qualify only for the exact versions and isolation evidence documented in the
+[software guide](software.md#native-inventory-qualification-run-02). The generic launcher and unknown
+versions still refuse. These contracts are tested with stand-ins; no live coding agent is launched.
+The efficiency Adapter is unsupported (EFF-01, 0.8.0); only `disabled` is allowed. Remote is not built.
+These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
+See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).

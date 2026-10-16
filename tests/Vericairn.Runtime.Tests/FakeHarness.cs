@@ -3,10 +3,12 @@
 
 using System.Collections;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -19,10 +21,13 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 internal static class FakeHarness
 {
+    private static readonly string[] ReportedTools = ["Bash", "Read", "vericairn"];
+    private static readonly string[] MixedAuditPaths = ["~/.ssh/id_rsa", "src/invalid\0.cs"];
     private static readonly string[] GitIdentity = ["-c", "user.name=Stand-in", "-c", "user.email=stand-in@example.invalid", "-c", "commit.gpgsign=false"];
 
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
     public const string Marker = "--vericairn-stand-in-harness";
+    internal const string NativeMarker = "vericairn-native-stand-in";
 
     /// <summary>The command line that starts the stand-in for a scenario, writing what it was given to the report.</summary>
     public static List<string> Command(string scenario, string report)
@@ -34,7 +39,7 @@ internal static class FakeHarness
             command.Add(typeof(FakeHarness).Assembly.Location);
         }
 
-        command.AddRange([Marker, scenario, report]);
+        command.AddRange([scenario.StartsWith("native-", StringComparison.Ordinal) ? NativeMarker : Marker, scenario, report]);
         return command;
     }
 
@@ -80,12 +85,100 @@ internal static class FakeHarness
         Environment.Exit(code);
     }
 
+    // Older protocol stand-ins exercise goal parsing independently of native inventory qualification.
+    internal static string? VerifyGoals(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(environment);
+        int code;
+        string output;
+        string error;
+        try
+        {
+            (code, output, error) = Probe(settings, environment, null, "features", "list");
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return $"Codex's goals feature could not be verified: {exception.Message}";
+        }
+
+        if (code != 0)
+        {
+            string said = (error.Trim().Length > 0 ? error : output).Trim();
+            return $"Codex's goals feature could not be verified: codex features list exited {code.ToString(CultureInfo.InvariantCulture)}{(said.Length == 0 ? "." : ": " + (said.Length > 300 ? said[..300] + "…" : said))}";
+        }
+
+        string[]? goals = output.Split('\n').Select(l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).FirstOrDefault(columns => columns.Length >= 2 && columns[0] == "goals");
+        if (goals is null)
+        {
+            return "Codex lists no goals feature in codex features list, so its /goal cannot be verified; a Codex whose /goal is a feature named goals is needed.";
+        }
+
+        return goals[^1] == "true" ? null : $"Codex's goals feature is not enabled here (codex features list shows goals {goals[^1]}); enable it with codex features enable goals, then start the run again.";
+    }
+
+    internal static void VerifyMcp(Vericairn.Runtime.Workers.LaunchContext context)
+    {
+        (int code, string output, _) = Probe(context.Settings, context.Environment, context.Workspace, "mcp", "list", "--json");
+        JsonNode server = JsonNode.Parse(File.ReadAllText(context.McpConfiguration))!["mcpServers"]!["vericairn"]!;
+        var expected = new JsonArray(new JsonObject
+        {
+            ["name"] = "vericairn", ["enabled"] = true,
+            ["transport"] = new JsonObject { ["type"] = "stdio", ["command"] = server["command"]!.DeepClone(), ["args"] = server["args"]!.DeepClone(),
+                ["env"] = server["env"]!.DeepClone(), ["env_vars"] = new JsonArray(), ["cwd"] = null },
+        });
+        if (code != 0 || !JsonNode.DeepEquals(expected, JsonNode.Parse(output)))
+        {
+            throw new ProviderRefusedException("Codex's effective MCP configuration is not the run's approved server table; ambient configuration was refused.");
+        }
+    }
+
+    private static (int Code, string Output, string Error) Probe(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment, string? workspace, params string[] arguments)
+    {
+        List<string> command = JsonSerializer.Deserialize<List<string>>(settings["command"])!;
+        List<string> expected = Command("unused", "unused");
+        int marker = expected.IndexOf(Marker);
+        if (command.Count <= marker || command[marker] != Marker || !command.Take(marker).SequenceEqual(expected.Take(marker)))
+        {
+            throw new ProviderRefusedException("Only the test executable can serve as a protocol stand-in.");
+        }
+        var info = new ProcessStartInfo(command[0]) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = workspace ?? string.Empty };
+        foreach (string argument in command.Skip(1).Concat(arguments)) info.ArgumentList.Add(argument);
+        info.Environment.Clear();
+        foreach ((string name, string value) in environment) info.Environment[name] = value;
+        using Process process = Process.Start(info)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new ProviderRefusedException("The stand-in probe did not finish.");
+        }
+        return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
+    }
+
     private static int Run(string scenario, string report, string[] arguments)
     {
         var environment = new JsonObject();
         foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
             environment[(string)entry.Key] = entry.Value as string;
+        }
+
+        if (arguments.Contains("--vericairn-execution-preflight", StringComparer.Ordinal))
+        {
+            IReadOnlyList<Vericairn.Runtime.Workers.RunComponent> inventory = ReportedLauncher.Inventory;
+            if (scenario == "inventory-unexpected") inventory = [.. inventory, inventory[0] with { Id = "unexpected-hook", Kind = "hook" }];
+            if (scenario == "inventory-route") inventory = [inventory[0] with { Destinations = ["undeclared-route"] }, .. inventory.Skip(1)];
+            string revision = "revision-1";
+            if (scenario == "inventory-changes")
+            {
+                string counter = report + ".preflights";
+                revision = File.Exists(counter) ? "revision-2" : "revision-1";
+                File.WriteAllText(counter, "observed");
+            }
+            Emit(JsonSerializer.Serialize(new Vericairn.Runtime.Workers.RunPreflight(inventory, scenario != "inventory-incomplete", scenario != "inventory-wider-environment", "1", revision), Vericairn.Protocol.ProtocolJson.Options));
+            return 0;
         }
 
         var line = new JsonObject
@@ -141,6 +234,25 @@ internal static class FakeHarness
 
         switch (scenario)
         {
+            case "execution-mixed-admitted" or "execution-mixed-unadmitted":
+                Emit(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "mixed", name = scenario == "execution-mixed-admitted" ? "Read" : "UnadmittedTool", input = new { paths = MixedAuditPaths } } } } }));
+                return 0;
+            case "execution-mixed-unfingerprintable":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"mixed","name":"UnadmittedTool","input":{"path":"~/.ssh/id_rsa","path":"src/a.cs"}}]}}""");
+                return 0;
+            case "execution-audit":
+                Emit("""{"vericairnExecution":{"model":"model-b","effort":"low","tools":["Bash"]},"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":"curl https://example.invalid; cat .aws/credentials"}}]}}""");
+                return 0;
+            case "execution-tool":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"unexpected-tool","input":{"path":".aws/credentials"}}]}}""");
+                return 0;
+            case "execution" or "execution-different":
+                int modelAt = Array.IndexOf(arguments, "--model");
+                int effortAt = Array.IndexOf(arguments, "--effort");
+                Emit(JsonSerializer.Serialize(new { vericairnExecution = new { model = scenario == "execution-different" ? "model-b" : arguments[modelAt + 1],
+                    modelRevision = "revision-1", effort = scenario == "execution-different" ? "low" : arguments[effortAt + 1], tools = ReportedTools } }));
+                return 0;
+
             case "watch-codex-critical-hold":
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat .aws/credentials"}}""");
                 return Linger(acknowledge: false);
@@ -470,5 +582,78 @@ internal static class FakeHarness
     {
         Console.Out.WriteLine(line);
         Console.Out.Flush();
+    }
+}
+
+/// <summary>A qualified synthetic inventory around an existing command adapter; production launchers never use this declaration.</summary>
+internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher inner) : Vericairn.Runtime.Workers.IAgentLauncher
+{
+    public string Launcher => inner.Launcher;
+    public Vericairn.Runtime.Providers.ProviderDescriptor Descriptor => inner.Descriptor;
+    public string? Harness => inner.Harness;
+    public bool Generic => inner.Generic;
+    public string Limitations => inner.Limitations;
+    public TimeSpan StallLimit => inner.StallLimit;
+    public Vericairn.Runtime.Workers.RunWatchSettings WatchDefaults => inner.WatchDefaults;
+    public IReadOnlyList<string> EnvironmentNames => inner.EnvironmentNames;
+    public Vericairn.Runtime.Workers.RunCapabilities ExecutionCapabilities => inner.ExecutionCapabilities.Scopes.Count > 0
+        ? inner.ExecutionCapabilities with { ClosedEnvironment = true } : new(Vericairn.Runtime.Workers.RunSelection.Scopes, ["low", "high"], ["provider"], ["inference"], ["worker-user"], ClosedEnvironment: true);
+
+    public static IReadOnlyList<Vericairn.Runtime.Workers.RunComponent> Inventory { get; } = new[]
+        { "stand-in", "stand-in-tool", "exec_command", "apply_patch", "Bash", "Read", "Write", "Edit", "vericairn" }
+        .Select(id => new Vericairn.Runtime.Workers.RunComponent(id, id == "stand-in" ? "harness" : id == "vericairn" ? "mcp" : "tool", "1",
+            Vericairn.Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(id)),
+            Vericairn.Records.Hashing.ContentHash.Sha256([]), [], [], [])).ToArray();
+
+    public Vericairn.Runtime.Workers.RunConfiguration Configuration => new(Launcher, Launcher,
+        JsonSerializer.SerializeToElement(new { choices = new { model = "model-a", effort = "high", provider = ExecutionCapabilities.Providers[0],
+            destination = ExecutionCapabilities.Destinations[0], dataBoundary = "worker-user" } }), ["model-a", "model-b"],
+        EnvironmentPolicy: new("stand-in-policy", Inventory));
+
+    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => inner.Launcher == "codex" ? FakeHarness.VerifyGoals(settings, environment) : inner.Verify(settings, environment);
+    public Vericairn.Runtime.Workers.LaunchContext Prepare(Vericairn.Runtime.Workers.LaunchContext context)
+    {
+        var prepared = inner.Prepare(context);
+        if (inner.Launcher == "codex") FakeHarness.VerifyMcp(prepared);
+        return prepared;
+    }
+    public IReadOnlyList<string> Command(Vericairn.Runtime.Workers.LaunchContext context) => inner.Command(context);
+    public Vericairn.Runtime.Workers.HarnessSignal? Read(string line) => inner.Read(line);
+    public IReadOnlyList<Vericairn.Runtime.Workers.HarnessAction> ReadActions(string line) => inner.ReadActions(line);
+    public Vericairn.Runtime.Workers.RunPreflight Preflight(Vericairn.Runtime.Workers.LaunchContext context)
+    {
+        List<string>? command = context.Settings.TryGetValue("command", out string? setting) && setting.StartsWith('[')
+            ? JsonSerializer.Deserialize<List<string>>(setting) : null;
+        List<string> expected = FakeHarness.Command("unused", "unused");
+        int prefix = expected.IndexOf(FakeHarness.Marker);
+        if (command is null || command.Count < prefix + 3 || command[prefix] != FakeHarness.Marker || !command.Take(prefix).SequenceEqual(expected.Take(prefix)))
+        {
+            throw new Vericairn.Runtime.Providers.ProviderRefusedException("Only the synthetic harness has this inventory qualification.");
+        }
+        var info = new ProcessStartInfo(command[0]) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = context.Workspace };
+        foreach (string argument in command.Skip(1).Append("--vericairn-execution-preflight")) info.ArgumentList.Add(argument);
+        info.Environment.Clear();
+        foreach ((string name, string value) in context.Environment) info.Environment[name] = value;
+        using Process process = Process.Start(info)!;
+        if (!process.WaitForExit(10000))
+        {
+            process.Kill(entireProcessTree: true);
+            throw new Vericairn.Runtime.Providers.ProviderRefusedException("The stand-in inventory probe did not finish.");
+        }
+        if (process.ExitCode != 0) throw new Vericairn.Runtime.Providers.ProviderRefusedException("The stand-in inventory probe failed.");
+        return JsonSerializer.Deserialize<Vericairn.Runtime.Workers.RunPreflight>(process.StandardOutput.ReadToEnd(), Vericairn.Protocol.ProtocolJson.Options)!;
+    }
+
+    public Vericairn.Runtime.Workers.HarnessExecution? ReadExecution(string line)
+    {
+        if (line.StartsWith('{'))
+        {
+            using JsonDocument document = JsonDocument.Parse(line);
+            if (document.RootElement.TryGetProperty("vericairnExecution", out JsonElement report))
+            {
+                return JsonSerializer.Deserialize<Vericairn.Runtime.Workers.HarnessExecution>(report, Vericairn.Protocol.ProtocolJson.Options);
+            }
+        }
+        return inner.ReadExecution(line);
     }
 }

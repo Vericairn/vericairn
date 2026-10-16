@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
+using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -9,16 +10,48 @@ using Vericairn.Records.Model;
 namespace Vericairn.Runtime.Workers;
 
 /// <summary>Bounded rate samples and repeated invocation fingerprints, driven only by worker-observed events and monotonic time.</summary>
-internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decimal? historyRate)
+internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decimal? historyRate, JsonElement? selection = null)
 {
     private readonly Queue<string> recent = new();
     private readonly Dictionary<string, int> repeats = new(StringComparer.Ordinal);
     private readonly Queue<(TimeSpan At, long Tokens)> samples = new([(TimeSpan.Zero, 0)]);
     private long lastTokens;
+    private readonly RunExecutionObservation? execution = selection is JsonElement admitted ? new RunExecutionObservation(admitted) : null;
+    private readonly RunToolInventory? tools = selection is JsonElement snapshot && snapshot.TryGetProperty("environment", out _)
+        ? new(snapshot) : null;
+
+    public JsonElement? ExecutionObserved => execution is null ? null : JsonSerializer.SerializeToElement(execution.Snapshot());
+
+    public IReadOnlyList<RunSignal> Reported(HarnessExecution report)
+    {
+        if (execution is null) return [];
+        execution.Add(report);
+        JsonElement facts = ExecutionObserved!.Value;
+        var observations = new List<RunSignal>();
+        if (facts.GetProperty("discrepancies").GetArrayLength() > 0)
+        {
+            observations.Add(new RunSignal("execution", "critical", Now(), "The harness reported execution or inventory facts that differ from the admitted intent; a change requires a newly admitted run."));
+        }
+        if (facts.GetProperty("unknown").EnumerateArray().Any(f => f.GetString() == "complete-report"))
+        {
+            observations.Add(new RunSignal("audit-unverified", "warning", Now(), "The harness execution report was incomplete, unsafe or exceeded the observation bound; unknown facts remain explicit."));
+        }
+        return observations;
+    }
 
     public IReadOnlyList<RunSignal> Action(HarnessAction action)
     {
-        string fingerprint = CommandAudit.Fingerprint(action);
+        string? fingerprint = CommandAudit.TryFingerprint(action);
+        var observations = new List<RunSignal>();
+        if (tools is not null && !tools.Contains(action.Tool))
+        {
+            observations.Add(new RunSignal("tool-inventory", "critical", Now(), "The worker observed an invocation of a tool outside the intent's admitted inventory.", fingerprint));
+        }
+        if (fingerprint is null)
+        {
+            observations.Add(new RunSignal("audit-unverified", "warning", Now(), "The worker could not fingerprint an invocation; inventory and completed command checks still apply, but repetition is unverified."));
+            return observations;
+        }
         recent.Enqueue(fingerprint);
         repeats[fingerprint] = repeats.GetValueOrDefault(fingerprint) + 1;
         if (recent.Count > settings.LoopWindow)
@@ -33,11 +66,12 @@ internal sealed class RunWatch(RunWatchSettings settings, long? tokenCap, decima
         int count = repeats[fingerprint];
         if (count < settings.LoopWarning)
         {
-            return [];
+            return observations;
         }
 
-        return [new RunSignal("loop", count >= settings.LoopStop ? "critical" : "warning", Now(),
-            $"The worker observed the same tool and canonical input {count.ToString(CultureInfo.InvariantCulture)} times among the last {settings.LoopWindow.ToString(CultureInfo.InvariantCulture)} invocations.", fingerprint, count)];
+        observations.Add(new RunSignal("loop", count >= settings.LoopStop ? "critical" : "warning", Now(),
+            $"The worker observed the same tool and canonical input {count.ToString(CultureInfo.InvariantCulture)} times among the last {settings.LoopWindow.ToString(CultureInfo.InvariantCulture)} invocations.", fingerprint, count));
+        return observations;
     }
 
     public IReadOnlyList<RunSignal> Usage(long? tokens, TimeSpan elapsed)

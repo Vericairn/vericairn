@@ -80,6 +80,12 @@ public class GoalStepTests
         Assert.Contains("## Context package", exported, StringComparison.Ordinal);
         Assert.Contains(assigned.ComputedHash, exported, StringComparison.Ordinal);
         Assert.Contains("## Assignment " + assigned.Id, exported, StringComparison.Ordinal);
+        var custody = new Workers.RunDirectory(run.Service.Session.Manifest.Estate, second.Run.Run);
+        using JsonDocument retained = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+        string package = retained.RootElement.GetProperty("context").GetProperty("hash").GetString()!;
+        Assert.Equal(package, AgentRuns.Find(run.Estate.Load(), second.Run.Run)!.Intent.Body.GetProperty("execution").GetProperty("contextPackage").GetString());
+        Assert.Contains(package, exported, StringComparison.Ordinal);
+        Assert.Empty(run.Service.Objects());
         Assert.Equal(builder, EstateModel.BodyString(assigned, "contributor"));
         Assert.StartsWith("Routed by roster (builder, from the estate's roster): the first available of the builder role's principals", EstateModel.BodyString(assigned, "note"), StringComparison.Ordinal);
         JsonElement brief = assigned.Body.GetProperty("brief");
@@ -249,7 +255,8 @@ public class GoalStepTests
         // A harness that cannot start once the intent is recorded: W-3's assignment and its run's intent were recorded together, and the
         // run is recorded as the known failure it is, which spent nothing.
         Order(run, "W-3", string.Empty);
-        GoalStepResponse failed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(run.Scratch, "no-such-harness") }));
+        HookedLauncher.Install(run, command: () => throw new Vericairn.Runtime.Providers.ProviderRefusedException("The synthetic executable disappeared after preflight."));
+        GoalStepResponse failed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "not-started")));
         Assert.False(failed.Ok);
         Assert.Equal(("none", "W-3"), (failed.Outcome, failed.Step));
         Assert.StartsWith($"Routing assigned W-3 to its agent (assignment {failed.Assignment!.Id}), recorded with the run's intent.", failed.Message, StringComparison.Ordinal);

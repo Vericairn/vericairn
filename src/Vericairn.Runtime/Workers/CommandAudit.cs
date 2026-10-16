@@ -29,6 +29,19 @@ public static partial class CommandAudit
         return ContentHash.Sha256(Encoding.UTF8.GetBytes(action.Tool + "\n" + CanonicalJson.Serialize(action.Input)));
     }
 
+    /// <summary>An uncanonicalizable input cannot support deduplication, but its other checks still apply.</summary>
+    internal static string? TryFingerprint(HarnessAction action)
+    {
+        try
+        {
+            return Fingerprint(action);
+        }
+        catch (Exception exception) when (CheckFailure(exception))
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Flags recognizable network, credential and out-of-brief path attempts without retaining their arguments.
     /// A failed check adds an audit-unverified warning without discarding the action's completed verdicts.
@@ -179,13 +192,15 @@ public static partial class CommandAudit
             check();
             return true;
         }
-        catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException
-            or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or TimeoutException)
+        catch (Exception exception) when (CheckFailure(exception))
         {
             codes.Add("audit-unverified");
             return false;
         }
     }
+
+    private static bool CheckFailure(Exception exception) => exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException
+        or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or TimeoutException;
 
     private static void GatherPaths(JsonElement value, List<string> paths)
     {

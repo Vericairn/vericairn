@@ -231,7 +231,7 @@ public class LauncherTests
     {
         var launcher = new ClaudeCodeLauncher();
         LaunchContext context = Context(NoSettings);
-        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], launcher.Command(context));
+        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"hooks\":{},\"enabledPlugins\":{}}", "--tools", "Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation", "--model", "model-a", "--effort", "high"], launcher.Command(context));
         Assert.Equal(["/opt/claude/bin/claude", "--debug", "-p"], launcher.Command(Context(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = """["/opt/claude/bin/claude","--debug"]""" })).Take(3));
         Assert.Null(launcher.Verify(NoSettings, NoSettings));
         Assert.Contains("JSON array of one or more non-empty strings", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = "[]" }, NoSettings), StringComparison.Ordinal);
@@ -259,26 +259,15 @@ public class LauncherTests
     }
 
     [Fact]
-    public void CodexIsVerifiedToHaveItsGoalsFeatureEnabledOrRefusedWithTheReason()
+    public void CodexDefersFeatureProbesUntilItsRunHomeIsPrepared()
     {
-        string scratch = Path.Combine(Path.GetTempPath(), "vericairn-codex-" + Ulid.NewUlid().Value);
-        Directory.CreateDirectory(scratch);
-        try
-        {
-            var launcher = new CodexLauncher();
-            Dictionary<string, string> environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), launcher.EnvironmentNames);
-            string? Verify(string scenario) => launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, Path.Combine(scratch, scenario + ".jsonl")) }, environment);
-            Assert.Null(Verify("codex"));
-            Assert.Equal("Codex's goals feature is not enabled here (codex features list shows goals false); enable it with codex features enable goals, then start the run again.", Verify("codex-goals-off"));
-            Assert.StartsWith("Codex lists no goals feature in codex features list", Verify("codex-no-goals"), StringComparison.Ordinal);
-            Assert.Equal("Codex's goals feature could not be verified: codex features list exited 2: error: unrecognized subcommand 'features'", Verify("codex-broken"));
-            Assert.StartsWith("Codex's goals feature could not be verified: ", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(scratch, "no-such-codex") }, environment), StringComparison.Ordinal);
-            Assert.Equal(["features", "list"], FakeHarness.Reports(Path.Combine(scratch, "codex.jsonl"))[0]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
-        }
-        finally
-        {
-            Directory.Delete(scratch, recursive: true);
-        }
+        using var fixture = new NativeProbe("codex");
+        var launcher = new CodexLauncher();
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(fixture.Root, "not-yet-probed") };
+        Assert.Null(launcher.Verify(settings, fixture.Context.Environment));
+        settings["command"] = "[]";
+        Assert.Contains("JSON array", launcher.Verify(settings, fixture.Context.Environment), StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.Report));
     }
 
     [Fact]
@@ -386,5 +375,5 @@ public class LauncherTests
     }
 
     private static LaunchContext Context(IReadOnlyDictionary<string, string> settings) =>
-        new("/work/widget", "Is it done? Checks: it builds.", "/work/widget/.vericairn/brief.md", "/runs/r/mcp.json", ["vericairn", "--estate", "/estate", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], new Dictionary<string, string>(StringComparer.Ordinal), settings, new Dictionary<string, string>(StringComparer.Ordinal));
+        new("/work/widget", "Is it done? Checks: it builds.", "/work/widget/.vericairn/brief.md", "/runs/r/mcp.json", ["vericairn", "--estate", "/estate", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], new Dictionary<string, string>(StringComparer.Ordinal), settings, new Dictionary<string, string>(StringComparer.Ordinal), Execution: RunEstate.Json("""{"requested":{"model":"model-a","effort":"high"}}"""));
 }

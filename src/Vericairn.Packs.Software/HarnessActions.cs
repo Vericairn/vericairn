@@ -72,7 +72,9 @@ internal static class HarnessActions
             }
         }
 
-        return [new HarnessAction(id, kind, JsonSerializer.SerializeToElement(input))];
+        // Codex's JSON lifecycle names are event categories; admission names the native tools.
+        string tool = kind switch { "command_execution" => "exec_command", "file_change" => "apply_patch", _ => kind };
+        return [new HarnessAction(id, tool, JsonSerializer.SerializeToElement(input))];
     }
 
     private static string Required(JsonElement value, string field) => Text(value, field) ?? throw new JsonException("An invocation has no identity or tool name.");

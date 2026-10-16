@@ -27,6 +27,23 @@ public class RunApiTests
     }
 
     [Fact]
+    public void OpenApiDescribesTheAdditiveExecutionContract()
+    {
+        using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
+        JsonElement schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+        foreach (string request in new[] { "RunStartRequest", "GoalStepRequest" })
+        {
+            JsonElement properties = schemas.GetProperty(request).GetProperty("properties");
+            foreach (string name in new[] { "configuration", "execution", "allocation", "contextPackage" })
+            {
+                Assert.True(properties.TryGetProperty(name, out _), request + "." + name);
+            }
+        }
+        Assert.True(schemas.GetProperty("ProviderRow").GetProperty("properties").TryGetProperty("execution", out _));
+        Assert.True(schemas.GetProperty("RunRow").GetProperty("properties").TryGetProperty("executionObserved", out _));
+    }
+
+    [Fact]
     public async Task ADaemonRunsTheWorkerAndTheApiListsLaunchersRunsAndStops()
     {
         using var estate = new TestEstate(recordFormat: 2);
@@ -34,7 +51,7 @@ public class RunApiTests
         Directory.CreateDirectory(scratch);
         await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         var registry = new ProviderRegistry();
-        registry.Register(new StandInLauncher());
+        registry.Register(new ReportedLauncher(new StandInLauncher()));
         registry.Register(new DirectoryWorkspaces());
         host.Service.Providers = registry;
         host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };

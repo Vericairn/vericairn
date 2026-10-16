@@ -13,9 +13,14 @@ namespace Vericairn.Runtime.Tests;
 /// recorded, its answer, when it gives one, being the launcher's refusal; and when the worker asks it for the command, after the
 /// intent is recorded and before the launch.
 /// </summary>
-internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null) : IAgentLauncher
+internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Action<LaunchContext>? prepared = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null) : IAgentLauncher
 {
     public string Launcher => inner.Launcher;
+
+    public RunCapabilities ExecutionCapabilities => inner.ExecutionCapabilities;
+    public RunConfiguration? Configuration => inner.Configuration;
+    public RunPreflight Preflight(LaunchContext context) => inner.Preflight(context);
+    public HarnessExecution? ReadExecution(string line) => inner.ReadExecution(line);
 
     public ProviderDescriptor Descriptor => inner.Descriptor;
 
@@ -35,9 +40,9 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public static void Install(RunEstate run, Func<string?>? verify = null, Action? command = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null)
     {
         var registry = new ProviderRegistry();
-        registry.Register(new HookedLauncher(new ClaudeCodeLauncher(), verify, command, readActions));
-        registry.Register(new CodexLauncher());
-        registry.Register(new GenericLauncher());
+        registry.Register(new HookedLauncher(new ReportedLauncher(new ClaudeCodeLauncher()), verify, command, readActions: readActions));
+        registry.Register(new ReportedLauncher(new CodexLauncher()));
+        registry.Register(new ReportedLauncher(new GenericLauncher()));
         registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         run.Service.Providers = registry;
     }
@@ -50,7 +55,12 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
         return inner.Command(context);
     }
 
-    public LaunchContext Prepare(LaunchContext context) => inner.Prepare(context);
+    public LaunchContext Prepare(LaunchContext context)
+    {
+        LaunchContext result = inner.Prepare(context);
+        prepared?.Invoke(result);
+        return result;
+    }
 
     public HarnessSignal? Read(string line) => inner.Read(line);
 

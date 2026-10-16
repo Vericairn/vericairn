@@ -27,6 +27,7 @@ public sealed class RosterType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
+        new("execution", "object", false, "Explicit execution choices and cumulative restrictions; launcher, roster, goal, assignment, then run precedence. Role restrictions remain binding.", 2),
         new("roles", "object[]", true, "Each role (a lower-case name such as builder or decider), its principals (ulid[]) in order of preference, and an optional note; the decider role is held by operators.", 2),
         new("limits", "object", false, "stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds), inherited by goals using this roster. Goal fields override these; omitted fields keep the launcher defaults.", 2),
     ];
@@ -38,6 +39,7 @@ public sealed class RosterType : IRecordType
         BodyReader body = context.Body;
         IReadOnlyList<BodyReader>? roles = body.NestedArray("roles", true, allowEmpty: false);
         BodyReader? limits = body.Nested("limits", false);
+        ExecutionPolicy.Read(body);
         body.NoOtherKeys();
         if (limits is not null)
         {
@@ -77,6 +79,7 @@ public sealed class RosterType : IRecordType
             string? name = role.Text("role", true, 60, Patterns.Slug, "a lower-case role name such as builder");
             IReadOnlyList<string>? principals = role.StringArray("principals", true, allowEmpty: false, maxItemLength: Identity.Ulid.Length);
             role.Text("note", false, 2000);
+            ExecutionPolicy.Read(role);
             role.NoOtherKeys();
             if (name is not null && !seen.Add(name))
             {
