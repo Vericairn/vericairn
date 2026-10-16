@@ -279,6 +279,20 @@ public static class WorkView
                 foreach (RecordEnvelope review in model.About(result.Id, "review").Where(model.IsCurrent).OrderBy(r => r.Id, StringComparer.Ordinal))
                 {
                     text.Append("        review ").Append(review.Id).Append(" (").Append(EstateModel.BodyString(review, "independence")).Append(", ").Append(EstateModel.BodyString(review, "outcome")).Append(") by ").Append(PrincipalName(model, review.By)).Append('\n');
+                    text.Append("          ").Append(EstateModel.BodyString(review, "summary")).Append('\n');
+                    if (review.Body.TryGetProperty("findings", out JsonElement findings) && findings.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (JsonElement finding in findings.EnumerateArray())
+                        {
+                            text.Append("          ").Append(Field(finding, "severity") ?? "unknown").Append(": ").Append(Field(finding, "summary"));
+                            if (Field(finding, "location") is string location)
+                            {
+                                text.Append(" (").Append(location).Append(')');
+                            }
+
+                            text.Append('\n');
+                        }
+                    }
                 }
 
                 foreach (RecordEnvelope acceptance in model.About(result.Id, "acceptance").Where(model.IsCurrent).OrderBy(a => a.Id, StringComparer.Ordinal))
@@ -373,7 +387,11 @@ public static class WorkView
         {
             foreach (JsonElement check in checks.EnumerateArray())
             {
-                text.Append(indent).Append("check ").Append(check.TryGetProperty("name", out JsonElement name) ? name.GetString() : "?").Append(": ").Append(check.TryGetProperty("outcome", out JsonElement outcome) ? outcome.GetString() : "?").Append('\n');
+                text.Append(indent).Append("check ").Append(Field(check, "name") ?? "?").Append(": ").Append(Field(check, "outcome") ?? "?").Append('\n');
+                if (Field(check, "summary") is string summary)
+                {
+                    text.Append(indent).Append("  ").Append(summary).Append('\n');
+                }
             }
         }
 
@@ -407,6 +425,9 @@ public static class WorkView
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToList()
             : [];
+
+    private static string? Field(JsonElement element, string name) =>
+        element.ValueKind == JsonValueKind.Object && element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     private static void AppendList(StringBuilder text, string heading, List<string> items)
     {

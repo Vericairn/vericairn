@@ -533,7 +533,7 @@ public sealed class ResultInboxDocument(IReadOnlyList<InboxRow> rows) : Document
 }
 
 /// <summary>An existing review of the subject, selectable as the basis of an acceptance.</summary>
-public sealed class ReviewRow(string id, string by, string independence, string outcome, string summary) : Observable
+public sealed class ReviewRow(string id, string by, string independence, string outcome, string summary, JsonElement findings = default) : Observable
 {
     private bool selected;
 
@@ -546,8 +546,28 @@ public sealed class ReviewRow(string id, string by, string independence, string 
     /// <summary>Display.</summary>
     public string Display => $"{Id[..Math.Min(12, Id.Length)]} {independence} {outcome}: {summary}";
 
+    /// <summary>Every recorded finding, with its severity and location, independent of presentation depth.</summary>
+    public string Findings { get; } = DescribeFindings(findings);
+
     /// <summary>Whether the acceptance cites it.</summary>
     public bool Selected { get => selected; set => Set(ref selected, value); }
+
+    private static string DescribeFindings(JsonElement findings)
+    {
+        if (findings.ValueKind != JsonValueKind.Array)
+        {
+            return "Review findings unavailable; inspect the original record.";
+        }
+
+        if (findings.GetArrayLength() == 0)
+        {
+            return "No findings recorded.";
+        }
+
+        static string Field(JsonElement finding, string name) => finding.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString()! : string.Empty;
+        return string.Join('\n', findings.EnumerateArray().Select(f =>
+            Field(f, "severity") + ": " + Field(f, "summary") + (Field(f, "location") is { Length: > 0 } location ? " (" + location + ")" : string.Empty)));
+    }
 }
 
 /// <summary>
@@ -708,7 +728,7 @@ public sealed class ReviewWorkspace : Document
                 PreparedState = PreparedAction.Label(Presentation.PreparedState.Reusable);
                 if (type == "review")
                 {
-                    Reviews.Add(new ReviewRow(outcome.Written.Id, ActingPrincipal, Independence, ReviewOutcome, ReviewSummary.Trim()));
+                    Reviews.Add(new ReviewRow(outcome.Written.Id, ActingPrincipal, Independence, ReviewOutcome, ReviewSummary.Trim(), document.RootElement.GetProperty("findings")));
                 }
             }
             else

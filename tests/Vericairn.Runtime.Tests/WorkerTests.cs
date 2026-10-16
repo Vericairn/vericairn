@@ -775,6 +775,8 @@ public class WorkerTests
         Assert.Equal(given["environment"]!["VERICAIRN_MCP_CONFIG"]!.GetValue<string>(), arguments[5]);
 
         // Unknown usage is never zero: the whole token cap was charged, so the goal is budget-limited and no further run starts.
+        // The goal-status record follows the run's settlement in a separate write.
+        WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
         Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
         LedgerRow ledger = Assert.Single(run.Service.Runs().Goals);
         Assert.Equal(0, Assert.Single(ledger.Units, u => u.Unit == "tokens").Remaining);
@@ -947,6 +949,8 @@ public class WorkerTests
         Assert.NotNull(row.Stop.AcknowledgedAt);
         Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
         Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());
+        // The goal-status record follows the run's settlement in a separate write.
+        WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
         Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
     }
 
