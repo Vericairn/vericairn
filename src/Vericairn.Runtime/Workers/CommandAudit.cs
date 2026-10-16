@@ -50,6 +50,15 @@ public static partial class CommandAudit
                 codes.Add("network");
             }
 
+            foreach (string field in new[] { "url", "uri" })
+            {
+                if (action.Input.TryGetProperty(field, out JsonElement url) && url.ValueKind == JsonValueKind.String
+                    && Uri.TryCreate(url.GetString(), UriKind.Absolute, out Uri? address) && address.Scheme is "http" or "https" or "ftp" or "sftp" or "ssh" or "ws" or "wss")
+                {
+                    codes.Add("network");
+                }
+            }
+
             foreach (string field in new[] { "command", "cmd" })
             {
                 if (action.Input.TryGetProperty(field, out JsonElement command) && command.ValueKind == JsonValueKind.String)
@@ -168,21 +177,30 @@ public static partial class CommandAudit
             return;
         }
 
-        string[] tokens = ShellWords().Matches(command).Select(m => m.Value.Trim('"', '\'')).ToArray();
+        string[] words = ShellWords().Matches(command).Select(m => m.Value).ToArray();
+        string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
         bool first = true;
         bool redirect = false;
+        string? wrapper = null;
         string executable = "";
         int operand = 0;
         for (int i = 0; i < tokens.Length; i++)
         {
             string token = tokens[i];
-            if (token is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n")
+            bool quoted = words[i].StartsWith('"') || words[i].StartsWith('\'');
+            if (!words[i].StartsWith('\'') && SecretEnvironment().IsMatch(words[i]))
+            {
+                codes.Add("credentials");
+            }
+
+            if (!quoted && token is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n")
             {
                 first = true;
+                wrapper = null;
                 continue;
             }
 
-            if (token.Contains('>', StringComparison.Ordinal) || token == "<")
+            if (!quoted && (token.Contains('>', StringComparison.Ordinal) || token == "<"))
             {
                 redirect = true;
                 continue;
@@ -197,8 +215,27 @@ public static partial class CommandAudit
 
             if (first)
             {
+                if (wrapper is not null && token.StartsWith('-'))
+                {
+                    if (token is "-u" or "--user" or "-g" or "--group" or "--unset" or "-C" or "--chdir" && i + 1 < tokens.Length)
+                    {
+                        string argument = tokens[++i];
+                        if (token is "-C" or "--chdir")
+                        {
+                            paths.Add(argument);
+                        }
+                    }
+
+                    continue;
+                }
+
                 if (token.Contains('=', StringComparison.Ordinal) || token is "sudo" or "env" or "command" or "exec")
                 {
+                    if (token is "sudo" or "env" or "command" or "exec")
+                    {
+                        wrapper = token;
+                    }
+
                     if (token == "env" && i == tokens.Length - 1)
                     {
                         codes.Add("credentials");
@@ -281,6 +318,9 @@ public static partial class CommandAudit
 
     [GeneratedRegex(@"(?:^|/)(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.docker|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.env(?:\.[^/]*)?|\.credentials(?:\.json)?|auth\.json|credentials(?:\.json)?|id_rsa|id_ed25519|Keychains|keyrings|Credentials)(?:/|$)|(?:^|/)\.config/(?:gcloud|gh)(?:/|$)|(?:^|/)run/secrets(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
     private static partial Regex SecretPath();
+
+    [GeneratedRegex(@"(?<!\\)\$(?:\{)?(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|GH_TOKEN|AZURE_CLIENT_SECRET)(?:\}|\b)", RegexOptions.CultureInvariant, 100)]
+    private static partial Regex SecretEnvironment();
 
     [GeneratedRegex(@"(?:requests|httpx)\.(?:get|post|put|delete|request)\s*\(|socket\.(?:socket|create_connection)\s*\(|urllib\.request\.urlopen\s*\(|\bfetch\s*\(", RegexOptions.CultureInvariant, 100)]
     private static partial Regex NetworkCode();

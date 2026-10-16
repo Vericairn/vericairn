@@ -15,10 +15,13 @@ public class CommandAuditTests
     [InlineData("git push origin work", "network")]
     [InlineData("echo ready\ncurl https://example.invalid", "network")]
     [InlineData("bash -lc 'wget https://example.invalid'", "network")]
+    [InlineData("env -i curl https://example.invalid", "network")]
+    [InlineData("sudo -u worker curl https://example.invalid", "network")]
     [InlineData("python3 -c \"import requests; requests.get('https://example.invalid')\"", "network")]
     [InlineData("cat ~/.ssh/id_ed25519", "credentials")]
     [InlineData("security find-generic-password -w", "credentials")]
     [InlineData("printenv", "credentials")]
+    [InlineData("printf '%s' \"$AWS_SECRET_ACCESS_KEY\"", "credentials")]
     [InlineData("cat .env", "credentials")]
     [InlineData("cat ../outside.txt", "scope")]
     [InlineData("cp src/a.cs docs/outside.cs", "scope")]
@@ -36,6 +39,10 @@ public class CommandAuditTests
     [Theory]
     [InlineData("cat src/widget.cs")]
     [InlineData("echo 'curl https://example.invalid'")]
+    [InlineData("echo 'this > is text' plain")]
+    [InlineData("echo '$AWS_SECRET_ACCESS_KEY'")]
+    [InlineData("echo '&&' curl")]
+    [InlineData("printf '%s' \"\\$AWS_SECRET_ACCESS_KEY\"")]
     [InlineData("dotnet test --no-restore")]
     [InlineData("cat .vericairn/brief.md")]
     public void HarmlessCommandsAndPermittedPathsDoNotInventAttempts(string command) =>
@@ -49,6 +56,7 @@ public class CommandAuditTests
         Assert.Empty(CommandAudit.Inspect(Action("Read", new { file_path = ".vericairn/brief.md" }), Workspace(), ["src/"]));
         Assert.Empty(CommandAudit.Inspect(Action("command_execution", new { cwd = Workspace(), command = "cat src/a.cs" }), Workspace(), ["src/"]));
         Assert.Contains(CommandAudit.Inspect(Action("WebSearch", new { query = "widget" }), Workspace(), ["src/"]), s => s.Code == "network");
+        Assert.Contains(CommandAudit.Inspect(Action("mcp__browser__navigate", new { url = "https://example.invalid" }), Workspace(), ["src/"]), s => s.Code == "network");
         Assert.Equal(CommandAudit.Fingerprint(Action("Edit", new { file_path = "src/a.cs", old_string = "a" })),
             CommandAudit.Fingerprint(Action("Edit", new { old_string = "a", file_path = "src/a.cs" })));
         Assert.NotEqual(CommandAudit.Fingerprint(Action("Read", new { file_path = "src/a.cs" })), CommandAudit.Fingerprint(Action("Read", new { file_path = "src/b.cs" })));

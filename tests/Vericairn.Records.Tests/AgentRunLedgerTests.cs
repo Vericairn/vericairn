@@ -146,6 +146,8 @@ public class AgentRunLedgerTests
     [InlineData("scope", null)]
     [InlineData("observed", "{\"summary\":\"A different outcome.\",\"at\":\"2026-10-13T12:00:40Z\"}")]
     [InlineData("liveness", "{\"stallSeconds\":60,\"lastEventAt\":\"2026-10-13T12:00:39Z\"}")]
+    [InlineData("signals", "[]")]
+    [InlineData("signals", null)]
     [InlineData("evidence", "[]")]
     public void ASettledRevisionCannotRewriteItsRecordedFacts(string field, string? replacement)
     {
@@ -155,6 +157,7 @@ public class AgentRunLedgerTests
         var body = System.Text.Json.Nodes.JsonNode.Parse(settled.Body.GetRawText())!.AsObject();
         body["scope"] = System.Text.Json.Nodes.JsonNode.Parse("""{"changed":1,"outsideCount":1,"outside":["outside.txt"]}""");
         body["liveness"] = System.Text.Json.Nodes.JsonNode.Parse("""{"stallSeconds":60,"lastEventAt":"2026-10-13T12:00:20Z"}""");
+        body["signals"] = System.Text.Json.Nodes.JsonNode.Parse("""[{"code":"network","severity":"warning","at":"2026-10-13T12:00:20Z","summary":"A network attempt was observed."}]""");
         body["evidence"]!.AsArray().Add(System.Text.Json.Nodes.JsonNode.Parse("""{"summary":"The process exited."}"""));
         RecordEnvelope prior = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: settled.Id);
         Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
@@ -198,6 +201,33 @@ public class AgentRunLedgerTests
         body[field] = System.Text.Json.Nodes.JsonNode.Parse(json);
         RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
         Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == changed.ExpectedPath && f.Code == code);
+    }
+
+    [Theory]
+    [InlineData("duplicate")]
+    [InlineData("foreign-attention")]
+    public void ARunCannotDuplicateSignalsOrBorrowAnotherRunsAttention(string problem)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("observed", Small, Usage);
+        RecordEnvelope other = ledger.Intent("other", Small);
+        RecordEnvelope ask = ledger.Estate.Add("ask", ledger.Estate.OperatorId,
+            $$"""{"to":"{{ledger.Estate.OperatorId}}","question":"Inspect the run?","recommendation":"Read its observation.","consequence":"The observation waits for review.","state":"open"}""", other.Reference);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        var signal = System.Text.Json.Nodes.JsonNode.Parse("""{"code":"network","severity":"warning","at":"2026-10-13T12:00:20Z","summary":"A network attempt was observed."}""")!;
+        var signals = new System.Text.Json.Nodes.JsonArray(signal);
+        if (problem == "duplicate")
+        {
+            signals.Add(signal.DeepClone());
+        }
+        else
+        {
+            signal["attention"] = ask.Id;
+        }
+
+        body["signals"] = signals;
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.signals" && f.Location == changed.ExpectedPath);
     }
 
     [Fact]
