@@ -63,7 +63,7 @@ of the line-feed-joined string `vericairn-request/1`, the upper-case method, the
 exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body (empty for no body). A JSON body
 is UTF-8: one whose `Content-Type` names another charset is refused, and so is one that begins with a byte order
 mark; any other body is taken as the bytes it is. The daemon accepts a signature only from a device that is
-current and admitted now in the estate it serves, within five minutes of its own clock when the request starts and
+current and admitted now in the estate it serves, no more than five minutes old by its own clock when the request starts and
 still when its body is in, and once: authentication reads the body only until the signature is five minutes old,
 and a request whose body has not arrived by then is refused. It remembers each device's accepted signatures until five minutes
 after their signing time, when they would be refused as stale anyway, refuses a signature already stale, and
@@ -71,9 +71,23 @@ forgets none sooner: a device with 10,000 in that window is refused until older 
 device or another, and no body held back, makes room for a replay. It remembers a signature by its 64 bytes with
 `s` replaced by the smaller of `s` and `n - s`, `n` being the order of the P-256 group, so neither another
 base64url spelling of the same bytes nor the malleated twin `(r, n - s)`, which verifies just as well, passes for
-a new signature; the device signing the same request again makes a new one, which is accepted. Anything else is
+a new signature; the device signing the same request again makes a new one, which is accepted.
+
+On every device-authenticated profile, including the local-network identity proof, the signing time must also
+be at or after the instant this runtime instance began accepting requests and no later than its current clock.
+A request signed before that cutoff is refused with `401` / `denied` and a message to **sign the request afresh**.
+The cutoff retains its subsecond precision: rounding it down would admit a replay after a restart within the
+same second. Startup publishes readiness after the next whole second, so clients using the existing timestamp
+format can sign immediately. The replay cache remains in memory; with a nondecreasing runtime clock, no request
+accepted by an earlier instance can pass the new cutoff. Future-dated requests are refused too, since accepting
+one would allow its replay after a restart before that future time. Synchronize client and runtime clocks:
+clients may lag by up to five minutes, but never past the startup cutoff; a client ahead of the runtime must
+correct its clock and sign afresh. There is no clock-skew allowance across the startup cutoff.
+
+Anything else is
 answered with `401` and a problem with code `denied`; revoking the device ends access from the next request on,
-with no restart. The SDK signs with `DeviceRequestSigner`, which uses the device key in this machine's custody, so
+with no restart. The SDK signs each request when it sends it, including the identity proof on a new connection,
+with `DeviceRequestSigner`, which uses the device key in this machine's custody, so
 a copied request is refused, as stale after five minutes and as a repeat before then, and a copied key file is
 useless where platform custody holds the key.
 
@@ -175,11 +189,13 @@ accepts it, before TLS, so `vericairn runtime rotate --compromised` also closes 
 handshake.
 
 **Every request.** Every request after the proof is device-signed with scheme `vericairn-request/2`: the same
-three headers, five minutes of skew and each signature accepted once in any of its forms, over the SHA-256 of
+three headers, at most five minutes of age and each signature accepted once in any of its forms, over the SHA-256 of
 the line-feed-joined `vericairn-request/2`, the estate's id, the fingerprint of the runtime identity the device
 paired with, and then the method, the request target, the signed-at time and the body's hash as on loopback. A
 request signed for one runtime is refused by any other, even a runtime of the same estate on another machine,
-which knows the same device. Until the connection's client certificate verifies with the current key of the
+which knows the same device. The startup cutoff and clock rule above apply here too: a signing time before
+this instance began accepting requests or ahead of its clock is refused. Local-network clients must synchronize
+their clocks; a slow client can be refused after a restart until its signing time reaches the cutoff. Until the connection's client certificate verifies with the current key of the
 device a request names, every refusal is the same one, so nobody learns from it whether a device exists, is
 revoked or is permitted the profile. The runtime reads the device from the records at every request, when it
 starts and again once its body is in, and refuses it unless it is current, admitted now and permitted
@@ -323,7 +339,9 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
   refused at its next request.
 - A captured request is accepted once, within five minutes of its signing time, only over a connection whose
   certificate the device's key issued, and only by the runtime it was signed for; no flood makes the runtime
-  forget a signature before it is stale, and a copy whose body is held back until then is refused.
+  forget a signature before it is stale, and a copy whose body is held back until then is refused. With a
+  nondecreasing runtime clock, restarting cannot admit it again: requests predating the new instance's startup
+  are refused, and future signing times are never accepted.
 - No certificate makes either side connect anywhere: the local network speaks TLS 1.2 only, so a certificate that
   names an address is refused in clear before the platform's TLS reads it, on every platform, and nothing a
   certificate names is fetched.
@@ -396,7 +414,7 @@ record was rejected:
 | `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit, a request above the HTTP body limit or a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
-| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a body that arrives after its signature is stale, or after its device was revoked; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
+| `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
 
 `conflict`, which the OpenAPI description has named from the start, is reserved: nothing answers with it yet,

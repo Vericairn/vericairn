@@ -296,7 +296,15 @@ public sealed class DaemonHost : IAsyncDisposable
         DaemonRoutes.Map(routes, host);
         try
         {
+            host.Authenticator.StartAccepting();
             await app.StartAsync(cancellationToken).ConfigureAwait(false);
+            // Request times have whole-second precision. Keep the exact cutoff, and publish readiness only when a freshly
+            // signed request can meet it, including after a restart in the same second as the previous instance's last request.
+            TimeSpan signingDelay = host.Authenticator.FirstSigningTime - host.Time.GetUtcNow();
+            if (signingDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(signingDelay, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch
         {

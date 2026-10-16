@@ -108,20 +108,21 @@ public class SecondReviewTests
     [InlineData(true)]
     public async Task N1_AReplayWhoseBodyArrivesAfterItsSignatureIsStaleIsRefused(bool loopback)
     {
-        // The re-review's probe, on the system clock: a signature five seconds from stale, accepted once, then replayed with its body
-        // trickled until after the signature is stale.
-        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(systemClock: true);
+        // Accept a request signed since startup, then move the runtime's clock until it is five seconds from stale. Its replay's
+        // body is trickled past the real read deadline; pre-startup signatures are no longer accepted even inside five minutes.
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = loopback ? DeviceRequestSigner.Find(harness.OperatorDevice)! : harness.Signer(connection);
         string address = loopback ? LoopbackAddress(harness) : harness.Address;
         using X509Certificate2? credential = loopback ? null : LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey), DateTimeOffset.UtcNow);
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
         byte[] body = Encoding.ASCII.GetBytes(new string('a', 3600));
-        string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow.AddSeconds(-295));
+        string at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         byte[] digest = loopback ? RequestSigning.Digest("GET", "/v1/status", at, body) : harness.Digest("GET", "/v1/status", at, body);
         byte[] head = Head("GET", "/v1/status", body, at, signer, digest, "text/plain");
         Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(address, credential, pinned, [.. head, .. body], TimeSpan.FromSeconds(5)), StringComparison.Ordinal);
 
+        harness.Time.Advance(TimeSpan.FromSeconds(295));
         string replay = await Raw.ExchangeAsync(address, credential, pinned, head, TimeSpan.FromSeconds(15), trickle: body, chunkSize: 360, delay: TimeSpan.FromSeconds(1));
         Say(replay);
         Assert.StartsWith("HTTP/1.1 401", replay, StringComparison.Ordinal);
