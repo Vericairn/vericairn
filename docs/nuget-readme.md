@@ -25,6 +25,8 @@ dotnet vc version
 The tool is framework-dependent and uses the .NET and ASP.NET Core runtimes included with the SDK.
 The self-contained release archives continue to provide the `vericairn` executable for machines without
 the SDK. The macOS archives also include the Secure Enclave helper; the portable NuGet tool does not.
+The worker's agent-side MCP launcher still resolves `vericairn`; use the archive executable on PATH for
+worker runs. The package smoke checks qualify tool invocation and SDK consumption, not a NuGet-only worker run.
 
 ## SDK
 
