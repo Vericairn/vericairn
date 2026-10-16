@@ -1,15 +1,22 @@
 # Communication and continuity qualification
 
-COMMS-02, first round for 0.7.0, exercised on 2026-10-16. The work starts at
-`c420900` on `work/comms-02`, with COMMS-01, CONTEXT-01, HANDOFF-01, WATCH-01
-and FIX-10 present. RUN-01 and RUN-02 are not integrated in this round.
-This is evidence for review, not milestone or release acceptance.
+COMMS-02 for 0.7.0, exercised in two rounds on 2026-10-16. Round one
+started at `c420900` on `work/comms-02`, with COMMS-01, CONTEXT-01,
+HANDOFF-01, WATCH-01 and FIX-10 present. The builder reported that PR 87's
+corrected three-platform run passed and merged it. Round two merged
+`origin/main` at `cfd166c` (including RUN-01 and RUN-02 from PR 88) as merge
+commit `5a9437a`, retaining both histories. This report is evidence for review,
+not milestone or release acceptance.
 
 The source cases are DESIGN-08, `design/communication-and-context.md`, section
-13, revision 4 (`sha256:c23dede8968774513689c43c24907b79c6c5790aa74a862e66dc5efe07751c88`)
-in the estate. The work order is `01M526EX8HTM50MR2J0DBMXXQJ`, assignment
-`01M5324YFHWJWX1XBMR545V306`, and this round's attempt is
-`01M5325JD0HTYNWNPK5V12ZBJ0`.
+13 in the estate. Round two reads revision 5
+(`sha256:e86a4b4c2002efbbbc69faff699957534b8314040ccfbe574bd2252bdc4998dd`);
+round one read revision 4
+(`sha256:c23dede8968774513689c43c24907b79c6c5790aa74a862e66dc5efe07751c88`).
+The work order is `01M526EX8HTM50MR2J0DBMXXQJ`, assignment
+`01M5324YFHWJWX1XBMR545V306`. The attempts are
+`01M5325JD0HTYNWNPK5V12ZBJ0` (round one) and
+`01M537TR608K7ND9JQ8ZPYKSEE` (round two).
 
 ## Case results
 
@@ -36,9 +43,10 @@ not-applicable portions of the same design case are separate rows.
 
 ## Reproducible coverage
 
-This table records the initial qualification and regression cases at `7590bc7`.
-Theory rows count as individual test cases; the two 12-row matrices cover every
-supported depth/frequency pair. The CI follow-up below adds three theory rows.
+This table records all COMMS-02 qualification and regression cases through
+round two. Theory rows count as individual test cases; the two 12-row matrices
+cover every supported depth/frequency pair. Round one added 50 cases, its
+Workbench CI follow-up added three, and round two adds 21.
 
 | Test file | Coverage | Cases |
 |---|---|---:|
@@ -47,17 +55,22 @@ supported depth/frequency pair. The CI follow-up below adds three theory rows.
 | [Workbench communication qualification](../tests/Vericairn.Workbench.Tests/CommunicationQualificationTests.cs) | D08-A, B, E and watch presentation | 4 |
 | [CLI continuity journeys](../tests/Vericairn.Cli.Tests/CommunicationContinuityJourneyTests.cs) | D08-E; original preservation, loss and revoked MCP reads | 3 |
 | [Workbench context refusals](../tests/Vericairn.Workbench.Tests/ContextRefusalTests.cs) | Both existing work/assignment routes preserve missing-original refusals | 2 |
-| [Workbench review findings](../tests/Vericairn.Workbench.Tests/ReviewFindingsTests.cs) | Existing and newly submitted findings in actual headless controls, at all depths | 3 |
+| [Workbench review findings](../tests/Vericairn.Workbench.Tests/ReviewFindingsTests.cs) | Existing and newly submitted findings in actual headless controls, at all depths and two window sizes | 6 |
 | [CLI review observations](../tests/Vericairn.Cli.Tests/ReviewObservationTests.cs) | Complete findings/checks at all depths; canonical decision/review artifacts | 4 |
 | [Hand-over invariants](../tests/Vericairn.Cli.Tests/CommunicationHandoffInvariantTests.cs) | HANDOFF-01 across all profiles | 12 |
 | [Watcher invariants](../tests/Vericairn.Runtime.Tests/CommunicationWatchInvariantTests.cs) | WATCH-01 with the stand-in across all profiles | 12 |
-| **Total new cases** | | **50** |
+| [Bounded run journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunJourneyTests.cs) | D08-D; both native launcher adapters at all depths, measured intent before dispatch, requested/observed values, unknown usage and eight pre-dispatch refusals | 14 |
+| [Execution recovery journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunRecoveryTests.cs) | D08-E; both interruption boundaries, both native inventory rechecks and reported model mismatches | 6 |
+| [Run admission regression](../tests/Vericairn.Records.Tests/AgentRunLedgerTests.cs) | Uncertain assignments cannot retry; later reconciliation does not rewrite earlier admission | 1 |
+| **Total new cases** | | **74** |
 
 Existing suites also cover profile precedence/conflicts, protected kind/depth
 renderings, exact context budget boundaries and accounting digit boundaries,
 pinned identity tampering, binary originals, hand-over corruption, worker
-silence, burn-rate and invocation auditing. These remain part of the whole-suite
-run. MCP journeys call the production tool registry; existing MCP tests cover
+silence, burn-rate and invocation auditing. RUN-01/RUN-02 add execution-policy
+precedence, exact revision restrictions, retained context/allocation boundaries,
+native configuration and inventory refusals, and dispatch rechecks. These remain
+part of the whole-suite run. MCP journeys call the production tool registry; existing MCP tests cover
 the stdio server. Workbench tests use headless Avalonia, not a manual desktop or
 mobile usability session. SDK tests use temporary local sockets and loopback
 TLS, not an external service.
@@ -84,15 +97,34 @@ The initial whole-suite run also exposed a timing assumption in the existing
 worker token-budget test, corrected in `7590bc7`: the run settles before the
 separate goal-status record is written. The test now waits for that second
 write with its existing bounded wait, then retains the exact status and usage
-assertions. Runtime behavior was not changed for this test correction.
+assertions. Runtime behavior was not changed for this test correction. The
+builder applied the same bounded goal-status wait to the generic-launcher cap test in `1e42e8e`;
+round two preserves both corrections.
 
-API v1 contracts and record format 2 are unchanged. The MCP tool list and input
-schemas are unchanged; no orientation regeneration is required by this round.
-No lock, package, project or frozen release document changed.
+COMMS-02 changes no API v1 schema or record format. The round-two fix strengthens
+format 2 admission for an uncertain assignment; it adds no record fields. The
+MCP tool list and input schemas are unchanged by COMMS-02, so this work requires
+no orientation regeneration. No lock, package, project or frozen release
+document changed.
 
 ## Validation
 
-Validated code at `7590bc7` on macOS arm64 with .NET SDK 10.0.303.
+Round-two code at `81c02b5` was validated on macOS arm64 with .NET SDK 10.0.303.
+
+| Check | Round-two result |
+|---|---|
+| Offline Release build | Passed; zero warnings and zero errors |
+| Whole suite | Passed; 1,270 total, 1,258 succeeded, 12 skipped, zero failed; 7 minutes 5 seconds |
+| New round-two qualification/regression cases | All 21 passed; included in the whole-suite total |
+| All COMMS-02 qualification/regression cases | All 74 passed; includes both rounds and the Workbench CI follow-up |
+| Repository checks | Clean whitespace diff; all 12 report links resolve; no machine paths, secrets or prohibited file changes in the diff |
+
+The Records, Daemon, CLI, Runtime and Workbench modules all passed. The twelve
+skips have the same platform/helper/opt-in reasons listed below. No real coding
+agent or external network service ran. The builder's three-platform validation
+of these new commits remains outstanding.
+
+Historical round-one validation at `7590bc7`, on the same platform and SDK:
 
 | Check | Result |
 |---|---|
@@ -148,56 +180,95 @@ The whole suite on macOS arm64 passed: 1,019 total, 1,007 succeeded, 12 skipped
 for the reasons listed above, and zero failed. The full Workbench suite also
 passed with `CI=true` and `DOTNET_PROCESSOR_COUNT=2`: 48 succeeded, one opt-in
 live-estate case skipped. No shared headless settings were changed.
-The corrected three-platform CI run remains the builder's next check.
+The builder subsequently reported that the corrected three-platform run passed
+and merged round one as PR 87. Round-two changes still need their own builder
+three-platform run.
 
-## Round two: bounded execution
+## Round two: execution and recovery evidence
 
-RUN-01 and RUN-02 were merged from `origin/main` at `cfd166c` for this round.
-The new attempt is `01M537TR608K7ND9JQ8ZPYKSEE`.
-[Communication run journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunJourneyTests.cs)
-add 14 passing cases: six native-launcher/depth combinations and eight refused
-selection or inventory requests. Every executable is a local stand-in. The
-checks inspect the intent from inside the pre-dispatch command boundary and
-verify retained context accounting before the stand-in runs. The targeted
-Release build passed with zero warnings/errors.
-[Execution recovery journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunRecoveryTests.cs)
-add six passing cases: two interruption boundaries, two changed native
-inventories and two reported model mismatches. The separate reconciliation fix
-also adds one record-admission regression. Whole-suite validation follows.
+Commit `46ec2a1` adds 14 bounded-run cases. The six native-launcher/depth
+combinations inspect the saved intent at the command boundary, before dispatch.
+The intent pins the selected model and supported effort, their run-scope origin,
+the disabled adapter, admitted inventory, retained context hash and byte/token
+allocations. The stand-ins report the model and effort they received; the other
+execution facts remain explicitly unknown. They supply no token usage, and the
+full token cap is charged. Eight separate cases refuse adapter requests,
+unallowlisted hooks, tools and environment needs, unsupported effort, and
+model/provider/route fallback without recording an intent or dispatching.
 
-## Remaining gaps and next round
+The tests compare every original run revision and the retained context bytes
+across all view depths, along with canonical runs, status, progress and hand-over
+output. Each launch also starts with the person's recorded depth and `none`
+frequency. No profile is an execution-policy input.
 
-1. **D08-D placeholder — RUN-01, RUN-02, then COMMS-02.** Test explicit model
-   and supported effort recorded before launch, admitted effective inventories
-   and their recheck immediately before dispatch, refusal of unallowlisted
-   hooks/tool environment/fallback, absent usage staying unknown, and failure
-   before versus after possible dispatch. This round's WATCH-01 stand-in runs
-   do not qualify any of those new execution contracts.
-2. **Adapter behavior — EFF-01, 0.8.0, with follow-up COMMS-02 qualification.**
-   This round exercises deterministic selection with synthesis off. Eligible
-   text reduction, byte-for-byte bypass of protected payloads/tool arguments,
-   telemetry/extra-routing disablement, adapter failure/removal, and changed
-   model/tokenizer behavior remain unqualified. Tokens and model fit stay
-   unknown; byte measurement is not dispatch qualification or a saving claim.
-3. **Remote — not applicable until built.** Neither mobile profile behavior nor
-   the phone's full-evidence/hand-off path is claimed. The operator must place
-   and review that qualification when Remote is available.
-4. **Templates — TPL-COMMS-01, 0.8.0 or later.** No generated-field, quote,
-   locked-section or old-instance migration protection is qualified here.
-5. **Continuity limits.** Hand-over is a record-only selection. Source-file
-   contents, output objects, unrecorded conversation and external health are
-   outside it. Resume compares record identities; context retrieval separately
-   verifies source bytes. A missing original is not reconstructed from its
-   summary. Actual compaction and dispatch interruption await the run round.
-6. **Other implementations and platforms.** The existing stand-ins qualify
-   contract behavior only. No live vendor, harness version range, model/provider
-   combination or percentage saving is qualified. The builder's Linux/macOS/
-   Windows CI run, a manual Workbench review and independent review of meaning
-   and task sufficiency remain outstanding. No push, merge, publication or
-   acceptance was performed.
+Commit `00727cb` fixes the reproduced reconciliation bypass and adds two
+interrupted-dispatch journeys plus a record-admission regression. Dispatch is
+interrupted both before and after saving its dispatch record. Supervision ends
+while the stand-in remains alive. The successor records uncertainty under the
+original operation, and retries on either branch are refused despite spare
+budget and concurrency. Only after the stand-in's exit is observed and that
+operation is reconciled can a new intent launch. Lost observation alone does
+not rewrite a run status; this journey explicitly records the uncertainty.
+Missing wall-time usage stays
+unreported and charged at the original cap. Resume exposes the changed operation
+revision; the original intent, execution selection and retained context bytes
+survive. This is explicit reconciliation through record authoring, not automatic
+recovery of a provider conversation.
 
-The next builder should run the three-platform suite, review these fixes and
-limits, and bring the Remote and template exclusions to the operator. Once
-RUN-01 and RUN-02 reach main, continue COMMS-02 at the D08-D placeholder and the
-deferred execution portions of D08-E; preserve this round's evidence and add
-new results for the newly exercised contracts.
+Commit `81c02b5` adds the remaining four execution-recovery cases. Each native
+launcher refuses a workspace instruction changed between admission and dispatch;
+the failed intent retains the admitted inventory, and restoring the source still
+requires a fresh intent. No process was dispatched in that case, so its zero
+usage is an observed pre-launch failure, unlike missing usage after launch.
+Both native event readers also retain a reported model discrepancy as critical,
+including at short depth and `none` frequency, without rewriting the request or
+claiming a known exact revision, token count or model fit.
+
+All 21 new round-two cases passed in targeted Release runs and the whole suite. No real coding
+agent, model provider, tokenizer or compaction engine ran. The full suite covers
+the existing native admission tests after their shared stand-in setup was
+extracted for reuse.
+
+## Remaining gaps and next step
+
+1. **Adapter behavior — EFF-01, 0.8.0, with follow-up COMMS-02 qualification.**
+   The disabled path is passed. Eligible-text reduction, protected payload and
+   tool-argument bypass, telemetry/extra-routing controls, adapter failure/removal,
+   changed model/tokenizer behavior and percentage savings remain deferred.
+   Byte accounting is not a token count or proof of model fit.
+2. **Actual compaction and model semantics — follow-up COMMS-02 harness
+   qualification, and EFF-01 for tokenizer/model-fit behavior.** The stand-ins
+   exercise interruption, explicit reconciliation and reported model mismatch,
+   but do not compact, tokenize, recover a provider conversation or execute a
+   model. No inference about those behaviors follows from the event contract.
+   Hand-over remains a record-only selection: source-file contents, output
+   objects, unrecorded conversation and external health are outside it. Missing
+   originals are not reconstructed from summaries.
+3. **Remote — not applicable while unbuilt.** No mobile profile synchronization,
+   phone full-evidence display or phone hand-off is claimed. Requalify through
+   COMMS-02 with the Remote implementation and return this exclusion to the
+   operator.
+4. **Templates — TPL-COMMS-01, 0.8.0 or later.** Generated/quoted fields, locked
+   sections, versioned instances and protection against silent migration remain
+   deferred; no template check is counted as passed.
+5. **Workbench context controls — not applicable while absent.** There is no
+   context-allocation editor or pinned-original retrieval control. Future
+   CONTEXT-01 follow-up controls need COMMS-02 qualification. Existing refusal
+   routes and actual review text reachability are covered; a manual desktop
+   usability review remains outstanding.
+6. **Harness versions and live services — RUN-03 and follow-up COMMS-02
+   qualification.** The shipped native inventory adapters remain qualified for
+   their specific compiled versions with stand-in evidence. Other versions,
+   real logins, live model/provider combinations and live service behavior are
+   not claimed. RUN-03 owns requalification of updated harnesses. The generic
+   production launcher remains refused, as RUN-02 specifies.
+7. **Independent validation.** Round two needs the builder's Linux/macOS/Windows
+   CI run and independent review of meaning and task sufficiency. Optional live
+   probes and unavailable platform checks remain skips, not passes. The local
+   merge was authorized for this round; nothing was pushed, published or accepted.
+
+The builder should review the merge and round-two commits, the reconciliation
+fix and this report, then run the three-platform suite. Every design case now
+has a passed, not-applicable or named deferred disposition; D08-D has no remaining
+run placeholder. Bring the Remote, adapter, compaction and template exclusions
+to the operator. Acceptance remains the operator's decision.
