@@ -97,7 +97,7 @@ internal static class FakeHarness
             ["process"] = Environment.ProcessId,
             ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
-        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
+        using PosixSignalRegistration? terminate = scenario.StartsWith("watch-", StringComparison.Ordinal) || scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
         // Publish the complete report atomically, after installing the stop handler. Existence is a readiness barrier.
         if (scenario != "child-survives-root")
         {
@@ -133,8 +133,47 @@ internal static class FakeHarness
         }
 
         bool listing = arguments.Contains("features") && arguments.Contains("list");
+        if (listing && scenario.StartsWith("watch-codex", StringComparison.Ordinal))
+        {
+            Emit("goals stable true");
+            return 0;
+        }
+
         switch (scenario)
         {
+            case "watch-codex-critical-hold":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat .aws/credentials"}}""");
+                return Linger(acknowledge: false);
+            case "watch-codex-warning-hold":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                return Linger(acknowledge: true);
+            case "watch-codex-loop":
+                for (int i = 0; i < 10; i++)
+                {
+                    Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "call-" + i, type = "command_execution", command = "echo stand-in" } }));
+                    Emit(JsonSerializer.Serialize(new { type = "item.completed", item = new { id = "call-" + i, type = "command_execution", command = "echo stand-in", aggregated_output = "stand-in" } }));
+                }
+
+                return 0;
+            case "watch-codex-burn":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":199990,"output_tokens":10}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":199990,"output_tokens":10}}""");
+                return 0;
+            case "watch-claude-usage":
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":20}}}""");
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":20}}}""");
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":25}}}""");
+                Emit("""{"type":"result","usage":{"input_tokens":100,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""");
+                return 0;
+            case "watch-claude-audit":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"outside.txt","content":"synthetic"}}]}}""");
+                return 0;
+            case "watch-codex-audit":
+                Emit("""{"type":"item.started","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                Emit("""{"type":"item.completed","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid","aggregated_output":"No actual command ran.","exit_code":0}}""");
+                Emit("""{"type":"item.started","item":{"id":"s1","type":"mcp_tool_call","server":"files","tool":"read","arguments":{"path":".aws/credentials"}}}""");
+                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"outside.txt","kind":"add"}]}}""");
+                return 0;
             case "claude":
                 Emit("""{"type":"system","subtype":"init","session_id":"stand-in","mcp_servers":[{"name":"vericairn","status":"connected"}]}""");
                 Emit("""{"type":"assistant","message":{"id":"m1","type":"message","role":"assistant","content":[{"type":"text","text":"Working on the assignment."}],"usage":{"input_tokens":100,"output_tokens":20}}}""");

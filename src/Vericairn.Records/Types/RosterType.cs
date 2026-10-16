@@ -28,6 +28,7 @@ public sealed class RosterType : IRecordType
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
         new("roles", "object[]", true, "Each role (a lower-case name such as builder or decider), its principals (ulid[]) in order of preference, and an optional note; the decider role is held by operators.", 2),
+        new("limits", "object", false, "stallSeconds (event-stream silence limit, 1–86400 seconds) and watch (bounded rate and loop thresholds), inherited by goals using this roster. Goal fields override these; omitted fields keep the launcher defaults.", 2),
     ];
 
     /// <inheritdoc />
@@ -36,7 +37,15 @@ public sealed class RosterType : IRecordType
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
         IReadOnlyList<BodyReader>? roles = body.NestedArray("roles", true, allowEmpty: false);
+        BodyReader? limits = body.Nested("limits", false);
         body.NoOtherKeys();
+        if (limits is not null)
+        {
+            limits.Number("stallSeconds", false, 1, 86400);
+            WatchLimits.Read(limits);
+            limits.NoOtherKeys();
+        }
+
         if (roles is not null)
         {
             Roles(context, roles, "roles");

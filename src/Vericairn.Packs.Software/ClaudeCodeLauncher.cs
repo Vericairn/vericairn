@@ -16,6 +16,12 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
+    /// <inheritdoc />
+    public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
+
+    /// <inheritdoc />
+    public RunWatchSettings WatchDefaults => new(NormalTokensPerMinute: 20000);
+
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
     public const string LauncherId = "claude-code";
 
@@ -37,11 +43,11 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         [
             "Runs claude -p \"/goal <condition>\" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's configuration> --strict-mcp-config in the workspace: Claude Code's own /goal, with the vericairn MCP server as its only MCP server.",
             "Imports only Claude Code's provisioned login into a fresh run configuration; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
-            "Reads the tokens of the stream's final result; it reads no price, so a cap in currency is charged in full.",
+            "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
             "Excludes user, project and local settings sources, disables hooks and refuses detected managed settings; remote managed policy is not qualified and managed accounts are unsupported.",
             "Implemented against claude --help and a stand-in process that speaks its stream; not yet qualified against a live Claude Code.",
         ],
-        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CLAUDE_CONFIG_DIR"];
@@ -163,19 +169,31 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public HarnessSignal? Read(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (!line.TrimStart().StartsWith('{') || !line.Contains("\"result\"", StringComparison.Ordinal))
+        if (!line.TrimStart().StartsWith('{'))
         {
             return null;
         }
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "result")
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        if (type.GetString() == "assistant" && root.TryGetProperty("message", out JsonElement message)
+            && message.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String && message.TryGetProperty("usage", out _))
+        {
+            long? provisional = HarnessUsage.Message(message);
+            return new HarnessSignal(UsageStarted: true, UsageIncomplete: provisional is null, UsageId: id.GetString(), UsageTokens: provisional);
+        }
+
+        if (type.GetString() != "result")
         {
             return null;
         }
 
         long? tokens = HarnessUsage.Total(root, "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens");
-        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null);
+        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null, UsageCompleted: true);
     }
 }

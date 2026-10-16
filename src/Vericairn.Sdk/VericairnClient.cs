@@ -194,6 +194,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public WriteOutcome Attempt(AttemptRequest request) => Post<AttemptRequest, WriteOutcome>("/v1/work/attempt", request)!;
 
     /// <inheritdoc />
+    public WorkProgressResponse WorkProgress(WorkProgressRequest request) => Post<WorkProgressRequest, WorkProgressResponse>("/v1/work/progress", request)!;
+
+    /// <inheritdoc />
     public WriteOutcome Result(ResultRequest request) => Post<ResultRequest, WriteOutcome>("/v1/work/result", request)!;
 
     /// <inheritdoc />

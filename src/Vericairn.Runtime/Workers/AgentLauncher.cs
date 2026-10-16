@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Runtime.Providers;
+using System.Text.Json;
 
 namespace Vericairn.Runtime.Workers;
 
@@ -26,7 +27,15 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
 /// <param name="UsageStarted">A turn began whose usage is in flight.</param>
 /// <param name="UsageCompleted">A turn ended.</param>
 /// <param name="Acknowledged">The harness acknowledged a stop.</param>
-public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false);
+/// <param name="UsageId">A message identity for a provisional usage snapshot.</param>
+/// <param name="UsageTokens">The latest provisional token count for that identity, not a second charge.</param>
+public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false, string? UsageId = null, long? UsageTokens = null);
+
+/// <summary>A tool invocation from a harness event, never from an assistant's narrative or a tool's output.</summary>
+/// <param name="Id">The harness's invocation identity, used to deduplicate lifecycle events.</param>
+/// <param name="Tool">The tool invoked.</param>
+/// <param name="Input">Its input, kept on this machine; raw arguments never enter a record.</param>
+public sealed record HarnessAction(string Id, string Tool, JsonElement Input);
 
 /// <summary>
 /// The coding-agent launcher contract, version 1 (vericairn.launcher.agent/1): how one harness is verified before a run is recorded,
@@ -70,6 +79,9 @@ public interface IAgentLauncher
     /// <summary>The launcher's default silence limit; a goal may override it.</summary>
     TimeSpan StallLimit => TimeSpan.FromMinutes(10);
 
+    /// <summary>Default command-loop and token-rate thresholds, overridden by recorded goal and roster limits.</summary>
+    RunWatchSettings WatchDefaults => new();
+
     /// <summary>Native spending controls used by this launcher; unlisted units have no native enforcement.</summary>
     string Limitations => "No native token or currency limit; the worker uses soft accounting thresholds only.";
 
@@ -81,4 +93,7 @@ public interface IAgentLauncher
 
     /// <summary>What one line of the harness's standard output reports; null when it reports nothing the worker reads.</summary>
     HarnessSignal? Read(string line) => null;
+
+    /// <summary>Tool invocations in a harness event; ordinary messages and tool results return no actions.</summary>
+    IReadOnlyList<HarnessAction> ReadActions(string line) => [];
 }

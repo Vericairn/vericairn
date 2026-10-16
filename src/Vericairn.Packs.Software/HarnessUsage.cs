@@ -8,6 +8,38 @@ namespace Vericairn.Packs.Software;
 /// <summary>Usage is complete only when every required count is a nonnegative integer and the sum fits.</summary>
 internal static class HarnessUsage
 {
+    public static long? Message(JsonElement message)
+    {
+        long? total = Total(message, "input_tokens", "output_tokens");
+        if (total is null)
+        {
+            return null;
+        }
+
+        JsonElement usage = message.GetProperty("usage");
+        try
+        {
+            foreach (string name in new[] { "cache_creation_input_tokens", "cache_read_input_tokens" })
+            {
+                if (usage.TryGetProperty(name, out JsonElement count))
+                {
+                    if (!count.TryGetInt64(out long value) || value < 0)
+                    {
+                        return null;
+                    }
+
+                    total = checked(total + value);
+                }
+            }
+        }
+        catch (OverflowException)
+        {
+            return null;
+        }
+
+        return total;
+    }
+
     public static long? Total(JsonElement root, params string[] fields)
     {
         if (!root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)

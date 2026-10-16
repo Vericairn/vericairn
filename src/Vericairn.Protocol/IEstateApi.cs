@@ -18,7 +18,7 @@ public interface IEstateApi
     /// <summary>Record that a person explicitly observed this estate's status; ordinary reads never advance this timestamp.</summary>
     WriteOutcome ObserveEstate(EstateObserveRequest request);
 
-    /// <summary>The progress report, rendered from the records alone, with the same check status runs.</summary>
+    /// <summary>The recorded progress report with the same checks as status, plus labelled local agent claims and worker observations.</summary>
     ProgressResponse Progress();
 
     /// <summary>Prepare a complete, portable hand-over from all records. A byte limit refuses overflow; nothing is truncated or authored.</summary>
@@ -53,6 +53,9 @@ public interface IEstateApi
 
     /// <summary>Start an attempt.</summary>
     WriteOutcome Attempt(AttemptRequest request);
+
+    /// <summary>Publish the contributor's latest claim, recording only a completed phase.</summary>
+    WorkProgressResponse WorkProgress(WorkProgressRequest request);
 
     /// <summary>Submit a result.</summary>
     WriteOutcome Result(ResultRequest request);

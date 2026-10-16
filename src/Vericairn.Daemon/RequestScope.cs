@@ -110,11 +110,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         RecordWritten? written = value switch
         {
             WriteOutcome { Written: RecordWritten record } => record,
+            WorkProgressResponse { Ok: true, Written: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -148,6 +149,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/work/{key}"] = null,
         ["POST /v1/work/assign"] = typeof(AssignRequest),
         ["POST /v1/work/attempt"] = typeof(AttemptRequest),
+        ["POST /v1/work/progress"] = typeof(WorkProgressRequest),
         ["POST /v1/work/result"] = typeof(ResultRequest),
         ["POST /v1/work/amend"] = typeof(AmendRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
@@ -224,6 +226,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),
         [typeof(AssignRequest)] = (_, r, d) => Acting(((AssignRequest)r).By, d),
         [typeof(AttemptRequest)] = (_, r, d) => Acting(((AttemptRequest)r).By, d),
+        [typeof(WorkProgressRequest)] = (_, r, d) => Acting(((WorkProgressRequest)r).By, d),
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
         [typeof(AmendRequest)] = (_, r, d) => Acting(((AmendRequest)r).By, d),
         [typeof(DeviceCreateRequest)] = (_, r, d) => Acting(((DeviceCreateRequest)r).Principal, d),

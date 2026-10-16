@@ -557,7 +557,7 @@ worker](software.md#launch-accounting-and-containment) for the Windows creation 
 
 The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
-that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
+that default, the roster's `limits.stallSeconds` overrides that setting, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the records current when it is recorded
 in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
 principal, about the run (no notification is sent). At twice the limit it requests a stop and attempts to contain the whole
 launch boundary; containment is recorded only after exit is observed. New stdout events reset the silence timer but
@@ -668,7 +668,8 @@ that device's every signature needs its owner's presence. So a record's signatur
 runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
 such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
 writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). Records signed by the paired device itself,
-on its own machine, remain a future design. Remote is not built; HANDOFF-01 adds no Remote signing or transport.
+on its own machine, remain a future design. Remote is not built; WATCH-01 and HANDOFF-01 add no Remote signing,
+transport or run-observation support.
 
 ## Emergency access
 
@@ -694,6 +695,20 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said
   as such, never a silent self-admission.
+
+## Work progress claims (0.7.0)
+
+`work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.
+
+Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded.
+
+A watched run's immutable `target.watch` is a JSON-encoded string of its resolved thresholds, and `target.watchHistoryTokensPerMinute` pins the recent historical median or `unavailable`. History uses only fully reported successful runs of that goal and launcher; no current run reports its own baseline.
+
+A signal's `attention` must refer to an ask about that run's original intent. One ask is recorded per signal kind and severity, including after a lifecycle event is repeated. Critical observations retain the existing `stop` facts through observed containment. The final `scope-settlement` warning describes a boundary that has already exited. A missing attention id explicitly preserves a recording failure; it is not evidence that an ask was recorded.
+
+Goals and rosters may record `limits.watch`, with optional integer fields `normalTokensPerMinute` (1–1,000,000,000), `burnMultiplier` (2–100), `burnMinimumTokens` (1–1,000,000,000,000), `burnWindowSeconds` (1–86,400), `burnCapPercent` (1–100), `loopWarning` (2–1,000), `loopStop` (3–10,000) and `loopWindow` (3–10,000). Specified loop fields must be ordered; the fully inherited settings must satisfy `loopWarning < loopStop <= loopWindow` before launch. Unknown fields, fractions and out-of-range values are refused. Rosters also accept `limits.stallSeconds` (1–86,400). These additions use the existing goal and roster revision authority, without another grant.
+
+Each watching field resolves from launcher defaults through the current roster revision to the goal. The goal's named roster follows revisions; otherwise the estate's current roster applies, even with goal-specific roles. The intent records that roster revision in `target.watchRoster` when present, alongside the complete effective `target.watch`. A revision after launch cannot change that run's thresholds. [The software guide](software.md#recorded-watching-settings-070) lists defaults and examples.
 
 ## Estate observations (HANDOFF-01)
 

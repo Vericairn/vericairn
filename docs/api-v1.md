@@ -1,6 +1,6 @@
 # API version 1
 
-This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Features marked "from 0.6.0" first
+This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.
 The NuGet installation described below is prepared for 0.7.0 and becomes available after its publication.
@@ -270,8 +270,9 @@ written; after the write, its outcome under the same id, written with the record
 stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
 interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
 devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
-machine, remain a future design. Remote is not built, and HANDOFF-01 does not implement or qualify its
-signing or transport. Loopback does not check `profiles` yet, so devices recorded
+machine, remain a future design: a remote device's writes cannot rest on a key of the runtime's machine.
+Remote is not built; WATCH-01 and HANDOFF-01 do not implement or qualify its signing, transport or run observation.
+Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
 ## Pairing
@@ -407,7 +408,8 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
 Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
-paired device by its own key. Remote is not built; local-network pairing does not qualify a Remote client.
+paired device by its own key. Remote is not built; this API makes no claim of Remote support, and local-network
+pairing does not qualify a Remote client.
 
 ## Operations
 
@@ -415,7 +417,10 @@ paired device by its own key. Remote is not built; local-network pairing does no
 |---|---|
 | `GET /v1/health` | The daemon's identity: API and product version, estate, root, profile, record format, start time, process |
 | `GET /v1/status` | Status text and canonical status JSON, including the findings of this copy's repository checks |
-| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own, omitting superseded results and counting a current result as accepted work when a current acceptance pins its exact hash or its work order's current revision and hash (including another principal's results without accepting those result records; an earlier work-order revision's acceptance does not count); what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
+| `POST /v1/status/observations` | Record a person's explicit observation of estate status (`EstateObserveRequest`); ordinary reads and agent claims never advance it. See [a person's last observation](#a-persons-last-observation). |
+| `GET /v1/handoff[?maxBytes=<n>]` | Prepare a complete retained package from the records, or refuse missing sources and overflow (`HandoffResponse`). See [hand-over](#hand-over-handoff-01). |
+| `POST /v1/resume` | Compare a retained `HandoffPackage` with current records (`ResumeResponse`). This POST is a read: no write-ledger entry, record or work dispatch. See [hand-over](#hand-over-handoff-01). |
+| `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, each record-derived line naming its sources; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. From 0.7.0, latest local agent claims and worker observations appear separately ([details](#agent-progress-claims-070-additive)). Its recorded sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own, omitting superseded results and counting a current result as accepted work when a current acceptance pins its exact hash or its work order's current revision and hash (including another principal's results without accepting those result records; an earlier work-order revision's acceptance does not count); what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks. `record.subject-stale` and `acceptance.unresolved` apply only while the referring record is current; superseded judgments retain historical integrity validation but no longer need reconsideration. A stale replacement is still flagged. |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
@@ -423,6 +428,7 @@ paired device by its own key. Remote is not built; local-network pairing does no
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
+| `POST /v1/work/progress` | Publish the contributor's latest claim on its own attempt (`WorkProgressRequest` / `WorkProgressResponse`); active notes stay local and a completed phase is recorded once. See [agent progress claims](#agent-progress-claims-070-additive). |
 | `POST /v1/work/takeover` | Hand a step an agent holds over to a person, from 0.6.0 (`TakeoverRequest`: the agent's assignment, by, and optionally the person who takes it over, the recording principal when omitted, and a note). Refused, before anything is recorded, unless the assignment is an agent's and still holds its work order, which is neither accepted nor retired, the person is a person, and the recording principal is a person too: the one taking the step over, the sponsor of a goal the step belongs to, or an operator; an agent never records a hand-over, whatever scope it holds, and the records refuse one it writes by any route (`assignment.handover`). The hand-over is a record: a new assignment of the work order to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on. Every run of the agent's assignment still in flight is asked to stop, as `POST /v1/runs/{id}/stop` asks it. Returns a `TakeoverResponse` (message, ok, the assignment written, each stop's `RunStopResponse`, problem) |
 | `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke`, `POST /v1/devices/rename`, `POST /v1/devices/rotate`, `POST /v1/devices/recovery` | Devices and admission; a device is created, renamed and rotated on the machine that holds its key, and the operator's recovery device is made there and its key written once for offline keeping. Admit and revoke accept the recovery key's path and passphrase. From 0.6.0 each `DeviceRow` gives the device's permitted `profiles`; a device on another machine is recorded by pairing. |
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release (applying is refused over the local network) |
@@ -503,7 +509,7 @@ charged at its cap.
 
 - `liveness`: `stallSeconds`, `lastEventAt`, optional `attentionAt`, `attention` (ask id) and `stoppedAt`. The worker
   observes stdout events with a monotonic clock. The launcher default is 600 seconds, changed by its `stall-seconds`
-  setting (1–86400), with the goal's `limits.stallSeconds` taking precedence. The current goal is read again when the intent pins the limit. One limit of silence raises an attention
+  setting (1–86400), then overridden by the current roster's `limits.stallSeconds` and finally the goal's. The goal and roster are read again when the intent pins the limit. One limit of silence raises an attention
   ask; twice the limit stops and contains the run. Events reset silence but never erase attention. An in-flight row
   reads local observations; settlement records them in the operation.
 
@@ -663,6 +669,26 @@ whose principal is not the one the request names as acting is refused. Sign a de
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
+
+## Agent progress claims (0.7.0, additive)
+
+`POST /v1/work/progress` accepts `{attempt, by, phase, note, completed?}`. The default `completed` is false. It returns `WorkProgressResponse` with `claim`, optional `written`, `problem`, and `ok`; refusals are in the response. Only the attempt's contributor may submit. A phase completion is idempotent for the same note and cannot be revised or reopened. Other submissions after the attempt's result are refused.
+
+For a paired device, the local-network write ledger records successful interim notes without a record identity,
+completed phases with the returned record id, hash and path, and refusals as failed. Hand-over and resume remain
+reads and add no write-ledger entry.
+
+`GET /v1/progress` adds `json.agentClaims`, the latest claim per attempt: `attempt`, `by`, `phase`, `note`, `at`, `completed`, and optional `record`. Its text and Workbench show the same labelled claims. Interim notes are local live state and are not worker observations; recorded completions provide the fallback on another machine. These additions do not change any existing field.
+
+`GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields.
+
+Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
+
+`GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each signal's `attention` names an ask about the original run intent. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.
+
+A goal's existing proposal/revision body and the generic roster record endpoint accept `limits.watch` partial threshold overrides; roster limits also accept `stallSeconds`. The resolved order is launcher, current roster revision, then goal, as described in [the software guide](software.md#recorded-watching-settings-070). Invalid merged loop limits refuse run start before an intent or harness launch. The run operation's immutable target includes `watch` (JSON encoded as a string), optional `watchRoster` (the roster revision), and `watchHistoryTokensPerMinute`. No new run-request override bypasses these recorded limits.
+
+Watching observes the process boundary on the worker's machine. Remote execution and observation are not built or qualified by these additions.
 
 ## Hand-over (HANDOFF-01)
 

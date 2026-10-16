@@ -105,6 +105,15 @@ public class McpTests
             using JsonDocument outcome = JsonDocument.Parse(attempt["result"]!["content"]![0]!["text"]!.GetValue<string>());
             string attemptId = outcome.RootElement.GetProperty("written").GetProperty("id").GetString()!;
 
+            Assert.Contains("work_progress", ToolNames(replies[0]));
+            JsonObject progress = Drive(api, builder, """{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"work_progress","arguments":{"attempt":"@ATTEMPT@","phase":"build","note":"The build is underway.","state":"active"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            Assert.False(progress["result"]!["isError"]!.GetValue<bool>(), progress.ToJsonString());
+            Assert.Contains("The build is underway.", CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
+            Assert.Empty(api.Records("work-progress"));
+            JsonObject completedProgress = Drive(api, builder, """{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"work_progress","arguments":{"attempt":"@ATTEMPT@","phase":"build","note":"The build passed.","state":"completed"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
+            Assert.False(completedProgress["result"]!["isError"]!.GetValue<bool>(), completedProgress.ToJsonString());
+            Assert.Single(api.Records("work-progress"));
+
             JsonObject record = Drive(api, null, """{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"record_get","arguments":{"id":"@ATTEMPT@"}}}""".Replace("@ATTEMPT@", attemptId, StringComparison.Ordinal))[0];
             using JsonDocument envelope = JsonDocument.Parse(record["result"]!["content"]![0]!["text"]!.GetValue<string>());
             JsonElement signatures = envelope.RootElement.GetProperty("envelope").GetProperty("signatures");
@@ -196,11 +205,11 @@ public class McpTests
             Assert.True(before.GetProperty("ready").GetBoolean());
             string hash = before.GetProperty("goal").GetProperty("hash").GetString()!;
 
-            // The goal tools are reads, and the writes a worker sees are the four of its contract, none of which records a goal's status, evaluation or acceptance.
+            // The goal tools are reads, and the writes a worker sees are the five of its contract, none of which records a goal's status, evaluation or acceptance.
             var registry = new ToolRegistry(api, builder);
             Assert.Equal(["goal_get", "goal_progress"], registry.Visible().Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)).Select(t => t.Name).Order(StringComparer.Ordinal));
             Assert.All(registry.All.Where(t => t.Name.StartsWith("goal_", StringComparison.Ordinal)), t => Assert.False(t.Writes));
-            Assert.Equal(["document_review", "work_amend", "work_attempt", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
+            Assert.Equal(["document_review", "work_amend", "work_attempt", "work_progress", "work_result"], registry.Visible().Where(t => t.Writes).Select(t => t.Name).Order(StringComparer.Ordinal));
 
             // Every tool the worker sees, called with arguments that name the goal and ask for its activation and acceptance, changes nothing about
             // the goal, and none answers the ask: no decision is recorded, and the ask still waits.

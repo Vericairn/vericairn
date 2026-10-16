@@ -21,6 +21,8 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
 
     public TimeSpan StallLimit => inner.StallLimit;
 
+    public RunWatchSettings WatchDefaults => inner.WatchDefaults;
+
     public string Limitations => inner.Limitations;
 
     public bool Generic => inner.Generic;
@@ -51,4 +53,6 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public LaunchContext Prepare(LaunchContext context) => inner.Prepare(context);
 
     public HarnessSignal? Read(string line) => inner.Read(line);
+
+    public IReadOnlyList<HarnessAction> ReadActions(string line) => inner.ReadActions(line);
 }

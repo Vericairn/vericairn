@@ -248,7 +248,7 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It reads the tokens of the stream's final result. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
 | `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | The command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Generic process launch is not complete agent support: it knows nothing of the harness's goal, sign-in, usage or stop, and it is listed and run with that label. |
 
@@ -489,7 +489,7 @@ negative. Elapsed wall usage and stop grace use a monotonic clock; recorded obse
 
 The worker observes stdout event-stream liveness with a monotonic clock; stderr activity and harness claims do not
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
-that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
+that default, the roster's `limits.stallSeconds` overrides that setting, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the records current when it is recorded
 in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
 principal, about the run (no notification is sent). At twice the limit it requests a stop and attempts to contain the whole
 launch boundary; containment is recorded only after exit is observed. New stdout events reset the silence timer but
@@ -539,6 +539,62 @@ upgrade path is proven by a synthetic migration in the tests: a step from format
 file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
 once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+
+## Progress claims (0.7.0)
+
+An agent may submit `work_progress` through MCP while carrying its own attempt. `vericairn progress`, its API, and Workbench show its latest claim with the attempt and phase. Interim notes stay in the runtime's local live store; only a completed phase creates a signed record, at most once. Workbench polls these claims every five seconds while its window is open; F5 also refreshes them. Worker liveness continues to come from the harness event stream, independently of these claims.
+
+Hand-over packages retain completed phase records. Interim notes stay local and do not change the package's identity;
+resume reports a newly completed phase as an added record.
+
+## Command observations (0.7.0)
+
+The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
+
+Recognizable network commands, structured network URLs and web tools, credential paths, common secret environment variables and secret-store commands, and invocation paths outside the assignment's permitted paths produce worker signals. Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names are not treated as executable operations. Path checks share the settlement audit's literal-directory and glob rules, normalize traversal and refuse workspace links. Reading the exported brief remains possible. Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
+
+This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.
+
+## Rate and loop observations (0.7.0)
+
+Loop detection compares the tool and canonical JSON input within the last 20 distinct invocations: five identical calls warn, ten are critical. Alternating calls are counted too; duplicate lifecycle events do not increase the count. The window and thresholds are bounded.
+
+Token-rate detection uses monotonic samples covering at least 60 seconds and at least 10,000 reported tokens. A rate above four times the greater of the launcher reference and the goal's recent median warns. It is critical once that anomalous run has consumed 25 percent of its token cap; without a token cap, eight times the reference is critical. Reference rates are configured safety baselines, not measured performance claims: Claude Code 20,000 tokens/minute, Codex 30,000, generic 10,000. Generic launch reads no actions or usage and therefore cannot produce these observations itself.
+
+History is the last 20 successful, fully reported runs of the same launcher and goal, across goal revisions. Its median uses recorded tokens per rounded wall minute; unknown usage and failed runs are excluded. The intent pins the settings and historical reference before launch. Claude message usage is provisional and deduplicated by message id; only its complete final result settles token accounting. Codex completed-turn usage is accumulated. Unknown usage cannot establish a rate and is still charged conservatively under the existing cap rules. Monetary rates are unavailable where launchers report no price; this is not a hard spending limit.
+
+## Attention and containment (0.7.0)
+
+Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, live path violations, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+
+Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
+
+`vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
+
+## Recorded watching settings (0.7.0)
+
+Goals and rosters hold partial overrides in `limits.watch`. Each field inherits from the launcher, then the current revision of the goal's named roster (or the estate's current roster), then the goal. A goal's role overrides do not remove roster limits. The operator or authorized administrator revises the roster; the goal's existing revision authority controls its limits. Request settings cannot replace these thresholds.
+
+| Field | Launcher default | Recorded range |
+|---|---|---|
+| `normalTokensPerMinute` | Claude Code 20,000; Codex 30,000; generic 10,000 | 1–1,000,000,000 |
+| `burnMultiplier` | 4 | 2–100 |
+| `burnMinimumTokens` | 10,000 | 1–1,000,000,000,000 |
+| `burnWindowSeconds` | 60 | 1–86,400 |
+| `burnCapPercent` | 25 | 1–100 |
+| `loopWarning` | 5 | 2–1,000 |
+| `loopStop` | 10 | 3–10,000 |
+| `loopWindow` | 20 | 3–10,000 |
+
+All fields are integers. The merged loop limits must satisfy `loopWarning < loopStop <= loopWindow`; incompatible partial overrides refuse launch before an intent is recorded. The worker resolves them again after workspace preparation, under the record lock, and pins the resolved values in `target.watch`, the roster revision in `target.watchRoster` when present, and the historical rate in `target.watchHistoryTokensPerMinute`. Later revisions affect later runs.
+
+For example, a roster may record `"limits":{"stallSeconds":300,"watch":{"loopWarning":3,"loopStop":6}}`; a goal may record `"limits":{"watch":{"burnMultiplier":3}}`. Every other field keeps its launcher default. `stallSeconds` follows goal, roster, launcher request setting, then the 600-second launcher default; its range remains 1–86,400.
+
+## Local scope of watching
+
+Remote is not built. WATCH-01 observes only a run launched and contained on the worker's own machine. It adds no remote execution, remote containment, remote record signing, relay, or Remote qualification. The local-network API remains its existing transport and authority model.
+
+Stand-in harness tests exercise the supported event shapes, rate and loop thresholds, attention failures and containment. They do not qualify a real Claude Code or Codex installation; a changed harness event format needs its own qualification. The command audit is an observation of emitted invocation events, which can arrive after an action began. It cannot prevent an already executed action, establish that an unreported action did not occur, or replace an isolation boundary.
 
 ## Handing work over
 

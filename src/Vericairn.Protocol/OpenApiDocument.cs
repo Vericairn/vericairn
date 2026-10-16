@@ -29,6 +29,7 @@ public static class OpenApiDocument
         ("GET", "/v1/work/{key}"),
         ("POST", "/v1/work/assign"),
         ("POST", "/v1/work/attempt"),
+        ("POST", "/v1/work/progress"),
         ("POST", "/v1/work/result"),
         ("POST", "/v1/work/amend"),
         ("POST", "/v1/work/takeover"),
@@ -202,6 +203,10 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
         }
+        else if (method == "POST" && path == "/v1/work/progress")
+        {
+            responses["200"] = new JsonObject { ["description"] = "WorkProgressResponse: the latest agent claim, a written record only for a completed phase, or a problem when refused." };
+        }
         else if (method == "POST" && path.StartsWith("/v1/runs", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = path == "/v1/runs" ? "RunResponse: what was recorded and launched; a problem inside when nothing was launched." : "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked." };
@@ -289,6 +294,7 @@ public static class OpenApiDocument
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
+            ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
@@ -335,6 +341,7 @@ public static class OpenApiDocument
         "/v1/records" => "NewRecordRequest",
         "/v1/work/assign" => "AssignRequest",
         "/v1/work/attempt" => "AttemptRequest",
+        "/v1/work/progress" => "WorkProgressRequest",
         "/v1/work/result" => "ResultRequest",
         "/v1/work/amend" => "AmendRequest",
         "/v1/work/takeover" => "TakeoverRequest",
@@ -374,7 +381,7 @@ public static class OpenApiDocument
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
-        ("GET", "/v1/progress") => "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON.",
+        ("GET", "/v1/progress") => "The progress report: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON. Record-derived sections agree for the same records; repository checks, latest local agent claims and worker observations are labelled separately and can differ by runtime.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",
         ("GET", "/v1/records/{id}") => "A record by id.",
@@ -386,6 +393,7 @@ public static class OpenApiDocument
         ("GET", "/v1/work/{key}") => "What an observer sees of a work order.",
         ("POST", "/v1/work/assign") => "Delegate a work order to a contributor under a brief.",
         ("POST", "/v1/work/attempt") => "Record the start of an attempt.",
+        ("POST", "/v1/work/progress") => "Publish the contributor's latest progress claim on its own attempt. Active notes replace local state; a completed phase is recorded once, and an identical completion retry returns its record. Claims never establish worker liveness, scope or acceptance.",
         ("POST", "/v1/work/result") => "Submit the result of an attempt: a claim to inspect.",
         ("POST", "/v1/work/amend") => "Request an amendment; it authorizes nothing.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
@@ -413,7 +421,7 @@ public static class OpenApiDocument
         ("POST", "/v1/goals/{id}/accept") => "Accept a goal at its current revision: by its sponsor when the sponsor is a person, or the principal the sponsor delegated an ordinary goal's acceptance to, and by an operator, only an operator, when an agent sponsors it; never by its evaluator or a step's author, and only once its current evaluation finds every condition met and every record predicate holds.",
         ("GET", "/v1/providers") => "The provider and adapter implementations available to the runtime on its machine, with their declared settings, destinations and served locations: release providers, source adapters, coding-agent launchers and workspace providers.",
         ("GET", "/v1/launchers") => "The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, with their settings and limitations; a generic launcher is labeled as not complete agent support.",
-        ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight) and a stop's facts; and the ledger of every goal with a run or active now.",
+        ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight), a stop's facts and worker-observed signals with severity and attention references; and the ledger of every goal with a run or active now.",
         ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. The principal recording the run (by) is the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",

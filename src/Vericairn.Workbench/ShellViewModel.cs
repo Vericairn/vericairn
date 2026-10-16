@@ -538,8 +538,22 @@ public sealed class ShellViewModel : Observable
         ProgressDocument page = Documents.OfType<ProgressDocument>().FirstOrDefault() ?? new ProgressDocument();
         Open(page);
         FillProgress(connection?.Api is IEstateApi api ? Try(api.Progress) : null);
-        Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The progress report, rendered from the records alone; each line names the records it rests on. F5 refreshes it.";
+        Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The estate's recorded progress and latest local agent claims, labelled separately from worker observations. F5 refreshes it.";
         return page;
+    }
+
+    /// <summary>Polls progress claims, worker observations and attention without replacing the user's open editing documents.</summary>
+    public void RefreshProgress()
+    {
+        if (connection?.Api is IEstateApi api && Try(api.Progress) is ProgressResponse progress)
+        {
+            FillProgress(progress);
+            if (Try(() => api.Asks()) is AsksResponse asks)
+            {
+                string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+                Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
+            }
+        }
     }
 
     /// <summary>Open the hand-over and resume page, preparing its first package only; reopening never replaces its retained basis.</summary>

@@ -83,7 +83,7 @@ internal static class Commands
         });
     }
 
-    /// <summary>The progress report from the records alone, through the API; exit 1 when the check it shows found errors, as status does.</summary>
+    /// <summary>Recorded progress with labelled local claims and worker observations, through the API; exit 1 when the check it shows found errors, as status does.</summary>
     public static int Progress(string root, bool json) => WithApi(root, api =>
     {
         ProgressResponse progress = api.Progress();
@@ -692,6 +692,11 @@ internal static class Commands
         Console.Out.WriteLine($"  cap {Units(row.Cap)}");
         Console.Out.WriteLine(row.Usage is JsonElement usage ? $"  usage {Units(usage)}" : "  usage: not settled yet, so charged at its cap");
         Console.Out.WriteLine($"  charged {Units(row.Charged)}");
+        foreach (RunSignal signal in row.Signals ?? [])
+        {
+            Console.Out.WriteLine($"  worker {signal.Severity} {signal.Code}: {signal.Summary} ({(signal.Attention is null ? "attention recording pending" : "ask " + signal.Attention)})");
+        }
+
         if (row.Stop is not null)
         {
             PrintStop(row.Stop);
