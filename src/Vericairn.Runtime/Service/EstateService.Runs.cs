@@ -76,10 +76,18 @@ public sealed partial class EstateService
             return RunProblem(pending, "not-started", "refused", "No workspace provider for git repositories is available on the runtime's machine, so no isolated workspace can be prepared; nothing was recorded.");
         }
 
-        RunConfiguration? configuration = WorkerOptions.Configurations.GetValueOrDefault(request.Configuration ?? launcher.Launcher) ?? launcher.Configuration;
+        RunConfiguration? configuration;
+        try { configuration = Configuration(launcher, request.Configuration); }
+        catch (ProviderRefusedException exception)
+        {
+            return RunProblem(pending, "not-started", "refused", exception.Message + " Nothing was recorded.");
+        }
         if (configuration is null || configuration.Launcher != launcher.Launcher || (request.Configuration is not null && request.Configuration != configuration.Name))
         {
-            return RunProblem(pending, "not-started", "refused", "No matching explicit launcher configuration is available; ambient model and effort choices are not permitted. Nothing was recorded.");
+            string configure = launcher.Launcher is "codex" or "claude-code"
+                ? $" Configure it on this machine with vericairn worker configure --launcher {launcher.Launcher} --model <model> --effort <effort>."
+                : string.Empty;
+            return RunProblem(pending, "not-started", "refused", "No matching explicit launcher configuration is available; ambient model and effort choices are not permitted." + configure + " Nothing was recorded.");
         }
 
         var settings = new Dictionary<string, string>(configuration.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal);
@@ -176,6 +184,7 @@ public sealed partial class EstateService
         environment["VERICAIRN_CONDITION"] = plan.Condition;
         LaunchContext launch;
         RunPreflight preflight;
+        RunEnvironmentPolicy? environmentPolicy = configuration.EnvironmentPolicy;
         string? admittedBinding;
         try
         {
@@ -200,12 +209,15 @@ public sealed partial class EstateService
             lock (gate)
             {
                 if (HarnessAdmission.Admit(session.Load(), launcher.Launcher, preflight) is JsonObject admission)
+                {
                     plan.Selection["harnessAdmission"] = admission;
+                    environmentPolicy ??= new("qualified-" + launcher.Launcher, preflight.Components);
+                }
             }
             admittedBinding = preflight.LocalBindingHash;
             RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
             plan.Selection["harnessVersion"] = preflight.HarnessVersion;
-            plan.Selection["environment"] = RunEnvironment.Admit(configuration.EnvironmentPolicy, preflight, environment, [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
+            plan.Selection["environment"] = RunEnvironment.Admit(environmentPolicy, preflight, environment, [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
             launch = launch with { Execution = Element(plan.Selection) };
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
@@ -371,7 +383,7 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("Execution defaults or restrictions changed during the final probes; no harness was dispatched.");
                 }
                 JsonObject? dispatchAdmission = HarnessAdmission.Admit(dispatchModel, launcher.Launcher, dispatchPreflight);
-                JsonObject dispatchEnvironment = RunEnvironment.Admit(configuration.EnvironmentPolicy, dispatchPreflight, environment,
+                JsonObject dispatchEnvironment = RunEnvironment.Admit(environmentPolicy, dispatchPreflight, environment,
                     [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
                 if (!JsonNode.DeepEquals(dispatchEnvironment, plan.Selection["environment"])
                     || !JsonNode.DeepEquals(dispatchAdmission, plan.Selection["harnessAdmission"])
@@ -834,11 +846,16 @@ public sealed partial class EstateService
         return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }
 
-    private static bool SelectionStillCurrent(EstateModel model, RecordEnvelope goal, RunPlan plan, RunConfiguration configuration, IAgentLauncher launcher, RunStartRequest request)
+    private RunConfiguration? Configuration(IAgentLauncher launcher, string? name) =>
+        WorkerOptions.Configurations.GetValueOrDefault(name ?? launcher.Launcher) ?? launcher.Configuration ?? new WorkerConfigurationStore().Resolve(launcher, name);
+
+    private bool SelectionStillCurrent(EstateModel model, RecordEnvelope goal, RunPlan plan, RunConfiguration configuration, IAgentLauncher launcher, RunStartRequest request)
     {
         try
         {
-            JsonObject current = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, model.Latest(plan.Assignment)), request.Execution, Element(plan.Cap));
+            RunConfiguration? latest = Configuration(launcher, request.Configuration);
+            if (latest is null || latest.Launcher != configuration.Launcher || latest.Name != configuration.Name) return false;
+            JsonObject current = RunSelection.Resolve(latest, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, model.Latest(plan.Assignment)), request.Execution, Element(plan.Cap));
             string role = WorkView.OrderOfAssignment(model, model.Latest(plan.Assignment)) is RecordEnvelope order ? Routing.RoleOf(model.Latest(order)) : Routing.DefaultRole;
             return JsonNode.DeepEquals(current["requested"], plan.Selection["requested"])
                 && role == plan.Selection["role"]!.GetValue<string>()

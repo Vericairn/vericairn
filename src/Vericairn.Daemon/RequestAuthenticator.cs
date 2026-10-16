@@ -82,6 +82,7 @@ internal sealed class RequestAuthenticator
         "POST /v1/releases/observe",
         "POST /v1/objects",
         "POST /v1/runs",
+        "POST /v1/harness-qualifications",
         "POST /v1/goals/{id}/step",
     };
 

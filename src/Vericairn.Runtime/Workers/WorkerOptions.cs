@@ -20,7 +20,7 @@ public sealed record WorkerOptions
 
     internal Func<uint>? WindowsJobInventory { get; init; }
 
-    /// <summary>Named local launcher configurations, with explicit defaults and admitted inventories.</summary>
+    /// <summary>Host-supplied configurations. Otherwise the launcher supplies one, or native runs read the user's WorkerConfigurationStore.</summary>
     public IReadOnlyDictionary<string, RunConfiguration> Configurations { get; init; } = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal);
 
     /// <summary>The worker's defaults.</summary>

@@ -110,6 +110,17 @@ selection provenance, admitted component identities, discrepancies and unknown f
 retains WATCH-01's execution and unexpected-tool signals without filtering the original command audit.
 MCP servers and their dependencies are themselves part of the launcher's complete environment admission.
 
+The stock CLI and daemon load machine-local model and effort defaults and optional allowlists for each
+native worker run, including agent goal steps. Set or show them on the worker's machine with
+`vericairn worker configure --launcher codex` (or `claude-code`), adding `--model` and `--effort` to set.
+The owner-only configuration stays under `VericairnHome`, outside repositories and records. It cannot
+grant tools, MCP servers, environment variables or routes: native inventory admission still requires
+the shipped baseline or a matching current harness qualification. No MCP tool is added or changed;
+there is no configuration write tool, and configuration does not launch an agent or run probes.
+Harness qualification also remains outside the MCP tool list. Its API operation is machine-local:
+paired local-network devices are refused before probes; local socket and signed loopback requests
+retain the existing human authority checks.
+
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
 The efficiency Adapter is disabled and unsupported until the planned EFF-01 work in 0.8.0. Native worker

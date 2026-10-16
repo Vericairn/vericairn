@@ -347,7 +347,8 @@ What acts on the runtime's own machine is refused: `POST /v1/shutdown`,
 `/v1/devices`, `/v1/devices/rename`, `/v1/devices/rotate`, `/v1/devices/recovery`, `/v1/estate/export`,
 `/v1/pairings`, `/v1/runtime/certificate`, `/v1/releases/submit` and `/v1/releases/observe` (which use the
 release provider's credentials on that machine), `/v1/objects`, `/v1/runs` and `/v1/goals/{id}/step`, which
-launch coding agents there (stopping a run is not refused); applying an upgrade, though not its plan (`check`);
+launch coding agents there (stopping a run is not refused); `/v1/harness-qualifications`, which runs local
+probes and accepts a local command override; applying an upgrade, though not its plan (`check`);
 a record of type `device`; and any request that names a `recovery` key file. A refusal is `401` with a problem of code `denied`,
 and the connection is closed. The daemon always runs as a production host, so no answer carries a stack trace.
 
@@ -949,6 +950,21 @@ unexpected component, undeclared route or incomplete inventory returns a refused
 an intent or routed assignment is stored. The same state is rechecked before dispatch. There is no silent
 fallback to the harness's environment. `provider-default` is explicitly requested and only allowed when
 declared; it never claims a known effort. `not-supported` requires a declared absence of effort control.
+
+The stock runtime reads native launcher defaults and optional model/effort allowlists from owner-only
+`worker/<launcher>.json` files under its user's `VericairnHome` for each run, including an agent goal step.
+Set or show them on that machine with `vericairn worker configure --launcher codex` (setting also requires
+`--model` and `--effort`; repeated `--allow-model` and `--allow-effort` narrow the allowed choices).
+This local CLI operation has no HTTP route and runs no probes. No restart is required. Missing
+configuration refuses before intent and names the setup command; API overrides cannot replace it or
+escape its allowlists. Native environment policy derives only from the inventory admitted by the shipped
+baseline or an exact current harness qualification; local configuration cannot add tools, servers,
+variables or routes. Files contain portable choice identities only, outside repositories and records.
+
+`POST /v1/harness-qualifications` is machine-local: a paired local-network device receives `401` / `denied`
+before any probe or record write, even when it acts for an authorized human. Local socket and signed
+loopback requests remain available under the existing human qualification authority checks. Qualification
+does not launch an agent. The worker configuration command adds no API route.
 
 The intent records configuration identity, requested choices, provenance, resolved revision, harness
 version, role, disabled Adapter, environment policy and admitted inventory, allocation and package identity.

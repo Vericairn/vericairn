@@ -19,7 +19,8 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Models">The model selectors this configuration admits; no ambient model is admitted.</param>
 /// <param name="Settings">Local launcher settings.</param>
 /// <param name="EnvironmentPolicy">The closed inventory admitted for this configuration.</param>
-public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null);
+/// <param name="Efforts">Optional narrower native effort allowlist; it cannot add to the launcher's vocabulary.</param>
+public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null, IReadOnlyList<string>? Efforts = null);
 
 /// <summary>The scopes and values a launcher implements, independently of a configuration's narrower restrictions.</summary>
 /// <param name="Scopes">Supported choice scopes, in precedence order.</param>
@@ -111,7 +112,7 @@ public static class RunSelection
         Require("dataBoundary", capabilities.DataBoundaries);
         IReadOnlyList<string> efforts = capabilities.Efforts.Count == 0 ? ["not-supported"]
             : capabilities.ProviderDefault ? [.. capabilities.Efforts, "provider-default"] : capabilities.Efforts;
-        Require("effort", efforts);
+        Require("effort", configuration.Efforts is null ? efforts : efforts.Intersect(configuration.Efforts, StringComparer.Ordinal).ToArray());
 
         foreach (RunPolicySource source in layers)
         {
