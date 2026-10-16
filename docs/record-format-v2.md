@@ -1,5 +1,16 @@
 # Record format 2
 
+## Derived context artifacts (0.7.0)
+
+`vericairn.context/1` is a versioned derived artifact, not a record type or an
+editable ledger. Its `vericairn.context-manifest/1` pins the declared basis and
+exact source identities; it is distinct from the estate release manifest.
+Record canonical hashes and original-file byte hashes are separate. Originals
+remain separate from attributed derivatives, whose synthesis defaults to off.
+The package's content hash and serialized byte count are a sidecar over the
+canonical pretty UTF-8 payload. Changing the payload invalidates that identity.
+This contract needs no estate upgrade and introduces no record format 3.
+
 Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written from
 now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
 it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2
