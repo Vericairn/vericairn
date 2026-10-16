@@ -18,6 +18,9 @@ public interface IEstateApi
     /// <summary>The progress report, rendered from the records alone, with the same check status runs.</summary>
     ProgressResponse Progress();
 
+    /// <summary>Prepare a complete, portable hand-over from all records. A byte limit refuses overflow; nothing is truncated or authored.</summary>
+    HandoffResponse Handoff(long? maxBytes = null);
+
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();
 

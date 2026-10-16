@@ -637,3 +637,36 @@ whose principal is not the one the request names as acting is refused. Sign a de
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
+
+## Hand-over (HANDOFF-01)
+
+`GET /v1/handoff[?maxBytes=<positive integer>]` is additive to API v1. The SDK's
+`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`, and
+`problem`. A refusal returns HTTP 200 with `package: null` and a problem naming
+all missing or invalid sources; clients must inspect `problem`. This read authors
+no record and dispatches no work.
+
+The package is a `vericairn.handoff/1` payload with a sidecar `hash` and `bytes`.
+Both measure the payload's canonical pretty UTF-8 serialization, including all
+originals, source identities, derived presentation, accounting and framing;
+they exclude the sidecar and the separately rendered response text. The pin,
+record format, latest recorded timestamp and observed state come from the same
+record snapshot. No wall-clock timestamp is mistaken for a human observation.
+Selection is deterministic: all records held by this copy, including superseded
+records, sorted by id. Every original has its exact record hash, retained byte
+hash and byte count, base64 content, repository-relative path, exact-id CLI
+retrieval command and API link. Record content hashes and retained byte hashes
+are different identities. Originals remain separate from the generated view;
+synthesis is off. Goals, work, assignments, results, runs, decisions, asks,
+recorded observations and next steps remain inspectable in full.
+
+`withheld` is empty for this full-record selection. Source-file contents and
+output objects are explicitly outside its scope; it does not certify their
+availability for a dependent action. Without a cap it reports **limit not set**;
+tokens and model fit are unknown. `maxBytes` refuses the entire hand-over if it
+does not fit, including mandatory originals and manifest overhead. It never
+silently truncates, substitutes a summary or claims fit to a model context.
+Malformed, missing or conflicting records and incomplete local record batches
+refuse a package with every finding. A self-contained package can be retained
+by the caller; the read does not store another status ledger or grant authority.
+Remote is not built.

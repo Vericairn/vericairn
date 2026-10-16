@@ -51,6 +51,14 @@ internal static class CliApp
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(progress);
 
+        var handoff = new Command("handoff", "Prepare a complete record-derived hand-over; refuse missing sources or overflow. Remote is not built.");
+        var handoffOut = new Option<string?>("--out") { Description = "Retain the portable package in a new file; never overwrite." };
+        var handoffLimit = new Option<long?>("--max-bytes") { Description = "Optional payload byte limit; no truncation. No limit when omitted." };
+        handoff.Options.Add(handoffOut);
+        handoff.Options.Add(handoffLimit);
+        handoff.SetAction(parseResult => Commands.Handoff(parseResult.GetValue(estateOption)!, parseResult.GetValue(handoffOut), parseResult.GetValue(handoffLimit), parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(handoff);
+
         var ask = new Command("ask", "Show what waits on a principal, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order. Reading them answers nothing; an ask is answered by a decision of the principal it is put to that names it in its answers.");
         var toOption = new Option<string?>("--to") { Description = "The principal asked (ULID); every principal when omitted." };
         ask.Options.Add(toOption);

@@ -70,6 +70,26 @@ internal static class Commands
         return progress.HasErrors ? HasErrors : Clean;
     });
 
+    public static int Handoff(string root, string? output, long? maxBytes, bool json) => WithApi(root, api =>
+    {
+        HandoffResponse response = api.Handoff(maxBytes);
+        if (response.Package is null)
+        {
+            Console.Out.Write(json ? JsonSerializer.Serialize(response.Problem, ProtocolJson.Options) : response.Text);
+            return Failed;
+        }
+
+        string package = CanonicalJson.SerializePretty(JsonSerializer.SerializeToElement(response.Package, ProtocolJson.Options));
+        if (output is not null)
+        {
+            using var file = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            file.Write(Encoding.UTF8.GetBytes(package));
+        }
+
+        Console.Out.Write(json ? package : response.Text);
+        return Clean;
+    });
+
     /// <summary>What waits on a principal, or on every principal, through the API: at most three asks in one delivery to each, the recommendation first.</summary>
     public static int Ask(string root, string? to, bool json) => WithApi(root, api =>
     {

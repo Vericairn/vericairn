@@ -15,6 +15,7 @@ public static class OpenApiDocument
         ("GET", "/v1/health"),
         ("GET", "/v1/status"),
         ("GET", "/v1/progress"),
+        ("GET", "/v1/handoff"),
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
@@ -105,6 +106,11 @@ public static class OpenApiDocument
             if (method == "GET" && path == RuntimeIdentityScheme.Path)
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
+            }
+
+            if (method == "GET" && path == "/v1/handoff")
+            {
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional canonical payload byte limit. Overflow refuses the whole hand-over." });
             }
 
             if (method == "GET" && path == "/v1/asks")
@@ -355,6 +361,7 @@ public static class OpenApiDocument
     {
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
         ("GET", "/v1/status") => "Current status: human text and the canonical JSON that is identical on every machine.",
+        ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
         ("GET", "/v1/progress") => "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",

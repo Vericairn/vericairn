@@ -503,3 +503,23 @@ upgrade path is proven by a synthetic migration in the tests: a step from format
 file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
 once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+
+## Handing work over
+
+`vericairn handoff` prepares the same hand-over as `GET /v1/handoff`: a generated
+view of goals, work orders, assignments, attempts and results, runs, decisions,
+asks, next steps, the estate's pin and recorded observations, followed by complete
+original records. No actor supplies the recap. Missing decisions or open work
+referenced by the records refuse the hand-over and are named together.
+
+Use `vericairn handoff --out handoff.json` to retain its portable package in a
+new file. Existing files are never overwritten. `--json` prints that same package;
+`--max-bytes <n>` sets a payload byte cap and refuses overflow without dropping
+required material. A refused command exits 2 and creates no package file.
+Without a cap, the full selected scope is retained and the limit is not set.
+The package includes every record held by this copy and its history; its
+`withheld` list is empty. Referenced source files, output objects and unrecorded
+provider state are outside that selection. The sidecar measures and hashes the
+canonical payload; token counts and model-context fit are not claimed. A copy
+with the same records and pin produces the same package. Records remain originals,
+apart from the deterministic presentation, with synthesis off.

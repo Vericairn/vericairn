@@ -152,6 +152,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public ProgressResponse Progress() => Get<ProgressResponse>("/v1/progress")!;
 
     /// <inheritdoc />
+    public HandoffResponse Handoff(long? maxBytes = null) => Get<HandoffResponse>("/v1/handoff" + (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
+
+    /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
 
     /// <inheritdoc />
