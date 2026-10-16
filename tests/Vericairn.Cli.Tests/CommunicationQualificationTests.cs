@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
+using Vericairn.Records.Hashing;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -155,5 +157,93 @@ public class CommunicationQualificationTests
     {
         Assert.True(outcome.Ok, outcome.Problem?.Message + JsonSerializer.Serialize(outcome.Problem, ProtocolJson.Options));
         return outcome.Written!.Id;
+    }
+
+    [Fact]
+    public void D08C_AMeasuredOmissionCanBeRetrievedUntilItsExactOriginalChanges()
+    {
+        using var estate = new HandoffEstate();
+        byte[] original = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("café 漢字\n", 20_000)));
+        Directory.CreateDirectory(Path.Combine(estate.Root, "docs"));
+        string path = Path.Combine(estate.Root, "docs", "large.md");
+        File.WriteAllBytes(path, original);
+        var revision = estate.Add("document-revision", estate.OperatorId, $$"""{"path":"docs/large.md","title":"Optional source","hash":"{{ContentHash.Sha256(original)}}","bytes":{{original.Length}},"mediaType":"text/markdown","revision":1,"summary":"A large optional original."}""");
+        var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Measured omission","intent":"Read docs/large.md if useful.","scope":["tests"],"exitQuestion":"Measured?","inputs":[],"deliverables":["results"]}""");
+        using EstateService api = EstateService.Open(estate.Root);
+        var mcp = new ToolRegistry(api, null);
+        const long cap = 100_000;
+        ContextResponse response = api.Context("COMMS-J", cap);
+        Assert.Null(response.Problem);
+        ContextPackage package = response.Package!;
+        string cli = CliHarness.Ok("--estate", estate.Root, "context", "prepare", "COMMS-J", "--max-bytes", "100000").Out;
+        ToolCallResult prepared = mcp.Call("context_prepare", new JsonObject { ["workOrder"] = "COMMS-J", ["maxBytes"] = "100000" });
+        Assert.False(prepared.IsError);
+        Assert.Equal(response.Text, cli);
+        Assert.Equal(cli, prepared.Text);
+        Assert.Equal(package.Bytes, Encoding.UTF8.GetByteCount(cli));
+        Assert.Equal(ContentHash.Sha256(Encoding.UTF8.GetBytes(cli)), package.Hash);
+        JsonElement payload = package.Payload;
+        JsonElement withheld = Assert.Single(payload.GetProperty("withheld").EnumerateArray());
+        Assert.Equal(original.Length, withheld.GetProperty("originalBytes").GetInt64());
+        Assert.Equal(original.Length, withheld.GetProperty("withheldBytes").GetInt64());
+        Assert.Equal(0, withheld.GetProperty("includedBytes").GetInt64());
+        Assert.Equal("budget", withheld.GetProperty("reason").GetString());
+        Assert.Equal("withheld-but-retrievable", withheld.GetProperty("state").GetString());
+        Assert.Equal(package.Bytes, payload.GetProperty("accounting").GetProperty("bytes").GetInt64());
+        Assert.Equal(cap - package.Bytes, payload.GetProperty("accounting").GetProperty("remainingBytes").GetInt64());
+        long originals = payload.GetProperty("originals").EnumerateArray().Sum(s => s.GetProperty("bytes").GetInt64());
+        long manifest = CanonicalJson.SerializePrettyUtf8(payload.GetProperty("manifest")).LongLength;
+        Assert.True(package.Bytes > originals + manifest);
+        Assert.Equal(ContentHash.Sha256(CanonicalJson.SerializePrettyUtf8(payload.GetProperty("presentation"))), payload.GetProperty("derivatives")[0].GetProperty("hash").GetString());
+        Assert.NotEqual(withheld.GetProperty("byteHash").GetString(), payload.GetProperty("derivatives")[0].GetProperty("hash").GetString());
+        Assert.Equal("off", payload.GetProperty("presentation").GetProperty("synthesis").GetString());
+        string pin = withheld.GetProperty("pin").GetString()!;
+        string command = withheld.GetProperty("retrieve").GetString()!;
+        Assert.Matches("^vericairn context read vc1_[A-Za-z0-9_-]+ --original$", command);
+        string scratch = CliHarness.TempDirectory("comms-original");
+        try
+        {
+            string fetched = Path.Combine(scratch, "original.md");
+            CliHarness.Ok(["--estate", estate.Root, .. command.Split(' ').Skip(1), "--out", fetched]);
+            Assert.Equal(original, File.ReadAllBytes(fetched));
+            Assert.Equal(withheld.GetProperty("byteHash").GetString(), ContentHash.Sha256File(fetched));
+            ToolCallResult read = mcp.Call("context_read", new JsonObject { ["pin"] = pin });
+            Assert.False(read.IsError);
+            Assert.Equal(original, JsonSerializer.Deserialize<ContextReadResponse>(read.Text, ProtocolJson.Options)!.Content);
+            Assert.Equal(original, api.ContextRead(pin).Content);
+
+            // A changed working file cannot satisfy an old pin or silently reuse its measured size.
+            File.WriteAllText(path, "Edited original: café.\n");
+            Assert.Equal("original-unavailable", api.ContextRead(pin).Problem!.Code);
+            Assert.True(mcp.Call("context_read", new JsonObject { ["pin"] = pin }).IsError);
+            Assert.Equal(2, CliHarness.Run(["--estate", estate.Root, "--json", .. command.Split(' ').Skip(1)]).Code);
+            ContextPackage changed = api.Context("COMMS-J", cap).Package!;
+            Assert.NotEqual(package.Hash, changed.Hash);
+            JsonElement missing = changed.Payload.GetProperty("withheld").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+            Assert.Equal(JsonValueKind.Null, missing.GetProperty("originalBytes").ValueKind);
+            Assert.Equal("missing", missing.GetProperty("state").GetString());
+            Assert.Equal(original, File.ReadAllBytes(fetched));
+            File.WriteAllBytes(path, original);
+            Assert.Equal(package.Hash, api.Context("COMMS-J", cap).Package!.Hash);
+        }
+        finally
+        {
+            CliHarness.Delete(scratch);
+        }
+
+        // Even the mandatory raw bytes alone cannot pay for their manifest and wrappers.
+        ContextResponse overhead = api.Context("COMMS-J", originals);
+        Assert.Null(overhead.Package);
+        Assert.Equal("context-over-budget", overhead.Problem!.Code);
+        JsonObject required = JsonNode.Parse(order.Body.GetRawText())!.AsObject();
+        required["inputs"] = new JsonArray(new JsonObject { ["type"] = "document-revision", ["id"] = revision.Id });
+        Ok(api.NewRecord(new("work-order", estate.OperatorId, Json(required.ToJsonString()), Supersedes: order.Id)));
+        Assert.Null(api.Context("COMMS-J", cap).Package);
+        Assert.Equal("context-over-budget", api.Context("COMMS-J", cap).Problem!.Code);
+        CliHarness.Outcome refused = CliHarness.Run("--estate", estate.Root, "context", "prepare", "COMMS-J", "--max-bytes", "100000");
+        Assert.Equal(2, refused.Code);
+        Assert.Contains("Nothing was truncated or dispatched", refused.Out, StringComparison.Ordinal);
+        Assert.True(mcp.Call("context_prepare", new JsonObject { ["workOrder"] = "COMMS-J", ["maxBytes"] = "100000" }).IsError);
+        Assert.Empty(api.Records("operation"));
     }
 }
