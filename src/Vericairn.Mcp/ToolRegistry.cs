@@ -94,6 +94,8 @@ public sealed class ToolRegistry
         [
             Read("estate_health", "The runtime's identity and what it serves: API version, Vericairn version, estate, profile and record format.", NoArguments(),
                 (api, _) => Json(api.Health())),
+            Read("communication_get", "The recipient's effective communication values, every contributing revision, conflicts and freshness; shipped and estate defaults when no recipient is named. Read-only; no permission or preference is inferred.", Arguments(("recipient", "Recipient principal id; omit for estate defaults."), ("assignment", "Exact assignment id for a personal override.")),
+                (api, a) => Json(api.Communication(OptionalArg(a, "recipient"), OptionalArg(a, "assignment")))),
             Read("estate_status", "The estate's current state derived from its records, as the canonical status document: work orders, releases, assignments, operations and findings. Identical on every machine for the same records.", NoArguments(),
                 (api, _) => new ToolCallResult(api.Status().Json.GetRawText(), false)),
             Read("estate_check", "Validation of every record plus the repository cleanliness and portability checks: the findings with their counts.", NoArguments(),

@@ -19,6 +19,10 @@ public static class ApiRoutes
         ArgumentNullException.ThrowIfNull(shutdown);
         string v = ApiVersion.Prefix;
         app.MapGet($"{v}/health", () => Results.Json(service.Health(), ProtocolJson.Options));
+        app.MapGet($"{v}/communication", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
+            Results.Json(service.Communication(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
+        app.MapPost($"{v}/communication", (CommunicationSetRequest request) => Outcome(service.CommunicationSet(request)));
+        app.MapPost($"{v}/communication/delegations", (CommunicationDelegateRequest request) => Outcome(service.CommunicationDelegate(request)));
         app.MapGet($"{v}/status", () => Results.Json(service.Status(), ProtocolJson.Options));
         app.MapPost($"{v}/status/observations", (EstateObserveRequest request) => Outcome(service.ObserveEstate(request)));
         app.MapGet($"{v}/progress", () => Results.Json(service.Progress(), ProtocolJson.Options));
@@ -101,5 +105,5 @@ public static class ApiRoutes
     private static IResult Outcome(WriteOutcome outcome) =>
         outcome.Ok
             ? Results.Json(outcome, ProtocolJson.Options)
-            : Results.Json(outcome, ProtocolJson.Options, statusCode: outcome.Problem?.Code == "not-found" ? StatusCodes.Status404NotFound : StatusCodes.Status422UnprocessableEntity);
+            : Results.Json(outcome, ProtocolJson.Options, statusCode: outcome.Problem?.Code == "not-found" ? StatusCodes.Status404NotFound : outcome.Problem?.Code == "conflict" ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity);
 }

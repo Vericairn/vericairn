@@ -765,3 +765,32 @@ subject and hashes of the pre-write record set, full pin and status. It records
 an `observation` with kind `estate`, requiring record format 2; format 1 is
 refused with an explicit-upgrade instruction. This is an attributable observation
 of recorded status, not evidence of live external health or acceptance.
+
+## Communication settings (COMMS-01)
+
+These additive API v1 operations require a COMMS-01-capable runtime:
+
+| Operation | Meaning |
+|---|---|
+| `GET /v1/communication` | Effective values, their sources, all scoped revisions, conflicts, observation time and revision-set hash. Optional `recipient` and `assignment` select the personal scope. Optional `progress`, `status`, `decision`, `result`, `handoff` are one-view overrides only. |
+| `POST /v1/communication` | Replace the complete values of a scope; `values: {}` resets it to inheritance. |
+| `POST /v1/communication/delegations` | The recipient explicitly grants or revokes changes to one personal scope. |
+
+A write names `by` (the actual author), `scope`, `recipient` (except estate
+defaults), `assignment` (assignment scope only), and `expected` (the prior
+record's hash, omitted only for a first setting). A setting also supplies
+`values`, optional `authority` (an explicit delegation record) and optional
+`basis` (an existing decision). The runtime pins authority and basis hashes.
+A delegation instead supplies `grantee`, `status` (`active` or `revoked`) and an
+optional `expires` timestamp. A stale or divergent edit returns HTTP 409 with
+problem code `conflict`; refresh and reconcile rather than silently retrying.
+Signed requests bind `by` to the authenticated device's principal.
+
+The SDK exposes `Communication`, `CommunicationSet` and
+`CommunicationDelegate`. Existing API implementations inherit explicit
+unsupported responses for these new methods. An older HTTP runtime's 404 on
+the read becomes an unavailable profile, never a claim that defaults were
+applied. Unknown recipients, assignments and unsupported values are labeled
+unavailable. Missing personal records use the stated defaults. Reads author
+nothing. Existing canonical status, progress, brief and record JSON do not
+vary with any recipient or one-view selection. Remote is not built.

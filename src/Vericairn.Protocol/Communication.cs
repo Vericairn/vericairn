@@ -21,7 +21,7 @@ public sealed record CommunicationLayer(string Scope, CommunicationValues Values
 public sealed record CommunicationValue(string? Value, string? Source, bool Conflict, IReadOnlyList<CommunicationLayer> Contributions);
 
 /// <summary>A read-only profile for a recipient and optional assignment. Freshness identifies the settings read, not authority.</summary>
-public sealed record CommunicationProfile(string? Recipient, string? Assignment, IReadOnlyDictionary<string, CommunicationValue> Fields, IReadOnlyList<CommunicationLayer> Revisions, IReadOnlyList<string> Conflicts, string? ObservedAt = null, string? RevisionHash = null);
+public sealed record CommunicationProfile(string? Recipient, string? Assignment, IReadOnlyDictionary<string, CommunicationValue> Fields, IReadOnlyList<CommunicationLayer> Revisions, IReadOnlyList<string> Conflicts, string? ObservedAt = null, string? RevisionHash = null, string? Unavailable = null);
 
 /// <summary>Deterministic, field-by-field precedence shared by runtime and client previews.</summary>
 public static class CommunicationResolution
@@ -109,3 +109,9 @@ public static class CommunicationResolution
         }
     }
 }
+
+/// <summary>Replace one complete scoped profile. Expected is the previous record's hash; null means no previous profile.</summary>
+public sealed record CommunicationSetRequest(string By, string Scope, CommunicationValues Values, string? Recipient = null, string? Assignment = null, string? Expected = null, string? Authority = null, string? Basis = null);
+
+/// <summary>A person grants or revokes another principal's permission to change exactly one personal scope.</summary>
+public sealed record CommunicationDelegateRequest(string By, string Recipient, string Grantee, string Scope, string? Assignment = null, string Status = "active", string? Expected = null, string? Expires = null);

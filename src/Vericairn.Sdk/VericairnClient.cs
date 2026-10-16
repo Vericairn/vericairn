@@ -146,6 +146,32 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public HealthResponse Health() => Get<HealthResponse>("/v1/health")!;
 
     /// <inheritdoc />
+    public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        var query = new Dictionary<string, string?> { ["recipient"] = recipient, ["assignment"] = assignment };
+        foreach ((string key, string? value) in (view ?? new CommunicationValues()).Fields)
+        {
+            query[key] = value;
+        }
+
+        string suffix = string.Join('&', query.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
+        try
+        {
+            return Get<CommunicationProfile>("/v1/communication" + (suffix.Length == 0 ? string.Empty : "?" + suffix))!;
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This runtime does not support communication settings.");
+        }
+    }
+
+    /// <inheritdoc />
+    public WriteOutcome CommunicationSet(CommunicationSetRequest request) => Post<CommunicationSetRequest, WriteOutcome>("/v1/communication", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) => Post<CommunicationDelegateRequest, WriteOutcome>("/v1/communication/delegations", request)!;
+
+    /// <inheritdoc />
     public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
 
     /// <inheritdoc />
@@ -402,7 +428,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         where TResponse : class
     {
         using HttpResponseMessage response = http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options).GetAwaiter().GetResult();
-        if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK)
+        if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK or HttpStatusCode.Conflict)
         {
             return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
         }
