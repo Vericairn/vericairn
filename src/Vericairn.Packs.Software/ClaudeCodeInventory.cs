@@ -15,6 +15,7 @@ internal static class ClaudeCodeInventory
 
     internal static RunPreflight Establish(LaunchContext context)
     {
+        IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: false);
         _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
         HarnessInventory.McpFile(context);
         string version = HarnessInventory.Version(context, "claude", Version + " (Claude Code)", Version);
@@ -31,6 +32,6 @@ internal static class ClaudeCodeInventory
         components.Add(new("claude-code-setting-sources-none", "configuration", "none", HarnessInventory.Digest("none"), configuration, [], ["local"], ["claude-code-configuration"]));
         components.Add(new("claude-code-goal-evaluator", "hook", version, HarnessInventory.Digest(new { version, command = "goal", settings = Settings }), configuration,
             [], ["anthropic-inference"], ["claude-code"]));
-        return new(components, true, true, version);
+        return new([.. components, .. instructions], true, true, version);
     }
 }

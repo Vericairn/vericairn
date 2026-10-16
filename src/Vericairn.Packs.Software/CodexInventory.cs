@@ -37,6 +37,7 @@ internal static class CodexInventory
 
     internal static RunPreflight Establish(LaunchContext context)
     {
+        IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: true);
         CheckHome();
         HarnessInventory.McpFile(context);
         string version = HarnessInventory.Version(context, "codex", "codex-cli " + Version, Version);
@@ -56,7 +57,7 @@ internal static class CodexInventory
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
             webSearch = "disabled", projectTrust = "untrusted",
         });
-        return new(HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference"), true, true, version);
+        return new([.. HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference"), .. instructions], true, true, version);
 
         void CheckHome()
         {
