@@ -877,6 +877,7 @@ internal static partial class CliApp
         var launchers = new Command("launchers", "List the coding-agent launchers available to the runtime, providers of vericairn.launcher.agent/1, with their settings and limitations.");
         launchers.SetAction(parseResult => Commands.WorkerLaunchers(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         worker.Subcommands.Add(launchers);
+        worker.Subcommands.Add(WorkerConfigure(jsonOption));
 
         var qualify = new Command("qualify", "Record an authorized human's qualification of one exact installed harness version from local probe digests: version, help-confirmed flags, closed tools, isolated configuration, login boundary and effective MCP. It launches no agent, establishes no live inference or work acceptance, and grants no version range. Admission allows the shipped baseline or a current qualification whose repeated local probes have identical digests; a superseding record revokes the qualification. The existing inventory policy still applies. Remote is not built.");
         var qualifyLauncher = new Option<string>("--launcher") { Description = "The native launcher: codex or claude-code.", Required = true };
