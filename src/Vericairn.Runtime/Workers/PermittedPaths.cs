@@ -24,9 +24,54 @@ public static class PermittedPaths
             return path == plain || path.StartsWith(plain + "/", StringComparison.Ordinal);
         }
 
-        string expression = Regex.Escape(plain).Replace(@"\*\*/", "(?:.*/)?", StringComparison.Ordinal)
-            .Replace(@"\*\*", ".*", StringComparison.Ordinal).Replace(@"\*", "[^/]*", StringComparison.Ordinal).Replace(@"\?", "[^/]", StringComparison.Ordinal);
-        return Regex.IsMatch(path, "\\A" + expression + "\\z", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100));
+        // Each row records which path prefixes the pattern so far can match. No backtracking or clock:
+        // O(pattern.Length * path.Length) work and O(path.Length) memory, including repeated wildcards.
+        var current = new bool[path.Length + 1];
+        var next = new bool[path.Length + 1];
+        current[0] = true;
+        for (int i = 0; i < plain.Length; i++)
+        {
+            char token = plain[i];
+            if (token == '*')
+            {
+                // **/ takes priority over **, so ***/ is a segment star followed by a directory star.
+                bool recursive = i + 1 < plain.Length && plain[i + 1] == '*'
+                    && !(i + 3 < plain.Length && plain[i + 2] == '*' && plain[i + 3] == '/');
+                if (recursive)
+                {
+                    i++;
+                }
+
+                bool directory = recursive && i + 1 < plain.Length && plain[i + 1] == '/';
+                if (directory)
+                {
+                    i++;
+                }
+
+                next[0] = current[0];
+                bool spanning = current[0];
+                for (int j = 1; j <= path.Length; j++)
+                {
+                    // **/ may end only after a slash, or consume nothing. Like the former regex's dot,
+                    // recursive stars do not consume LF; * and ? exclude only the segment separator.
+                    next[j] = current[j] || (directory ? path[j - 1] == '/' && spanning
+                        : next[j - 1] && path[j - 1] != (recursive ? '\n' : '/'));
+                    spanning = current[j] || spanning && path[j - 1] != '\n';
+                }
+            }
+            else
+            {
+                next[0] = false;
+                for (int j = 1; j <= path.Length; j++)
+                {
+                    next[j] = current[j - 1] && (token == '?' ? path[j - 1] != '/' : path[j - 1] == token);
+                }
+            }
+
+            (current, next) = (next, current);
+        }
+
+        return current[path.Length];
     }
 
     /// <summary>Checks an invocation path within the physical workspace; expansion and links are not assumed safe.</summary>
