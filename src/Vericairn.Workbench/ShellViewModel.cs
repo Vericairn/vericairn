@@ -17,7 +17,7 @@ public sealed record Region(string Name, string Question);
 /// The shell's state: the target context, navigation, documents, the inspector, the activity log, the layout and the views
 /// of home, work and runtime. Everything shown comes from the runtime's responses; the client computes no state of its own.
 /// </summary>
-public sealed class ShellViewModel : Observable
+public sealed partial class ShellViewModel : Observable
 {
     private static readonly JsonSerializerOptions Pretty = new() { WriteIndented = true };
     private readonly Func<string, IEstateConnection> connect;
@@ -111,6 +111,7 @@ public sealed class ShellViewModel : Observable
                 }
 
                 DescribeActing();
+                RefreshCommunication();
             }
         }
     }
@@ -321,6 +322,9 @@ public sealed class ShellViewModel : Observable
             }
 
             DescribeActing();
+            RefreshCommunication();
+            FillProgress(Try(() => connection.Api.Progress()));
+            AddCommunicationAttention();
             Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
@@ -545,13 +549,22 @@ public sealed class ShellViewModel : Observable
     /// <summary>Polls progress claims, worker observations and attention without replacing the user's open editing documents.</summary>
     public void RefreshProgress()
     {
-        if (connection?.Api is IEstateApi api && Try(api.Progress) is ProgressResponse progress)
+        if (connection?.Api is IEstateApi api)
         {
-            FillProgress(progress);
+            ProgressResponse? progress = Try(api.Progress);
+            RefreshCommunication();
+            FillProgress(progress, onDemand: false);
             if (Try(() => api.Asks()) is AsksResponse asks)
             {
                 string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
                 Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
+            }
+
+            AddCommunicationAttention();
+            if (progress is null)
+            {
+                Attention.Add(new AttentionItem("unknown-check", "Progress unavailable", "The runtime did not answer the progress read.", "unknown",
+                    Freshness, "Reconnect and refresh before relying on the cached view."));
             }
         }
     }
@@ -562,7 +575,7 @@ public sealed class ShellViewModel : Observable
         HandoffDocument? page = Documents.OfType<HandoffDocument>().FirstOrDefault();
         if (page is null)
         {
-            page = new HandoffDocument(() => connection?.Api);
+            page = new HandoffDocument(() => connection?.Api, () => communication);
             page.Prepare();
         }
 
@@ -600,12 +613,12 @@ public sealed class ShellViewModel : Observable
     }
 
     /// <summary>The summary rows of home and an open report from one response of the runtime; without one, both say it is unavailable.</summary>
-    private void FillProgress(ProgressResponse? progress)
+    private void FillProgress(ProgressResponse? progress, bool onDemand = true)
     {
-        Replace(Progress, ProgressView.Summary(progress?.Json ?? default));
+        Replace(Progress, ProgressView.Summary(progress?.Json ?? default, communication.Fields.TryGetValue("progress", out CommunicationValue? frequency) ? frequency.Value : null, onDemand));
         foreach (ProgressDocument page in Documents.OfType<ProgressDocument>())
         {
-            page.Text = progress?.Text ?? ProgressDocument.Unavailable;
+            page.Text = progress is null ? ProgressDocument.Unavailable : CommunicationPresentation.Protected(communication, "status", "estate progress", "Complete recorded progress, with claims distinguished from observations.", progress.Text);
         }
     }
 
@@ -768,7 +781,7 @@ public sealed class ShellViewModel : Observable
         try
         {
             ObserveResponse? observed = connection.Api.Observe(keyOrId);
-            BriefResponse? brief = connection.Api.Brief(keyOrId);
+            BriefResponse? brief = connection.Api.BriefFor(keyOrId, CommunicationRecipient());
             if (observed is null || brief is null)
             {
                 Open(new TextDocument(keyOrId, $"No work order '{keyOrId}'.", "missing"));
@@ -776,7 +789,7 @@ public sealed class ShellViewModel : Observable
             }
 
             string key = brief.Json.TryGetProperty("workOrder", out JsonElement o) && o.TryGetProperty("body", out JsonElement b) && b.TryGetProperty("key", out JsonElement k) ? k.GetString() ?? keyOrId : keyOrId;
-            Open(new WorkOrderDocument(key, brief.Json, observed.Text));
+            Open(new WorkOrderDocument(key, brief.Json, CommunicationPresentation.Protected(communication, "result", key, "Complete work and result observations.", observed.Text), CommunicationPresentation.Describe(communication)));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
         {
@@ -858,7 +871,8 @@ public sealed class ShellViewModel : Observable
 
             JsonElement body = record.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             string heading = record.Type == "result" ? $"Review result {record.Id[..12]}" : $"Review {record.Type} {record.Id[..12]}";
-            string summary = record.Type == "result" ? RenderResult(record, body) : JsonSerializer.Serialize(body, Pretty);
+            string original = record.Type == "result" ? RenderResult(record, body) + "\n\nComplete original record:\n" + JsonSerializer.Serialize(record.Envelope, Pretty) : JsonSerializer.Serialize(record.Envelope, Pretty);
+            string summary = CommunicationPresentation.Protected(communication, record.Type == "result" ? "result" : "decision", record.Id + " at " + record.Hash, Str(body, "summary") ?? heading, original);
             var reviews = new List<ReviewRow>();
             foreach (RecordResponse review in Try(() => connection.Api.Records("review")) ?? [])
             {

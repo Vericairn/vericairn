@@ -3,6 +3,56 @@
 How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
 
+## Personal communication (0.7.0, COMMS-01)
+
+Communication has five independent fields: optional progress frequency, status
+depth, decision lead depth, result explanation depth and handoff introduction
+depth. Shipped defaults are `completion-and-need`, `short`, `comprehensive`,
+`comprehensive`, `comprehensive`, respectively. The frequencies are `none`,
+`completion-and-need`, `milestones` and `verbose`; depths are `short`, `standard`
+and `comprehensive`. Resolution is field by field: shipped defaults, estate
+defaults, the recipient's estate setting, their assignment override, then a
+one-view override. An omitted field inherits; `none` explicitly suppresses
+optional progress. These choices confer no execution permission.
+
+```sh
+vericairn communication show --recipient <person-id> --preview
+vericairn communication set --as <person-id> --status short --progress completion-and-need
+vericairn communication set --as <person-id> --for-assignment <assignment-id> --handoffs standard
+vericairn communication set --as <person-id> --status inherit
+vericairn communication reset --as <person-id>
+vericairn status --recipient <person-id> --depth comprehensive
+vericairn records show <record-id>
+```
+
+Settings and delegations are signed format-2 records with retained revisions.
+The person changes their own settings; an explicit `communication delegate
+--as <person-id> --to <principal-id>` grants only that scope, and its exact
+record must be supplied as `--authority` by the actual delegated author.
+Revisions require the prior hash; stale or divergent writes report conflict.
+CLI named-field edits first read that prior hash and preserve other fields.
+`--expected` pins a previously inspected revision. Reset preserves history.
+
+Human CLI status, progress, decisions, work observations, briefs and handoffs
+use the effective depth. Short status omits optional principal navigation;
+protected decisions, results, findings, evidence and handoff originals remain
+complete behind the chosen explanatory lead. `--json`, canonical API JSON,
+record contents and saved handoff packages never vary with depth. CLI reads
+are on demand and show all progress. Workbench's periodic updates apply
+frequency only to optional claims. Required decisions, failed or unknown
+checks, blockers, uncertain effects, incidents and exhausted budgets always
+appear. A missing source remains unknown and visible.
+
+A worker brief captures the goal sponsor's settings when that sponsor is a
+person, plus that assignment's override; otherwise it explicitly uses estate
+defaults. The complete original brief is retained, with recipient, revisions,
+source hashes and freshness added. It instructs the worker to refresh through
+the read-only MCP tool `communication_get` at the next settled boundary.
+Enforcement covers stored authority, conflicts and first-party rendering;
+following the brief is an instruction to an external agent, not an observed
+guarantee of its prose. Run configuration and model selection are unchanged.
+Remote is not built; no Remote communication behavior is claimed.
+
 This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Its worker and launchers first appeared
 in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
 the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution

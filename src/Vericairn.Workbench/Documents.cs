@@ -224,10 +224,11 @@ public sealed record AssignmentView(string Id, string Hash, string Contributor, 
 public sealed class WorkOrderDocument : Document
 {
     /// <summary>Builds the page from the work order's brief document.</summary>
-    public WorkOrderDocument(string key, JsonElement brief, string observation) : base(key, "work-order")
+    public WorkOrderDocument(string key, JsonElement brief, string observation, string communication = "") : base(key, "work-order")
     {
         Key = key;
         Observation = observation;
+        Communication = communication;
         JsonElement order = brief.TryGetProperty("workOrder", out JsonElement o) ? o : default;
         Id = Str(order, "id") ?? string.Empty;
         Hash = Str(order, "hash") ?? string.Empty;
@@ -284,6 +285,9 @@ public sealed class WorkOrderDocument : Document
 
     /// <summary>Exit question.</summary>
     public string ExitQuestion { get; }
+
+    /// <summary>The addressed recipient profile and its provenance.</summary>
+    public string Communication { get; }
 
     /// <summary>The observation text.</summary>
     public string Observation { get; }

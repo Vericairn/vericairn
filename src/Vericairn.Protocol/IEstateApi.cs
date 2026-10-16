@@ -57,6 +57,13 @@ public interface IEstateApi
     /// <summary>The brief of a work order, or null when no work order has that key or id.</summary>
     BriefResponse? Brief(string workOrder);
 
+    /// <summary>A personalized brief with complete original obligations and an explicit communication section; its canonical JSON is unchanged.</summary>
+    BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        BriefResponse? brief = Brief(workOrder);
+        return brief is null ? null : brief with { Markdown = CommunicationPresentation.Brief(brief.Markdown, Communication(recipient, assignment, view)) };
+    }
+
     /// <summary>What an observer sees of a work order, or null.</summary>
     ObserveResponse? Observe(string workOrder);
 

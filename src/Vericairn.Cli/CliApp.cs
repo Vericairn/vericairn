@@ -6,7 +6,7 @@ using System.CommandLine;
 namespace Vericairn.Cli;
 
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
-internal static class CliApp
+internal static partial class CliApp
 {
     /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
     public static RootCommand Build()
@@ -27,9 +27,14 @@ internal static class CliApp
         var root = new RootCommand("Vericairn: records, estates and the tools that keep them honest.");
         root.Options.Add(estateOption);
         root.Options.Add(jsonOption);
+        var presentation = new PresentationOptions();
+        root.Options.Add(presentation.Recipient);
+        root.Options.Add(presentation.Assignment);
+        root.Options.Add(presentation.Depth);
+        root.Subcommands.Add(CommunicationFamily(estateOption, jsonOption, presentation));
         root.Subcommands.Add(RecordsFamily(estateOption, jsonOption));
         root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
-        root.Subcommands.Add(WorkFamily(estateOption, jsonOption));
+        root.Subcommands.Add(WorkFamily(estateOption, jsonOption, presentation));
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
@@ -48,11 +53,11 @@ internal static class CliApp
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         status.Options.Add(observeStatus);
         status.Options.Add(observer);
-        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer)));
+        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult)));
         root.Subcommands.Add(status);
 
         var progress = new Command("progress", "Show the estate's recorded progress with latest local agent claims and worker observations labelled separately: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
-        progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(progress);
 
         var resume = new Command("resume", "Show every record, pin and observed-state change since a retained hand-over. The world may have moved; this restarts nothing.");
@@ -66,7 +71,7 @@ internal static class CliApp
         var handoffLimit = new Option<long?>("--max-bytes") { Description = "Optional payload byte limit; no truncation. No limit when omitted." };
         handoff.Options.Add(handoffOut);
         handoff.Options.Add(handoffLimit);
-        handoff.SetAction(parseResult => Commands.Handoff(parseResult.GetValue(estateOption)!, parseResult.GetValue(handoffOut), parseResult.GetValue(handoffLimit), parseResult.GetValue(jsonOption)));
+        handoff.SetAction(parseResult => Commands.Handoff(parseResult.GetValue(estateOption)!, parseResult.GetValue(handoffOut), parseResult.GetValue(handoffLimit), parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(handoff);
 
         var ask = new Command("ask", "Show what waits on a principal, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order. Reading them answers nothing; an ask is answered by a decision of the principal it is put to that names it in its answers.");
@@ -78,7 +83,7 @@ internal static class CliApp
         var decisions = new Command("decisions", "List the estate's current decisions, or show one cleanly.");
         var decisionIdArgument = new Argument<string?>("id") { Description = "Decision record id (any revision); omit to list.", Arity = ArgumentArity.ZeroOrOne };
         decisions.Arguments.Add(decisionIdArgument);
-        decisions.SetAction(parseResult => Commands.Decisions(parseResult.GetValue(estateOption)!, parseResult.GetValue(decisionIdArgument), parseResult.GetValue(jsonOption)));
+        decisions.SetAction(parseResult => Commands.Decisions(parseResult.GetValue(estateOption)!, parseResult.GetValue(decisionIdArgument), parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(decisions);
 
         var doctor = new Command("doctor", "Check this machine's prerequisites.");
@@ -212,6 +217,12 @@ internal static class CliApp
         records.Subcommands.Add(newCommand);
 
         var describeTypeArgument = new Argument<string?>("type") { Description = "Record type to describe; omit to list all types.", Arity = ArgumentArity.ZeroOrOne };
+        var show = new Command("show", "Read one complete original record by id; presentation depth never changes it.");
+        var showId = new Argument<string>("id") { Description = "Exact record id." };
+        show.Arguments.Add(showId);
+        show.SetAction(p => Commands.RecordShow(p.GetValue(estateOption)!, p.GetValue(showId)!));
+        records.Subcommands.Add(show);
+
         var describe = new Command("describe", "Explain record types and their fields.");
         describe.Arguments.Add(describeTypeArgument);
         describe.SetAction(parseResult => Commands.Describe(parseResult.GetValue(describeTypeArgument)));
@@ -895,7 +906,7 @@ internal static class CliApp
         return worker;
     }
 
-    private static Command WorkFamily(Option<string> estateOption, Option<bool> jsonOption)
+    private static Command WorkFamily(Option<string> estateOption, Option<bool> jsonOption, PresentationOptions presentation)
     {
         var work = new Command("work", "Briefs, assignments, attempts, results and amendments of work orders.");
         var keyArgument = new Argument<string>("work-order") { Description = "Work-order key (for example M1-WORK) or record id." };
@@ -903,7 +914,7 @@ internal static class CliApp
 
         var brief = new Command("brief", "Export the brief of a work order: everything a contributor needs, from the records alone.");
         brief.Arguments.Add(keyArgument);
-        brief.SetAction(parseResult => Commands.WorkBrief(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption)));
+        brief.SetAction(parseResult => Commands.WorkBrief(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         work.Subcommands.Add(brief);
 
         var contributorOption = new Option<string>("--contributor") { Description = "Principal id of the contributor the work is delegated to.", Required = true };
@@ -983,7 +994,7 @@ internal static class CliApp
 
         var observe = new Command("observe", "Show a work order's assignments, attempts, results, amendments, reviews and acceptances.");
         observe.Arguments.Add(keyArgument);
-        observe.SetAction(parseResult => Commands.WorkObserve(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption)));
+        observe.SetAction(parseResult => Commands.WorkObserve(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         work.Subcommands.Add(observe);
         return work;
     }

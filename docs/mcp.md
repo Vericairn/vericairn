@@ -57,6 +57,11 @@ means estate defaults, without inventing a personal choice. It is visible on
 read-only connections and writes nothing. There is no MCP setting-write or
 delegation tool. Unsupported runtimes return an explicitly unavailable profile.
 
+`work_brief` accepts optional `recipient` and `assignment` ids. Its complete
+original brief remains present, with the effective communication values and
+their sources in a separate section. A worker's exported brief captures the
+same values and asks it to refresh them at the next settled boundary.
+
 This changes the MCP tool list. The builder must regenerate `AGENTS.md` with
 `vericairn mcp orientation` from the updated runtime; pointer files retain their
 usual role. Remote is not built and is not qualified by this tool.

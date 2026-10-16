@@ -29,7 +29,7 @@ public class HandoffTests(HeadlessFixture fixture)
             HandoffDocument page = Assert.IsType<HandoffDocument>(shell.SelectedDocument);
             Assert.NotNull(page.Package);
             string basis = page.PackageJson;
-            Assert.Equal(shell.Api!.Handoff().Text, page.Text);
+            Assert.EndsWith(shell.Api!.Handoff().Text, page.Text, StringComparison.Ordinal);
             Assert.Contains("Originals (complete)", page.Text, StringComparison.Ordinal);
             await fixture.Ui(() =>
             {

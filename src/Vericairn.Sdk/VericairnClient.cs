@@ -148,16 +148,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     /// <inheritdoc />
     public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
     {
-        var query = new Dictionary<string, string?> { ["recipient"] = recipient, ["assignment"] = assignment };
-        foreach ((string key, string? value) in (view ?? new CommunicationValues()).Fields)
-        {
-            query[key] = value;
-        }
-
-        string suffix = string.Join('&', query.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
         try
         {
-            return Get<CommunicationProfile>("/v1/communication" + (suffix.Length == 0 ? string.Empty : "?" + suffix))!;
+            return Get<CommunicationProfile>("/v1/communication" + CommunicationQuery(recipient, assignment, view))!;
         }
         catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
@@ -206,6 +199,10 @@ public sealed class VericairnClient : IEstateApi, IDisposable
 
     /// <inheritdoc />
     public DecisionResponse? Decision(string id) => Get<DecisionResponse>("/v1/decisions/" + Uri.EscapeDataString(id), allowNotFound: true);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief" + CommunicationQuery(recipient, assignment, view), allowNotFound: true);
 
     /// <inheritdoc />
     public BriefResponse? Brief(string workOrder) => Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief", allowNotFound: true);
@@ -393,6 +390,18 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     {
         http.Dispose();
         credential?.Dispose();
+    }
+
+    private static string CommunicationQuery(string? recipient, string? assignment, CommunicationValues? view)
+    {
+        var query = new Dictionary<string, string?> { ["recipient"] = recipient, ["assignment"] = assignment };
+        foreach ((string key, string? value) in (view ?? new CommunicationValues()).Fields)
+        {
+            query[key] = value;
+        }
+
+        string suffix = string.Join('&', query.Where(p => p.Value is not null).Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));
+        return suffix.Length == 0 ? string.Empty : "?" + suffix;
     }
 
     private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;

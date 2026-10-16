@@ -219,7 +219,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public BriefResponse? Brief(string workOrder)
+    public BriefResponse? Brief(string workOrder) => BriefFor(workOrder);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -232,7 +235,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             using JsonDocument json = JsonDocument.Parse(WorkView.RenderBriefJson(model, order));
-            return new BriefResponse(WorkView.RenderBrief(model, order), json.RootElement.Clone());
+            return new BriefResponse(CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), Communication(recipient, assignment, view)), json.RootElement.Clone());
         }
     }
 

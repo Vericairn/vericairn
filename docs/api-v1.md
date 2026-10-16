@@ -794,3 +794,9 @@ applied. Unknown recipients, assignments and unsupported values are labeled
 unavailable. Missing personal records use the stated defaults. Reads author
 nothing. Existing canonical status, progress, brief and record JSON do not
 vary with any recipient or one-view selection. Remote is not built.
+
+`GET /v1/work/{key}/brief` additionally accepts the same optional recipient,
+assignment and five one-view parameters. The SDK method is `BriefFor`.
+Its Markdown carries the effective profile, source revisions and freshness;
+its canonical `json` member is unchanged and its original obligations remain
+complete. This is presentation input, never authority for an extra effect.

@@ -24,6 +24,31 @@
 - Theme: the brand's token contract is bound in one resource (`Theme.axaml`): eight color roles in light and dark variants, four type roles, three scale roles and two motion roles. The first values were adopted on October 14, 2026 (design/brand.md revision 2): Inter for title, heading and body and JetBrains Mono for identifiers, both bundled under the SIL Open Font License, one accent blue, one attention amber used only for the attention kinds, neutral surfaces and outlines. The probe measures the contrast ratio of every pair the roles form in both variants (text and muted text on the surfaces at 4.5 or better, outlines at 3 or better) and reports it beside the target sizes. The mark and the wordmark (`brand/`) appear on the arrival page; the shell binds roles, never values.
 - Records: open any record by id.
 
+## Personal communication (0.7.0)
+
+Estate → Communication settings opens the recipient, scope and five fields.
+Refresh the selected scope to see recorded values, inheritance, revision ids,
+hashes, authors, adoption basis, freshness and conflicts. The status, decision,
+result and handoff previews use the same examples as the CLI. Save writes as
+the selected acting principal; changing another person's setting requires
+their explicit delegation. Reset writes a revision with inherited values. A
+stale editor retains its draft and reports the conflict; it never overwrites
+the other device's change. Estate defaults require estate administration.
+
+Home's current status uses the selected person's effective status depth; an
+agent selection uses estate defaults and invents no personal preference.
+The adjacent depth chooser changes that status view only and writes nothing.
+Work briefs identify the recipient, sources and freshness. Review and handoff
+pages change their explanatory lead while keeping the complete original
+record or package. Home's periodic refresh filters optional agent claims by
+frequency; opening a report explicitly still shows every claim. Required
+decisions, failed or unknown checks, blockers, uncertain effects, incidents
+and exhausted budgets remain in attention at every frequency, including
+`none`. Unavailable settings and attention sources are labeled explicitly.
+
+No presentation choice changes a draft's pinned hash, permission, acceptance
+or exported handoff bytes. Remote is not built and has no communication UI.
+
 ## Keyboard
 
 Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attention list on Home), the inspector and the activity log. Ctrl+Shift+L, R, B toggle the navigation, inspector and activity panels; Ctrl+Shift+0 resets the layout. Ctrl+O focuses the estate path; Ctrl+G the record or work-order id; Ctrl+I opens the result inbox; Ctrl+Shift+E the release workspace; Ctrl+Shift+U the runtime workspace; Ctrl+Shift+D the Documents page; Ctrl+Shift+P the progress report; Ctrl+Shift+G the Goals workspace; Ctrl+Shift+A the composer for the open work order; Ctrl+Enter and Ctrl+Shift+Enter send the open document's requests; F5 refreshes; Enter opens the selected item (an attention item, a row of the progress summary, an inbox row, an assignment, an attempt's result, a release destination's candidate); Escape returns to navigation. The Work and Runtime menus carry the same actions. Every pointer arrangement has one of these.

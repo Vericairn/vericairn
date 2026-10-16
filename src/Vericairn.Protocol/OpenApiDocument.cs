@@ -106,7 +106,7 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
-            if (method == "GET" && path == "/v1/communication")
+            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief")
             {
                 operation["parameters"] = new JsonArray(CommunicationParameterNames
                     .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
@@ -134,7 +134,7 @@ public static class OpenApiDocument
 
             if (path.Contains('{', StringComparison.Ordinal))
             {
-                var parameters = new JsonArray();
+                var parameters = operation["parameters"] is JsonArray existingParameters ? (JsonArray)existingParameters.DeepClone() : new JsonArray();
                 foreach (string name in path.Split('/').Where(s => s.StartsWith('{')).Select(s => s.Trim('{', '}')))
                 {
                     parameters.Add(new JsonObject { ["name"] = name, ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" } });
@@ -166,7 +166,7 @@ public static class OpenApiDocument
                 ["title"] = "Vericairn API",
                 ["version"] = ApiVersion.Current,
                 ["description"] = "One versioned API that every client uses. Authority is evaluated by the runtime behind it; a client presents, requests and observes. "
-                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider; conflict reports a stale or divergent communication revision), "
+                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
                     + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1). "
