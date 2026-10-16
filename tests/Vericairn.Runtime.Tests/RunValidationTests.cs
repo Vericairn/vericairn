@@ -13,6 +13,32 @@ public class RunValidationTests
     private static RunCapabilities Capabilities => RunSelectionTests.Capabilities;
 
     [Theory]
+    [InlineData("local")]
+    [InlineData("efficiency")]
+    [InlineData("enabled")]
+    public void AnEfficiencyAdapterRequestIsUnsupportedEvenWhenALaterScopeDisablesIt(string adapter)
+    {
+        RunPolicySource source = new("goal", "goal", RunEstate.Json("{\"choices\":{\"adapter\":\"" + adapter + "\"}}"));
+        Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(Configuration, Capabilities, [source], RunEstate.Json("""{"adapter":"disabled"}"""), RunEstate.Json("{}")));
+        Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(Configuration, Capabilities, [], RunEstate.Json("{\"adapter\":\"" + adapter + "\"}"), RunEstate.Json("{}")));
+    }
+
+    [Fact]
+    public void ExplicitlyDisabledAdapterNeedsNoImplementation()
+    {
+        JsonObject selected = RunSelection.Resolve(Configuration, Capabilities, [], RunEstate.Json("""{"adapter":"disabled"}"""), RunEstate.Json("{}"));
+        Assert.Equal("disabled", selected["requested"]!["adapter"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("not-supported")]
+    [InlineData("provider-default")]
+    public void ReservedEffortChoicesCannotBeAdvertisedAsNativeEffortValues(string effort)
+    {
+        Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(Configuration, Capabilities with { Efforts = ["high", effort] }, [], RunEstate.Json("{\"effort\":\"" + effort + "\"}"), RunEstate.Json("{}")));
+    }
+
+    [Theory]
     [InlineData("model", "missing")]
     [InlineData("effort", "ultra")]
     [InlineData("effort", "not-supported")]

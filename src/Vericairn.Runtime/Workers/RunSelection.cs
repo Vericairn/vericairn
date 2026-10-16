@@ -60,6 +60,10 @@ public static class RunSelection
         {
             throw new ProviderRefusedException("A launcher configuration needs portable identities.");
         }
+        if (capabilities.Efforts.Any(e => e is "not-supported" or "provider-default"))
+        {
+            throw new ProviderRefusedException("A launcher's native effort vocabulary cannot contain the reserved not-supported or provider-default choices.");
+        }
 
         List<RunPolicySource> layers = [new("launcher", configuration.Name, configuration.Policy), .. sources];
         if (overrides is JsonElement explicitChoices)
@@ -83,6 +87,10 @@ public static class RunSelection
             {
                 foreach (JsonProperty choice in choices.EnumerateObject())
                 {
+                    if (choice.Name == "adapter" && choice.Value.GetString() != "disabled")
+                    {
+                        throw new ProviderRefusedException("The efficiency Adapter is unsupported; every run keeps it disabled. EFF-01 belongs to release 0.8.0.");
+                    }
                     requested[choice.Name] = choice.Value.GetString();
                 }
             }
