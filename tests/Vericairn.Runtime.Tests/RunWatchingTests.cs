@@ -82,9 +82,10 @@ public class RunWatchingTests
     [Theory]
     [InlineData("watch-claude-unverified-path")]
     [InlineData("watch-claude-unverified-workdir")]
+    [InlineData("watch-claude-unverified-filesystem")]
     public void InvalidInvocationPathsProduceAnUnverifiedWarningWithoutStopping(string scenario)
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "**", StringComparison.Ordinal));
         AssertUnverifiedRunContinues(run, scenario);
     }
 
