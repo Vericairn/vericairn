@@ -35,7 +35,7 @@ internal static partial class Docs
     /// Writes release notes from the estate's records since the previous set's notes ended, so that no record falls between two
     /// sets, and records their window in the set's manifest. The previous set is the directory the earlier version names beside the
     /// output; one that records no window (0.5.2 and earlier) gives the end its notes state; a time named with --since overrides
-    /// both; and with no previous set the notes begin at the earlier publication.
+    /// either only when it is no later than that end; and with no previous set the notes begin at the earlier publication.
     /// </summary>
     public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json)
     {
@@ -90,18 +90,33 @@ internal static partial class Docs
     }
 
     /// <summary>
-    /// Where the notes begin: the time --since names; else where the previous set's notes ended, as its manifest records it or, for a
+    /// Where the notes begin: the time --since names, no later than the previous end; else where the previous set's notes ended, as its manifest records it or, for a
     /// set made before the window was recorded, as its notes state it (to the minute, or to the second when they end at a publication
     /// this estate records); else, when no previous set is found beside this one, the earlier version's publication.
     /// </summary>
     private static Beginning? Begin(EstateModel model, RecordEnvelope from, string fromVersion, string output, string? since, out string? problem)
     {
-        problem = null;
-        if (since is not null)
+        Beginning? previous = PreviousEnd(model, from, fromVersion, output, out problem);
+        if (since is null || previous is null)
         {
-            return new Beginning(since, $"since {When(since)} (the time named when they were generated)");
+            return previous;
         }
 
+        int order = string.CompareOrdinal(since, previous.At);
+        if (order > 0)
+        {
+            problem = $"--since {since} is later than the previous set's end ({previous.At}); that would leave records between the sets. Choose that end or an earlier time.";
+            return null;
+        }
+
+        return new Beginning(since, order < 0
+            ? $"since {since} (explicitly widened to include records missed by the previous set; the notes of {fromVersion} end at {previous.At}, so records may appear in both sets)"
+            : $"since {since} (the time named when they were generated, equal to the previous set's end)");
+    }
+
+    private static Beginning? PreviousEnd(EstateModel model, RecordEnvelope from, string fromVersion, string output, out string? problem)
+    {
+        problem = null;
         string previous = Path.Combine(Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(Path.GetFullPath(output))) ?? string.Empty, fromVersion);
         string manifestPath = Path.Combine(previous, "manifest.json");
         if (File.Exists(manifestPath) && JsonNode.Parse(File.ReadAllText(manifestPath)) is JsonObject manifest && manifest[NotesWindow] is JsonNode recorded)
@@ -109,7 +124,7 @@ internal static partial class Docs
             string? end = recorded is JsonObject window && window["to"] is JsonValue value && value.TryGetValue(out string? text) ? text : null;
             if (end is null || !RecordParser.IsTimestamp(end))
             {
-                problem = $"{manifestPath} records the window of its notes without a valid end; name where these notes begin with --since <time>.";
+                problem = $"{manifestPath} records the window of its notes without a valid end; cannot verify that --since leaves no gap after the previous set.";
                 return null;
             }
 
@@ -127,7 +142,7 @@ internal static partial class Docs
         Match stated = StatedEnd().Match(sections < 0 ? overview : overview[..sections]);
         if (!stated.Success)
         {
-            problem = $"{notes} records no window and states no end that can be read; name where these notes begin with --since <time>.";
+            problem = $"{notes} records no window and states no end that can be read; cannot verify that --since leaves no gap after the previous set.";
             return null;
         }
 

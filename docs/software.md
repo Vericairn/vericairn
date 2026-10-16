@@ -166,11 +166,18 @@ which step 2 reads from the draft. `vericairn docs notes --from <previous> --to 
 writes the set's release notes from the estate's records and records their window in the manifest
 (`notes: {from, to}`, the records dated after `from` and up to `to`). The notes begin where the notes of
 the previous set, the directory `<previous>` names beside `<set>`, ended, so no record falls between two
-sets for records present when generation runs. A record imported later with an earlier date can still be missed.
+sets for records present when generation runs. To include records imported later with earlier dates, use
+`--since <timestamp>` to widen the next window. The manifest records that exact start, and the introduction
+states it and explains that the overlap includes records missed by the previous set. A start later than the
+previous end is refused before writing either file, as is a previous set whose end cannot be read.
 For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
-notes state, to the minute, and with no previous set at the previous publication; `--since <time>` names
-the beginning instead. Until the version's publication is recorded they end at the second before they are
-generated.
+notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
+explicit start). Until the version's publication is recorded they end at the second before they are generated.
+
+The next set after 0.6.1 must use `--since 2026-10-16T04:29:43Z`: 0.6.1 was rendered from a clone
+missing nine records dated 04:29–04:34 UTC. For 0.7.0, run
+`vericairn docs notes --from 0.6.1 --to 0.7.0 --out docs/releases/0.7.0 --since 2026-10-16T04:29:43Z`
+against the estate that holds those records. This deliberately overlaps 0.6.1; its frozen set stays unchanged.
 
 Only current results in that window are listed: a result superseded by a later result is omitted, even when the later
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
