@@ -36,7 +36,7 @@ internal static class ContextRendering
             text.Append('\n').Append(source.GetProperty("kind").GetString()).Append(' ')
                 .Append(source.TryGetProperty("id", out JsonElement id) ? id.GetString() : source.GetProperty("path").GetString())
                 .Append(" at ").Append(source.GetProperty("byteHash").GetString()).Append(" (byte hash)\n")
-                .Append(ContextAssembly.Retrieval(payload.GetProperty("manifest").GetProperty("hash").GetString()!, source.GetProperty("key").GetString()!)).Append('\n');
+                .Append(ContextRetrieval.Command(source.GetProperty("pin").GetString()!)).Append('\n');
             byte[] original = Convert.FromBase64String(source.GetProperty("content").GetString()!);
             string content = System.Text.Unicode.Utf8.IsValid(original) ? Encoding.UTF8.GetString(original) : Convert.ToBase64String(original);
             string fence = "```";

@@ -17,6 +17,25 @@ namespace Vericairn.Runtime.Tests;
 public class ContextTests
 {
     [Fact]
+    public void PreparingBriefsContextAndHandoffsWritesNothingIntoTheEstate()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        AddDocument(estate, "docs/source.md", Encoding.UTF8.GetBytes("An original to read."));
+        using EstateService service = EstateService.Open(estate.Root);
+        string[] Snapshot() => Directory.GetFiles(estate.Root, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal).Select(p => Path.GetRelativePath(estate.Root, p) + ":" + ContentHash.Sha256(File.ReadAllBytes(p))).ToArray();
+        string[] before = Snapshot();
+        Assert.Null(service.Brief("H-1")!.Problem);
+        Assert.Equal(before, Snapshot());
+        Assert.Null(service.Context("H-1").Problem);
+        Assert.Equal(before, Snapshot());
+        Assert.Null(service.Handoff().Problem);
+        Assert.Equal(before, Snapshot());
+        Assert.Empty(service.Objects());
+    }
+
+    [Fact]
     public void SharedDecisionsDoNotImportUnrelatedWorkOrItsMissingInputs()
     {
         using var estate = new TestEstate(recordFormat: 2);
@@ -95,28 +114,18 @@ public class ContextTests
         }
 
         ContextPackage package = service.Context("H-1").Package!;
-        string manifest = package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
         JsonElement document = package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
-        string original = Path.Combine(estate.Root, "objects", ContentHash.Sha256(bytes)[7..]);
-        string protectedObject = denyDirectory ? Path.GetDirectoryName(original)! : original;
-        UnixFileMode objectMode = File.GetUnixFileMode(protectedObject);
-        File.SetUnixFileMode(protectedObject, UnixFileMode.None);
+        File.SetUnixFileMode(protectedSource, UnixFileMode.None);
         try
         {
-            ContextReadResponse denied = service.ContextRead(manifest, document.GetProperty("key").GetString()!);
+            ContextReadResponse denied = service.ContextRead(document.GetProperty("pin").GetString()!);
             Assert.Null(denied.Identity);
             Assert.Null(denied.Content);
             Assert.Equal("Completeness cannot be confirmed.", denied.Problem!.Message);
-            if (denyDirectory)
-            {
-                HandoffResponse handoff = service.Handoff();
-                Assert.Null(handoff.Package);
-                Assert.Equal("Completeness cannot be confirmed.", handoff.Problem!.Message);
-            }
         }
         finally
         {
-            File.SetUnixFileMode(protectedObject, objectMode);
+            File.SetUnixFileMode(protectedSource, sourceMode);
         }
     }
 
@@ -136,7 +145,7 @@ public class ContextTests
     }
 
     [Fact]
-    public void RetentionRefusesAnOversizedArtifactWithoutWritingAnInvalidObject()
+    public void PayloadsAreNotConstrainedByAnObjectStoreTheyNeverWrite()
     {
         using var estate = new TestEstate(recordFormat: 2);
         estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
@@ -148,8 +157,8 @@ public class ContextTests
 
         using EstateService service = EstateService.Open(estate.Root);
         ContextResponse refused = service.Context("H-1");
-        Assert.Null(refused.Package);
-        Assert.Equal("context-retention-limit", refused.Problem!.Code);
+        Assert.Null(refused.Problem);
+        Assert.True(refused.Package!.Bytes > EstateLayout.MaxObjectBytes);
         Assert.Empty(service.Objects());
     }
 
@@ -197,10 +206,9 @@ public class ContextTests
         Assert.True(ContextAccounting.Verify(new ContextPackage(package.Hash, package.Bytes, package.Payload)));
         Assert.Equal(Encoding.UTF8.GetByteCount(handoff.Text), handoff.TextMeasurement!.Bytes);
         Assert.Equal(ContentHash.Sha256(Encoding.UTF8.GetBytes(handoff.Text)), handoff.TextMeasurement.Hash);
-        string manifest = package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
         foreach (JsonElement original in package.Payload.GetProperty("originals").EnumerateArray())
         {
-            Assert.Equal(Convert.FromBase64String(original.GetProperty("content").GetString()!), service.ContextRead(manifest, original.GetProperty("key").GetString()!).Content);
+            Assert.Equal(Convert.FromBase64String(original.GetProperty("content").GetString()!), service.ContextRead(original.GetProperty("pin").GetString()!).Content);
         }
 
         JsonObject legacy = JsonNode.Parse(package.Payload.GetRawText())!.AsObject();
@@ -241,8 +249,7 @@ public class ContextTests
         JsonElement withheld = Assert.Single(bounded.Payload.GetProperty("withheld").EnumerateArray());
         Assert.Equal(optional.LongLength, withheld.GetProperty("originalBytes").GetInt64());
         Assert.Equal("budget", withheld.GetProperty("reason").GetString());
-        string manifest = bounded.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
-        Assert.Equal(optional, service.ContextRead(manifest, withheld.GetProperty("key").GetString()!).Content);
+        Assert.Equal(optional, service.ContextRead(withheld.GetProperty("pin").GetString()!).Content);
         Assert.Equal(bounded.Hash, service.Context("H-1", cap).Package!.Hash);
         Assert.True(ContextAccounting.Verify(bounded));
         JsonObject edited = JsonNode.Parse(bounded.Payload.GetRawText())!.AsObject();
@@ -325,7 +332,7 @@ public class ContextTests
     }
 
     [Fact]
-    public void PinnedRetrievalSurvivesSourceEditsAndRejectsTampering()
+    public void PinnedRecordsSurviveRevisionsButDocumentsRequireMatchingWorkingTreeBytes()
     {
         using var estate = new TestEstate(recordFormat: 2);
         RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
@@ -335,27 +342,52 @@ public class ContextTests
         int count = estate.Load().Records.Count;
         ContextPackage package = service.Context("H-1").Package!;
         Assert.Equal(count, estate.Load().Records.Count);
-        string manifest = package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
         JsonElement identity = package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
-        string key = identity.GetProperty("key").GetString()!;
+        string key = identity.GetProperty("pin").GetString()!;
         JsonElement recordSource = package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray()
             .Single(s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == order.Id);
         estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "A newer instruction.", StringComparison.Ordinal), supersedes: order.Id);
-        ContextReadResponse pinnedRecord = service.ContextRead(manifest, recordSource.GetProperty("key").GetString()!);
+        ContextReadResponse pinnedRecord = service.ContextRead(recordSource.GetProperty("pin").GetString()!);
         Assert.Equal(order.ComputedHash, pinnedRecord.Identity!.Value.GetProperty("hash").GetString());
         Assert.Equal(File.ReadAllBytes(Path.Combine(estate.Root, order.ExpectedPath)), pinnedRecord.Content);
         File.WriteAllText(Path.Combine(estate.Root, "docs/context.md"), "Changed working file.");
-        Assert.Equal(bytes, service.ContextRead(manifest, key).Content);
-        string hash = ContentHash.Sha256(bytes);
-        string heldPath = Path.Combine(estate.Root, "objects", hash[7..]);
-        File.WriteAllText(heldPath, "Corrupted original.");
-        ContextReadResponse corrupted = service.ContextRead(manifest, key);
-        Assert.Equal("invalid-context", corrupted.Problem!.Code);
-        Assert.Null(corrupted.Content);
-        File.Delete(heldPath);
-        Assert.Equal("original-unavailable", service.ContextRead(manifest, key).Problem!.Code);
-        Assert.Null(service.ContextRead(manifest, key).Content);
+        Assert.Equal("original-unavailable", service.ContextRead(key).Problem!.Code);
+        // Even another custody store holding these bytes is not a fallback for a changed working file.
+        service.ObjectPut(bytes);
+        Assert.Null(service.ContextRead(key).Content);
+        File.WriteAllBytes(Path.Combine(estate.Root, "docs/context.md"), bytes);
+        Assert.Equal(bytes, service.ContextRead(key).Content);
+        File.Delete(Path.Combine(estate.Root, "docs/context.md"));
+        Assert.Equal("original-unavailable", service.ContextRead(key).Problem!.Code);
+        Assert.Null(service.ContextRead(key).Content);
+        File.AppendAllText(Path.Combine(estate.Root, order.ExpectedPath), " ");
+        Assert.Equal("original-unavailable", service.ContextRead(recordSource.GetProperty("pin").GetString()!).Problem!.Code);
         Assert.Equal(revision.Id, identity.GetProperty("revision").GetString());
+    }
+
+    [Fact]
+    public void PinsCannotSubstituteAnotherPathRevisionHashOrEstate()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        AddDocument(estate, "docs/source.md", Encoding.UTF8.GetBytes("Pinned source."));
+        using EstateService service = EstateService.Open(estate.Root);
+        JsonElement entry = service.Context("H-1").Package!.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources")
+            .EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+        JsonObject identity = JsonNode.Parse(ContextRetrieval.Decode(entry.GetProperty("pin").GetString()!, estate.Estate.Id).GetRawText())!.AsObject();
+        foreach (string field in new[] { "path", "revision", "revisionHash", "byteHash", "kind" })
+        {
+            JsonObject changed = identity.DeepClone().AsObject();
+            changed[field] = field is "byteHash" or "revisionHash" ? "sha256:" + new string('a', 64) : "not-the-pinned-source";
+            ContextReadResponse refused = service.ContextRead(ContextRetrieval.Pin(changed, estate.Estate.Id));
+            Assert.Equal("original-unavailable", refused.Problem!.Code);
+            Assert.Null(refused.Content);
+        }
+
+        Assert.Null(service.ContextRead(ContextRetrieval.Pin(identity, "another-estate")).Content);
+        Assert.Equal("invalid-context", service.ContextRead("vc1_invalid").Problem!.Code);
+        Assert.Equal("original-unavailable", service.ContextRead("old-manifest", "s000000").Problem!.Code);
+        Assert.Empty(service.Objects());
     }
 
     [Fact]
@@ -391,17 +423,17 @@ public class ContextTests
         Assert.True(service.DeviceAdmit(new AdmitRequest(device, estate.OperatorId, "Read this estate.")).Ok);
         DeviceStanding standing = service.Standing(device)!;
         ContextPackage package = service.Context("H-1").Package!;
-        string manifest = package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
+        string pin = package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources")[0].GetProperty("pin").GetString()!;
         HandoffPackage handoff = service.Handoff().Package!;
         using (service.ForDeviceRequest(standing.Identity, standing.PublicKey))
         {
-            Assert.Null(service.ContextRead(manifest, "s000000").Problem);
+            Assert.Null(service.ContextRead(pin).Problem);
             Assert.True(service.DeviceRevoke(new RevokeRequest(device, estate.OperatorId, "Withdraw access.")).Ok);
-            ContextReadResponse denied = service.ContextRead(manifest, "s000000");
+            ContextReadResponse denied = service.ContextRead(pin);
             Assert.Null(denied.Identity);
             Assert.Null(denied.Content);
             Assert.Equal("Completeness cannot be confirmed.", denied.Problem!.Message);
-            Assert.Equal(denied, service.ContextRead("unknown", "unknown"));
+            Assert.Equal(denied, service.ContextRead("unknown"));
             ContextResponse noPackage = service.Context("H-1");
             Assert.Null(noPackage.Package);
             Assert.Equal("Completeness cannot be confirmed.\n", noPackage.Text);

@@ -17,7 +17,7 @@ public sealed record ContextPackage(string Hash, long Bytes, JsonElement Payload
 /// <param name="Problem">Why assembly could not complete.</param>
 public sealed record ContextResponse(string Text, ContextPackage? Package, Problem? Problem);
 
-/// <summary>The exact original read through a retained context manifest, with permission checked again.</summary>
+/// <summary>The exact original read using its self-contained pinned identity, with permission checked again.</summary>
 /// <param name="Identity">Pinned source identity; absent when completeness cannot be confirmed.</param>
 /// <param name="Content">Original bytes (base64 in JSON), never the latest revision or a derivative.</param>
 /// <param name="Problem">Why bytes cannot be returned.</param>

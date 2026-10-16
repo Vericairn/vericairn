@@ -67,6 +67,7 @@ internal static class ContextAssembly
 
             string key = "s" + i.ToString("D6", CultureInfo.InvariantCulture);
             JsonObject identity = source.Identity.DeepClone().AsObject();
+            identity["pin"] = ContextRetrieval.Pin(source.Identity, basis["estate"]?.GetValue<string>());
             identity["key"] = key;
             identity["mandatory"] = source.Mandatory;
             identity["dependency"] = source.Dependency;
@@ -100,7 +101,7 @@ internal static class ContextAssembly
                         ? "irreversible reduction of this representation; original retained" : "selection only; original retained",
                     ["cause"] = source.Original is null ? "The pinned original is not available in this copy; no retention disposition is inferred." : "Deterministic package selection; no original was deleted.",
                     ["lostBy"] = source.Original is null ? "unknown" : null,
-                    ["disposition"] = source.Original is null ? "unknown; absence observed in this copy, not permission to delete" : "retained in existing object custody",
+                    ["disposition"] = source.Original is null ? "unknown; absence observed in this copy, not permission to delete" : source.Identity["kind"]!.GetValue<string>() == "record" ? "immutable record custody" : "working-tree bytes matched at assembly; retrieval requires the same bytes",
                     ["unsupportedClaims"] = "The omitted original cannot support a dependent claim until retrieved and verified.",
                 };
                 if (source.ExcerptBytes is int length)
@@ -130,9 +131,9 @@ internal static class ContextAssembly
         string manifestHash = ContentHash.Sha256(Bytes(manifest));
         foreach (JsonObject entry in withheld.Cast<JsonObject>())
         {
-            string key = entry["key"]!.GetValue<string>();
-            entry["retrieve"] = Retrieval(manifestHash, key);
-            entry["api"] = "/v1/context/" + manifestHash + "/sources/" + key;
+            string pin = entry["pin"]!.GetValue<string>();
+            entry["retrieve"] = ContextRetrieval.Command(pin);
+            entry["api"] = "/v1/context/original/" + pin;
         }
 
         var derivative = new JsonObject
@@ -249,6 +250,4 @@ internal static class ContextAssembly
     internal static byte[] Bytes(JsonNode node) => CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(node, ProtocolJson.Options));
 
     internal static string Serialize(ContextPackage package) => Encoding.UTF8.GetString(CanonicalJson.SerializePrettyUtf8(package.Payload));
-
-    internal static string Retrieval(string manifest, string key) => "vericairn context read " + manifest + " --source " + key + " --original";
 }

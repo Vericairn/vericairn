@@ -4,11 +4,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
-using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
-using Vericairn.Runtime.Objects;
 
 namespace Vericairn.Runtime.Service;
 
@@ -51,11 +49,7 @@ public sealed partial class EstateService
         List<ContextAssembly.Source> sources;
         try
         {
-            sources = ContextSelection.Work(model, files, order, session.Objects);
-        }
-        catch (ObjectCorruptedException)
-        {
-            return ContextRefusal("incomplete-context", "A retained original failed hash verification; restore its exact bytes before continuing.");
+            sources = ContextSelection.Work(model, files, order);
         }
         catch (UnauthorizedAccessException)
         {
@@ -79,27 +73,7 @@ public sealed partial class EstateService
         {
             basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";
         }
-        ContextResponse response = ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order), maxBytes);
-        if (response.Package is { } package)
-        {
-            try
-            {
-                if (RetainContext(package, sources) is Problem retention)
-                {
-                    return new ContextResponse(retention.Message + "\n", null, retention);
-                }
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return ContextRefusal("denied", ContextDenied);
-            }
-            catch (Exception exception) when (exception is ObjectCorruptedException or IOException)
-            {
-                return ContextRefusal("incomplete-context", "Context refused: the exact originals and manifest could not be retained and verified in this copy.");
-            }
-        }
-
-        return response;
+        return ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order), maxBytes);
     }
 
     private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true)
@@ -117,97 +91,56 @@ public sealed partial class EstateService
         return new BriefResponse(text, machine.Payload, measurement, JsonMeasurement: new ContextTextMeasurement(machine.Hash, machine.Bytes, "exact canonical pretty UTF-8 of the complete machine brief, including its context package and accounting"));
     }
 
-    private Problem? RetainContext(ContextPackage package, IEnumerable<ContextAssembly.Source> sources)
-    {
-        List<ContextAssembly.Source> retainedSources = sources.Where(s => s.Original is not null).ToList();
-        byte[] manifestBytes = CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content"));
-        byte[] payloadBytes = CanonicalJson.SerializePrettyUtf8(package.Payload);
-        if (payloadBytes.LongLength > EstateLayout.MaxObjectBytes || manifestBytes.LongLength > EstateLayout.MaxObjectBytes ||
-            retainedSources.Any(s => s.Original!.LongLength > EstateLayout.MaxObjectBytes))
-        {
-            return new Problem("context-retention-limit", "Context refused: retaining a selected original, manifest or payload would exceed the estate's 8 MiB per-object limit. Use a smaller admitted selection or bounded original reads; nothing was truncated.", []);
-        }
-
-        foreach (ContextAssembly.Source source in retainedSources)
-        {
-            string hash = session.Objects.Put(source.Original!);
-            // Put is idempotent; verify an already held object as well as a newly retained one.
-            _ = session.Objects.Read(hash);
-        }
-
-        string manifest = session.Objects.Put(manifestBytes);
-        _ = session.Objects.Read(manifest);
-        string retained = session.Objects.Put(payloadBytes);
-        _ = session.Objects.Read(retained);
-        return null;
-    }
-
     /// <inheritdoc />
-    public ContextReadResponse ContextRead(string manifest, string source)
+    public ContextReadResponse ContextRead(string pin)
     {
         lock (gate)
         {
-            // A handle is never a capability. This happens before checking its existence or returning any metadata.
-            EstateModel model = session.Load();
-            if (RequestDeviceRefusal(model) is not null)
-            {
-                return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));
-            }
-
-            if (!ContentHash.IsValid(manifest) || source is null || source.Length != 7 || source[0] != 's' || source.AsSpan(1).ContainsAnyExceptInRange('0', '9'))
-            {
-                return new ContextReadResponse(null, null, new Problem("invalid", "Supply the manifest and source key generated by the context package.", []));
-            }
-
             JsonElement? identity = null;
             try
             {
-                byte[]? manifestBytes = session.Objects.Read(manifest);
-                if (manifestBytes is null)
+                // The pin is an identity, never a capability. Check access before decoding it.
+                IReadOnlyList<RecordFile> files = session.Files();
+                EstateModel model = EstateLoader.Load(session.Root, files);
+                if (RequestDeviceRefusal(model) is not null)
                 {
-                    return new ContextReadResponse(null, null, new Problem("not-found", "The retained context manifest is unavailable in this copy.", []));
+                    return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));
                 }
 
-                using JsonDocument document = JsonDocument.Parse(manifestBytes);
-                JsonElement root = document.RootElement;
-                if (root.GetProperty("format").GetString() != ContextAssembly.ManifestFormat || root.GetProperty("basis").GetProperty("estate").GetString() != model.Manifest?.Estate)
+                JsonElement pinned = ContextRetrieval.Decode(pin, model.Manifest!.Estate);
+                identity = pinned;
+                string kind = pinned.GetProperty("kind").GetString()!;
+                string byteHash = pinned.GetProperty("byteHash").GetString()!;
+                byte[]? original = null;
+                if (kind == "record")
                 {
-                    return new ContextReadResponse(null, null, new Problem("invalid", "This is not a supported context manifest for this estate.", []));
-                }
-
-                foreach (JsonElement entry in root.GetProperty("sources").EnumerateArray())
-                {
-                    if (entry.GetProperty("key").GetString() == source)
+                    string id = pinned.GetProperty("id").GetString()!;
+                    if (model.ById.TryGetValue(id, out RecordEnvelope? record))
                     {
-                        identity = entry.Clone();
-                        break;
+                        if (record.Type != pinned.GetProperty("type").GetString() || record.ComputedHash != pinned.GetProperty("hash").GetString() || record.ExpectedPath != pinned.GetProperty("path").GetString())
+                        {
+                            return Unavailable(identity);
+                        }
+
+                        original = files.Single(f => f.Path == record.ExpectedPath).Bytes;
+                    }
+                }
+                else if (kind == "document")
+                {
+                    string revision = pinned.GetProperty("revision").GetString()!;
+                    string path = pinned.GetProperty("path").GetString()!;
+                    if (model.ById.TryGetValue(revision, out RecordEnvelope? record) && record.Type == "document-revision" &&
+                        record.ComputedHash == pinned.GetProperty("revisionHash").GetString() &&
+                        EstateModel.BodyString(record, "path") == path && EstateModel.BodyString(record, "hash") == byteHash)
+                    {
+                        original = ContextSelection.LocalOriginal(model.Root, path, byteHash);
                     }
                 }
 
-                if (identity is not JsonElement pinned)
+                if (original is null || ContentHash.Sha256(original) != byteHash ||
+                    (pinned.TryGetProperty("bytes", out JsonElement size) && size.ValueKind == JsonValueKind.Number && size.GetInt64() != original.LongLength))
                 {
-                    return new ContextReadResponse(null, null, new Problem("not-found", "That source is not selected by the retained manifest.", []));
-                }
-
-                byte[]? original = session.Objects.Read(pinned.GetProperty("byteHash").GetString()!);
-                if (original is null)
-                {
-                    return new ContextReadResponse(identity, null, new Problem("original-unavailable", "The pinned original is unavailable in this copy. No latest revision was substituted.", []));
-                }
-
-                if (pinned.GetProperty("bytes") is { ValueKind: JsonValueKind.Number } size && size.GetInt64() != original.LongLength)
-                {
-                    throw new InvalidOperationException();
-                }
-
-                if (pinned.GetProperty("kind").GetString() == "record")
-                {
-                    var findings = new FindingList();
-                    RecordEnvelope? record = RecordParser.Parse(original, pinned.GetProperty("path").GetString()!, findings);
-                    if (record is null || findings.HasErrors || record.Id != pinned.GetProperty("id").GetString() || record.ComputedHash != pinned.GetProperty("hash").GetString())
-                    {
-                        throw new InvalidOperationException();
-                    }
+                    return Unavailable(identity);
                 }
 
                 return new ContextReadResponse(identity, original, null);
@@ -216,12 +149,31 @@ public sealed partial class EstateService
             {
                 return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));
             }
-            catch (Exception exception) when (exception is ObjectCorruptedException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException)
+            catch (IOException)
             {
-                return new ContextReadResponse(identity, null, new Problem("invalid-context", "The pinned manifest or original failed verification; no bytes were returned.", []));
+                return Unavailable(identity);
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or FormatException)
+            {
+                return new ContextReadResponse(null, null, new Problem("invalid-context", "Supply the complete pinned identity generated by the context package; no bytes were returned.", []));
             }
         }
     }
+
+    /// <inheritdoc />
+    public ContextReadResponse ContextRead(string manifest, string source)
+    {
+        lock (gate)
+        {
+            // Compatibility route for the unreleased manifest handle. Reads no retained objects.
+            return RequestDeviceRefusal(session.Load()) is not null
+                ? new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []))
+                : Unavailable(null);
+        }
+    }
+
+    private static ContextReadResponse Unavailable(JsonElement? identity) => new(identity, null,
+        new Problem("original-unavailable", "The pinned original is unavailable in this copy. No latest revision was substituted. Prepare context again to obtain a self-contained pinned identity.", []));
 
     private static ContextResponse ContextRefusal(string code, string message) => new(message + "\n", null, new Problem(code, message, []));
 }

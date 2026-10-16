@@ -71,7 +71,7 @@ public class JourneyTests
             Assert.True(check.Code == 0, check.Out);
             Assert.Equal(CliHarness.Ok("--estate", b, "--json", "status").Out, CliHarness.Ok("--estate", a, "--json", "status").Out);
             Assert.Contains("partial, awaiting review", CliHarness.Ok("--estate", a, "work", "observe", "W-1").Out, StringComparison.Ordinal);
-            Assert.Equal([".vericairn", "docs", "estate", "objects", "records"], Directory.EnumerateDirectories(a).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
+            Assert.Equal([".vericairn", "docs", "estate", "records"], Directory.EnumerateDirectories(a).Select(Path.GetFileName).Order(StringComparer.Ordinal).ToArray());
         }
         finally
         {

@@ -7,14 +7,13 @@ using System.Text.RegularExpressions;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
-using Vericairn.Runtime.Objects;
 
 namespace Vericairn.Runtime.Service;
 
 /// <summary>The working instructions and effects of one step, their pinned inputs, and the optional document catalogue.</summary>
 internal static partial class ContextSelection
 {
-    internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, IObjectStore objects)
+    internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order)
     {
         var working = new HashSet<string>(model.Chain(order), StringComparer.Ordinal);
         var required = new HashSet<string>(StringComparer.Ordinal);
@@ -91,7 +90,7 @@ internal static partial class ContextSelection
         {
             string path = EstateModel.BodyString(revision, "path")!;
             string hash = EstateModel.BodyString(revision, "hash")!;
-            byte[]? bytes = objects.Read(hash) ?? LocalOriginal(model.Root, path, hash);
+            byte[]? bytes = LocalOriginal(model.Root, path, hash);
             bool mandatory = requiredDocuments.Contains(revision.Id);
             sources.Add(new ContextAssembly.Source(new JsonObject
             {
@@ -176,7 +175,7 @@ internal static partial class ContextSelection
         }
     }
 
-    private static byte[]? LocalOriginal(string root, string relative, string hash)
+    internal static byte[]? LocalOriginal(string root, string relative, string hash)
     {
         // Only normalized repository files are eligible; never follow a link into machine-local custody.
         string[] parts = relative.Split('/');

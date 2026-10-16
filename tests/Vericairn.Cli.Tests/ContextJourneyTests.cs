@@ -7,8 +7,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
-using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Estate;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
@@ -21,17 +21,8 @@ public class ContextJourneyTests
     {
         using var estate = new HandoffEstate();
         byte[] original = [0, 255, 254, 13, 10, 128, 65];
-        var source = new ContextAssembly.Source(new JsonObject
-        {
-            ["kind"] = "document", ["path"] = "docs/binary.dat", ["byteHash"] = ContentHash.Sha256(original), ["bytes"] = original.LongLength,
-        }, original, false, "optional for this step", Inline: false);
+        ContextAssembly.Source source = Document(estate, "docs/binary.dat", original);
         ContextPackage package = ContextAssembly.Build(new JsonObject { ["estate"] = estate.Load().Manifest!.Estate }, [source], "lead");
-        using (EstateService api = EstateService.Open(estate.Root))
-        {
-            api.ObjectPut(original);
-            api.ObjectPut(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content")));
-        }
-
         string command = package.Payload.GetProperty("withheld")[0].GetProperty("retrieve").GetString()!;
         var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"))
         {
@@ -66,6 +57,9 @@ public class ContextJourneyTests
         using JsonDocument payload = JsonDocument.Parse(text);
         Assert.Equal(Encoding.UTF8.GetByteCount(text), payload.RootElement.GetProperty("accounting").GetProperty("bytes").GetInt64());
         Assert.False(mcp.IsError);
+        Assert.False(registry.Call("work_brief", new JsonObject { ["workOrder"] = "C-1" }).IsError);
+        CliHarness.Ok("--estate", estate.Root, "work", "brief", "C-1");
+        Assert.Empty(api.Objects());
         Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "context", "prepare", "C-1", "--max-bytes", "1").Code);
         Assert.True(registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "1" }).IsError);
         Assert.True(registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "not a cap" }).IsError);
@@ -78,15 +72,10 @@ public class ContextJourneyTests
         using EstateService api = EstateService.Open(estate.Root);
         byte[] full = Encoding.UTF8.GetBytes("Original bytes: café\n");
         byte[] partial = Encoding.UTF8.GetBytes("A separate excerpt's original.\n");
-        ContextAssembly.Source Source(string path, byte[]? bytes, int? excerpt = null) => new(new JsonObject
-        {
-            ["kind"] = "document", ["path"] = path, ["byteHash"] = bytes is null ? "sha256:" + new string('b', 64) : ContentHash.Sha256(bytes), ["bytes"] = bytes?.LongLength,
-        }, bytes, false, "optional for this step", Inline: false, ExcerptBytes: excerpt);
+        var record = estate.Load().CurrentEstate!;
+        ContextAssembly.Source recordSource = ContextAssembly.Record(record, new RecordFile(record.ExpectedPath, File.ReadAllBytes(Path.Combine(estate.Root, record.ExpectedPath))), false, "optional for this step") with { Inline = false };
         ContextPackage package = ContextAssembly.Build(new JsonObject { ["estate"] = estate.Load().Manifest!.Estate },
-            [Source("docs/quoted 'name; ignored.md", full), Source("docs/excerpt.md", partial, 7), Source("docs/missing.md", null)], "Derived lead.");
-        api.ObjectPut(full);
-        api.ObjectPut(partial);
-        string manifest = api.ObjectPut(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content"))).Stored!.Hash;
+            [recordSource, Document(estate, "docs/quoted 'name; ignored.md", full), Document(estate, "docs/excerpt.md", partial, 7), Document(estate, "docs/missing.md", null)], "Derived lead.");
         var registry = new ToolRegistry(api, null);
         string scratch = CliHarness.TempDirectory("context-original");
         try
@@ -94,11 +83,11 @@ public class ContextJourneyTests
             foreach (JsonElement entry in package.Payload.GetProperty("withheld").EnumerateArray())
             {
                 string command = entry.GetProperty("retrieve").GetString()!;
-                Assert.Matches("^vericairn context read sha256:[0-9a-f]{64} --source s[0-9]{6} --original$", command);
-                Assert.Equal(ContextAssembly.Retrieval(manifest, entry.GetProperty("key").GetString()!), command);
+                Assert.Matches("^vericairn context read vc1_[A-Za-z0-9_-]+ --original$", command);
+                Assert.Equal(ContextRetrieval.Command(entry.GetProperty("pin").GetString()!), command);
                 string[] args = ["--estate", estate.Root, "--json", .. command.Split(' ').Skip(1)];
                 CliHarness.Outcome cli = CliHarness.Run(args);
-                ToolCallResult mcp = registry.Call("context_read", new JsonObject { ["manifest"] = manifest, ["source"] = entry.GetProperty("key").GetString() });
+                ToolCallResult mcp = registry.Call("context_read", new JsonObject { ["pin"] = entry.GetProperty("pin").GetString() });
                 Assert.Equal(cli.Out, mcp.Text);
                 ContextReadResponse read = JsonSerializer.Deserialize<ContextReadResponse>(cli.Out, ProtocolJson.Options)!;
                 if (entry.GetProperty("state").GetString() == "missing")
@@ -123,4 +112,26 @@ public class ContextJourneyTests
             CliHarness.Delete(scratch);
         }
     }
+    private static ContextAssembly.Source Document(HandoffEstate estate, string path, byte[]? bytes, int? excerpt = null)
+    {
+        byte[] declared = bytes ?? Encoding.UTF8.GetBytes("Unavailable original.");
+        var body = new JsonObject
+        {
+            ["path"] = path, ["title"] = "Context source", ["hash"] = ContentHash.Sha256(declared),
+            ["bytes"] = declared.Length, ["mediaType"] = "application/octet-stream", ["revision"] = 1, ["summary"] = "The original.",
+        };
+        var revision = estate.Add("document-revision", estate.OperatorId, body.ToJsonString());
+        if (bytes is not null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(estate.Root, path))!);
+            File.WriteAllBytes(Path.Combine(estate.Root, path), bytes);
+        }
+
+        return new ContextAssembly.Source(new JsonObject
+        {
+            ["kind"] = "document", ["path"] = path, ["revision"] = revision.Id, ["revisionHash"] = revision.ComputedHash,
+            ["byteHash"] = ContentHash.Sha256(declared), ["bytes"] = bytes?.LongLength,
+        }, bytes, false, "optional for this step", Inline: false, ExcerptBytes: excerpt);
+    }
+
 }

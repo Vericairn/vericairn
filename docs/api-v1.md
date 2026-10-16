@@ -17,28 +17,38 @@ the runtime decides, and every response is what the runtime observed.
 
 ## Context artifacts (0.7.0 addition)
 
-`GET /v1/context/work/{key}` (`Context`) prepares and retains a
-`vericairn.context/1` package. `GET /v1/context/{manifest}/sources/{source}`
-(`ContextRead`) returns the pinned identity and exact original bytes (base64 in
-JSON). A handle names a retained `vericairn.context-manifest/1` object and a
-runtime-issued source key, never a mutable path or the latest revision.
+`GET /v1/context/work/{key}` (`Context`) computes and returns a
+`vericairn.context/1` package. It authors no record and writes nothing.
+`GET /v1/context/original/{pin}` (`ContextRead`) returns the pinned identity and
+exact original bytes (base64 in JSON). The shell-safe `vc1_` pin is unpadded
+base64url of canonical JSON containing the estate and source identity. A record
+pin contains its id, canonical record hash, path and byte hash; a document pin
+contains its path, revision record id and hash, and byte hash. It is an identity,
+not authority, and requires no retained manifest.
+
 Both operations recheck the requesting device under the runtime gate. A reader
 who loses access receives only `Completeness cannot be confirmed.` from the
 context operation, without source metadata. Transport authentication can refuse
 the request before the operation. Embedded/local-socket reads retain their OS
 authority. The existing boundary is estate-wide; no per-source ACL is claimed.
 
-The manifest and originals use existing content-addressed object custody;
-preparing context authors no record. Reads verify the object hash and, for
-records, its canonical record hash as well. Missing or corrupted bytes never
-fall back to a new revision. The SDK exposes the same operations. These are
-additive API v1 routes and introduce no record type. Remote is not built.
+Records are read from immutable record custody (the repository's `records/`,
+or the live store for the local-only profile). Documents are read from normalized
+`docs/` or `design/` working-tree paths, without following symbolic links, only
+while their bytes match the pinned revision. No object-store fallback, retained
+manifest, latest revision or other source is substituted. Unavailable or changed
+bytes return `original-unavailable`. The earlier unreleased manifest/source
+route remains callable but returns unavailable after access checking; prepare
+again for a self-contained pin. The SDK exposes both API v1 routes. No new record
+type is introduced. Remote is not built.
 
-The existing 8 MiB per-object custody limit still applies. A package whose
-originals, manifest or final payload cannot be retained under that limit is
-refused (`context-retention-limit`), never written as an invalid oversized
-object. A bounded context selection can omit optional bodies while retaining
-each original separately; it cannot truncate a required original.
+Briefs, preparation, hand-over and retrieval do not retain artifacts in the
+estate repository or object store. At dispatch only, the worker retains the
+complete machine brief in `context.json` and its human rendering in `brief.md`
+in the run's existing local directory under the Vericairn home. Its exported
+workspace brief remains git-ignored. These local files are not records, object
+custody or an editable authority ledger. Context payloads are not object-store
+objects and are not limited by that store's per-object limit.
 
 The optional `maxBytes` query on context preparation is the admitted **context
 input allocation**, separate from any run spending cap. With no cap, all
@@ -63,8 +73,7 @@ measured payload; API/SDK JSON envelopes and `--json` sidecars are transport.
 Context preparation and retrieval answer handled requests with HTTP 200 and a
 `ContextResponse` or `ContextReadResponse`; callers must inspect `problem`.
 `incomplete-context` means required source material is missing or invalid,
-`context-over-budget` means the complete mandatory payload cannot fit, and
-`context-retention-limit` means the existing object limit would be exceeded.
+`context-over-budget` means the complete mandatory payload cannot fit.
 Retrieval uses `original-unavailable` for a missing pinned original and
 `invalid-context` for failed verification, always without returned bytes.
 `invalid`, `not-found` and `denied` also appear in these response bodies;
@@ -793,8 +802,8 @@ does not fit, including mandatory originals and manifest overhead. It never
 silently truncates, substitutes a summary or claims fit to a model context.
 Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
-by the caller; its originals, manifest and payload are also retained as verified
-objects. This authors no record and stores no editable status ledger or authority.
+by the caller. Preparing it writes nothing: no objects, records, status ledger
+or authority are stored.
 Remote is not built.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,

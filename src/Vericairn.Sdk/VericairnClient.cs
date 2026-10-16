@@ -165,6 +165,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
 
     /// <inheritdoc />
+    public ContextReadResponse ContextRead(string pin) => Get<ContextReadResponse>("/v1/context/original/" + Uri.EscapeDataString(pin))!;
+
+    /// <inheritdoc />
     public ContextReadResponse ContextRead(string manifest, string source) => Get<ContextReadResponse>("/v1/context/" + Uri.EscapeDataString(manifest) + "/sources/" + Uri.EscapeDataString(source))!;
 
     /// <inheritdoc />

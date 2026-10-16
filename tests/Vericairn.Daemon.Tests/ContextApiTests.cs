@@ -26,19 +26,21 @@ public class ContextApiTests
         Assert.Null(served.Problem);
         Assert.Equal(local.Package!.Hash, served.Package!.Hash);
         Assert.Equal("context-over-budget", client.Context("C-1", 1).Problem!.Code);
-        string manifest = served.Package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
+        Assert.Empty(harness.Host.Service.Objects());
         foreach (JsonElement source in served.Package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray())
         {
-            string key = source.GetProperty("key").GetString()!;
-            ContextReadResponse expected = harness.Host.Service.ContextRead(manifest, key);
-            ContextReadResponse fetched = client.ContextRead(manifest, key);
+            string key = source.GetProperty("pin").GetString()!;
+            ContextReadResponse expected = harness.Host.Service.ContextRead(key);
+            ContextReadResponse fetched = client.ContextRead(key);
             Assert.Null(fetched.Problem);
             Assert.Equal(expected.Content, fetched.Content);
             Assert.True(JsonElement.DeepEquals(expected.Identity!.Value, fetched.Identity!.Value));
         }
 
+        Assert.Null(client.Brief("C-1")!.Problem);
+        Assert.Empty(harness.Host.Service.Objects());
         Assert.Equal(writes, LocalNetworkLedger.Read(directory).Count);
         Assert.True(harness.Host.Service.DeviceRevoke(new RevokeRequest(paired.Device, harness.Estate.OperatorId, "Withdraw read permission.")).Ok);
-        Assert.Throws<HttpRequestException>(() => client.ContextRead(manifest, "s000000"));
+        Assert.Throws<HttpRequestException>(() => client.ContextRead("unknown"));
     }
 }

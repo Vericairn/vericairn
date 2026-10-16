@@ -290,6 +290,7 @@ public sealed partial class EstateService
         try
         {
             directory.Create();
+            directory.RetainContext(plan.Context, plan.Brief);
             var mcp = new JsonObject
             {
                 ["mcpServers"] = new JsonObject
@@ -723,7 +724,7 @@ public sealed partial class EstateService
             return (null, contextBrief.Problem.Message, null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }
 
     private static int StallSeconds(EstateModel model, RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)
@@ -1164,7 +1165,7 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, JsonElement Context, string Condition, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

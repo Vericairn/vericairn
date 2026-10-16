@@ -9,7 +9,6 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
-using Vericairn.Runtime.Objects;
 
 namespace Vericairn.Runtime.Service;
 
@@ -97,29 +96,7 @@ public sealed partial class EstateService
                 model.Findings.Error(finding.Code, finding.Location, finding.Message);
             }
 
-            HandoffResponse response = HandoffAssembly.Build(model, files, maxBytes);
-            if (response.Package is { } package)
-            {
-                Dictionary<string, RecordFile> byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
-                try
-                {
-                    if (RetainContext(new ContextPackage(package.Hash, package.Bytes, package.Payload), model.Records.Select(r =>
-                        ContextAssembly.Record(r, byPath[r.ExpectedPath], true, "Review before continuing from this hand-over."))) is Problem retention)
-                    {
-                        return HandoffAssembly.Refuse("incomplete-handoff", retention.Message, []);
-                    }
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    return HandoffAssembly.Refuse("denied", ContextDenied, []);
-                }
-                catch (Exception exception) when (exception is ObjectCorruptedException or IOException)
-                {
-                    return HandoffAssembly.Refuse("incomplete-handoff", "Hand-over refused: the exact originals and context manifest could not be retained and verified in this copy.", []);
-                }
-            }
-
-            return response;
+            return HandoffAssembly.Build(model, files, maxBytes);
         }
     }
 }

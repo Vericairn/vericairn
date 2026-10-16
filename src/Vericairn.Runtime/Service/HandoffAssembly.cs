@@ -69,7 +69,7 @@ internal static class HandoffAssembly
             original["supersedes"] = record.Supersedes;
             original["retrieve"] = "vericairn records show " + record.Id;
             original["api"] = "/v1/records/" + record.Id;
-            original["originalRetrieve"] = ContextAssembly.Retrieval(payload["manifest"]!["hash"]!.GetValue<string>(), original["key"]!.GetValue<string>());
+            original["originalRetrieve"] = ContextRetrieval.Command(original["pin"]!.GetValue<string>());
         }
 
         payload["originals"] = new JsonArray(payload["originals"]!.AsArray().OrderBy(s => s!["id"]!.GetValue<string>(), StringComparer.Ordinal).Select(s => s!.DeepClone()).ToArray());

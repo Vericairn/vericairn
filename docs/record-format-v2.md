@@ -15,15 +15,21 @@ validation and the run ledger nevertheless need a build that understands their r
 `vericairn.context/1` is a versioned derived artifact, not a record type or an
 editable ledger. Its `vericairn.context-manifest/1` pins the declared basis and
 exact source identities; it is distinct from the estate release manifest.
+Retrieval pins carry the source identity themselves: record id, record hash and
+byte hash, or document path, revision record and byte hash. Reads write nothing
+and need no retained manifest. Documents are available only while working-tree
+bytes match; record custody is immutable. Only dispatch retains context, in the
+worker's local run directory under the Vericairn home, never estate objects or
+records.
 Record canonical hashes and original-file byte hashes are separate. Originals
 remain separate from attributed derivatives, whose synthesis defaults to off.
 The package's content hash and serialized byte count are a sidecar over the
 canonical pretty UTF-8 payload. Changing the payload invalidates that identity.
 This contract needs no estate upgrade and introduces no record format 3.
 
-Context manifests, original byte objects and payloads use existing object
-custody, in both repository-synced and local-only estates. Preparation and
-retrieval author no records. The work brief carries this contract; hand-over
+Context manifests and payloads are returned, never stored by a read, in both
+repository-synced and local-only estates. Preparation and retrieval author no
+records and write no files. The work brief carries this contract; hand-over
 keeps its API v1 discriminator and comparison fields as a compatibility view
 of the same manifest, source and accounting implementation. Run-intent evidence
 continues to pin the exported brief's byte hash through its existing field.

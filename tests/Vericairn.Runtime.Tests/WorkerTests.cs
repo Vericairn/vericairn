@@ -668,6 +668,14 @@ public class WorkerTests
         Assert.Contains("## Context package", exportedBrief, StringComparison.Ordinal);
         Assert.Contains("The worker must admit it together with its run intent before dispatch", exportedBrief, StringComparison.Ordinal);
         Assert.Equal(Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(exportedBrief)), recorded.Intent.Body.GetProperty("evidence")[0].GetProperty("hash").GetString());
+        var custody = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        Assert.Equal(exportedBrief, File.ReadAllText(custody.BriefFile));
+        using JsonDocument retainedContext = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));
+        JsonElement retained = retainedContext.RootElement.GetProperty("context").GetProperty("payload");
+        Assert.NotEmpty(retained.GetProperty("originals").EnumerateArray());
+        Assert.Equal("vericairn.context/1", retained.GetProperty("format").GetString());
+        Assert.False(custody.ContextFile.StartsWith(run.Estate.Root, StringComparison.Ordinal));
+        Assert.Empty(run.Service.Objects());
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(workspace, ".vericairn", ".gitignore")));
         Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
         JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();
