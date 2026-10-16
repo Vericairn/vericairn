@@ -242,11 +242,11 @@ internal static class ReferenceSet
         string text = option.Description ?? string.Empty;
         if (option.Recursive)
         {
-            text += " Applies to subcommands.";
+            text = Sentence(text) + " Applies to subcommands.";
         }
         if (option.Required)
         {
-            text += " Required.";
+            text = Sentence(text) + " Required.";
         }
         else if (option.HasDefaultValue)
         {
@@ -262,11 +262,18 @@ internal static class ReferenceSet
             };
             if (!string.IsNullOrEmpty(shown))
             {
-                text += $" Default: {shown}.";
+                text = Sentence(text) + $" Default: {shown}.";
             }
         }
 
         return text.Trim();
+    }
+
+    // A note follows a whole sentence: a description without closing punctuation, as a built-in option's is, gains a full stop.
+    private static string Sentence(string text)
+    {
+        string trimmed = text.TrimEnd();
+        return trimmed.Length == 0 || trimmed[^1] is '.' or '!' or '?' ? trimmed : trimmed + ".";
     }
 
     private static string CliReference(RootCommand root, List<CommandDoc> commands, string date)
