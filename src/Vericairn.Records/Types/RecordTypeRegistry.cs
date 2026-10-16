@@ -40,6 +40,7 @@ public static class RecordTypeRegistry
         new DischargeType(),
         new CredentialReferenceType(),
         new QualificationType(),
+        new HarnessQualificationType(),
         new MigrationType(),
         new VerificationType(),
         new ObservationType(),
