@@ -13,7 +13,7 @@ namespace Vericairn.Packs.Software;
 /// The Codex launcher (vericairn.launcher.agent/1): Codex's own /goal with the same condition as Claude Code's, through codex exec with
 /// its JSON events, in the workspace-write sandbox of the workspace, with the vericairn MCP server configured on its command line.
 /// Codex's /goal needs its goals feature, so before a run is recorded the launcher reads codex features list and refuses, saying why,
-/// when the effective feature is not enabled or cannot be verified. RUN-02 qualifies one exact version and confirms its flags in help.
+/// when the effective feature is not enabled or cannot be verified. The worker admits the shipped baseline or a matching human qualification.
 /// </summary>
 public sealed class CodexLauncher : IAgentLauncher
 {
@@ -66,7 +66,7 @@ public sealed class CodexLauncher : IAgentLauncher
         ["verify-goals", "launch", "observe-usage"],
         [
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
-            "Qualifies only codex-cli 0.159.0-alpha.12.1: version, documented flags, isolated configuration, effective features and MCP are established before intent and rechecked before dispatch.",
+            "Shipped baseline: codex-cli 0.159.0-alpha.12.1. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
