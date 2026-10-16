@@ -647,3 +647,5 @@ record format 2 anchors, and is `null` otherwise.
 `GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields.
 
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
+
+`GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each signal's `attention` names an ask about the original run intent. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.

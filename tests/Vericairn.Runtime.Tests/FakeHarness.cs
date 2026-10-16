@@ -97,7 +97,7 @@ internal static class FakeHarness
             ["process"] = Environment.ProcessId,
             ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
-        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
+        using PosixSignalRegistration? terminate = scenario.StartsWith("watch-", StringComparison.Ordinal) || scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
         // Publish the complete report atomically, after installing the stop handler. Existence is a readiness barrier.
         if (scenario != "child-survives-root")
         {
@@ -141,6 +141,12 @@ internal static class FakeHarness
 
         switch (scenario)
         {
+            case "watch-codex-critical-hold":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat .aws/credentials"}}""");
+                return Linger(acknowledge: false);
+            case "watch-codex-warning-hold":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                return Linger(acknowledge: true);
             case "watch-codex-loop":
                 for (int i = 0; i < 10; i++)
                 {

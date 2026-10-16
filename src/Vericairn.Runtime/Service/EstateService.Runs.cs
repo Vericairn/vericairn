@@ -302,7 +302,7 @@ public sealed partial class EstateService
                 lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate);
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal));
                 }
             }
         }
@@ -794,7 +794,8 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
-            RecordEnvelope? existing = model.Current("ask").FirstOrDefault(a => a.Subject?.Type == "operation" && a.Subject.Id == run);
+            RecordEnvelope? existing = model.Records.FirstOrDefault(a => a.Type == "ask" && a.Subject?.Type == "operation" && a.Subject.Id == run
+                && EstateModel.BodyString(a, "question")?.Contains("no stdout event for", StringComparison.Ordinal) == true);
             if (existing is not null)
             {
                 return existing.Id;
@@ -819,6 +820,50 @@ public sealed partial class EstateService
             };
             WriteOutcome written = WriteLocked(new RecordDraft("ask", by, Element(body), found.Intent.Reference), model);
             return written.Ok ? written.Written!.Id : null;
+        }
+    }
+
+    private string? RecordSignal(string run, string by, string goalId, RunSignal signal)
+    {
+        try
+        {
+            WorkerOptions.BeforeAttentionRecord?.Invoke();
+            lock (gate)
+            {
+                EstateModel model = session.Load();
+                string prefix = $"Run {run} [{signal.Code}/{signal.Severity}]";
+                RecordEnvelope? existing = model.Records.FirstOrDefault(a => a.Type == "ask" && a.Subject?.Type == "operation" && a.Subject.Id == run
+                    && EstateModel.BodyString(a, "question")?.StartsWith(prefix, StringComparison.Ordinal) == true);
+                if (existing is not null)
+                {
+                    return existing.Id;
+                }
+
+                AgentRuns.Run? found = AgentRuns.Find(model, run);
+                RecordEnvelope? goal = AgentRuns.GoalAt(model, goalId);
+                if (found is null || goal is null)
+                {
+                    return null;
+                }
+
+                var body = new JsonObject
+                {
+                    ["to"] = GoalRules.AccepterOf(model, goal).Principal ?? by,
+                    ["goal"] = goal.Id,
+                    ["state"] = "open",
+                    ["question"] = $"{prefix} needs attention at {signal.At}: {signal.Summary} Inspect the run?",
+                    ["recommendation"] = "Inspect the worker's observation, the locally retained output and the assignment before deciding on another attempt.",
+                    ["consequence"] = signal.Severity == "critical"
+                        ? "The worker asks the existing stop path to contain this run. Its allowance remains reserved until the whole boundary is observed exited."
+                        : "This warning does not stop the run. The observation remains for review; continued looping or abnormal spending may reach a critical threshold.",
+                };
+                WriteOutcome written = WriteLocked(new RecordDraft("ask", by, Element(body), found.Intent.Reference), model);
+                return written.Ok ? written.Written!.Id : null;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 
@@ -849,6 +894,13 @@ public sealed partial class EstateService
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or RegexMatchTimeoutException)
         {
             scope = new RunScope(0, 0, [], "The workspace scope audit could not complete; scope is unverified.");
+        }
+
+        if (scope.OutsideCount > 0 || scope.Problem is not null)
+        {
+            var signal = new RunSignal("scope-settlement", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
+                $"The worker's final scope audit found {scope.OutsideCount.ToString(CultureInfo.InvariantCulture)} paths outside the brief{(scope.Problem is null ? "." : "; the audit is incomplete.")} The run's boundary has already exited; review its changes.");
+            outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal with { Attention = RecordSignal(run, by, goalId, signal) }] };
         }
 
         try

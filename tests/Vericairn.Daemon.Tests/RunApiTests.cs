@@ -84,6 +84,14 @@ public class RunApiTests
             Assert.NotNull(row.Usage);
             Assert.Equal("not-found", api.RunStop("01M4TRNE1GYEK4P8MXQAB3C8Q4", new RunStopRequest(op)).Problem!.Code);
             Assert.Equal("refused", api.RunStart(new RunStartRequest(assignment, "claude-code", builder, op, resource)).Problem!.Code);
+
+            RunResponse audited = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Branch: "work/audit", Settings:
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("watch-codex-audit", Path.Combine(scratch, "audit.jsonl")) }));
+            Assert.True(audited.Ok, audited.Message);
+            RunRow watched = await Until(api, audited.Run, r => r.Status == "known-failure");
+            Assert.Contains(watched.Signals!, s => s.Code == "credentials" && s.Severity == "critical" && s.Attention is not null);
+            Assert.NotNull(watched.Stop!.ContainedAt);
+            Assert.Contains(api.Progress().Json.GetProperty("runSignals").EnumerateArray(), r => r.GetProperty("run").GetString() == audited.Run);
             Assert.Equal(0, api.Check().Errors);
         }
         finally
@@ -128,6 +136,24 @@ public class RunApiTests
         public ProviderDescriptor Descriptor { get; } = new("stand-in", IAgentLauncher.Contract, "implemented", ["launch"], ["Starts the tests' stand-in harness."], [new ProviderSetting("command", "The stand-in's command line, a JSON array.", true)]);
 
         public IReadOnlyList<string> Command(LaunchContext context) => JsonSerializer.Deserialize<List<string>>(context.Settings["command"])!;
+
+        public IReadOnlyList<HarnessAction> ReadActions(string line)
+        {
+            if (!line.StartsWith('{'))
+            {
+                return [];
+            }
+
+            using JsonDocument document = JsonDocument.Parse(line);
+            if (!document.RootElement.TryGetProperty("item", out JsonElement item))
+            {
+                return [];
+            }
+
+            // The API test observes synthetic invocations; production stream adapters are exercised by the runtime tests.
+            return [new HarnessAction(item.GetProperty("id").GetString()!, "stand-in-tool",
+                item.TryGetProperty("arguments", out JsonElement arguments) ? arguments.Clone() : item.Clone())];
+        }
     }
 
     /// <summary>A workspace that is a directory: no repository is needed to start the stand-in.</summary>

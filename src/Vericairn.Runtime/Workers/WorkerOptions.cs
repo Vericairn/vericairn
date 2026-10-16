@@ -16,6 +16,8 @@ public sealed record WorkerOptions
 
     internal Action? BeforeDispatchRecord { get; init; }
 
+    internal Action? BeforeAttentionRecord { get; init; }
+
     internal Func<uint>? WindowsJobInventory { get; init; }
 
     /// <summary>The worker's defaults.</summary>

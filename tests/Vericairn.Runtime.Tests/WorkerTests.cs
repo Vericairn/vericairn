@@ -319,6 +319,9 @@ public class WorkerTests
         Assert.Equal("observed-success", row.Status);
         Assert.Equal(8, row.Scope!.Changed);
         Assert.Equal(6, row.Scope.OutsideCount);
+        RunSignal signal = Assert.Single(row.Signals!, s => s.Code == "scope-settlement");
+        Assert.Equal("warning", signal.Severity);
+        Assert.NotNull(signal.Attention);
         Assert.Equal([".gitignore", "README-old.md", "README.md", "committed.txt", "ignored/outside.txt", "outside.txt"], row.Scope.Outside);
         Assert.Null(row.Scope.Problem);
         AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;

@@ -27,7 +27,9 @@ public static class ProgressView
         }
 
         return [Standing(report), WorkOrders(report), Releases(report), Next(report), Eligible(report), Operator(report),
-            .. Items(report, "agentClaims").Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)"))];
+            .. Items(report, "agentClaims").Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)")),
+            .. Items(report, "runSignals").SelectMany(r => Items(r, "signals").Select(s => new ProgressRow($"Worker · {Str(s, "severity")} {Str(s, "code")}",
+                $"{Str(s, "summary")} (run {Str(r, "run")}; {(Str(s, "attention") is string ask ? "ask " + ask : "attention recording pending")})")))];
     }
 
     private static ProgressRow Standing(JsonElement report)

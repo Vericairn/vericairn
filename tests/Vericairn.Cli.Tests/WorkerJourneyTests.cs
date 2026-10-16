@@ -25,6 +25,29 @@ public class WorkerJourneyTests
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
     [Fact]
+    public void WorkerRunsAndProgressShowRecordedObservationsAndAttention()
+    {
+        string root = CliHarness.TempDirectory("worker-watch");
+        string scratch = CliHarness.TempDirectory("worker-watch-scratch");
+        try
+        {
+            (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
+            CliHarness.Outcome ran = CliHarness.Run("--estate", root, "worker", "run", assignment, "--launcher", "codex", "--agent", builder, "--by", op, "--repository", resource,
+                "--setting", "command=" + FakeHarness.Setting("watch-codex-audit", Path.Combine(scratch, "audit.jsonl")));
+            Assert.Contains("known-failure", ran.Out, StringComparison.Ordinal);
+            string listed = CliHarness.Ok("--estate", root, "worker", "runs").Out;
+            Assert.Contains("worker critical credentials", listed, StringComparison.Ordinal);
+            Assert.Contains("ask ", listed, StringComparison.Ordinal);
+            Assert.Contains("Worker observations of agent runs", CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void ACodingAgentCarriesAnAssignmentTowardItsExitQuestionAndItsClaimOfDoneStaysAClaim()
     {
         string root = CliHarness.TempDirectory("worker");

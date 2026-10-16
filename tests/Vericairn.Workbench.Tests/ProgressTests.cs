@@ -114,5 +114,11 @@ public class ProgressTests(HeadlessFixture fixture)
         Assert.Equal("Agent claim · build", row.Heading);
         Assert.Contains("Compiling.", row.Detail, StringComparison.Ordinal);
         Assert.Contains("not a worker observation", row.Detail, StringComparison.Ordinal);
+
+        using JsonDocument signals = JsonDocument.Parse("""{"format":"vericairn.progress/1","runSignals":[{"run":"run-id","signals":[{"severity":"critical","code":"scope","summary":"Outside the brief.","attention":"ask-id"}]}]}""");
+        ProgressRow observed = ProgressView.Summary(signals.RootElement)[^1];
+        Assert.Equal("Worker · critical scope", observed.Heading);
+        Assert.Contains("Outside the brief.", observed.Detail, StringComparison.Ordinal);
+        Assert.Contains("ask ask-id", observed.Detail, StringComparison.Ordinal);
     }
 }

@@ -638,6 +638,11 @@ internal static class Commands
         Console.Out.WriteLine($"  cap {Units(row.Cap)}");
         Console.Out.WriteLine(row.Usage is JsonElement usage ? $"  usage {Units(usage)}" : "  usage: not settled yet, so charged at its cap");
         Console.Out.WriteLine($"  charged {Units(row.Charged)}");
+        foreach (RunSignal signal in row.Signals ?? [])
+        {
+            Console.Out.WriteLine($"  worker {signal.Severity} {signal.Code}: {signal.Summary} ({(signal.Attention is null ? "attention recording pending" : "ask " + signal.Attention)})");
+        }
+
         if (row.Stop is not null)
         {
             PrintStop(row.Stop);

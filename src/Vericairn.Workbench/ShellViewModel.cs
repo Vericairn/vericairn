@@ -527,6 +527,11 @@ public sealed class ShellViewModel : Observable
         if (connection?.Api is IEstateApi api && Try(api.Progress) is ProgressResponse progress)
         {
             FillProgress(progress);
+            if (Try(() => api.Asks()) is AsksResponse asks)
+            {
+                string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+                Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
+            }
         }
     }
 

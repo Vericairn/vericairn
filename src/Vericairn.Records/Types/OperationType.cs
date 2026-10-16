@@ -432,6 +432,10 @@ public sealed class OperationType : IRecordType
             signal.Number("count", false, 1, int.MaxValue);
             string? attention = signal.Ulid("attention", false);
             context.RequireReference("signals.attention", attention, "ask");
+            if (context.Find(attention) is { Type: "ask" } ask && ask.Subject?.Id != context.Model.Chain(context.Record)[0])
+            {
+                context.Error("operation.signals", "A signal's attention item names this run's intent.");
+            }
             signal.NoOtherKeys();
             if (!signalKeys.Add(code + ":" + severity) || EstateModel.BodyString(context.Record, "action") != AgentRun)
             {
