@@ -127,7 +127,7 @@ public class RunEnvironmentTests
     [Theory]
     [InlineData("codex")]
     [InlineData("claude-code")]
-    public void UnqualifiedNativeVersionsRefuseBeforeIntent(string launcher)
+    public void UnqualifiedNativeCommandPrefixesRefuseBeforeIntent(string launcher)
     {
         using var run = new RunEstate();
         IAgentLauncher native = launcher == "codex" ? new CodexLauncher() : new ClaudeCodeLauncher();
@@ -142,7 +142,8 @@ public class RunEnvironmentTests
         string report = run.Report("unqualified");
         RunResponse refused = run.Start(launcher, "codex", report);
         Assert.False(refused.Ok);
-        Assert.Contains("version is not qualified", refused.Message, StringComparison.Ordinal);
+        Assert.Contains("leading harness options", refused.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(report));
         Assert.Empty(run.Service.Runs().Runs);
     }
 }

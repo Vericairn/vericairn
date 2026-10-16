@@ -693,7 +693,7 @@ public class WorkerTests
     }
 
     [Fact]
-    public void CodexVerifiesItsGoalsFeatureBeforeTheRunIsRecordedAndAddsUpEachTurnsTokens()
+    public void StandInFeatureRefusalsLeaveNoIntentAndCodexEventsAddUpEachTurnsTokens()
     {
         using var run = new RunEstate();
         run.Service.WorkerOptions = run.Service.WorkerOptions with { Vericairn = ["vericairn-under-test"] };

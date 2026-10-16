@@ -75,6 +75,7 @@ internal static class HarnessConfiguration
                     if (IsCustomization(name)) Customization(path, logical);
                     else if (!codex && name.Equals(".mcp.json", StringComparison.OrdinalIgnoreCase)) found.Add(logical);
                     else if (Instructions.Contains(name, StringComparer.OrdinalIgnoreCase)) Instruction(path, logical, name);
+                    else if (recursive && attributes.HasFlag(FileAttributes.ReparsePoint)) found.Add(logical + " (uninspected link)");
                     else if (recursive && attributes.HasFlag(FileAttributes.Directory) && !attributes.HasFlag(FileAttributes.ReparsePoint)
                         && !name.Equals(".git", StringComparison.OrdinalIgnoreCase)) pending.Push((path, logical));
                 }

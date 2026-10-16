@@ -150,7 +150,8 @@ internal sealed class NativeProbe : IDisposable
             string[] flags = codex
                 ? ["--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
                 : ["--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
-            Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
+            Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? behavior["proseFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
+            if (behavior["proseFlag"]?.GetValue<string>() is string prose) Console.WriteLine("This prose mentions " + prose + " but declares no flag.");
             if (behavior["helpSuffix"]?.GetValue<string>() is string suffix) Console.WriteLine(suffix);
             return 0;
         }
@@ -175,6 +176,13 @@ internal sealed class NativeProbe : IDisposable
             if (defect is "args" or "env_vars") transport[defect] = new JsonArray("unexpected");
             if (defect == "env") transport["env"] = new JsonObject { ["EXTRA"] = "unexpected" };
             var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport });
+            if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
+            if (defect == "transport-control") transport["unapproved"] = true;
+            if (defect == "duplicate-env")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"env\":{}", "\"env\":{},\"env\":{}", StringComparison.Ordinal));
+                return 0;
+            }
             if (defect is "ambient" or "disabled-ambient") list.Add(new JsonObject { ["name"] = "ambient", ["enabled"] = defect == "ambient" });
             Console.WriteLine(list.ToJsonString());
             return 0;

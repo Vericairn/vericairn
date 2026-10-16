@@ -12,6 +12,18 @@ namespace Vericairn.Packs.Software;
 /// <summary>Evidence shared by the two version-qualified native launchers; no ambient defaults are admission evidence.</summary>
 internal static class HarnessInventory
 {
+    public static void CommandPrefix(LaunchContext context, string executable)
+    {
+        if (HarnessProcess.Command(context.Settings, executable).Skip(1).Any(a => a.StartsWith('-')))
+        {
+            throw new ProviderRefusedException("Native qualification does not admit leading harness options in the command setting; the launcher supplies every option.");
+        }
+    }
+
+    public static bool OnlyProperties(JsonElement value, params string[] names) => value.ValueKind == JsonValueKind.Object
+        && value.EnumerateObject().All(p => names.Contains(p.Name, StringComparer.Ordinal))
+        && value.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() == value.EnumerateObject().Count();
+
     public static string Probe(LaunchContext context, string executable, params string[] arguments)
     {
         (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, executable), .. arguments],
@@ -47,6 +59,9 @@ internal static class HarnessInventory
 
     public static string Digest<T>(T value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));
 
+    public static string[] Arguments(LaunchContext context, string executable) => HarnessProcess.Command(context.Settings, executable).Skip(1)
+        .Select(a => Path.IsPathFullyQualified(a) ? "local-binding" : a).ToArray();
+
     public static string Binding(LaunchContext context, IReadOnlyList<string> command) => Digest(new
     {
         command, workspace = context.Workspace, context.Brief, context.Condition, context.McpConfiguration,
@@ -55,8 +70,11 @@ internal static class HarnessInventory
         mcpEnvironment = context.McpEnvironment.OrderBy(p => p.Key, StringComparer.Ordinal),
         executable = ContentHash.Sha256File(Executable(command, context.Environment)),
         server = ContentHash.Sha256File(Executable(context.McpServer, context.Environment)),
-        entries = command.Skip(1).Concat(context.McpServer.Skip(1)).Where(a => Path.IsPathFullyQualified(a) && File.Exists(a)).Select(ContentHash.Sha256File).ToArray(),
+        entries = EntryFiles(context, command).Concat(EntryFiles(context, context.McpServer)).Select(ContentHash.Sha256File).ToArray(),
     });
+
+    private static IEnumerable<string> EntryFiles(LaunchContext context, IReadOnlyList<string> command) => command.Skip(1)
+        .Select(a => Path.IsPathFullyQualified(a) ? a : Path.Combine(context.Workspace, a)).Where(File.Exists);
 
     public static void Recheck(LaunchContext context, IReadOnlyList<string> command, string binding, IReadOnlyList<RunComponent> instructions, bool codex)
     {
@@ -106,7 +124,7 @@ internal static class HarnessInventory
         {
             var ids = new List<string>();
             // Managed entry assemblies and explicitly supplied scripts are part of the executable, not just its host.
-            foreach (string argument in invocation.Skip(1).Where(a => Path.IsPathFullyQualified(a) && File.Exists(a)))
+            foreach (string argument in EntryFiles(context, invocation))
             {
                 string dependency = owner + "-entry-" + ids.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
                 string hash = ContentHash.Sha256File(argument);

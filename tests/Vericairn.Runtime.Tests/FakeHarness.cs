@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections;
+using System.Globalization;
+using Vericairn.Packs.Software;
+using Vericairn.Runtime.Providers;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -24,6 +27,7 @@ internal static class FakeHarness
 
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
     public const string Marker = "--vericairn-stand-in-harness";
+    private const string NativeMarker = "vericairn-native-stand-in";
 
     /// <summary>The command line that starts the stand-in for a scenario, writing what it was given to the report.</summary>
     public static List<string> Command(string scenario, string report)
@@ -35,7 +39,7 @@ internal static class FakeHarness
             command.Add(typeof(FakeHarness).Assembly.Location);
         }
 
-        command.AddRange([Marker, scenario, report]);
+        command.AddRange([scenario.StartsWith("native-", StringComparison.Ordinal) ? NativeMarker : Marker, scenario, report]);
         return command;
     }
 
@@ -61,6 +65,7 @@ internal static class FakeHarness
     {
         string[] arguments = Environment.GetCommandLineArgs();
         int at = Array.IndexOf(arguments, Marker);
+        if (at < 0) at = Array.IndexOf(arguments, NativeMarker);
         if (at < 0 || at + 2 >= arguments.Length)
         {
             return;
@@ -79,6 +84,43 @@ internal static class FakeHarness
 
         Console.Out.Flush();
         Environment.Exit(code);
+    }
+
+    // Older protocol stand-ins exercise goal parsing independently of native inventory qualification.
+    internal static string? VerifyGoals(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(environment);
+        if (HarnessProcess.Problem(settings, "codex") is string problem)
+        {
+            return problem;
+        }
+
+        int code;
+        string output;
+        string error;
+        try
+        {
+            (code, output, error) = HarnessProcess.Run([.. HarnessProcess.Command(settings, "codex"), "features", "list"], environment, TimeSpan.FromSeconds(30));
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return $"Codex's goals feature could not be verified: {exception.Message}";
+        }
+
+        if (code != 0)
+        {
+            string said = (error.Trim().Length > 0 ? error : output).Trim();
+            return $"Codex's goals feature could not be verified: codex features list exited {code.ToString(CultureInfo.InvariantCulture)}{(said.Length == 0 ? "." : ": " + (said.Length > 300 ? said[..300] + "…" : said))}";
+        }
+
+        string[]? goals = output.Split('\n').Select(l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).FirstOrDefault(columns => columns.Length >= 2 && columns[0] == CodexLauncher.GoalsFeature);
+        if (goals is null)
+        {
+            return "Codex lists no goals feature in codex features list, so its /goal cannot be verified; a Codex whose /goal is a feature named goals is needed.";
+        }
+
+        return goals[^1] == "true" ? null : $"Codex's goals feature is not enabled here (codex features list shows goals {goals[^1]}); enable it with codex features enable goals, then start the run again.";
     }
 
     private static int Run(string scenario, string report, string[] arguments)
@@ -511,7 +553,7 @@ internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher 
             destination = ExecutionCapabilities.Destinations[0], dataBoundary = "worker-user" } }), ["model-a", "model-b"],
         EnvironmentPolicy: new("stand-in-policy", Inventory));
 
-    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => inner is Vericairn.Packs.Software.CodexLauncher ? Vericairn.Packs.Software.CodexLauncher.VerifyGoals(settings, environment) : inner.Verify(settings, environment);
+    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => inner is Vericairn.Packs.Software.CodexLauncher ? FakeHarness.VerifyGoals(settings, environment) : inner.Verify(settings, environment);
     public Vericairn.Runtime.Workers.LaunchContext Prepare(Vericairn.Runtime.Workers.LaunchContext context)
     {
         var prepared = inner.Prepare(context);

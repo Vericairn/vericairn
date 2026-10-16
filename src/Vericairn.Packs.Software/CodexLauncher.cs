@@ -70,45 +70,8 @@ public sealed class CodexLauncher : IAgentLauncher
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CODEX_HOME"];
 
-    /// <summary>Verifies, before anything is recorded, that Codex's goals feature is enabled: what codex features list says it is, with the run's own environment.</summary>
+    /// <inheritdoc />
     public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => HarnessProcess.Problem(settings, "codex");
-
-    // Protocol tests retain this parser; native admission probes features only in the prepared run environment.
-    internal static string? VerifyGoals(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
-    {
-        ArgumentNullException.ThrowIfNull(settings);
-        ArgumentNullException.ThrowIfNull(environment);
-        if (HarnessProcess.Problem(settings, "codex") is string problem)
-        {
-            return problem;
-        }
-
-        int code;
-        string output;
-        string error;
-        try
-        {
-            (code, output, error) = HarnessProcess.Run([.. HarnessProcess.Command(settings, "codex"), "features", "list"], environment, TimeSpan.FromSeconds(30));
-        }
-        catch (ProviderRefusedException exception)
-        {
-            return $"Codex's goals feature could not be verified: {exception.Message}";
-        }
-
-        if (code != 0)
-        {
-            string said = (error.Trim().Length > 0 ? error : output).Trim();
-            return $"Codex's goals feature could not be verified: codex features list exited {code.ToString(CultureInfo.InvariantCulture)}{(said.Length == 0 ? "." : ": " + (said.Length > 300 ? said[..300] + "…" : said))}";
-        }
-
-        string[]? goals = output.Split('\n').Select(l => l.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).FirstOrDefault(columns => columns.Length >= 2 && columns[0] == GoalsFeature);
-        if (goals is null)
-        {
-            return "Codex lists no goals feature in codex features list, so its /goal cannot be verified; a Codex whose /goal is a feature named goals is needed.";
-        }
-
-        return goals[^1] == "true" ? null : $"Codex's goals feature is not enabled here (codex features list shows goals {goals[^1]}); enable it with codex features enable goals, then start the run again.";
-    }
 
     /// <inheritdoc />
     public LaunchContext Prepare(LaunchContext context)
@@ -185,7 +148,10 @@ public sealed class CodexLauncher : IAgentLauncher
 
             JsonElement server = root[0];
             JsonElement transport = server.GetProperty("transport");
-            bool approved = server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
+            bool approved = HarnessInventory.OnlyProperties(server, "name", "enabled", "disabled_reason", "auth_status", "transport")
+                && HarnessInventory.OnlyProperties(transport, "type", "command", "args", "env", "env_vars", "cwd")
+                && (!server.TryGetProperty("disabled_reason", out JsonElement reason) || reason.ValueKind == JsonValueKind.Null)
+                && server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
                 && transport.GetProperty("type").GetString() == "stdio" && transport.GetProperty("command").GetString() == context.McpServer[0]
                 && transport.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))
                 && transport.GetProperty("env_vars").GetArrayLength() == 0

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
+using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Packs.Software;
@@ -15,8 +17,10 @@ internal static class ClaudeCodeInventory
 
     internal static RunPreflight Establish(LaunchContext context)
     {
+        HarnessInventory.CommandPrefix(context, "claude");
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: false);
         _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
+        Login(context);
         HarnessInventory.McpFile(context);
         IReadOnlyList<string> command = new ClaudeCodeLauncher().Command(context);
         string binding = HarnessInventory.Binding(context, command);
@@ -25,10 +29,12 @@ internal static class ClaudeCodeInventory
         HarnessInventory.Flags("claude", help, "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
             "--strict-mcp-config", "--setting-sources", "--settings", "--tools", "--model", "--effort", "--max-budget-usd");
         _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
+        Login(context);
         string configuration = HarnessInventory.Digest(new
         {
             qualification = "run-02-claude-code-v1", version, tools = ToolList, settings = Settings, settingSources = "none",
             strictMcp = true, home = "run-only-login", goal = "built-in-evaluator", help = HarnessInventory.Digest(help),
+            arguments = HarnessInventory.Arguments(context, "claude"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json")),
         });
         List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, configuration, ToolList.Split(','), "CLAUDE_CONFIG_DIR", "anthropic-inference");
@@ -37,5 +43,20 @@ internal static class ClaudeCodeInventory
             [], ["anthropic-inference"], ["claude-code"]));
         HarnessInventory.Recheck(context, command, binding, instructions, codex: false);
         return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding);
+    }
+
+    private static void Login(LaunchContext context)
+    {
+        try
+        {
+            string path = Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json");
+            using JsonDocument login = JsonDocument.Parse(File.ReadAllText(path));
+            if (login.RootElement.EnumerateObject().Count() == 1 && login.RootElement.GetProperty("claudeAiOauth").GetProperty("subscriptionType").GetString() is "pro" or "max") return;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw new ProviderRefusedException("Claude Code needs a readable provisioned unmanaged login; implicit keychain login and managed accounts are not qualified.", exception);
+        }
+        throw new ProviderRefusedException("Claude Code's provisioned login does not establish an unmanaged account; managed accounts are not qualified.");
     }
 }

@@ -37,6 +37,8 @@ internal static class CodexInventory
 
     internal static RunPreflight Establish(LaunchContext context)
     {
+        HarnessInventory.CommandPrefix(context, "codex");
+        RefuseManagedConfiguration(context);
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: true);
         CheckHome();
         HarnessInventory.McpFile(context);
@@ -58,6 +60,7 @@ internal static class CodexInventory
             qualification = "run-02-codex-v1", version, tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal),
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
             webSearch = "disabled", projectTrust = "untrusted",
+            arguments = HarnessInventory.Arguments(context, "codex"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
         });
         List<RunComponent> components = HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference");
@@ -71,6 +74,39 @@ internal static class CodexInventory
             {
                 throw new ProviderRefusedException("The run-specific CODEX_HOME configuration differs from the launcher's isolated configuration.");
             }
+        }
+    }
+
+    private static void RefuseManagedConfiguration(LaunchContext context)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            if (context.Environment.GetValueOrDefault("ProgramData") is not string shared)
+            {
+                throw new ProviderRefusedException("Codex's system configuration discovery root could not be established.");
+            }
+            RefuseManagedPaths([Path.Combine(shared, "Codex"), Path.Combine(shared, "OpenAI", "Codex")]);
+        }
+        else
+        {
+            RefuseManagedPaths(["/etc/codex"]);
+            if (OperatingSystem.IsMacOS()) RefuseManagedPaths(["/Library/Managed Preferences/com.openai.codex.plist",
+                Path.Combine("/Library/Managed Preferences", Environment.UserName, "com.openai.codex.plist")]);
+        }
+    }
+
+    internal static void RefuseManagedPaths(IEnumerable<string> paths)
+    {
+        try
+        {
+            foreach (string path in paths)
+            {
+                if (HarnessInventory.Exists(path)) throw new ProviderRefusedException("Codex system configuration is not qualified: " + Path.GetFileName(path) + ".");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("Codex system configuration could not be inspected; launch was refused.", exception);
         }
     }
 

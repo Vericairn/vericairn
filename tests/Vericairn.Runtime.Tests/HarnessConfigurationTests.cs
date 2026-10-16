@@ -102,6 +102,20 @@ public class HarnessConfigurationTests
         Assert.Contains("common-worktree", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("claude")]
+    [InlineData("codex")]
+    public void DirectoryLinksCannotHideConfigurationInAnUninspectedTree(string harness)
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating directory links can require a Windows privilege.");
+        using var fixture = new NativeProbe(harness);
+        LaunchContext context = fixture.Prepare();
+        string external = Path.Combine(fixture.Root, "external");
+        Write(Path.Combine(external, harness == "codex" ? ".codex/config.toml" : ".claude/settings.json"), "unadmitted");
+        Directory.CreateSymbolicLink(Path.Combine(context.Workspace, "linked-tree"), external);
+        Assert.Contains("linked-tree", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+    }
+
     private static void Write(string path, string content)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
