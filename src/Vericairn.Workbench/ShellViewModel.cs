@@ -895,7 +895,8 @@ public sealed partial class ShellViewModel : Observable
                 string? subjectId = review.Envelope.TryGetProperty("subject", out JsonElement s) && s.ValueKind == JsonValueKind.Object ? Str(s, "id") : null;
                 if (subjectId == record.Id)
                 {
-                    reviews.Add(new ReviewRow(review.Id, Str(review.Envelope, "by") ?? "?", Str(rb, "independence") ?? "?", Str(rb, "outcome") ?? "?", Str(rb, "summary") ?? string.Empty));
+                    reviews.Add(new ReviewRow(review.Id, Str(review.Envelope, "by") ?? "?", Str(rb, "independence") ?? "?", Str(rb, "outcome") ?? "?", Str(rb, "summary") ?? string.Empty,
+                        rb.TryGetProperty("findings", out JsonElement findings) ? findings : default));
                 }
             }
 

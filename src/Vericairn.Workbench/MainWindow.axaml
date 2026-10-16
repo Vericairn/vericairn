@@ -358,7 +358,10 @@
                     <ItemsControl ItemsSource="{Binding Reviews}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="local:ReviewRow">
-                          <CheckBox IsChecked="{Binding Selected}" Content="{Binding Display}" MinHeight="28" />
+                          <StackPanel Spacing="4">
+                            <CheckBox IsChecked="{Binding Selected}" Content="{Binding Display}" MinHeight="28" />
+                            <SelectableTextBlock Text="{Binding Findings}" TextWrapping="Wrap" MinHeight="24" Margin="24,0,0,4" />
+                          </StackPanel>
                         </DataTemplate>
                       </ItemsControl.ItemTemplate>
                     </ItemsControl>
