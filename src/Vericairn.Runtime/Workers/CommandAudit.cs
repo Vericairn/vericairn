@@ -31,23 +31,29 @@ public static partial class CommandAudit
 
     /// <summary>
     /// Flags recognizable network, credential and out-of-brief path attempts without retaining their arguments.
-    /// A failed check propagates to the worker's audit-unverified handler; only completed checks establish violations.
+    /// A failed check adds an audit-unverified warning without discarding the action's completed verdicts.
     /// </summary>
-    public static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted)
+    public static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted) =>
+        Inspect(action, workspace, permitted, command => Regex.IsMatch(command, @"\A(?:cat|head|tail)\s+\.vericairn/brief\.md\s*\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)));
+
+    internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, Func<string, bool> isBriefRead)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(permitted);
+        ArgumentNullException.ThrowIfNull(isBriefRead);
         var codes = new HashSet<string>(StringComparer.Ordinal);
         var paths = new List<string>();
         bool readsBrief = action.Tool == "Read";
-        string input = action.Input.GetRawText();
-        if (input.Length > 65536 || action.Input.ValueKind != JsonValueKind.Object)
+        bool briefReadUnverified = false;
+        bool interpretable = false;
+        Check(() => interpretable = action.Input.GetRawText().Length <= 65536 && action.Input.ValueKind == JsonValueKind.Object, codes);
+        if (!interpretable)
         {
             codes.Add("audit-unverified");
         }
         else
         {
-            GatherPaths(action.Input, paths);
+            Check(() => GatherPaths(action.Input, paths), codes);
             if (action.Tool is "WebFetch" or "WebSearch" or "web_search" || action.Tool.Contains("__web", StringComparison.OrdinalIgnoreCase))
             {
                 codes.Add("network");
@@ -55,69 +61,130 @@ public static partial class CommandAudit
 
             foreach (string field in new[] { "url", "uri" })
             {
-                if (action.Input.TryGetProperty(field, out JsonElement url) && url.ValueKind == JsonValueKind.String
-                    && Uri.TryCreate(url.GetString(), UriKind.Absolute, out Uri? address) && address.Scheme is "http" or "https" or "ftp" or "sftp" or "ssh" or "ws" or "wss")
+                Check(() =>
                 {
-                    codes.Add("network");
-                }
+                    if (action.Input.TryGetProperty(field, out JsonElement url) && url.ValueKind == JsonValueKind.String
+                        && Uri.TryCreate(url.GetString(), UriKind.Absolute, out Uri? address) && address.Scheme is "http" or "https" or "ftp" or "sftp" or "ssh" or "ws" or "wss")
+                    {
+                        codes.Add("network");
+                    }
+                }, codes);
             }
 
             foreach (string field in new[] { "command", "cmd" })
             {
-                if (action.Input.TryGetProperty(field, out JsonElement command) && command.ValueKind == JsonValueKind.String)
+                string? command = null;
+                if (!Check(() => command = StringField(action.Input, field), codes))
                 {
-                    InspectCommand(command.GetString()!, paths, codes, 0);
-                    readsBrief |= Regex.IsMatch(command.GetString()!, @"\A(?:cat|head|tail)\s+\.vericairn/brief\.md\s*\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+                    briefReadUnverified = true;
+                }
+
+                if (command is not null)
+                {
+                    Check(() => InspectCommand(command, paths, codes, 0), codes);
+                    if (!Check(() => readsBrief |= isBriefRead(command), codes))
+                    {
+                        briefReadUnverified = true;
+                    }
                 }
             }
 
-            if (action.Input.TryGetProperty("patch", out JsonElement patch) && patch.ValueKind == JsonValueKind.String)
+            Check(() =>
             {
-                foreach (Match match in PatchPaths().Matches(patch.GetString()!))
+                if (StringField(action.Input, "patch") is string patch)
                 {
-                    paths.Add(match.Groups[1].Value);
+                    foreach (Match match in PatchPaths().Matches(patch))
+                    {
+                        paths.Add(match.Groups[1].Value);
+                    }
                 }
-            }
+            }, codes);
 
-            if (paths.Any(path => SecretPath().IsMatch(path.Replace('\\', '/'))))
-            {
-                codes.Add("credentials");
-            }
-
-            string working = workspace;
+            string? working = workspace;
             foreach (string field in new[] { "cwd", "workdir", "working_directory" })
             {
-                if (action.Input.TryGetProperty(field, out JsonElement cwd) && cwd.ValueKind == JsonValueKind.String)
+                string? cwd = null;
+                if (!Check(() => cwd = StringField(action.Input, field), codes))
                 {
-                    working = Path.GetFullPath(cwd.GetString()!, workspace);
-                    if (working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
+                    working = null;
+                }
+                else if (cwd is not null)
+                {
+                    // A failed resolution leaves no base for relative paths. A failed permission check does not
+                    // erase a successfully resolved base, so other paths can still be checked independently.
+                    working = null;
+                    Check(() => working = Path.GetFullPath(cwd, workspace), codes);
+                    if (working is not null)
                     {
-                        codes.Add("scope");
+                        Check(() =>
+                        {
+                            if (working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
+                            {
+                                codes.Add("scope");
+                            }
+                        }, codes);
                     }
                 }
             }
 
             foreach (string path in paths)
             {
-                // Reading the exported brief is part of every assignment. It does not authorize changing worker metadata.
-                string resolved = Path.GetFullPath(path.Replace('\\', '/'), working);
-                bool briefRead = readsBrief && resolved == Path.Combine(Path.GetFullPath(workspace), ".vericairn", "brief.md");
-                if (!briefRead && !PermittedPaths.Allows(resolved, workspace, permitted))
+                Check(() =>
                 {
-                    codes.Add("scope");
-                }
+                    if (SecretPath().IsMatch(path.Replace('\\', '/')))
+                    {
+                        codes.Add("credentials");
+                    }
+                }, codes);
+                Check(() =>
+                {
+                    string normalized = path.Replace('\\', '/');
+                    if (working is null && !Path.IsPathFullyQualified(normalized))
+                    {
+                        codes.Add("audit-unverified");
+                        return;
+                    }
+
+                    string resolved = Path.IsPathFullyQualified(normalized) ? Path.GetFullPath(normalized) : Path.GetFullPath(normalized, working!);
+                    // Reading the exported brief is part of every assignment. An undecidable brief-read check
+                    // cannot establish a scope violation for that path, but does not exempt any other path.
+                    bool brief = resolved == Path.Combine(Path.GetFullPath(workspace), ".vericairn", "brief.md");
+                    if (!(brief && readsBrief) && !PermittedPaths.Allows(resolved, workspace, permitted))
+                    {
+                        codes.Add(brief && briefReadUnverified ? "audit-unverified" : "scope");
+                    }
+                }, codes);
             }
         }
 
         string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-        string fingerprint = Fingerprint(action);
+        string? fingerprint = null;
+        Check(() => fingerprint = Fingerprint(action), codes);
         return codes.Order(StringComparer.Ordinal).Select(code => new RunSignal(code, code is "credentials" or "scope" ? "critical" : "warning", at, code switch
         {
             "network" => "The worker observed an invocation that attempts network access.",
             "credentials" => "The worker observed an invocation targeting credentials or a secret store.",
             "scope" => "The worker observed an invocation targeting a path outside the assignment's permitted paths.",
-            _ => "The worker could not fully interpret an invocation; its command audit is incomplete.",
+            _ => "The worker could not complete one or more invocation checks; completed audit verdicts still apply.",
         }, fingerprint)).ToArray();
+    }
+
+    private static string? StringField(JsonElement input, string name) =>
+        input.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool Check(Action check, HashSet<string> codes)
+    {
+        try
+        {
+            check();
+            return true;
+        }
+        catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException
+            or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or TimeoutException)
+        {
+            codes.Add("audit-unverified");
+            return false;
+        }
     }
 
     private static void GatherPaths(JsonElement value, List<string> paths)
@@ -163,7 +230,12 @@ public static partial class CommandAudit
             return;
         }
 
-        string[] words = ShellWords().Matches(command).Select(m => m.Value).ToArray();
+        string[] words = [];
+        if (!Check(() => words = ShellWords().Matches(command).Select(m => m.Value).ToArray(), codes))
+        {
+            return;
+        }
+
         string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
         bool first = true;
         bool redirect = false;
@@ -174,10 +246,13 @@ public static partial class CommandAudit
         {
             string token = tokens[i];
             bool quoted = words[i].StartsWith('"') || words[i].StartsWith('\'');
-            if (!words[i].StartsWith('\'') && SecretEnvironment().IsMatch(words[i]))
+            Check(() =>
             {
-                codes.Add("credentials");
-            }
+                if (!words[i].StartsWith('\'') && SecretEnvironment().IsMatch(words[i]))
+                {
+                    codes.Add("credentials");
+                }
+            }, codes);
 
             if (!quoted && token is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n")
             {
@@ -254,7 +329,8 @@ public static partial class CommandAudit
 
             if (executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd" && token is "-c" or "-lc" or "-Command" or "/c" && i + 1 < tokens.Length)
             {
-                InspectCommand(tokens[++i], paths, codes, depth + 1);
+                string nested = tokens[++i];
+                Check(() => InspectCommand(nested, paths, codes, depth + 1), codes);
                 continue;
             }
 
@@ -268,15 +344,20 @@ public static partial class CommandAudit
             if (executable is "python" or "python3" or "node" or "ruby" or "perl")
             {
                 codes.Add("audit-unverified");
-                if (NetworkCode().IsMatch(token))
+                Check(() =>
                 {
-                    codes.Add("network");
-                }
-
-                foreach (Match match in CodePaths().Matches(token))
+                    if (NetworkCode().IsMatch(token))
+                    {
+                        codes.Add("network");
+                    }
+                }, codes);
+                Check(() =>
                 {
-                    paths.Add(match.Groups[1].Value);
-                }
+                    foreach (Match match in CodePaths().Matches(token))
+                    {
+                        paths.Add(match.Groups[1].Value);
+                    }
+                }, codes);
 
                 if (i > 0 && tokens[i - 1] is "-c" or "-e")
                 {

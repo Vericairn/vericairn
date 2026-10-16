@@ -74,7 +74,7 @@ public static class PermittedPaths
 
     /// <summary>
     /// Checks an invocation path within the physical workspace; expansion and links are not assumed safe.
-    /// Inspection failures propagate to the worker's audit-unverified handler, never becoming a false verdict.
+    /// Inspection failures propagate to the caller, never becoming a false verdict.
     /// </summary>
     public static bool Allows(string path, string workspace, IReadOnlyList<string> permitted)
     {

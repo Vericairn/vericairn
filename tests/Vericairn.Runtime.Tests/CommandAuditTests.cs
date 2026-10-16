@@ -62,6 +62,105 @@ public class CommandAuditTests
         Assert.NotEqual(CommandAudit.Fingerprint(Action("Read", new { file_path = "src/a.cs" })), CommandAudit.Fingerprint(Action("Read", new { file_path = "src/b.cs" })));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CredentialVerdictsSurviveAnUndecidablePathInEitherOrder(bool invalidFirst)
+    {
+        string[] paths = ["~/.ssh/id_rsa", "src/invalid\0.cs"];
+        if (invalidFirst)
+        {
+            Array.Reverse(paths);
+        }
+
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", new { paths }), Workspace(), ["src/"]);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "credentials").Severity);
+        AssertUndecidableCheckWarning(signals);
+    }
+
+    [Theory]
+    [InlineData("cwd")]
+    [InlineData("workdir")]
+    [InlineData("working_directory")]
+    public void NetworkVerdictsSurviveAnUndecidableWorkingDirectory(string field)
+    {
+        var input = new Dictionary<string, object>(StringComparer.Ordinal)
+        {
+            ["url"] = "https://example.invalid",
+            [field] = "invalid\0directory",
+            ["file_path"] = "outside.txt",
+        };
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", input), Workspace(), ["src/"]);
+        Assert.Equal(["audit-unverified", "network"], signals.Select(s => s.Code));
+        Assert.Equal("warning", Assert.Single(signals, s => s.Code == "network").Severity);
+        AssertUndecidableCheckWarning(signals);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ScopeVerdictsSurviveAnUndecidablePathInEitherOrder(bool invalidFirst)
+    {
+        string[] paths = ["outside.txt", "src/invalid\0.cs", "src/allowed.cs"];
+        if (invalidFirst)
+        {
+            Array.Reverse(paths);
+        }
+
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", new { paths }), Workspace(), ["src/"]);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
+        AssertUndecidableCheckWarning(signals);
+    }
+
+    [Fact]
+    public void AnAbsolutePathCanStillBeCheckedWhenTheWorkingDirectoryIsUnknown()
+    {
+        string file = Path.Combine(Workspace(), "outside.txt");
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", new { cwd = "invalid\0directory", file_path = file }), Workspace(), ["src/"]);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
+        AssertUndecidableCheckWarning(signals);
+    }
+
+    [Theory]
+    [InlineData("printenv", "credentials")]
+    [InlineData("curl https://example.invalid", "network")]
+    [InlineData("cat outside.txt", "scope")]
+    [InlineData("cat .vericairn/brief.md", null)]
+    public void ABriefReadTimeoutPreservesOtherVerdictsWithoutInventingAScopeViolation(string command, string? code)
+    {
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Bash", new { command }), Workspace(), ["src/"],
+            _ => throw new System.Text.RegularExpressions.RegexMatchTimeoutException());
+        AssertUndecidableCheckWarning(signals);
+        if (code is null)
+        {
+            Assert.Single(signals);
+        }
+        else
+        {
+            Assert.Equal(code == "network" ? "warning" : "critical", Assert.Single(signals, s => s.Code == code).Severity);
+        }
+    }
+
+    [Fact]
+    public void AFingerprintFailureDoesNotDiscardCompletedVerdicts()
+    {
+        using JsonDocument input = JsonDocument.Parse("""{"url":"https://example.invalid","url":"https://example.invalid"}""");
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(new HarnessAction("invocation", "Read", input.RootElement), Workspace(), ["src/"]);
+        Assert.Equal(["audit-unverified", "network"], signals.Select(s => s.Code));
+        Assert.All(signals, s => Assert.Null(s.Fingerprint));
+        Assert.Contains("invocation check", signals[0].Summary, StringComparison.Ordinal);
+    }
+
+    private static void AssertUndecidableCheckWarning(IReadOnlyList<RunSignal> signals)
+    {
+        RunSignal warning = Assert.Single(signals, s => s.Code == "audit-unverified");
+        Assert.Equal("warning", warning.Severity);
+        Assert.Contains("invocation check", warning.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("harness event", warning.Summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid", warning.Summary, StringComparison.Ordinal);
+        Assert.StartsWith("sha256:", warning.Fingerprint, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ClaudeReadsToolUseInputsButNeverAssistantTextOrToolResults()
     {

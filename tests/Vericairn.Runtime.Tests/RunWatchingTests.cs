@@ -90,6 +90,35 @@ public class RunWatchingTests
     }
 
     [Theory]
+    [InlineData("watch-claude-mixed-credentials", "credentials", true)]
+    [InlineData("watch-claude-mixed-network", "network", false)]
+    public void UndecidableItemsDoNotEraseCompletedActionVerdicts(string scenario, string code, bool critical)
+    {
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        RunResponse started = run.Start("claude-code", scenario, run.Report("mixed-audit"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal(critical ? "critical" : "warning", Assert.Single(settled.Signals!, s => s.Code == code).Severity);
+        RunSignal unverified = Assert.Single(settled.Signals!, s => s.Code == "audit-unverified");
+        Assert.Equal("warning", unverified.Severity);
+        Assert.Contains("invocation check", unverified.Summary, StringComparison.Ordinal);
+        Assert.Equal(critical ? "known-failure" : "observed-success", settled.Status);
+        if (critical)
+        {
+            Assert.Equal("worker", settled.Stop!.RequestedBy);
+            Assert.NotNull(settled.Stop.ContainedAt);
+        }
+        else
+        {
+            Assert.Null(settled.Stop);
+            Assert.DoesNotContain(settled.Signals!, s => s.Code is "scope" or "credentials");
+        }
+
+        Assert.All(settled.Signals!, s => Assert.NotNull(s.Attention));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
     [InlineData("argument")]
     [InlineData("io")]
     [InlineData("access")]
