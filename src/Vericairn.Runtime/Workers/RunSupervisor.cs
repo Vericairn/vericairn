@@ -74,7 +74,6 @@ public sealed class RunSupervisor
     private readonly RunWatch watch;
     private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
     private readonly Func<RunSignal, string?>? signalAttention;
-    private readonly RunExecutionObservation? execution;
 
     private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution)
     {
@@ -89,9 +88,8 @@ public sealed class RunSupervisor
         this.attention = attention;
         this.workspace = workspace;
         this.permitted = permitted;
-        watch = new RunWatch(watchSettings, tokenCap, historyRate);
+        watch = new RunWatch(watchSettings, tokenCap, historyRate, execution);
         this.signalAttention = signalAttention;
-        this.execution = execution is JsonElement selection ? new RunExecutionObservation(selection) : null;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
         launchedTick = options.Clock.GetTimestamp();
@@ -317,7 +315,7 @@ public sealed class RunSupervisor
             }
 
             Save();
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), execution is null ? null : JsonSerializer.SerializeToElement(execution.Snapshot()));
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick), state.Signals.ToArray(), watch.ExecutionObserved);
             process.Close();
             return outcome;
         }
@@ -467,8 +465,8 @@ public sealed class RunSupervisor
                     {
                         lock (gate)
                         {
-                            execution?.Add(reported);
-                            state.Execution = execution is null ? null : JsonSerializer.SerializeToElement(execution.Snapshot());
+                            foreach (RunSignal observation in watch.Reported(reported)) AddSignal(observation);
+                            state.Execution = watch.ExecutionObserved;
                         }
                     }
                 }

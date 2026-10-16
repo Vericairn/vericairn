@@ -13,6 +13,18 @@ namespace Vericairn.Runtime.Tests;
 public class RunExecutionTests
 {
     [Fact]
+    public void AReportedInventoryChangeRemainsADiscrepancyWhenTheOriginalInventoryReturns()
+    {
+        string admitted = Vericairn.Records.Hashing.ContentHash.Sha256("admitted"u8);
+        string changed = Vericairn.Records.Hashing.ContentHash.Sha256("changed"u8);
+        var observation = new RunExecutionObservation(JsonSerializer.SerializeToElement(new { environment = new { inventoryHash = admitted } }));
+        observation.Add(new HarnessExecution(InventoryHash: changed));
+        observation.Add(new HarnessExecution(InventoryHash: admitted));
+        Assert.Equal("inventoryHash", Assert.Single(observation.Snapshot()["discrepancies"]!.AsArray())!.GetValue<string>());
+        Assert.Equal(2, observation.Snapshot()["reports"]!.AsArray().Count);
+    }
+
+    [Fact]
     public void ReportedResolvedAliasIsNotAChangeAndAnActualChangeIsNeverErased()
     {
         var observation = new RunExecutionObservation(RunEstate.Json("""{"requested":{"model":"alias","effort":"high"},"resolvedRevision":"revision-1"}"""));

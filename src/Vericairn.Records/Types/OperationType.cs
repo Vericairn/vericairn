@@ -426,7 +426,7 @@ public sealed class OperationType : IRecordType
         var signalKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader signal in signals ?? [])
         {
-            string? code = signal.Enum("code", true, "network", "credentials", "scope", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement");
+            string? code = signal.Enum("code", true, "network", "credentials", "scope", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement", "execution", "tool-inventory");
             string? severity = signal.Enum("severity", true, "warning", "critical");
             signal.Timestamp("at", true);
             signal.Text("summary", true, 2000);

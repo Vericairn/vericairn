@@ -32,7 +32,7 @@ internal static class HarnessSelection
         return new HarnessExecution(Text(root, "model"), Text(root, "model_revision"), Text(root, "effort"),
             Text(root, "provider"), Text(root, "destination"), Text(root, "harness_version") ?? Text(root, "claude_code_version"),
             root.TryGetProperty("tools", out JsonElement tools) && tools.ValueKind == JsonValueKind.Array
-                ? tools.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : "unknown").ToArray() : null);
+                ? tools.EnumerateArray().Select(t => t.ValueKind == JsonValueKind.String ? t.GetString()! : "unknown").ToArray() : null, Text(root, "inventory_hash"));
     }
 
     private static string? Text(JsonElement element, string field) => element.TryGetProperty(field, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

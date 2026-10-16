@@ -44,14 +44,15 @@ public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool C
 /// <param name="Destination">Reported route.</param>
 /// <param name="HarnessVersion">Reported harness version.</param>
 /// <param name="Tools">Reported effective tool identities.</param>
+/// <param name="InventoryHash">Reported identity of the complete effective inventory, when exposed.</param>
 public sealed record HarnessExecution(string? Model = null, string? ModelRevision = null, string? Effort = null,
-    string? Provider = null, string? Destination = null, string? HarnessVersion = null, IReadOnlyList<string>? Tools = null);
+    string? Provider = null, string? Destination = null, string? HarnessVersion = null, IReadOnlyList<string>? Tools = null, string? InventoryHash = null);
 
 /// <summary>Retains reported execution facts separately from the admitted request, with bounded, explicit unknowns.</summary>
 public sealed class RunExecutionObservation
 {
     private static readonly string[] AllocationFields = ["inputTokens", "outputTokens"];
-    private static readonly string[] Facts = ["model", "modelRevision", "effort", "provider", "destination", "harnessVersion", "tools"];
+    private static readonly string[] Facts = ["model", "modelRevision", "effort", "provider", "destination", "harnessVersion", "tools", "inventoryHash"];
     private readonly JsonObject selection;
     private readonly JsonArray reports = [];
     private readonly HashSet<string> known = new(StringComparer.Ordinal);
@@ -73,14 +74,14 @@ public sealed class RunExecutionObservation
 
         var entry = new JsonObject();
         foreach ((string field, string? value) in new[] { ("model", report.Model), ("modelRevision", report.ModelRevision), ("effort", report.Effort),
-            ("provider", report.Provider), ("destination", report.Destination), ("harnessVersion", report.HarnessVersion) })
+            ("provider", report.Provider), ("destination", report.Destination), ("harnessVersion", report.HarnessVersion), ("inventoryHash", report.InventoryHash) })
         {
             if (value is null)
             {
                 continue;
             }
 
-            if (!Safe(value) || value is "unknown" or "provider-default")
+            if (!Safe(value) || value is "unknown" or "provider-default" || (field == "inventoryHash" && !ContentHash.IsValid(value)))
             {
                 incomplete = true;
                 continue;
@@ -92,6 +93,7 @@ public sealed class RunExecutionObservation
             {
                 "modelRevision" => selection["resolvedRevision"]?.GetValue<string>(),
                 "harnessVersion" => selection["harnessVersion"]?.GetValue<string>(),
+                "inventoryHash" => selection["environment"]?["inventoryHash"]?.GetValue<string>(),
                 _ => selection["requested"]?[field]?.GetValue<string>(),
             };
             bool resolvedAlias = field == "model" && value == selection["resolvedRevision"]?.GetValue<string>();

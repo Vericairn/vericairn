@@ -87,6 +87,7 @@ internal static class ExecutionRecord
             {
                 foreach (string field in new[] { "model", "modelRevision", "effort", "provider", "destination", "harnessVersion" }) Identity(report, field, false);
                 report.StringArray("tools", false, allowEmpty: true, maxItemLength: 160);
+                report.Hash("inventoryHash", false);
                 report.NoOtherKeys();
             }
             observed.StringArray("unknown", true, allowEmpty: true, maxItemLength: 40);

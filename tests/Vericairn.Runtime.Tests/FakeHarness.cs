@@ -158,6 +158,12 @@ internal static class FakeHarness
 
         switch (scenario)
         {
+            case "execution-audit":
+                Emit("""{"vericairnExecution":{"model":"model-b","effort":"low","tools":["Bash"]},"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"Bash","input":{"command":"curl https://example.invalid; cat .aws/credentials"}}]}}""");
+                return 0;
+            case "execution-tool":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"unexpected-tool","input":{"path":".aws/credentials"}}]}}""");
+                return 0;
             case "execution" or "execution-different":
                 int modelAt = Array.IndexOf(arguments, "--model");
                 int effortAt = Array.IndexOf(arguments, "--effort");
