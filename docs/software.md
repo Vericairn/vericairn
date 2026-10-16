@@ -3,8 +3,8 @@
 How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
 
-This draft describes the 0.6.1 code. Its worker and launchers first appeared in the 0.6.0 candidate, withdrawn before
-publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
+This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Its worker and launchers first appeared
+in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
 the release-note and progress classification of accepted work, as the sections below describe.
 
 ## Where each part lives
@@ -182,6 +182,11 @@ against the estate that holds those records. This deliberately overlaps 0.6.1; i
 Generated API parameter rows omit the description separator when there is no description and carry no trailing
 spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no
 legacy scope label.
+
+When a review or acceptance names an earlier work-order revision, the estate check asks for reconsideration only
+while that judgment remains current. Superseding it with a judgment of the current revision clears the earlier
+`record.subject-stale` and `acceptance.unresolved` findings, as in FIX-05. A replacement that still names an earlier
+revision remains flagged, and historical records still have their integrity and authority checked.
 
 Only current results in that window are listed: a result superseded by a later result is omitted, even when the later
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either

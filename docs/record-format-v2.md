@@ -6,8 +6,8 @@ it was written under. A record states the format it was written in, and an estat
 carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
-publication. This draft describes 0.6.1, which carries those additions with FIX-08's corrections and continues to read
-formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
+publication. This draft describes 0.6.1 with the unreleased FIX-09 corrections; 0.6.1 carries those additions with
+FIX-08's corrections and continues to read formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
 validation and the run ledger nevertheless need a build that understands their rules.
 
 ## Why a new format number
@@ -35,6 +35,13 @@ recorded step.
   admission recorded without a signature counts follows the estate's format (rules, below). A type or a field introduced
   in format 2 is refused in a format-1 record (`record.type-format`, `body.format`), with the upgrade that answers it.
 - `vericairn records describe` and the record reference mark the types and fields format 2 introduced.
+- For records of either format, reconsideration findings apply only to current records. A review or acceptance
+  that pins an earlier subject revision is flagged with `record.subject-stale` (and an acceptance also with
+  `acceptance.unresolved`) while that judgment is current. Once the judgment itself is superseded, those findings
+  stop: its successor is judged against the subject's current revision. A replacement still pinning an earlier
+  subject revision remains flagged. Every historical record still undergoes structural, hash, signature and
+  authority validation; supersession does not repair an invalid pinned hash. FIX-05's replacement acceptance of
+  its current work-order revision therefore answers the superseded acceptance of the earlier revision.
 - A new estate starts at the newest format its build writes.
 - A record's `at` is in whole seconds, and its identifier keeps the milliseconds of the moment it was made. Records of
   one second are ordered by identifier, so a build that writes them sorts them in the order they were made; records a
