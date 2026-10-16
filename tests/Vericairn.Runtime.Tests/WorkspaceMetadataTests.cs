@@ -62,7 +62,7 @@ public class WorkspaceMetadataTests
     }
 
     [Fact]
-    public void RegularMetadataCanBeReplacedWithoutLeavingTemporaryFiles()
+    public void RegularAndHiddenMetadataCanBeReplacedWithoutLeavingTemporaryFiles()
     {
         string workspace = Path.Combine(Path.GetTempPath(), "vericairn-metadata-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(workspace);
@@ -70,6 +70,14 @@ public class WorkspaceMetadataTests
         {
             string brief = WorkspaceMetadata.Write(workspace, "first");
             Assert.Equal("first", File.ReadAllText(brief));
+            if (OperatingSystem.IsWindows())
+            {
+                foreach (string path in Directory.EnumerateFiles(Path.GetDirectoryName(brief)!))
+                {
+                    File.SetAttributes(path, File.GetAttributes(path) | FileAttributes.Hidden | FileAttributes.System);
+                }
+            }
+
             Assert.Equal(brief, WorkspaceMetadata.Write(workspace, "second"));
             Assert.Equal("second", File.ReadAllText(brief));
             Assert.Equal([".gitignore", "brief.md"], Directory.EnumerateFiles(Path.GetDirectoryName(brief)!).Select(Path.GetFileName).Order(StringComparer.Ordinal));

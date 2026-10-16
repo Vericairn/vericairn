@@ -21,6 +21,7 @@ internal sealed class ContainedProcess
     internal Func<int[], (int Count, int Error)>? ProcessInventory { get; set; }
     internal Func<IEnumerable<string>>? ProcfsDirectories { get; set; }
     internal Func<int, int, int>? UnixSignal { get; set; }
+    internal Func<uint>? WindowsJobInventory { get; set; }
     private bool exited;
     private int exitCode;
 
@@ -63,14 +64,23 @@ internal sealed class ContainedProcess
 
     public bool BoundaryExited()
     {
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() || WindowsJobInventory is not null)
         {
-            if (!QueryInformationJobObject(job!, 1, out JobAccounting accounting, Marshal.SizeOf<JobAccounting>(), out _))
+            uint active;
+            if (WindowsJobInventory is not null)
+            {
+                active = WindowsJobInventory();
+            }
+            else if (QueryInformationJobObject(job!, 1, out JobAccounting queried, Marshal.SizeOf<JobAccounting>(), out _))
+            {
+                active = queried.ActiveProcesses;
+            }
+            else
             {
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
 
-            return accounting.ActiveProcesses == 0;
+            return active == 0;
         }
 
         return UnixMembersExited();

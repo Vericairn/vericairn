@@ -45,10 +45,48 @@ public class WorkspaceScopeTests
         var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
         PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/git-file", null, Path.Combine(run.Scratch, "worktree"));
         WorkspaceSnapshot before = provider.Capture(workspace);
-        File.WriteAllText(Path.Combine(workspace.Path, ".git"), "gitdir: missing-administration\n");
+        Assert.Null(before.Problem);
+        string administration = Path.Combine(workspace.Path, ".git");
+        // Git for Windows can mark this file hidden; CREATE_ALWAYS cannot overwrite an existing hidden file.
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(administration, File.GetAttributes(administration) | FileAttributes.Hidden);
+        }
+
+        File.Delete(administration);
+        File.WriteAllText(administration, "gitdir: missing-administration\n");
         File.WriteAllText(Path.Combine(workspace.Path, "forbidden.txt"), "outside scope");
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Null(scope.Problem);
         Assert.Contains("forbidden.txt", scope.Outside);
+    }
+
+    [Fact]
+    public void HiddenWorkspaceFilesAreStillComparedWithoutChangingTheirAttributes()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/hidden-file", null, Path.Combine(run.Scratch, "worktree"));
+        string hidden = Path.Combine(workspace.Path, ".hidden.txt");
+        File.WriteAllText(hidden, "before");
+        if (OperatingSystem.IsWindows())
+        {
+            File.SetAttributes(hidden, File.GetAttributes(hidden) | FileAttributes.Hidden | FileAttributes.System);
+        }
+
+        FileAttributes attributes = File.GetAttributes(hidden);
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        Assert.Null(before.Problem);
+        using (var changed = new FileStream(hidden, FileMode.Open, FileAccess.Write, FileShare.None))
+        {
+            changed.SetLength(0);
+            changed.Write("after"u8);
+        }
+
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Null(scope.Problem);
+        Assert.Equal([".hidden.txt"], scope.Outside);
+        Assert.Equal(attributes, File.GetAttributes(hidden));
     }
 
     [Fact]
