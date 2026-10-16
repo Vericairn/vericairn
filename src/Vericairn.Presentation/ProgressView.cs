@@ -3,6 +3,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using Vericairn.Protocol;
 
 namespace Vericairn.Presentation;
 
@@ -19,7 +20,10 @@ public sealed record ProgressRow(string Heading, string Detail);
 public static class ProgressView
 {
     /// <summary>The summary rows of a report in its machine form; one row saying the report is unavailable when there is none.</summary>
-    public static IReadOnlyList<ProgressRow> Summary(JsonElement report)
+    public static IReadOnlyList<ProgressRow> Summary(JsonElement report) => Summary(report, "verbose", onDemand: true);
+
+    /// <summary>Optional live claims follow frequency; worker observations and every on-demand read remain visible.</summary>
+    public static IReadOnlyList<ProgressRow> Summary(JsonElement report, string? frequency, bool onDemand)
     {
         if (report.ValueKind != JsonValueKind.Object || Str(report, "format") != "vericairn.progress/1")
         {
@@ -27,7 +31,8 @@ public static class ProgressView
         }
 
         return [Standing(report), WorkOrders(report), Releases(report), Next(report), Eligible(report), Operator(report),
-            .. Items(report, "agentClaims").Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)")),
+            .. Items(report, "agentClaims").Where(c => CommunicationPresentation.ShouldDeliver(frequency,
+                c.TryGetProperty("completed", out JsonElement completed) && completed.ValueKind == JsonValueKind.True ? "completion" : "progress", [], onDemand)).Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)")),
             .. Items(report, "runSignals").SelectMany(r => Items(r, "signals").Select(s => new ProgressRow($"Worker · {Str(s, "severity")} {Str(s, "code")}",
                 $"{Str(s, "summary")} (run {Str(r, "run")}; {(Str(s, "attention") is string ask ? "ask " + ask : "attention recording pending")})")))];
     }

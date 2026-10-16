@@ -11,7 +11,7 @@ using Vericairn.Records.Canonical;
 namespace Vericairn.Workbench;
 
 /// <summary>A retained hand-over and its current comparison, both through the runtime. Refresh never replaces the basis.</summary>
-public sealed class HandoffDocument(Func<IEstateApi?> api) : Document("Hand-over and resume", "handoff")
+public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationProfile>? profile = null) : Document("Hand-over and resume", "handoff")
 {
     private HandoffPackage? package;
     private string text = "Prepare a hand-over or open a saved package.", resumeText = "No comparison yet.", note = "Remote is not built.";
@@ -132,7 +132,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api) : Document("Hand-over
     private void Keep(HandoffPackage retained, string human)
     {
         package = retained;
-        Text = human;
+        Text = profile is null ? human : CommunicationPresentation.Protected(profile(), "handoff", retained.Hash, "Complete hand-over; its package and originals remain unchanged.", human);
         Raise(nameof(Package));
         Raise(nameof(Identity));
         Raise(nameof(PackageJson));

@@ -11,6 +11,8 @@ public static class RecordTypeRegistry
         new EstateType(),
         new PrincipalType(),
         new AuthorityType(),
+        new CommunicationSettingType(),
+        new CommunicationDelegationType(),
         new DecisionType(),
         new ProductType(),
         new ResourceType(),

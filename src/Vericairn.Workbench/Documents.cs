@@ -224,10 +224,11 @@ public sealed record AssignmentView(string Id, string Hash, string Contributor, 
 public sealed class WorkOrderDocument : Document
 {
     /// <summary>Builds the page from the work order's brief document.</summary>
-    public WorkOrderDocument(string key, JsonElement brief, string observation) : base(key, "work-order")
+    public WorkOrderDocument(string key, JsonElement brief, string observation, string communication = "") : base(key, "work-order")
     {
         Key = key;
         Observation = observation;
+        Communication = communication;
         JsonElement order = brief.TryGetProperty("workOrder", out JsonElement o) ? o : default;
         Id = Str(order, "id") ?? string.Empty;
         Hash = Str(order, "hash") ?? string.Empty;
@@ -285,6 +286,9 @@ public sealed class WorkOrderDocument : Document
     /// <summary>Exit question.</summary>
     public string ExitQuestion { get; }
 
+    /// <summary>The addressed recipient profile and its provenance.</summary>
+    public string Communication { get; }
+
     /// <summary>The observation text.</summary>
     public string Observation { get; }
 
@@ -311,7 +315,7 @@ public sealed record AttemptView(string Id, string By, string StartedAt, string 
 public sealed class AssignmentDocument : Document
 {
     /// <summary>Builds the page from the assignment node of the work order's brief document.</summary>
-    public AssignmentDocument(string key, JsonElement assignment, string contributorName) : base($"Assignment {Str(assignment, "id")?[..12]}", "assignment")
+    public AssignmentDocument(string key, JsonElement assignment, string contributorName, CommunicationProfile? communication = null, RecordResponse? original = null) : base($"Assignment {Str(assignment, "id")?[..12]}", "assignment")
     {
         Key = key;
         Id = Str(assignment, "id") ?? string.Empty;
@@ -332,6 +336,14 @@ public sealed class AssignmentDocument : Document
         lines.Add("Recovery: " + (Str(brief, "recovery") ?? string.Empty));
         BriefText = string.Join("\n", lines);
         Note = Str(assignment, "note") ?? string.Empty;
+        if (communication is not null)
+        {
+            string complete = original is null ? "\n\nAssignment view (original record unavailable):\n" + assignment.GetRawText()
+                : "\n\nComplete original assignment:\n" + original.Envelope.GetRawText();
+            BriefText = CommunicationPresentation.Protected(communication, "handoff", Id + " at " + Hash,
+                "The delegated outcome, limits and original source follow.", BriefText + complete);
+        }
+
         var attempts = new List<AttemptView>();
         if (assignment.TryGetProperty("attempts", out JsonElement at) && at.ValueKind == JsonValueKind.Array)
         {

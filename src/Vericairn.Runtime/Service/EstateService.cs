@@ -219,7 +219,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public BriefResponse? Brief(string workOrder)
+    public BriefResponse? Brief(string workOrder) => BriefFor(workOrder);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -232,7 +235,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             using JsonDocument json = JsonDocument.Parse(WorkView.RenderBriefJson(model, order));
-            return new BriefResponse(WorkView.RenderBrief(model, order), json.RootElement.Clone());
+            CommunicationProfile profile = Communication(recipient, assignment, view);
+            if (assignment is not null && model.ById.TryGetValue(assignment, out RecordEnvelope? assigned) &&
+                (WorkView.OrderOfAssignment(model, assigned) is not { } assignedOrder || !model.Chain(order).Contains(assignedOrder.Id, StringComparer.Ordinal)))
+            {
+                profile = profile with { Unavailable = "The selected assignment does not belong to this work brief; its communication override is not applied." };
+            }
+
+            return new BriefResponse(CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), profile), json.RootElement.Clone());
         }
     }
 
@@ -2301,6 +2311,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs a record for its author, in the estate's format, without storing it; or says why it cannot be. Caller holds the gate.</summary>
     private (AuthoredRecord? Record, string? Refusal) AuthorLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        if (CommunicationWriteRefusal(draft, current) is string communicationRefusal)
+        {
+            return (null, communicationRefusal);
+        }
+
         if (signers is null)
         {
             string? refusal = ResolveSigner(current, draft, out IRecordSigner? signer);

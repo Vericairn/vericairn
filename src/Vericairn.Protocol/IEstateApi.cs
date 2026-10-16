@@ -12,6 +12,18 @@ public interface IEstateApi
     /// <summary>The daemon's or embedded runtime's identity and what it serves.</summary>
     HealthResponse Health();
 
+    /// <summary>The recipient's effective communication values, revisions, conflicts and freshness; a read never authors a record.</summary>
+    CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        new(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This API implementation does not support communication settings.");
+
+    /// <summary>Replace or reset one profile with an expected prior hash; only its owner or explicit delegate may change it.</summary>
+    WriteOutcome CommunicationSet(CommunicationSetRequest request) =>
+        WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication settings.", []));
+
+    /// <summary>Grant or revoke permission to change one's own communication setting.</summary>
+    WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) =>
+        WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication delegation.", []));
+
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
@@ -44,6 +56,13 @@ public interface IEstateApi
 
     /// <summary>The brief of a work order, or null when no work order has that key or id.</summary>
     BriefResponse? Brief(string workOrder);
+
+    /// <summary>A personalized brief with complete original obligations and an explicit communication section; its canonical JSON is unchanged.</summary>
+    BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        BriefResponse? brief = Brief(workOrder);
+        return brief is null ? null : brief with { Markdown = CommunicationPresentation.Brief(brief.Markdown, Communication(recipient, assignment, view)) };
+    }
 
     /// <summary>What an observer sees of a work order, or null.</summary>
     ObserveResponse? Observe(string workOrder);

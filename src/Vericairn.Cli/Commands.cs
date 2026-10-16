@@ -30,7 +30,7 @@ namespace Vericairn.Cli;
 /// this machine, the embedded runtime otherwise, so that one owner holds the live state and one implementation evaluates
 /// authority. Exit codes: 0 clean, 1 findings with errors, 2 usage or failure.
 /// </summary>
-internal static class Commands
+internal static partial class Commands
 {
     internal const int Clean = 0;
     internal const int HasErrors = 1;
@@ -42,7 +42,7 @@ internal static class Commands
     public static int Check(string root, bool json) =>
         IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
 
-    public static int Status(string root, bool json, bool observe = false, string? by = null)
+    public static int Status(string root, bool json, bool observe = false, string? by = null, CommunicationSelection? presentation = null)
     {
         if (observe || by is not null)
         {
@@ -60,7 +60,7 @@ internal static class Commands
                 }
 
                 StatusResponse observed = api.Status();
-                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : observed.Text);
+                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : StatusPresentation(api, observed, presentation));
                 return observed.HasErrors ? HasErrors : Clean;
             });
         }
@@ -78,16 +78,16 @@ internal static class Commands
         return WithApi(root, api =>
         {
             StatusResponse status = api.Status();
-            Console.Out.Write(json ? CanonicalJson.SerializePretty(status.Json) : status.Text);
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(status.Json) : StatusPresentation(api, status, presentation));
             return status.HasErrors ? HasErrors : Clean;
         });
     }
 
     /// <summary>Recorded progress with labelled local claims and worker observations, through the API; exit 1 when the check it shows found errors, as status does.</summary>
-    public static int Progress(string root, bool json) => WithApi(root, api =>
+    public static int Progress(string root, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         ProgressResponse progress = api.Progress();
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : progress.Text);
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : ProtectedPresentation(api, "status", "estate progress", progress.Text, presentation) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, presentation?.Recipient)));
         return progress.HasErrors ? HasErrors : Clean;
     });
 
@@ -104,7 +104,7 @@ internal static class Commands
         return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
     }));
 
-    public static int Handoff(string root, string? output, long? maxBytes, bool json) => WithApi(root, api =>
+    public static int Handoff(string root, string? output, long? maxBytes, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         HandoffResponse response = api.Handoff(maxBytes);
         if (response.Package is null)
@@ -120,7 +120,7 @@ internal static class Commands
             file.Write(Encoding.UTF8.GetBytes(package));
         }
 
-        Console.Out.Write(json ? package : response.Text);
+        Console.Out.Write(json ? package : ProtectedPresentation(api, "handoff", response.Package.Hash, response.Text, presentation));
         return Clean;
     });
 
@@ -140,9 +140,9 @@ internal static class Commands
     public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
         WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
 
-    public static int WorkBrief(string root, string key, bool json) => WithApi(root, api =>
+    public static int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
-        BriefResponse? brief = api.Brief(key);
+        BriefResponse? brief = json ? api.Brief(key) : api.BriefFor(key, presentation?.Recipient, presentation?.Assignment, presentation?.Values("handoff"));
         if (brief is null)
         {
             return Fail($"No current work order has key or id {key}.");
@@ -152,7 +152,7 @@ internal static class Commands
         return Clean;
     });
 
-    public static int WorkObserve(string root, string key, bool json) => WithApi(root, api =>
+    public static int WorkObserve(string root, string key, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         ObserveResponse? observe = api.Observe(key);
         if (observe is null)
@@ -160,7 +160,7 @@ internal static class Commands
             return Fail($"No current work order has key or id {key}.");
         }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : observe.Text);
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : ProtectedPresentation(api, "result", key, observe.Text, presentation));
         return Clean;
     });
 
@@ -891,12 +891,12 @@ internal static class Commands
         }
     }
 
-    public static int Decisions(string root, string? id, bool json) => WithApi(root, api =>
+    public static int Decisions(string root, string? id, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         if (id is null)
         {
             DecisionsResponse decisions = api.Decisions();
-            Console.Out.Write(json ? CanonicalJson.SerializePretty(decisions.Json) : decisions.Text);
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(decisions.Json) : ProtectedPresentation(api, "decision", "decision index", decisions.Text, presentation));
             return Clean;
         }
 
@@ -906,7 +906,7 @@ internal static class Commands
             return Fail($"No decision has id {id}.");
         }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : decision.Text);
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : ProtectedPresentation(api, "decision", id, decision.Text, presentation));
         return Clean;
     });
 
