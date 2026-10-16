@@ -782,3 +782,44 @@ validation still checks when an existing record was authored, so a later
 revocation preserves its earlier authorized history. Backdating a new record
 cannot reuse revoked consent. Unknown fields in the new setting, values and
 delegation request contracts are refused explicitly. Remote is not built.
+
+## Explicit execution policies and run observations (RUN-01)
+
+These are additive format-2 fields; no format 3 is introduced and earlier records are not rewritten.
+`roster`, `goal` and `assignment` accept optional `execution`. Roster and goal role entries accept the
+same policy. It contains optional `choices` and `restrictions` objects. Choices are portable string
+identities for `model`, `effort`, `provider`, `destination`, `dataBoundary`, and `adapter`. Restrictions
+are `requiredModel`, `requiredEffort`, `exactRevision`, `dataBoundary`, nonempty `permittedProviders` and
+`permittedDestinations` arrays, and `maxCurrency: {amount, unit}` with a nonnegative safe integer and a
+three-letter uppercase currency. Unknown keys, invalid types and nonportable identities are refused.
+
+The worker resolves launcher configuration, roster defaults/role, goal defaults/role, assignment, then
+explicit run choices. Restrictions are cumulative, never overridden by choices. Only a launcher's native
+effort values are accepted; `provider-default` requires explicit support and `not-supported` requires no
+effort control. Unknown model resolution never meets an exact pin. The worker refuses unresolved choices
+or incomplete environment admission before authoring an intent.
+
+An `operation` whose action is `agent-run` can carry `execution`, fixed at its intent and immutable across
+revisions. It includes `configuration`, `configurationHash`, `requested`, `provenance`, `resolvedRevision`,
+`harnessVersion`, `role`, `adapter: disabled`, `contextPackage`, `allocation` and `environment`:
+
+- `provenance` entries contain scope, source, policy, and the exact contributing record id and hash for
+  recorded policies. Overwritten choices remain inspectable.
+- `allocation` contains known input/output token counts and an `unknown` list. `contextPackage` is an
+  exact content hash or `unknown`; RUN-01 stores no package body, withheld list or measurements.
+- `environment` contains policy id, inventory hash, admitted variable names and the complete inventory.
+  Each component has id, kind, version, content hash, configuration hash, environment names, destinations
+  and dependencies. Kinds are harness, tool, skill, plugin, hook, mcp, helper, dependency and configuration.
+  No machine paths, secret values or raw environment values are stored.
+
+A settled admitted run also records `executionObserved` with distinct `reports`, `unknown` facts and
+`discrepancies`. Reports can contain model, modelRevision, effort, provider, destination, harnessVersion,
+tools and inventoryHash, only when actually reported. Missing facts are never copied from intent.
+Unsafe or excessive reports leave `complete-report` unknown. A changed fact remains a discrepancy after
+it changes back. These observations are immutable once settled under the existing settlement rules.
+Older agent-run records may omit both fields; they establish no execution selection or environment claim.
+
+WATCH-01 `signals` additionally admit `execution` and `tool-inventory` codes. They record critical
+execution discrepancies or invocations outside the admitted tool inventory; existing command audit
+signals remain intact. The efficiency Adapter stays disabled and absent; enabling it is unsupported.
+Remote is not built. A native launcher without complete inventory qualification cannot dispatch.

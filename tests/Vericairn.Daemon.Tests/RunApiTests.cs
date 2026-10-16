@@ -27,6 +27,23 @@ public class RunApiTests
     }
 
     [Fact]
+    public void OpenApiDescribesTheAdditiveExecutionContract()
+    {
+        using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);
+        JsonElement schemas = document.RootElement.GetProperty("components").GetProperty("schemas");
+        foreach (string request in new[] { "RunStartRequest", "GoalStepRequest" })
+        {
+            JsonElement properties = schemas.GetProperty(request).GetProperty("properties");
+            foreach (string name in new[] { "configuration", "execution", "allocation", "contextPackage" })
+            {
+                Assert.True(properties.TryGetProperty(name, out _), request + "." + name);
+            }
+        }
+        Assert.True(schemas.GetProperty("ProviderRow").GetProperty("properties").TryGetProperty("execution", out _));
+        Assert.True(schemas.GetProperty("RunRow").GetProperty("properties").TryGetProperty("executionObserved", out _));
+    }
+
+    [Fact]
     public async Task ADaemonRunsTheWorkerAndTheApiListsLaunchersRunsAndStops()
     {
         using var estate = new TestEstate(recordFormat: 2);

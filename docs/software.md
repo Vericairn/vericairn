@@ -706,3 +706,92 @@ Workbench journey only. Moving a saved package between copies is an explicit
 file transfer; this work adds no relay, mobile client, Remote transport or
 remote-device record signing. It makes no qualification claim for those surfaces,
 live external health, or an agent harness's compaction and session recovery.
+
+### Explicit execution and environment admission (RUN-01, 0.7.0)
+
+Every new worker run resolves its model, effort, provider, destination and data boundary before dispatch.
+The precedence, from lowest to highest, is the named local launcher configuration, estate roster defaults
+and its role policy, goal defaults and its role policy, assignment choices, then explicit run choices.
+Each contributing record is pinned by id and hash, including defaults later overridden. Communication
+preferences do not participate. All restrictions accumulate: a later choice cannot weaken a required
+role model or effort, an exact model revision, permitted providers or destinations, a data boundary or
+a currency reservation bound. Existing goal budgets, concurrency, custody and watching limits still apply.
+
+An optional format-2 `execution` policy on a roster, goal, assignment or roster/goal role has this shape:
+
+```json
+{
+  "choices": {"model": "model-alias", "effort": "high"},
+  "restrictions": {
+    "requiredModel": "model-alias",
+    "exactRevision": "model-revision",
+    "permittedProviders": ["provider"],
+    "permittedDestinations": ["inference"],
+    "dataBoundary": "worker-user",
+    "maxCurrency": {"amount": 100, "unit": "USD"}
+  }
+}
+```
+
+Choices omit fields they inherit. `requiredEffort` is also supported. Currency amounts use the same units
+as the goal's recorded budget. A bound requires a corresponding reservation in that currency; a soft
+spending threshold is still not a guarantee of actual cost. Conflicting restrictions refuse the run.
+A model alias remains recorded as requested; an observable resolved revision is recorded separately.
+An unobservable revision stays `unknown` and cannot satisfy an exact pin.
+
+A launcher declares its supported scopes, native effort values, providers, destinations, data boundaries,
+whether explicit `provider-default` effort is allowed, and whether it can establish a complete environment
+inventory. `worker launchers --json` and the API expose these capabilities. Effort is never translated
+onto a universal scale. `not-supported` is admitted only when the launcher declares no effort control;
+`provider-default` means an explicit choice to leave effort to the provider, not a known effort. Missing
+required choices or unsupported values refuse dispatch, without ambient fallback. The Codex command
+adapter passes an explicit model and native reasoning-effort configuration; the Claude Code adapter
+passes an explicit model and native effort flag. An explicit provider default omits only the effort flag.
+
+`worker run` and `goal step` accept `--configuration <name>` and repeated `--execution name=value` for
+`model`, `effort`, `provider`, `destination`, `dataBoundary` and `adapter`. They also accept
+`--input-tokens`, `--output-tokens` and `--context-package <sha256:...>`. For example, the execution part
+of a run command can be `--execution model=model-alias --execution effort=high`. These are choices,
+not permission to change an inherited restriction. The runtime host supplies named `RunConfiguration`
+entries through `WorkerOptions.Configurations`, or a qualified launcher supplies its own configuration.
+Each has an explicit model catalog, choices/restrictions, local settings and an environment admission
+policy. Naming an unknown configuration is refused. There is no shipped ambient model configuration.
+
+The complete environment inventory covers the harness, tools, skills, plugins, hooks, MCP servers,
+shell helpers, dependencies, and effective user and repository configuration. Preflight must account for
+every loaded component and route and establish that its children inherit the same environment limits.
+Each component has a portable id, kind, version (or `unknown`), content hash, effective-configuration hash,
+required environment-variable names, destinations and dependency ids. Every dependency must be present;
+every route must be the selected inference destination, `estate` or `local`. The observed inventory must
+match the configured admission policy exactly; an installed or discovered component grants no authority.
+The worker filters inherited variables, including credentials and language/runtime loader directives,
+and refuses a launcher that reintroduces an unadmitted variable. Records contain identities, hashes and
+variable names only. Local settings, machine paths, login material and environment values stay local.
+
+Selection and inventory are checked before the intent and again immediately before dispatch. A change
+requires fresh admission. A refusal before the intent writes no run or routed assignment. A change found
+after the intent but before launch settles an unstarted failure with zero usage. The intent's `execution`
+snapshot is immutable and includes the requested choices and provenance, configuration identity, resolved
+revision, harness version, role, `adapter: disabled`, environment inventory, allocation and context-package
+identity. Missing allocation counts and package identity stay explicitly unknown. RUN-01 records identity
+and allocation only; CONTEXT-01 owns package construction, withheld content and measurements.
+
+Settlement's `executionObserved` keeps distinct harness reports, discrepancies and still-unknown facts.
+The worker never fills missing actual model, effort, revision, provider, destination, version or inventory
+facts from its request. Reports are bounded and portable; unsafe or excessive reports leave an explicit
+incomplete-report observation. A discrepancy remains even if a later report returns to the requested
+choice. WATCH-01 receives the admitted selection and inventory: execution discrepancies and unadmitted
+tool invocations produce critical signals and use its existing attention and stop path. All original
+command, credentials, network, scope, loop and burn-rate auditing remains in place.
+
+**Qualification limit:** the shipped native Codex, Claude Code and generic launchers do not yet establish
+a complete inventory of all loaded tools, dependencies and configuration. They therefore refuse worker
+dispatch before running even feature probes. The older isolated configuration checks described above
+remain necessary but do not establish complete environment admission. RUN-01 tests exercise the admission
+contract with the stand-in harness only; no live coding agent was launched. A production launcher needs a
+qualified complete-inventory implementation before it can dispatch. This is not an operating-system
+sandbox or a hard network firewall; `worker-user` retains the existing same-user access limitations.
+
+The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
+refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not
+built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.

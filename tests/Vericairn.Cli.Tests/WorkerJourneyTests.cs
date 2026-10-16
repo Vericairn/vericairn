@@ -40,6 +40,32 @@ public sealed class WorkerJourneyTests : IDisposable
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
     [Fact]
+    public void ExplicitExecutionChoicesReachTheIntentAndTheHarnessFromTheCommandLine()
+    {
+        string root = CliHarness.TempDirectory("worker-execution");
+        string scratch = CliHarness.TempDirectory("worker-execution-scratch");
+        try
+        {
+            (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
+            string package = Vericairn.Records.Hashing.ContentHash.Sha256("package"u8);
+            CliHarness.Ok("--estate", root, "worker", "run", assignment, "--launcher", "claude-code", "--agent", builder, "--by", op, "--repository", resource,
+                "--configuration", "claude-code", "--execution", "model=model-b", "--execution", "effort=low", "--input-tokens", "200", "--output-tokens", "100", "--context-package", package,
+                "--setting", "command=" + FakeHarness.Setting("execution", Path.Combine(scratch, "report.jsonl")));
+            JsonElement run = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());
+            Assert.Equal("model-b", run.GetProperty("execution").GetProperty("requested").GetProperty("model").GetString());
+            Assert.Equal(package, run.GetProperty("execution").GetProperty("contextPackage").GetString());
+            Assert.Equal(200, run.GetProperty("execution").GetProperty("allocation").GetProperty("inputTokens").GetInt64());
+            Assert.Equal("low", Assert.Single(run.GetProperty("executionObserved").GetProperty("reports").EnumerateArray()).GetProperty("effort").GetString());
+            Assert.Contains("efforts:", CliHarness.Ok("--estate", root, "worker", "launchers").Out, StringComparison.Ordinal);
+            Assert.Contains("--execution", CliHarness.Ok("goal", "step", "--help").Out, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
+        }
+    }
+
+    [Fact]
     public void WorkerRunsAndProgressShowRecordedObservationsAndAttention()
     {
         string root = CliHarness.TempDirectory("worker-watch");

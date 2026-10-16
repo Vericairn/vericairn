@@ -406,7 +406,28 @@ internal static partial class Commands
         WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
 
     /// <summary>What <c>vericairn worker run</c> was given.</summary>
-    internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach);
+    internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach, RunChoices? Choices = null);
+
+    internal sealed record RunChoices(string? Configuration, string[] Execution, long? InputTokens, long? OutputTokens, string? ContextPackage);
+
+    private static readonly string[] ExecutionCapabilityLists = ["scopes", "efforts", "providers", "destinations", "dataBoundaries"];
+
+    private static bool ParseRunChoices(RunChoices? choices, out JsonElement? execution, out JsonElement? allocation, out string? problem)
+    {
+        execution = null;
+        allocation = null;
+        Dictionary<string, string>? values = ParseSettings(choices?.Execution ?? [], out problem);
+        if (values is null) return false;
+        if (values.Count > 0) execution = JsonSerializer.SerializeToElement(values);
+        if (choices?.InputTokens is not null || choices?.OutputTokens is not null)
+        {
+            var counts = new Json.JsonObject();
+            if (choices.InputTokens is long input) counts["inputTokens"] = input;
+            if (choices.OutputTokens is long output) counts["outputTokens"] = output;
+            allocation = Element(counts);
+        }
+        return true;
+    }
 
     /// <summary>Lists the coding-agent launchers, labeling a generic one as not complete agent support.</summary>
     public static int WorkerLaunchers(string root, bool json) => WithApi(root, api =>
@@ -427,6 +448,14 @@ internal static partial class Commands
         foreach (ProviderRow row in rows)
         {
             Console.Out.WriteLine($"{row.Provider}  {row.Implementation}  {row.Contract}  {row.Status}{(row.Provider == "generic" ? "  (" + Vericairn.Runtime.Workers.IAgentLauncher.GenericLabel + ")" : string.Empty)}");
+            if (row.Execution is JsonElement execution)
+            {
+                foreach (string field in ExecutionCapabilityLists)
+                {
+                    Console.Out.WriteLine($"  {field}: {string.Join(", ", execution.GetProperty(field).EnumerateArray().Select(v => v.GetString()))}");
+                }
+                Console.Out.WriteLine($"  complete environment inventory: {execution.GetProperty("closedEnvironment").GetBoolean()}");
+            }
             foreach (ProviderSettingRow setting in row.Settings)
             {
                 Console.Out.WriteLine($"  {setting.Name,-10} {(setting.Required ? "required" : setting.Default is null ? "optional" : "default " + setting.Default)}: {setting.Summary}");
@@ -449,7 +478,7 @@ internal static partial class Commands
     {
         ArgumentNullException.ThrowIfNull(options);
         Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
-        if (settings is null)
+        if (settings is null || !ParseRunChoices(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
         {
             return Fail(problem!);
         }
@@ -461,7 +490,8 @@ internal static partial class Commands
                 return Fail("--detach leaves the run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or run in the foreground.");
             }
 
-            RunResponse started = api.RunStart(new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings));
+            RunResponse started = api.RunStart(new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings,
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
             if (!started.Ok)
             {
                 return started.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(started.Message);
@@ -555,7 +585,7 @@ internal static partial class Commands
     }
 
     /// <summary>What <c>vericairn goal step</c> was given.</summary>
-    internal sealed record GoalStepOptions(string? Goal, string By, string? Repository, string[] Settings, long? WallMinutes, string? Branch, string? Base, bool Detach);
+    internal sealed record GoalStepOptions(string? Goal, string By, string? Repository, string[] Settings, long? WallMinutes, string? Branch, string? Base, bool Detach, RunChoices? Choices = null);
 
     /// <summary>
     /// Takes a goal's next step, one at a time: an agent's run starts and, without --detach, is followed until it settles; a person's step
@@ -565,7 +595,7 @@ internal static partial class Commands
     {
         ArgumentNullException.ThrowIfNull(options);
         Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
-        if (settings is null)
+        if (settings is null || !ParseRunChoices(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
         {
             return Fail(problem!);
         }
@@ -583,7 +613,8 @@ internal static partial class Commands
                 return Clean;
             }
 
-            GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base));
+            GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base,
+                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
             if (!step.Ok)
             {
                 return step.Run?.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(step.Message);
