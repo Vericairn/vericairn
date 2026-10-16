@@ -7,12 +7,13 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The 0.6.1 code offers Community goals with record predicates and independent evaluations, the worker with Claude Code,
-Codex and generic launchers, roster routing and asks, the progress report, and pairing with a runtime over the local
-network. Workbench has a Goals workspace and shows asks and progress on Home. The 0.6.0 candidate was withdrawn before
-publication after independent review; 0.6.1 carries those features with FIX-08's corrections. The
-[0.6.1 documentation set](docs/releases/0.6.1/README.md) describes the code and its limits; its preparation does not
-establish release acceptance or publication.
+[0.6.1](https://github.com/Vericairn/vericairn/releases/tag/v0.6.1) is the current published release, published on
+October 16, 2026. It offers Community goals with record predicates and independent evaluations, the worker with Claude
+Code, Codex and generic launchers, roster routing and asks, the progress report, and pairing with a runtime over the
+local network. Workbench has a Goals workspace and shows asks and progress on Home. The 0.6.0 candidate was withdrawn
+before publication after independent review; 0.6.1 carries those features with FIX-08's corrections. The frozen
+[0.6.1 documentation set](docs/releases/0.6.1/README.md) describes the published build and its limits. Its pre-build
+wording records the preparation stage; acceptance and publication are recorded in the estate.
 
 Settled agent-run facts cannot be rewritten, and the scope audit checks the run branch's reachable committed changes
 even when a later commit or the worktree restores them. Loopback checks the device's admission before reading a body;
@@ -30,7 +31,13 @@ sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md
 and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
 the maintained documents, the release notes and known limitations. The index there also names the versions
 withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the drafts for the next release.
+documents at `docs/` are the drafts for the next release. Main now includes the post-release FIX-09 corrections;
+they are not part of the published 0.6.1 build or its frozen documentation set.
+
+For 0.6.1, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
+The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
+any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
+as the [install guide](docs/releases/0.6.1/install.md) describes.
 
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
@@ -113,8 +120,9 @@ release and pins the one it runs on.
 
 Development is supported on all three. Requires the .NET SDK pinned in `global.json` and git on the PATH.
 Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
-every platform, and continuous integration builds and tests on all three operating systems and scans the
-commits of every pushed branch and pull request for secrets with a pinned, checksum-verified gitleaks.
+every platform. Continuous integration builds and tests on all three operating systems for main and manual runs,
+and on Linux for pull requests. A separate workflow scans the commits of every pushed branch and pull request
+for secrets with a pinned, checksum-verified gitleaks.
 The release workflow builds the Secure Enclave helper on macOS. This repository's solution contains no iOS or Android
 client, so its build and tests make no mobile-platform qualification claim.
 
