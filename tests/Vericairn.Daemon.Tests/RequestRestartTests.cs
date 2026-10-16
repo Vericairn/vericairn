@@ -55,7 +55,7 @@ public class RequestRestartTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task TheCutoffIsNotRoundedDownAndFutureTimesAreRefused(bool localNetwork)
+    public async Task TheCutoffIsNotRoundedDownAndTimesTooFarAheadAreRefused(bool localNetwork)
     {
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
@@ -75,10 +75,13 @@ public class RequestRestartTests
         restarted.StartAccepting();
         Assert.Contains("sign the request afresh", (await VerifyAsync(restarted, at, signature))!.Message, StringComparison.Ordinal);
 
-        string future = RequestSigning.FormatTime(second.AddSeconds(1));
+        // A client clock may run up to five seconds fast; a time further ahead is refused until the runtime's clock comes within that lead.
+        string ahead = RequestSigning.FormatTime(second.AddSeconds(3));
+        Assert.Null(await VerifyAsync(restarted, ahead, Base64Url.EncodeToString(signer.Sign(Digest(harness, "/v1/status", ahead, localNetwork)))));
+        string future = RequestSigning.FormatTime(second.AddSeconds(7));
         string freshSignature = Base64Url.EncodeToString(signer.Sign(Digest(harness, "/v1/status", future, localNetwork)));
         Assert.Contains("ahead of the runtime's clock", (await VerifyAsync(restarted, future, freshSignature))!.Message, StringComparison.Ordinal);
-        time.Advance(TimeSpan.FromMilliseconds(900));
+        time.Advance(TimeSpan.FromSeconds(2));
         Assert.Null(await VerifyAsync(restarted, future, freshSignature));
 
         // Lag is permitted only after startup, up to the existing five-minute age bound.

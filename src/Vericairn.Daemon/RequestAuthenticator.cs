@@ -376,9 +376,9 @@ internal sealed class RequestAuthenticator
             return Denied("The signing time is earlier than this runtime instance began accepting requests; sign the request afresh.");
         }
 
-        // A future signature accepted now could be replayed after a restart that happens before its signed time.
-        return at > now
-            ? Denied("The signing time is ahead of the runtime's clock; synchronize the client clock and sign the request afresh.")
+        // A signature dated ahead could be replayed after a restart before its signed time, so the lead for a fast client clock stays a few seconds.
+        return at > now + RequestSigning.MaxLead
+            ? Denied("The signing time is more than five seconds ahead of the runtime's clock; synchronize the client clock and sign the request afresh.")
             : null;
     }
 

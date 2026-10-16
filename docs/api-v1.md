@@ -74,15 +74,16 @@ base64url spelling of the same bytes nor the malleated twin `(r, n - s)`, which 
 a new signature; the device signing the same request again makes a new one, which is accepted.
 
 On every device-authenticated profile, including the local-network identity proof, the signing time must also
-be at or after the instant this runtime instance began accepting requests and no later than its current clock.
+be at or after the instant this runtime instance began accepting requests and no more than five seconds ahead of its clock.
 A request signed before that cutoff is refused with `401` / `denied` and a message to **sign the request afresh**.
 The cutoff retains its subsecond precision: rounding it down would admit a replay after a restart within the
 same second. Startup publishes readiness after the next whole second, so clients using the existing timestamp
 format can sign immediately. The replay cache remains in memory; with a nondecreasing runtime clock, no request
-accepted by an earlier instance can pass the new cutoff. Future-dated requests are refused too, since accepting
-one would allow its replay after a restart before that future time. Synchronize client and runtime clocks:
-clients may lag by up to five minutes, but never past the startup cutoff; a client ahead of the runtime must
-correct its clock and sign afresh. There is no clock-skew allowance across the startup cutoff.
+accepted by an earlier instance can pass the new cutoff. A signing time more than five seconds ahead is refused,
+since a request signed ahead could be replayed after a restart before its signed time; the five seconds allow
+for a client clock that runs a little fast, and bound that replay to a restart within them. Synchronize client
+and runtime clocks: clients may lag by up to five minutes, but never past the startup cutoff; a client further
+ahead must correct its clock and sign afresh. There is no clock-skew allowance across the startup cutoff.
 
 Anything else is answered with `401` and a problem with code `denied`; revoking the device ends access from
 the next request on, with no restart. An already authenticated request also loses its right to write: under
@@ -202,7 +203,7 @@ the line-feed-joined `vericairn-request/2`, the estate's id, the fingerprint of 
 paired with, and then the method, the request target, the signed-at time and the body's hash as on loopback. A
 request signed for one runtime is refused by any other, even a runtime of the same estate on another machine,
 which knows the same device. The startup cutoff and clock rule above apply here too: a signing time before
-this instance began accepting requests or ahead of its clock is refused. Local-network clients must synchronize
+this instance began accepting requests, or more than five seconds ahead of its clock, is refused. Local-network clients must synchronize
 their clocks; a slow client can be refused after a restart until its signing time reaches the cutoff. Until
 the connection's client certificate verifies with the current key of the
 device a request names, every refusal is the same one, so nobody learns from it whether a device exists, is

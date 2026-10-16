@@ -42,8 +42,15 @@ public static class RequestSigning
     /// <summary>Header carrying the base64url signature.</summary>
     public const string SignatureHeader = "Vericairn-Signature";
 
-    /// <summary>The maximum age of a request's signing time; future times and times before the instance's startup are refused.</summary>
+    /// <summary>The maximum age of a request's signing time; times more than <see cref="MaxLead"/> ahead and times before the instance's startup are refused.</summary>
     public static TimeSpan MaxSkew { get; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// How far ahead of the runtime's clock a signing time may be: enough for a client clock that runs a little fast, since signing
+    /// times have whole-second precision, and short enough that a request signed ahead can be replayed only after a restart within
+    /// these seconds.
+    /// </summary>
+    public static TimeSpan MaxLead { get; } = TimeSpan.FromSeconds(5);
 
     private const string TimeFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'";
 
