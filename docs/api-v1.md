@@ -136,6 +136,14 @@ to authentication or binding only within its limit. The original body reader rem
 instead of becoming unreadable after a size-limit failure. Size refusals are `413`; cleanup does not raise the
 parsing limit.
 
+Loopback permits at most eight simultaneous body reads awaiting signature verification across all devices.
+The slot is held through signature verification and released on every outcome, including a timeout, disconnect,
+or size refusal. With all slots occupied, a further admitted-device request receives `503` with problem code
+`refused` before any authentication body read; it follows the same completed-response and bounded-discard path.
+There is no queue of waiting bodies. Clients may retry with a fresh signature when capacity is available.
+Kestrel admits at most 32 simultaneous connections across all listeners, including handshakes and idle
+connections. Excess connections close at the transport before TLS or HTTP; no HTTP response exists at that stage.
+
 From 0.6.0 a device-signed request acts for its device's principal, on loopback as on the local network. When the
 request an operation receives names the principal acting, in its `by` or `principal`, as records, assignments,
 admissions, revocations, goals (including taking a step), work takeovers, releases, runs, new and recovery devices
