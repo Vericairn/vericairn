@@ -28,6 +28,14 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public RunPreflight Probe(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RefuseManagedSettings();
+        return ClaudeCodeInventory.Establish(context, qualifying: true);
+    }
+
+    /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "system", "init");
 
     /// <inheritdoc />

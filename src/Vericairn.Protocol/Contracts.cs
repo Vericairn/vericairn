@@ -486,6 +486,12 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="ContextPackage">Optional expected hash of the assembled run context; the intent always pins the actual package.</param>
 public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
 
+/// <summary>A human requests local native harness probes and a signed exact-version qualification; no agent is launched.</summary>
+/// <param name="Launcher">codex or claude-code.</param>
+/// <param name="By">A human operator or human holding qualify.</param>
+/// <param name="Settings">Local launcher settings, never stored in the qualification.</param>
+public sealed record HarnessQualifyRequest(string Launcher, string By, IReadOnlyDictionary<string, string>? Settings = null);
+
 /// <summary>Ask a run to stop.</summary>
 /// <param name="By">The principal asking.</param>
 /// <param name="Reason">Why.</param>

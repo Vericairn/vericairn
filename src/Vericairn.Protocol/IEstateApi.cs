@@ -186,6 +186,9 @@ public interface IEstateApi
     /// <summary>The coding-agent launchers available to the runtime on its machine, providers of vericairn.launcher.agent/1, listed as the release providers are.</summary>
     IReadOnlyList<ProviderRow> Launchers();
 
+    /// <summary>Runs local read-only probes and records an exact native harness qualification by an authorized human.</summary>
+    WriteOutcome QualifyHarness(HarnessQualifyRequest request);
+
     /// <summary>
     /// Start a coding agent's run on an assignment (vericairn.worker/1): the workspace prepared, the intent recorded with the run's cap
     /// from its goal's budget before anything starts, the harness launched; the runtime observes and settles it after this returns.

@@ -323,6 +323,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public IReadOnlyList<ProviderRow> Launchers() => Get<List<ProviderRow>>("/v1/launchers")!;
 
     /// <inheritdoc />
+    public WriteOutcome QualifyHarness(HarnessQualifyRequest request) => Post<HarnessQualifyRequest, WriteOutcome>("/v1/harness-qualifications", request)!;
+
+    /// <inheritdoc />
     public RunResponse RunStart(RunStartRequest request) => Post<RunStartRequest, RunResponse>("/v1/runs", request)!;
 
     /// <inheritdoc />

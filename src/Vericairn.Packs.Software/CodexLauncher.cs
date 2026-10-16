@@ -28,6 +28,13 @@ public sealed class CodexLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public RunPreflight Probe(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return CodexInventory.Establish(context, qualifying: true);
+    }
+
+    /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "thread.started");
 
     /// <inheritdoc />
@@ -133,15 +140,14 @@ public sealed class CodexLauncher : IAgentLauncher
     internal static IReadOnlyList<string> Overrides(LaunchContext context) => ["-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context),
         .. CodexInventory.Settings.SelectMany(s => new[] { "-c", s })];
 
-    internal static void VerifyMcp(LaunchContext context)
+    internal static string VerifyMcp(LaunchContext context)
     {
-        (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, "codex"),
-            .. Overrides(context), "mcp", "list", "--json"], context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
+        string output = HarnessInventory.Probe(context, "codex", [.. Overrides(context), "mcp", "list", "--json"]);
         try
         {
             using JsonDocument document = JsonDocument.Parse(output);
             JsonElement root = document.RootElement;
-            if (code != 0 || root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 1)
+            if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 1)
             {
                 throw new ProviderRefusedException("Codex's effective MCP configuration is not the run's approved server table; ambient or incompatible managed configuration must be removed before launch.");
             }
@@ -164,6 +170,8 @@ public sealed class CodexLauncher : IAgentLauncher
             {
                 throw new ProviderRefusedException("Codex's effective MCP transport differs from the run's approved configuration; launch was refused.");
             }
+            return HarnessInventory.Digest(new { transport = HarnessInventory.McpEvidence(context, "effective-list"),
+                authStatus = server.TryGetProperty("auth_status", out JsonElement auth) ? auth.GetRawText() : "absent" });
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
         {

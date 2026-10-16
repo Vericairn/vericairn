@@ -532,6 +532,13 @@ internal static partial class Commands
         return Clean;
     });
 
+    /// <summary>Records a human's exact-version native harness qualification from local probes, without launching an agent.</summary>
+    public static int WorkerQualify(string root, string launcher, string by, string[] options, bool json)
+    {
+        Dictionary<string, string>? settings = ParseSettings(options, out string? problem);
+        return settings is null ? Fail(problem!) : WithApi(root, api => ReportOutcome(api.QualifyHarness(new(launcher, by, settings)), json));
+    }
+
     /// <summary>
     /// Runs a coding agent on an assignment: starts the run, then waits in the foreground until it settles and reports its usage, a
     /// Ctrl+C asking it to stop; with --detach, returns once the daemon serving the estate has launched it.
