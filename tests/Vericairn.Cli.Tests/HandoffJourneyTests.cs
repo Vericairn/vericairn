@@ -139,11 +139,11 @@ internal sealed class HandoffEstate : IDisposable
     public string OperatorId { get; }
     public string BuilderId { get; }
 
-    public RecordEnvelope Add(string type, string by, string body, string? id = null)
+    public RecordEnvelope Add(string type, string by, string body, string? id = null, long format = 2)
     {
         using JsonDocument json = JsonDocument.Parse(body);
         clock = clock.AddSeconds(1);
-        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, json.RootElement, null, null, clock, id, 2));
+        AuthoredRecord record = RecordAuthor.Create(new RecordDraft(type, by, json.RootElement, null, null, clock, id, format));
         RecordAuthor.Write(Root, record);
         return record.Envelope;
     }

@@ -30,7 +30,7 @@ internal static partial class Commands
         return profile.Unavailable is null && profile.Conflicts.Count == 0 ? Clean : HasErrors;
     });
 
-    public static int CommunicationSet(string root, string by, string scope, CommunicationSelection selection, CommunicationValues changes, bool reset, string? expected, string? authority, bool json) => WithApi(root, api =>
+    public static int CommunicationSet(string root, string by, string scope, CommunicationSelection selection, CommunicationValues changes, bool reset, string? expected, string? authority, bool json, string? basis = null) => WithApi(root, api =>
     {
         scope = selection.Assignment is null ? scope : "assignment";
         string? recipient = scope == "estate" ? null : selection.Recipient ?? by;
@@ -45,7 +45,8 @@ internal static partial class Commands
         static string? Changed(string? supplied, string? existing) => supplied == "inherit" ? null : supplied ?? existing;
         CommunicationValues values = reset ? new() : new(Changed(changes.Progress, previous.Progress), Changed(changes.Status, previous.Status),
             Changed(changes.Decision, previous.Decision), Changed(changes.Result, previous.Result), Changed(changes.Handoff, previous.Handoff));
-        return ReportOutcome(api.CommunicationSet(new CommunicationSetRequest(by, scope, values, recipient, selection.Assignment, expected ?? prior?.Hash, authority)), json);
+        string? priorHash = expected == "absent" ? null : expected ?? prior?.Hash;
+        return ReportOutcome(api.CommunicationSet(new CommunicationSetRequest(by, scope, values, recipient, selection.Assignment, priorHash, authority, basis)), json);
     });
 
     public static int CommunicationDelegate(string root, string by, string grantee, string? assignment, bool revoke, string? expected, string? expires, bool json) => WithApi(root, api =>

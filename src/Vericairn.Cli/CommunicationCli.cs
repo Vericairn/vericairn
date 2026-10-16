@@ -30,18 +30,19 @@ internal static partial class CliApp
             var command = new Command(name, name == "set" ? "Change the named fields, preserving the others; inherit resets a field." : "Reset this complete scope to inheritance as a new record.");
             var by = new Option<string>("--as") { Description = "Actual author; defaults to their own setting unless --recipient names another person.", Required = true };
             var scope = new Option<string>("--scope") { Description = "person, estate, or assignment (also selected by --for-assignment).", DefaultValueFactory = _ => "person" };
-            var expected = new Option<string?>("--expected") { Description = "Expected prior revision hash. Without it the command reads the current revision before applying the named fields." };
+            var expected = new Option<string?>("--expected") { Description = "Expected prior revision hash, or absent to require no existing profile. Without it the command reads the current revision before applying the named fields." };
             var authority = new Option<string?>("--authority") { Description = "Explicit communication-delegation record for a delegated change." };
+            var basis = new Option<string?>("--basis") { Description = "Exact decision being explicitly adopted; does not grant delegated authority." };
             var progress = new Option<string?>("--progress") { Description = "none, completion-and-need, milestones, verbose, or inherit." };
             var status = new Option<string?>("--status") { Description = "short, standard, comprehensive, or inherit." };
             var decisions = new Option<string?>("--decisions") { Description = "Decision lead depth, or inherit." };
             var results = new Option<string?>("--results") { Description = "Result explanation depth, or inherit." };
             var handoffs = new Option<string?>("--handoffs") { Description = "Handoff introduction depth, or inherit." };
-            foreach (Option option in new Option[] { by, scope, expected, authority, progress, status, decisions, results, handoffs }) { command.Options.Add(option); }
+            foreach (Option option in new Option[] { by, scope, expected, authority, basis, progress, status, decisions, results, handoffs }) { command.Options.Add(option); }
             bool reset = name == "reset";
             command.SetAction(p => Commands.CommunicationSet(p.GetValue(estate)!, p.GetValue(by)!, p.GetValue(scope)!, presentation.Read(p),
                 new CommunicationValues(p.GetValue(progress), p.GetValue(status), p.GetValue(decisions), p.GetValue(results), p.GetValue(handoffs)),
-                reset, p.GetValue(expected), p.GetValue(authority), p.GetValue(json)));
+                reset, p.GetValue(expected), p.GetValue(authority), p.GetValue(json), p.GetValue(basis)));
             family.Subcommands.Add(command);
         }
 
