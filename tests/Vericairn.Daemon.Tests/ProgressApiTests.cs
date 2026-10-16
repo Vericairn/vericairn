@@ -19,6 +19,58 @@ public class ProgressApiTests
         DaemonTestHome.Ensure();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PairedProgressKeepsItsActualOutcomeWhileHandoffAndResumeRemainReads(bool refused)
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        TestEstate estate = harness.Estate;
+        estate.Add("work-order", estate.OperatorId, """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Progress.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget"]}""");
+        using JsonDocument brief = JsonDocument.Parse("""{"outcome":"Widget","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["widget repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests"],"recovery":"Record a result."}""");
+        string assignment = harness.Socket.Assign(new AssignRequest("W-1", estate.BuilderId, estate.OperatorId, brief.RootElement)).Written!.Id;
+        string attempt = harness.Socket.Attempt(new AttemptRequest(assignment, estate.BuilderId, "widget repository", "Build it.")).Written!.Id;
+        RuntimeConnection paired = harness.Pair(estate.BuilderId);
+        using VericairnClient client = VericairnClient.LocalNetwork(paired, harness.Signer(paired));
+        string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(estate.Root))!;
+        int records = estate.Load().Records.Count;
+        HandoffPackage basis = client.Handoff().Package!;
+
+        WorkProgressResponse active = client.WorkProgress(new WorkProgressRequest(attempt, estate.BuilderId, "build", "Compiling the widget."));
+        Assert.True(active.Ok, active.Problem?.Message);
+        LocalNetworkWrite live = Assert.Single(LocalNetworkLedger.Read(directory));
+        Assert.Equal("written", live.State);
+        Assert.Null(live.Record);
+        Assert.Equal(records, estate.Load().Records.Count);
+        Assert.Equal(basis.Hash, client.Handoff().Package!.Hash);
+
+        WorkProgressResponse response = client.WorkProgress(new WorkProgressRequest(refused ? estate.Estate.Id : attempt, estate.BuilderId, "build", "The widget compiles.", Completed: true));
+        Assert.Equal(!refused, response.Ok);
+        IReadOnlyList<LocalNetworkWrite> writes = LocalNetworkLedger.Read(directory);
+        Assert.Equal(2, writes.Count);
+        LocalNetworkWrite outcome = writes[1];
+        Assert.Equal("POST /v1/work/progress", outcome.Operation);
+        Assert.Equal(paired.Device, outcome.Device);
+        Assert.Equal(estate.BuilderId, outcome.Principal);
+        Assert.Equal(refused ? "failed" : "written", outcome.State);
+        Assert.Equal(response.Written?.Id, outcome.Record);
+        Assert.Equal(response.Written?.Hash, outcome.Hash);
+        Assert.Equal(response.Written?.Path, outcome.Path);
+        Assert.Equal(records + (refused ? 0 : 1), estate.Load().Records.Count);
+
+        // A POST carrying a retained package remains a read, and live claims never enter that package.
+        ResumeResponse comparison = client.ResumeHandoff(basis);
+        Assert.Null(comparison.Problem);
+        Assert.Equal(!refused, comparison.Json!.Value.GetProperty("changed").GetBoolean());
+        if (!refused)
+        {
+            Assert.Equal(response.Written!.Id, Assert.Single(comparison.Json.Value.GetProperty("added").EnumerateArray()).GetProperty("id").GetString());
+        }
+
+        Assert.NotNull(client.Handoff().Package);
+        Assert.Equal(writes, LocalNetworkLedger.Read(directory));
+    }
+
     [Fact]
     public async Task TheReportThroughTheDaemonIsTheEmbeddedRuntimesByteForByte()
     {

@@ -83,7 +83,7 @@ internal static class Commands
         });
     }
 
-    /// <summary>The progress report from the records alone, through the API; exit 1 when the check it shows found errors, as status does.</summary>
+    /// <summary>Recorded progress with labelled local claims and worker observations, through the API; exit 1 when the check it shows found errors, as status does.</summary>
     public static int Progress(string root, bool json) => WithApi(root, api =>
     {
         ProgressResponse progress = api.Progress();

@@ -544,6 +544,9 @@ knows is refused rather than misread. Migrations never rewrite records; they sta
 
 An agent may submit `work_progress` through MCP while carrying its own attempt. `vericairn progress`, its API, and Workbench show its latest claim with the attempt and phase. Interim notes stay in the runtime's local live store; only a completed phase creates a signed record, at most once. Workbench polls these claims every five seconds while its window is open; F5 also refreshes them. Worker liveness continues to come from the harness event stream, independently of these claims.
 
+Hand-over packages retain completed phase records. Interim notes stay local and do not change the package's identity;
+resume reports a newly completed phase as an added record.
+
 ## Command observations (0.7.0)
 
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.

@@ -110,11 +110,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         RecordWritten? written = value switch
         {
             WriteOutcome { Written: RecordWritten record } => record,
+            WorkProgressResponse { Ok: true, Written: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
