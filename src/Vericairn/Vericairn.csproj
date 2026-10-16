@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The Vericairn Community SDK: the typed API client, protocol and public record types.</Description>
+    <IsPackable>true</IsPackable>
+    <PackageId>Vericairn</PackageId>
+    <!-- The front door brings the SDK without duplicating its assembly or changing its package identity. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <!-- This package deliberately has dependencies and no lib/ref assemblies of its own. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>
