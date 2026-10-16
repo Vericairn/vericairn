@@ -668,7 +668,7 @@ that device's every signature needs its owner's presence. So a record's signatur
 runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
 such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
 writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). Records signed by the paired device itself,
-on its own machine, are the design to come: the Remote profile, planned for 0.7.0, needs them.
+on its own machine, remain a future design. Remote is not built; HANDOFF-01 adds no Remote signing or transport.
 
 ## Emergency access
 

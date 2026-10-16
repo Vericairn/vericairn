@@ -269,8 +269,8 @@ written; after the write, its outcome under the same id, written with the record
 stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
 interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
 devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
-machine, are the design to come: the Remote profile, planned for 0.7.0, needs them, since a remote device's
-writes cannot rest on a key of the runtime's machine. Loopback does not check `profiles` yet, so devices recorded
+machine, remain a future design. Remote is not built, and HANDOFF-01 does not implement or qualify its
+signing or transport. Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
 ## Pairing
@@ -406,7 +406,7 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
 Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
-paired device by its own key, the design the Remote profile in 0.7.0 needs.
+paired device by its own key. Remote is not built; local-network pairing does not qualify a Remote client.
 
 ## Operations
 

@@ -542,3 +542,9 @@ The runtime supplies the timestamp and snapshot identities; ordinary status
 reads, agent reads and repository probes do not update them. Both flags are
 required, and an agent cannot author an estate observation. Format-1 estates
 must be explicitly upgraded before this write is available.
+
+Remote is not built. HANDOFF-01 provides the runtime, API, CLI and local desktop
+Workbench journey only. Moving a saved package between copies is an explicit
+file transfer; this work adds no relay, mobile client, Remote transport or
+remote-device record signing. It makes no qualification claim for those surfaces,
+live external health, or an agent harness's compaction and session recovery.
