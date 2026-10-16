@@ -8,12 +8,25 @@ The [0.6.1 set](0.6.1/README.md) documents the current published release, publis
 
 The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn before publication after the Reviewer principal's independent review (withdrawal record `01M51CE4J8Q2XR92Z8M2EPZF13`, under decision `01M51CDST3GS2CDFXD22Z3NKJP`); it is not a published release. 0.6.1 carries the same work with FIX-08 and corrected documentation. Both sets keep the two record-format documents under their own names, as 0.5.2 did; from 0.6.0 `documents.json` explicitly requires both alongside `record-format.md`.
 
+## NuGet publication setup
+
+For 0.7.0 and later, before publishing the accepted draft, the operator configures nuget.org Trusted
+Publishing with repository owner **Vericairn**, repository **vericairn**, workflow file **nuget.yml**, and
+the **Vericairn** organization as package owner. Set the GitHub repository variable **NUGET_USER** to
+Jason Furr's nuget.org user name, not the organization name. No API-key secret is needed or used.
+
+The draft already holds the release's `.nupkg` and `.snupkg` assets under `SHA256SUMS`. Publishing the
+release triggers `nuget.yml` to verify and push those exact files; it never rebuilds them. Check that run
+and package availability after the first publication. A withdrawn candidate stays off NuGet. Details are
+in the [publication draft](../software.md#vericairns-nuget-publication); the next set's installation guide
+should incorporate [the maintained installation draft](../install.md) and its SDK package commands.
+
 ## What a set holds
 
 | Document | Written by | What it is |
 |---|---|---|
 | `README.md` | a person | The overview: what the release is, what the set holds, how to tell you are running it |
-| `install.md` | a person | Installation and cold start on Linux, macOS and Windows, by the estate bootstrap and by direct download, with verification |
+| `install.md` | a person | Installation and cold start on Linux, macOS and Windows: the estate bootstrap, verified direct download, and from 0.7.0 the NuGet tool and SDK |
 | `operator-guide.md` | a person | The operator's journeys: create an estate, devices and admission, the work loop, review and acceptance, releases, upgrades, recovery, the daemon |
 | `cli-reference.md` | the build tooling (`vericairn-docs generate`) | Every command and verb with its arguments and options, from the build's own command tree |
 | `api-reference.md` | the build tooling (`vericairn-docs generate`) | Every API operation with parameters, bodies and responses, from the OpenAPI document the daemon serves |

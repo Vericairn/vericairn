@@ -30,6 +30,10 @@ Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attent
 
 ## Running it
 
+Workbench continues to ship in self-contained archives with `vericairn` beside it. The `dotnet-vc` NuGet
+tool, invoked as `dotnet vc`, installs the command line only; it does not install Workbench or replace
+that companion executable. See the [installation draft](install.md).
+
 ```sh
 vericairn-workbench --estate <estate root> [--as <principal id>]
 ```
@@ -49,3 +53,36 @@ With `--estate` and `--open`, and a daemon already serving the estate, the named
 Keyboard-only journeys of the work loop, release flow, Goals workspace and progress report have headless tests in the three-platform workflow; a native keyboard-only run with a screen reader needs a person on each desktop and is recorded per cell in the platform obligations, as are the accessibility measurements. Workbench ships as an unsigned developer build per platform beside the command line, with no bundle, installer or signature. Projects wait for the record format to define them. The comparison is a line difference of canonical JSON, not a field-aware merge. Docking is panel placement with keyboard alternatives, not free drag-and-drop of every panel. The probe's `--open` has no value for the Documents page, the review workspace or the composer, and when no daemon answers yet a probe run can measure before the named workspace is open, so start the daemon first.
 
 Workbench opens estates served on its own machine; it has no paired-connection chooser, pairing form or local-network configuration form. Configure and pair through the command line and use the SDK for operations through a saved connection. The Goals workspace is a read view, with no worker launch or stop controls.
+
+## Hand-over and resume (HANDOFF-01)
+
+Open **Work → Hand-over and resume**, the Home button, or Ctrl+Shift+H (Cmd on
+macOS). The page prepares the runtime's complete hand-over, with the exact
+package identity, byte accounting, derived presentation and complete originals.
+Its three tabs show the hand-over, changes since it, and the portable machine
+package. No editable recap is requested and no work is submitted.
+
+**Save package** writes a new local JSON file and never overwrites an existing
+package. **Open package** loads that same file from the CLI or another Workbench
+and asks the runtime to verify it and compare it with this estate. A foreign,
+changed or incomplete package is refused; a failed load keeps the previous
+basis. **Resume: show changes** and F5 refresh the comparison, preserving the
+retained originals and package identity. Only **Prepare new hand-over** explicitly
+replaces the in-memory basis. The comparison shows added and superseded records,
+missing or changed originals, pin changes and recorded-state changes in full,
+and always says the world may have moved. Failed checks and uncertain effects
+remain present in the originals. Reopening the page never silently resets its
+basis. If the runtime is unavailable, retained content is labeled cached and is
+still available to save; no current comparison is claimed.
+
+Home also shows **Last observed by a person**, separate from the client's refresh
+time. **Record my observation** (also in the Estate menu) explicitly records an
+observation for the selected human principal through the runtime. Opening,
+preparing, resuming and refreshing do not advance that timestamp. The runtime
+refuses an agent or a principal whose signing authority is unavailable.
+
+The headless journey checks keyboard entry, visible controls, package retention,
+save/load, refusals, refresh and the explicit observation. Native file pickers and
+screen-reader announcements still need platform qualification. Workbench remains
+a client of a daemon on its own machine. Remote is not built; this page makes no
+claim about a mobile or remote surface.

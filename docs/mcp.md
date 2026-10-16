@@ -17,11 +17,14 @@ Every tool description describes and never directs: nothing a tool returns, and 
 
 ## Running it
 
+With 0.7.0's NuGet packages published and the .NET 10 SDK installed:
+
 ```sh
-vericairn --estate <estate root> mcp serve --as <principal id>
+dotnet tool install --global dotnet-vc
+dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 
-Claude Code: `claude mcp add vericairn -- vericairn --estate <estate root> mcp serve --as <principal id>`. Other harnesses take the same command and arguments in their server configuration. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`), and to a generic harness in `VERICAIRN_MCP_CONFIG`. Diagnostics go to standard error; the output stream carries only protocol messages. `vericairn mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `vericairn status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
+Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp serve --as <principal id>`. Other harnesses use executable `dotnet` with `vc` as the first argument, followed by the arguments above. The self-contained archives still use executable `vericairn` with no `vc` argument. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`), and to a generic harness in `VERICAIRN_MCP_CONFIG`. Diagnostics go to standard error; the output stream carries only protocol messages. `dotnet vc mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `dotnet vc status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
 
 ## Qualification
 

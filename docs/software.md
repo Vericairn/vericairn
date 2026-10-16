@@ -5,7 +5,8 @@ intent recorded before every external effect, and publication left to the operat
 
 This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Its worker and launchers first appeared
 in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
-the release-note and progress classification of accepted work, as the sections below describe.
+the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
+path below is prepared for 0.7.0.
 
 ## Where each part lives
 
@@ -200,6 +201,41 @@ that result's exact hash or its work order's current revision and hash. This inc
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
 work-order revision does not count for the current revision. Every remaining current result appears only under **Work
 recorded, not yet accepted**. The progress report uses the same classification for each published release.
+
+## Vericairn's NuGet publication
+
+From 0.7.0, `.github/workflows/release.yml` packs the Community command line and libraries with the release
+version checked against `VersionPrefix` in `Directory.Build.props`, clearing the development suffix.
+It attaches the `.nupkg` and `.snupkg` files to the draft release and lists every file in `SHA256SUMS`,
+alongside the self-contained archives. No package is pushed while the release is a candidate, so a
+withdrawn draft has not occupied that version on NuGet.
+
+Only the operator's publication triggers `.github/workflows/nuget.yml` (`release: types: [published]`).
+That workflow downloads the published release's package assets and `SHA256SUMS` by release id, requires
+every package and symbol asset to appear exactly once in the checksums, and verifies each hash before
+requesting credentials. Missing, extra or changed package assets refuse publication. Non-package archive
+entries remain in the release's checksum file; this workflow downloads and pushes only the packages.
+
+The workflow has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
+GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
+returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the workflow never
+checks out or rebuilds the packages. It pushes the verified package files and then their verified symbol
+files. A failed or partly completed publication needs operator inspection before any retry; the workflow
+does not silently skip an existing version. See the [operator setup note](releases/README.md#nuget-publication-setup).
+
+Once publication succeeds, a .NET 10 SDK installation uses:
+
+```sh
+dotnet tool install --global dotnet-vc
+dotnet vc version
+dotnet vc doctor
+dotnet add package Vericairn
+```
+
+Run the last command in the project that will use the SDK. `Vericairn` brings `Vericairn.Sdk`, Protocol
+and Records; Runtime, Daemon and Mcp are separate host and adapter packages. The module names and
+`vericairn.*` contribution identifiers earlier in this document are unchanged. The software pack, git
+adapter and GitHub provider still ship inside the command line; they are not separate NuGet packages.
 
 ## Coding agents: the worker and its launchers
 
@@ -556,3 +592,48 @@ For example, a roster may record `"limits":{"stallSeconds":300,"watch":{"loopWar
 Remote is not built. WATCH-01 observes only a run launched and contained on the worker's own machine. It adds no remote execution, remote containment, remote record signing, relay, or Remote qualification. The local-network API remains its existing transport and authority model.
 
 Stand-in harness tests exercise the supported event shapes, rate and loop thresholds, attention failures and containment. They do not qualify a real Claude Code or Codex installation; a changed harness event format needs its own qualification. The command audit is an observation of emitted invocation events, which can arrive after an action began. It cannot prevent an already executed action, establish that an unreported action did not occur, or replace an isolation boundary.
+
+## Handing work over
+
+`vericairn handoff` prepares the same hand-over as `GET /v1/handoff`: a generated
+view of goals, work orders, assignments, attempts and results, runs, decisions,
+asks, next steps, the estate's pin and recorded observations, followed by complete
+original records. No actor supplies the recap. Missing decisions or open work
+referenced by the records refuse the hand-over and are named together.
+
+Use `vericairn handoff --out handoff.json` to retain its portable package in a
+new file. Existing files are never overwritten. `--json` prints that same package;
+`--max-bytes <n>` sets a payload byte cap and refuses overflow without dropping
+required material. A refused command exits 2 and creates no package file.
+Without a cap, the full selected scope is retained and the limit is not set.
+The package includes every record held by this copy and its history; its
+`withheld` list is empty. Referenced source files, output objects and unrecorded
+provider state are outside that selection. The sidecar measures and hashes the
+canonical payload; token counts and model-context fit are not claimed. A copy
+with the same records and pin produces the same package. Records remain originals,
+apart from the deterministic presentation, with synthesis off.
+
+`vericairn resume handoff.json` compares that retained basis to the current copy.
+Use `--json` for the full machine comparison or `resume -` to read the package
+from standard input. It includes added and superseded records, missing or
+changed originals, the full pin and observed-state differences. It compares
+identities rather than time windows, so an older timestamp on an imported record
+cannot hide it. Unchanged records do not prove an unchanged external world.
+Resume exits 0 for a valid comparison, 1 when the current view has errors or
+missing/changed originals, and 2 for an invalid baseline. It submits nothing and
+never rewrites the retained package. Review changes and current authority before
+continuing under the existing assignment and original operation identities.
+
+`vericairn status` shows when a person last explicitly observed the estate,
+including the observation record and hash, or says unknown. To record an
+observation, a person runs `vericairn status --observe --by <principal-id>`.
+The runtime supplies the timestamp and snapshot identities; ordinary status
+reads, agent reads and repository probes do not update them. Both flags are
+required, and an agent cannot author an estate observation. Format-1 estates
+must be explicitly upgraded before this write is available.
+
+Remote is not built. HANDOFF-01 provides the runtime, API, CLI and local desktop
+Workbench journey only. Moving a saved package between copies is an explicit
+file transfer; this work adds no relay, mobile client, Remote transport or
+remote-device record signing. It makes no qualification claim for those surfaces,
+live external health, or an agent harness's compaction and session recovery.

@@ -44,12 +44,30 @@ internal static class CliApp
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
-        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
+        var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
+        status.Options.Add(observeStatus);
+        status.Options.Add(observer);
+        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer)));
         root.Subcommands.Add(status);
 
         var progress = new Command("progress", "Show the progress report, rendered from the records alone: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         root.Subcommands.Add(progress);
+
+        var resume = new Command("resume", "Show every record, pin and observed-state change since a retained hand-over. The world may have moved; this restarts nothing.");
+        var resumePackage = new Argument<string>("package") { Description = "The retained hand-over JSON file, or - for standard input." };
+        resume.Arguments.Add(resumePackage);
+        resume.SetAction(parseResult => Commands.Resume(parseResult.GetValue(estateOption)!, parseResult.GetValue(resumePackage)!, parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(resume);
+
+        var handoff = new Command("handoff", "Prepare a complete record-derived hand-over; refuse missing sources or overflow. Remote is not built.");
+        var handoffOut = new Option<string?>("--out") { Description = "Retain the portable package in a new file; never overwrite." };
+        var handoffLimit = new Option<long?>("--max-bytes") { Description = "Optional payload byte limit; no truncation. No limit when omitted." };
+        handoff.Options.Add(handoffOut);
+        handoff.Options.Add(handoffLimit);
+        handoff.SetAction(parseResult => Commands.Handoff(parseResult.GetValue(estateOption)!, parseResult.GetValue(handoffOut), parseResult.GetValue(handoffLimit), parseResult.GetValue(jsonOption)));
+        root.Subcommands.Add(handoff);
 
         var ask = new Command("ask", "Show what waits on a principal, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order. Reading them answers nothing; an ask is answered by a decision of the principal it is put to that names it in its answers.");
         var toOption = new Option<string?>("--to") { Description = "The principal asked (ULID); every principal when omitted." };

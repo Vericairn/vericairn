@@ -21,9 +21,22 @@
     <Product>Vericairn</Product>
     <Copyright>Copyright (c) 2026 Jason Furr</Copyright>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Vericairn/vericairn</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>vericairn;community;records;sdk;cli</PackageTags>
     <RepositoryUrl>https://github.com/Vericairn/vericairn</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+    <!-- Source Link is supplied by the .NET SDK; no package reference is needed. -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>portable</DebugType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <VersionPrefix>0.6.1</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)docs/nuget-readme.md" Pack="true" PackagePath="/README.md" />
+    <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="/" />
+  </ItemGroup>
 </Project>

@@ -9,6 +9,8 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Store;
+using Vericairn.Runtime.Service;
+using Vericairn.Protocol;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -72,6 +74,16 @@ public class EstateSessionTests
             Assert.Throws<IOException>(() => session.Write(prepared.Estate));
             Assert.Equal(["estate"], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName).ToArray());
             Assert.False(EstateChecks.Run(model).HasErrors);
+
+            // Hand-over uses the session's original bytes even when there are no repository record files.
+            using (EstateService service = EstateService.Open(root))
+            {
+                HandoffPackage package = service.Handoff().Package!;
+                Assert.Equal(2, package.Payload.GetProperty("originals").GetArrayLength());
+                Assert.Equal("local-only", package.Payload.GetProperty("pin").GetProperty("profile").GetString());
+                Assert.False(service.ResumeHandoff(package).Json!.Value.GetProperty("changed").GetBoolean());
+                Assert.False(Directory.Exists(Path.Combine(root, EstateLayout.RecordsDirectory)));
+            }
 
             // Local-only roots refer to one canonical store, so they also share its batch journals.
             string alias = root + "-alias";

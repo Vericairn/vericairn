@@ -15,8 +15,17 @@ public interface IEstateApi
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
+    /// <summary>Record that a person explicitly observed this estate's status; ordinary reads never advance this timestamp.</summary>
+    WriteOutcome ObserveEstate(EstateObserveRequest request);
+
     /// <summary>The recorded progress report with the same checks as status, plus labelled local agent claims and worker observations.</summary>
     ProgressResponse Progress();
+
+    /// <summary>Prepare a complete, portable hand-over from all records. A byte limit refuses overflow; nothing is truncated or authored.</summary>
+    HandoffResponse Handoff(long? maxBytes = null);
+
+    /// <summary>Compare a retained hand-over with this copy now, including additions, supersessions, missing records, the pin and observed state. Read-only.</summary>
+    ResumeResponse ResumeHandoff(HandoffPackage package);
 
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();

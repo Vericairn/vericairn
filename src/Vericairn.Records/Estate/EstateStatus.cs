@@ -61,6 +61,19 @@ public static class EstateStatus
         text.Append("Estate: ").Append(estate is null ? "(no charter)" : $"{EstateModel.BodyString(estate, "name")} ({EstateModel.BodyString(estate, "slug")})")
             .Append(" · record format ").Append((model.Manifest?.RecordFormat ?? RecordFormats.Current).ToString(CultureInfo.InvariantCulture)).Append(" · ").Append(model.Records.Count.ToString(CultureInfo.InvariantCulture)).Append(" records\n");
         text.Append("Vericairn: ").Append(model.Manifest?.Describe() ?? "(no manifest)").Append('\n');
+        RecordEnvelope? observation = LastObservationByPerson(model);
+        text.Append("Last observed by a person: ");
+        if (observation is null)
+        {
+            text.Append("unknown (no estate observation recorded).\n");
+        }
+        else
+        {
+            text.Append(EstateModel.BodyString(observation, "asOf")).Append(" · ")
+                .Append(model.CurrentPrincipal(observation.By) is { } person ? EstateModel.BodyString(person, "name") : observation.By)
+                .Append(" (").Append(observation.By).Append(") · observation ").Append(observation.Id).Append(" at ").Append(observation.ComputedHash).Append('\n');
+        }
+
         text.Append("Principals:\n");
         foreach (RecordEnvelope principal in model.OfType("principal").Where(p => !model.SupersededBy.ContainsKey(p.Id) || true).Where(p => model.Records.All(r => r.Supersedes != p.Id)).OrderBy(p => p.Id, StringComparer.Ordinal))
         {
@@ -185,14 +198,38 @@ public static class EstateStatus
         return findings.Sorted().Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).ToList();
     }
 
+    /// <summary>The latest explicit estate observation by a person, ordered by observed time then recorded time and id. Ordinary reads and automation do not count.</summary>
+    public static RecordEnvelope? LastObservationByPerson(EstateModel model)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        IReadOnlyList<string> estate = model.CurrentEstate is { } charter ? model.Chain(charter) : [];
+        return model.Current("observation").Where(r => EstateModel.BodyString(r, "kind") == "estate" &&
+                r.Subject?.Type == "estate" && estate.Contains(r.Subject.Id, StringComparer.Ordinal) &&
+                model.CurrentPrincipal(r.By) is { } person && EstateModel.BodyString(person, "kind") == "human" &&
+                !model.Findings.Any(f => f.Severity == Severity.Error && f.Location.StartsWith(r.ExpectedPath, StringComparison.Ordinal)))
+            .OrderBy(r => EstateModel.BodyString(r, "asOf"), StringComparer.Ordinal).ThenBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).LastOrDefault();
+    }
+
     /// <summary>Machine-readable status in canonical pretty JSON (byte-identical across machines for the same estate).</summary>
     public static string RenderJson(EstateModel model, FindingList checks)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(checks);
         RecordEnvelope? estate = model.CurrentEstate;
+        RecordEnvelope? observed = LastObservationByPerson(model);
         var status = new JsonObject
         {
+            ["lastObservedByPerson"] = observed is null ? null : new JsonObject
+            {
+                ["at"] = EstateModel.BodyString(observed, "asOf"),
+                ["by"] = observed.By,
+                ["name"] = model.CurrentPrincipal(observed.By) is { } person ? EstateModel.BodyString(person, "name") : null,
+                ["record"] = observed.Id,
+                ["hash"] = observed.ComputedHash,
+                ["subject"] = observed.Subject?.Id,
+                ["subjectHash"] = observed.Subject?.Hash,
+                ["facts"] = JsonNode.Parse(observed.Body.GetProperty("facts").GetRawText()),
+            },
             ["estate"] = estate is null ? null : new JsonObject { ["id"] = estate.Id, ["name"] = EstateModel.BodyString(estate, "name"), ["slug"] = EstateModel.BodyString(estate, "slug") },
             ["records"] = model.Records.Count,
             ["vericairn"] = model.Manifest is null ? null : new JsonObject { ["mode"] = model.Manifest.Mode, ["repository"] = model.Manifest.Repository, ["commit"] = model.Manifest.Commit, ["version"] = model.Manifest.Version },

@@ -1,9 +1,10 @@
 name: release
 
 # Builds a release candidate from an exact commit: the three-platform test matrix is the evidence, the
-# distributables are self-contained per platform, a software bill of materials and the notices travel
-# with them, and everything lands in a DRAFT GitHub release with a SHA256SUMS file. Publishing the draft
-# is the operator's reserved action after the candidate is accepted in the estate.
+# archives are self-contained per platform, NuGet packages are framework-dependent, and a software bill
+# of materials and the notices travel with them. Everything lands in a DRAFT GitHub release under
+# SHA256SUMS. Publishing the draft is the operator's reserved action after acceptance in the estate;
+# only nuget.yml, triggered by that publication, pushes the package assets to NuGet.
 
 on:
   workflow_dispatch:
@@ -136,6 +137,17 @@ jobs:
           set -eu
           dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "docs/releases/$VERSION" --documents docs/releases/documents.json
           dotnet run --configuration Release --project tools/Vericairn.DocsTool -- compare "docs/releases/$VERSION"
+      - name: Pack Community NuGet packages
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        # Pack before the RID-specific publishes: the tool is portable and the packages all carry the
+        # checked release version. These exact files stay in the draft until the operator publishes it.
+        run: |
+          set -eu
+          mkdir -p dist
+          dotnet pack --no-restore --configuration Release --output dist \
+            -p:Version="$VERSION" -p:VersionSuffix= -p:ContinuousIntegrationBuild=true
       - name: Publish self-contained distributables
         shell: bash
         env:
@@ -230,6 +242,8 @@ jobs:
             echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
             echo
             echo "Distributables are self-contained per platform: unpack and run bin/vericairn (bin/vericairn.exe on Windows)."
+            echo "NuGet packages and portable symbol packages are attached under SHA256SUMS. Publishing this draft triggers nuget.yml to verify and push these exact files through Trusted Publishing; it never rebuilds them."
+            echo "After package publication, install the CLI with dotnet tool install --global dotnet-vc and invoke dotnet vc; install the SDK with dotnet add package Vericairn."
             echo "Workbench, the desktop, is vericairn-workbench-$VERSION-<platform>: unpack and run bin/vericairn-workbench beside the bin/vericairn it drives; an unsigned developer build with no bundle or installer, qualified only where the platform obligations say."
             echo
             echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
@@ -259,4 +273,5 @@ jobs:
             dist/vericairn-$VERSION-win-x64.zip dist/vericairn-$VERSION-win-arm64.zip \
             dist/vericairn-workbench-$VERSION-linux-x64.tar.gz dist/vericairn-workbench-$VERSION-linux-arm64.tar.gz dist/vericairn-workbench-$VERSION-osx-x64.tar.gz dist/vericairn-workbench-$VERSION-osx-arm64.tar.gz \
             dist/vericairn-workbench-$VERSION-win-x64.zip dist/vericairn-workbench-$VERSION-win-arm64.zip \
-            dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip dist/SHA256SUMS
+            dist/vericairn-$VERSION-sbom.cdx.json dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md dist/vericairn-$VERSION-docs.zip \
+            dist/*.nupkg dist/*.snupkg dist/SHA256SUMS

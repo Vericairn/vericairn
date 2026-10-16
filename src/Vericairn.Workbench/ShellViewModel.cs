@@ -34,6 +34,7 @@ public sealed class ShellViewModel : Observable
     private bool choosingActing;
     private string actingRole = string.Empty;
     private string freshness = "no view yet";
+    private string lastPersonObservation = "Last observed by a person: unknown.";
     private ShellLayout layout;
     private string estatePath = string.Empty;
 
@@ -170,6 +171,9 @@ public sealed class ShellViewModel : Observable
     /// <summary>When the view was taken.</summary>
     public string Freshness { get => freshness; private set => Set(ref freshness, value); }
 
+    /// <summary>The last explicit human observation from status, distinct from this client's refresh time.</summary>
+    public string LastPersonObservation { get => lastPersonObservation; private set => Set(ref lastPersonObservation, value); }
+
     /// <summary>The layout.</summary>
     public ShellLayout Layout
     {
@@ -246,12 +250,19 @@ public sealed class ShellViewModel : Observable
         {
             Status = $"{connection.Root}: {StateLanguage.Label("runtime", "unavailable")}; the last view is kept as cached.";
             Freshness = "cached";
+            foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
+            {
+                page.Unavailable();
+            }
             return;
         }
 
         try
         {
             StatusResponse response = connection.Api.Status();
+            LastPersonObservation = response.Json.TryGetProperty("lastObservedByPerson", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
+                ? $"Last observed by a person: {Str(observed, "at")} · {Str(observed, "name") ?? Str(observed, "by")} · observation {Str(observed, "record")}."
+                : "Last observed by a person: unknown (no estate observation recorded).";
             string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
             estate = EstateView.From(response, now);
             Freshness = $"current as of {now}";
@@ -260,6 +271,13 @@ public sealed class ShellViewModel : Observable
             AsksResponse? asks = Try(() => connection.Api.Asks());
             Replace(Attention, [.. AskAttention.From(asks?.Json ?? default, now), .. estate.Attention]);
             FillProgress(Try(() => connection.Api.Progress()));
+            foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
+            {
+                if (page.HasPackage)
+                {
+                    page.Compare();
+                }
+            }
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
@@ -312,6 +330,10 @@ public sealed class ShellViewModel : Observable
         {
             Status = "The runtime did not answer: " + exception.Message;
             Freshness = "cached";
+            foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
+            {
+                page.Unavailable();
+            }
         }
     }
 
@@ -531,6 +553,49 @@ public sealed class ShellViewModel : Observable
                 string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
                 Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
             }
+        }
+    }
+
+    /// <summary>Open the hand-over and resume page, preparing its first package only; reopening never replaces its retained basis.</summary>
+    public HandoffDocument OpenHandoff()
+    {
+        HandoffDocument? page = Documents.OfType<HandoffDocument>().FirstOrDefault();
+        if (page is null)
+        {
+            page = new HandoffDocument(() => connection?.Api);
+            page.Prepare();
+        }
+
+        // The work page uses the full document area; Home's summary remains available through navigation.
+        if (HomeSelected)
+        {
+            SelectedRegion = Regions.First(r => r.Name == "Work");
+        }
+
+        Open(page);
+        Inspector = "A hand-over keeps its exact originals. Save it for another surface, or open a saved package to see every change since it. Refresh compares with the retained basis. Remote is not built.";
+        return page;
+    }
+
+    /// <summary>Explicitly record an observation by the selected person, through the runtime; a refresh alone never does this.</summary>
+    public void ObserveEstate()
+    {
+        if (connection?.Api is not { } api || ActingPrincipalId is not { } by)
+        {
+            Status = "Connect to the estate and select the observing person's admitted device first.";
+            return;
+        }
+
+        WriteOutcome? result = Try(() => api.ObserveEstate(new EstateObserveRequest(by)));
+        if (result?.Written is { } written)
+        {
+            Log("person observed estate: " + written.Id);
+            Refresh();
+            Status = "Observation recorded: " + written.Id;
+        }
+        else
+        {
+            Status = result?.Problem?.Message ?? "The runtime did not record the observation.";
         }
     }
 
