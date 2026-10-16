@@ -312,7 +312,7 @@ public sealed record AsksResponse(string Text, JsonElement Json);
 /// person, and by an operator when an agent sponsors it (decision 01M50A8KHJT1MSSS84KZKHKRHB).
 /// </summary>
 /// <param name="By">The proposing principal; for a revision, who decides for the goal it supersedes.</param>
-/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits.</param>
+/// <param name="Body">The goal record's body: title, objective, completion, constraints, kind, sponsor, budget, plan and inputs, and optionally roster, roles and limits. limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.</param>
 /// <param name="Supersedes">The goal this proposal revises, by the id of its current revision.</param>
 public sealed record GoalProposeRequest(string By, JsonElement Body, string? Supersedes = null);
 
@@ -437,7 +437,7 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="Assignment">The assignment, whose contributor is the agent.</param>
 /// <param name="Launcher">The launcher, for example claude-code, codex or generic.</param>
 /// <param name="Agent">The agent principal the harness acts for: the assignment's contributor.</param>
-/// <param name="By">The principal recording the run: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="By">The principal recording the run: the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope.</param>
 /// <param name="Repository">The repository resource whose clone, registered on the runtime's machine, the workspace is made from.</param>
 /// <param name="Goal">The goal the run is charged to, when the assignment's work belongs to more than one active goal.</param>
 /// <param name="Branch">The work branch; work/ and the work order's key when omitted.</param>
