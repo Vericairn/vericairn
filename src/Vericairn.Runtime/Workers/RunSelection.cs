@@ -132,7 +132,7 @@ public static class RunSelection
 
         void Require(string field, IReadOnlyList<string> allowed)
         {
-            if (requested[field]?.GetValue<string>() is not string value || !allowed.Contains(value, StringComparer.Ordinal))
+            if (requested[field]?.GetValue<string>() is not string value || value == "unknown" || !allowed.Contains(value, StringComparer.Ordinal))
             {
                 throw new ProviderRefusedException($"The required {field} is unresolved or unsupported by the launcher configuration; ambient fallback is not permitted.");
             }

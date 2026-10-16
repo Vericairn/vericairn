@@ -35,6 +35,10 @@ internal static class ExecutionRecord
                 foreach (string required in new[] { "model", "effort", "provider", "destination", "dataBoundary" })
                 {
                     if (!requested.Has(required)) requested.Error("body.missing", required, "An admitted execution choice is required.");
+                    if (requested.Element.TryGetProperty(required, out JsonElement value) && value.ValueKind == JsonValueKind.String && value.GetString() == "unknown")
+                    {
+                        context.Error("operation.execution", "Unknown is not a resolved required execution choice.");
+                    }
                 }
             }
 

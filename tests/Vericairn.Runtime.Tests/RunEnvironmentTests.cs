@@ -13,6 +13,22 @@ public class RunEnvironmentTests
 {
     private static readonly IReadOnlyDictionary<string, string> EmptyEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
 
+    [Fact]
+    public void VariableNamesKeepTheAdmittedSpellingAcrossPlatformComparisonRules()
+    {
+        RunComponent harness = ReportedLauncher.Inventory.Single(c => c.Kind == "harness") with { Environment = ["path"] };
+        var policy = new RunEnvironmentPolicy("test", [harness]);
+        var environment = new Dictionary<string, string>(WorkerEnvironment.Names) { ["PATH"] = "synthetic-value" };
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Throws<ProviderRefusedException>(() => RunEnvironment.Admit(policy, new RunPreflight(policy.Components, true, true), environment));
+            return;
+        }
+        var admitted = RunEnvironment.Admit(policy, new RunPreflight(policy.Components, true, true), environment);
+        Assert.Equal("PATH", admitted["inventory"]![0]!["environment"]![0]!.GetValue<string>());
+        Assert.Equal("PATH", admitted["variables"]![0]!.GetValue<string>());
+    }
+
     [Theory]
     [InlineData("dependency")]
     [InlineData("destination")]

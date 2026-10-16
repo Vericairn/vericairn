@@ -17,10 +17,11 @@ public class RunPolicyIntegrationTests
     [InlineData("provenance")]
     [InlineData("adapter")]
     [InlineData("requested")]
+    [InlineData("unknown")]
     public void AnImportedIntentCannotMisstateItsInventoryOrItsPinnedSelection(string change)
     {
         using var run = new RunEstate();
-        Roster(run, """{"choices":{"effort":"high"}}""");
+        if (change != "unknown") Roster(run, """{"choices":{"effort":"high"}}""");
         RunResponse started = run.Start("claude-code", "claude", run.Report("original"));
         Assert.True(started.Ok, started.Message);
         run.Settled(started.Run);
@@ -35,6 +36,10 @@ public class RunPolicyIntegrationTests
             case "provenance": execution["provenance"]![1]!["policy"]!["choices"]!["effort"] = "low"; break;
             case "adapter": execution["requested"]!["adapter"] = "local"; break;
             case "requested": execution["requested"]!["model"] = "model-b"; break;
+            case "unknown":
+                execution["requested"]!["model"] = "unknown";
+                execution["provenance"]![0]!["policy"]!["choices"]!["model"] = "unknown";
+                break;
         }
         WriteOutcome refused = run.Service.NewRecord(new NewRecordRequest("operation", run.Estate.OperatorId, RunEstate.Json(body.ToJsonString()), Subject: "assignment:" + run.Assignment));
         Assert.False(refused.Ok);

@@ -29,6 +29,7 @@ public static class RunEnvironment
 
         var allowedNames = WorkerEnvironment.Build(environment, launcherNames).Keys.Concat(RunVariables).ToHashSet(WorkerEnvironment.Names);
         if (!RunExecutionObservation.Safe(policy.Id) || !RunExecutionObservation.Safe(preflight.HarnessVersion)
+            || environment.Keys.Distinct(WorkerEnvironment.Names).Count() != environment.Count
             || environment.Keys.Any(n => !WorkerEnvironment.IsVariableName(n) || !allowedNames.Contains(n) || WorkerEnvironment.IsCredential(n) || WorkerEnvironment.IsLoadDirective(n)))
         {
             throw new ProviderRefusedException("The effective environment contains an unadmitted variable or loader directive, or an invalid policy identity.");
@@ -55,8 +56,9 @@ public static class RunEnvironment
             }
         }
 
-        JsonNode inventory = Inventory(preflight.Components);
-        if (!JsonNode.DeepEquals(inventory, Inventory(policy.Components)))
+        Dictionary<string, string> spellings = environment.Keys.ToDictionary(n => n, n => n, WorkerEnvironment.Names);
+        JsonNode inventory = Inventory(preflight.Components, spellings);
+        if (!JsonNode.DeepEquals(inventory, Inventory(policy.Components, spellings)))
         {
             throw new ProviderRefusedException("The effective tool, configuration or dependency inventory differs from the admitted policy.");
         }
@@ -70,7 +72,7 @@ public static class RunEnvironment
         };
     }
 
-    private static JsonNode Inventory(IReadOnlyList<RunComponent> components) => JsonSerializer.SerializeToNode(components.OrderBy(c => c.Id, StringComparer.Ordinal)
-        .Select(c => c with { Environment = c.Environment.Order(StringComparer.Ordinal).ToArray(), Dependencies = c.Dependencies.Order(StringComparer.Ordinal).ToArray(),
+    private static JsonNode Inventory(IReadOnlyList<RunComponent> components, IReadOnlyDictionary<string, string> spellings) => JsonSerializer.SerializeToNode(components.OrderBy(c => c.Id, StringComparer.Ordinal)
+        .Select(c => c with { Environment = c.Environment.Select(n => spellings.GetValueOrDefault(n, n)).Order(StringComparer.Ordinal).ToArray(), Dependencies = c.Dependencies.Order(StringComparer.Ordinal).ToArray(),
             Destinations = c.Destinations.Order(StringComparer.Ordinal).ToArray() }), ProtocolJson.Options)!;
 }

@@ -13,6 +13,23 @@ public class RunValidationTests
     private static RunCapabilities Capabilities => RunSelectionTests.Capabilities;
 
     [Theory]
+    [InlineData("model")]
+    [InlineData("effort")]
+    [InlineData("provider")]
+    [InlineData("destination")]
+    [InlineData("dataBoundary")]
+    public void UnknownIsNeverAResolvedRequiredChoiceEvenInALocalCatalog(string field)
+    {
+        RunCapabilities capabilities = Capabilities with
+        {
+            Efforts = [.. Capabilities.Efforts, "unknown"], Providers = [.. Capabilities.Providers, "unknown"],
+            Destinations = [.. Capabilities.Destinations, "unknown"], DataBoundaries = [.. Capabilities.DataBoundaries, "unknown"],
+        };
+        Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(Configuration with { Models = [.. Configuration.Models, "unknown"] }, capabilities,
+            [], RunEstate.Json("{\"" + field + "\":\"unknown\"}"), RunEstate.Json("{}")));
+    }
+
+    [Theory]
     [InlineData("local")]
     [InlineData("efficiency")]
     [InlineData("enabled")]

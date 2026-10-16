@@ -798,6 +798,7 @@ explicit run choices. Restrictions are cumulative, never overridden by choices. 
 effort values are accepted; `provider-default` requires explicit support and `not-supported` requires no
 effort control. Unknown model resolution never meets an exact pin. The worker refuses unresolved choices
 or incomplete environment admission before authoring an intent.
+The literal `unknown` cannot stand for a resolved required choice, even in a local model catalog.
 
 An `operation` whose action is `agent-run` can carry `execution`, fixed at its intent and immutable across
 revisions. It includes `configuration`, `configurationHash`, `requested`, `provenance`, `resolvedRevision`,
@@ -811,6 +812,8 @@ revisions. It includes `configuration`, `configurationHash`, `requested`, `prove
   Each component has id, kind, version, content hash, configuration hash, environment names, destinations
   and dependencies. Kinds are harness, tool, skill, plugin, hook, mcp, helper, dependency and configuration.
   No machine paths, secret values or raw environment values are stored.
+  Component variable names use the admitted environment's spelling, including Windows case matching,
+  so the resulting record validates identically on every platform.
 
 A settled admitted run also records `executionObserved` with distinct `reports`, `unknown` facts and
 `discrepancies`. Reports can contain model, modelRevision, effort, provider, destination, harnessVersion,
