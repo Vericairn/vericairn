@@ -86,14 +86,15 @@ jobs:
         shell: bash
         env:
           NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
-        # Suppress the implicit symbol push so each verified file is sent exactly once, explicitly.
+        # Suppress the implicit symbol push so each verified file is sent explicitly. A version nuget.org already holds is skipped,
+        # never replaced, so a re-run completes a publication that stopped part way.
         run: |
           set -eu
           for package in packages/*.nupkg; do
             dotnet nuget push "$package" --api-key "$NUGET_API_KEY" \
-              --source https://api.nuget.org/v3/index.json --no-symbols
+              --source https://api.nuget.org/v3/index.json --no-symbols --skip-duplicate
           done
           for symbols in packages/*.snupkg; do
             dotnet nuget push "$symbols" --api-key "$NUGET_API_KEY" \
-              --source https://api.nuget.org/v3/index.json
+              --source https://api.nuget.org/v3/index.json --skip-duplicate
           done
