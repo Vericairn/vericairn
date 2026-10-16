@@ -26,7 +26,7 @@ internal static class ClaudeCodeInventory
         string binding = HarnessInventory.Binding(context, command);
         string version = HarnessInventory.Version(context, "claude", Version + " (Claude Code)", Version);
         string help = HarnessInventory.Probe(context, "claude", "--help");
-        HarnessInventory.Flags("claude", help, "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
+        HarnessInventory.Flags("claude", help, "-p", "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
             "--strict-mcp-config", "--setting-sources", "--settings", "--tools", "--model", "--effort", "--max-budget-usd");
         _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
         Login(context);

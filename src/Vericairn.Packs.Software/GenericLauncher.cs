@@ -34,6 +34,7 @@ public sealed class GenericLauncher : IAgentLauncher
         [
             "Generic process launch is not complete agent support: it starts the command a run names in the workspace, and knows nothing of the harness's goal, sign-in, usage or stop.",
             "Tells the process the condition, the brief, the MCP configuration and the stop file in VERICAIRN_CONDITION, VERICAIRN_BRIEF, VERICAIRN_MCP_CONFIG and VERICAIRN_STOP_FILE, and in its arguments where they name {condition}, {brief}, {mcp-config} or {workspace}.",
+            "Has no complete inventory qualification; worker dispatch remains refused for every generic command and version.",
             "Reads no usage, so every unit the run's cap states other than its wall minutes is charged in full.",
         ],
         [

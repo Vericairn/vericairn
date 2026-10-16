@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Packs.Software;
-using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
@@ -13,6 +13,28 @@ namespace Vericairn.Runtime.Tests;
 
 public class NativePreflightTests
 {
+    [Theory]
+    [InlineData("tool_search")]
+    [InlineData("request_user_input_async")]
+    [InlineData("send_message_to_user_async")]
+    [InlineData("clock.curr_time")]
+    public void CodexInventoriesBuiltInDiscoveryAndModelConditionalUtilities(string tool)
+    {
+        using var fixture = new NativeProbe("codex");
+        RunPreflight inventory = fixture.Launcher.Preflight(fixture.Prepare());
+        Assert.Contains(inventory.Components, c => c.Kind == "tool" && c.Id == tool && c.Version == "0.159.0-alpha.12.1");
+    }
+
+    [Fact]
+    public void CodexSuppressesBundledSkillInstallationInBothConfigurationAndLaunchOverrides()
+    {
+        using var fixture = new NativeProbe("codex");
+        LaunchContext context = fixture.Prepare();
+        Assert.Contains("skills.bundled.enabled=false", fixture.Launcher.Command(context));
+        Assert.Contains("skills.bundled.enabled = false", File.ReadAllText(Path.Combine(context.Environment["CODEX_HOME"], "config.toml")), StringComparison.Ordinal);
+        Assert.DoesNotContain(fixture.Launcher.Preflight(context).Components, c => c.Kind == "skill");
+    }
+
     [Fact]
     public void CodexEstablishesItsVersionToolsIsolatedHomeAndEffectiveMcp()
     {
@@ -134,6 +156,25 @@ internal sealed class NativeProbe : IDisposable
     public void Behavior(string key, string value) => File.WriteAllText(Report + ".behavior", new JsonObject { [key] = value }.ToJsonString());
     public void Dispose() => Directory.Delete(Root, recursive: true);
 
+    [ModuleInitializer]
+#pragma warning disable CA2255 // Native protocol emulation belongs only to this test executable, not the linked shared stand-in.
+    internal static void Intercept()
+#pragma warning restore CA2255
+    {
+        string[] arguments = Environment.GetCommandLineArgs();
+        int at = Array.IndexOf(arguments, FakeHarness.NativeMarker);
+        if (at < 0 || at + 2 >= arguments.Length) return;
+        int code;
+        try { code = Run(arguments[at + 1], arguments[at + 2], arguments[(at + 3)..]) ?? 70; }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            Console.Error.WriteLine("native stand-in: " + exception.Message);
+            code = 70;
+        }
+        Console.Out.Flush();
+        Environment.Exit(code);
+    }
+
     internal static int? Run(string scenario, string report, string[] arguments)
     {
         if (!scenario.StartsWith("native-", StringComparison.Ordinal)) return null;
@@ -148,10 +189,11 @@ internal sealed class NativeProbe : IDisposable
         if (arguments.Contains("--help"))
         {
             string[] flags = codex
-                ? ["--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
-                : ["--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
-            Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? behavior["proseFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
+                ? ["-c", "--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
+                : ["-p", "--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
+            Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? behavior["proseFlag"]?.GetValue<string>() ?? behavior["descriptionFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
             if (behavior["proseFlag"]?.GetValue<string>() is string prose) Console.WriteLine("This prose mentions " + prose + " but declares no flag.");
+            if (behavior["descriptionFlag"]?.GetValue<string>() is string description) Console.WriteLine("  --unrelated  Documentation mentioning " + description + " without declaring it.");
             if (behavior["helpSuffix"]?.GetValue<string>() is string suffix) Console.WriteLine(suffix);
             return 0;
         }
@@ -181,6 +223,11 @@ internal sealed class NativeProbe : IDisposable
             if (defect == "duplicate-env")
             {
                 Console.WriteLine(list.ToJsonString().Replace("\"env\":{}", "\"env\":{},\"env\":{}", StringComparison.Ordinal));
+                return 0;
+            }
+            if (defect == "duplicate-variable")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"SECOND\":\"two\"", "\"FIRST\":\"one\"", StringComparison.Ordinal));
                 return 0;
             }
             if (defect is "ambient" or "disabled-ambient") list.Add(new JsonObject { ["name"] = "ambient", ["enabled"] = defect == "ambient" });

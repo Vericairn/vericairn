@@ -115,11 +115,60 @@ public class NativeRefusalTests
     [Theory]
     [InlineData("codex")]
     [InlineData("claude")]
+    public void DuplicateExplicitMcpVariablesCannotStandInForTheApprovedEnvironment(string harness)
+    {
+        using var fixture = new NativeProbe(harness);
+        LaunchContext context = fixture.Context with { McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["FIRST"] = "one", ["SECOND"] = "two" } };
+        string configuration = JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = context.McpServer[0], args = context.McpServer.Skip(1), env = new { FIRST = "one", SECOND = "two" } } } });
+        File.WriteAllText(context.McpConfiguration, configuration.Replace("\"SECOND\":\"two\"", "\"FIRST\":\"one\"", StringComparison.Ordinal));
+        context = fixture.Launcher.Prepare(context);
+        Assert.Contains("MCP", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.Report));
+    }
+
+    [Fact]
+    public void DuplicateEffectiveMcpVariablesCannotStandInForTheApprovedEnvironment()
+    {
+        using var fixture = new NativeProbe("codex");
+        LaunchContext context = fixture.Context with { McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["FIRST"] = "one", ["SECOND"] = "two" } };
+        File.WriteAllText(context.McpConfiguration, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = context.McpServer[0], args = context.McpServer.Skip(1), env = new { FIRST = "one", SECOND = "two" } } } }));
+        context = fixture.Launcher.Prepare(context);
+        fixture.Behavior("mcp", "duplicate-variable");
+        Assert.Contains("MCP", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.Report));
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
     public void AFlagMentionInProseDoesNotQualifyTheMissingFlag(string harness)
     {
         using var fixture = new NativeProbe(harness);
         LaunchContext context = fixture.Prepare();
         fixture.Behavior("proseFlag", harness == "codex" ? "--ignore-rules" : "--strict-mcp-config");
         Assert.Contains("help does not declare", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void AnotherOptionsDescriptionDoesNotDeclareTheMissingFlag(string harness)
+    {
+        using var fixture = new NativeProbe(harness);
+        LaunchContext context = fixture.Prepare();
+        fixture.Behavior("descriptionFlag", harness == "codex" ? "--ignore-rules" : "--strict-mcp-config");
+        Assert.Contains("help does not declare", Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("codex", "-c")]
+    [InlineData("claude", "-p")]
+    public void TheShortAliasActuallyUsedMustAlsoBeDeclaredByHelp(string harness, string flag)
+    {
+        using var fixture = new NativeProbe(harness);
+        LaunchContext context = fixture.Prepare();
+        fixture.Behavior("missingFlag", flag);
+        Assert.Contains(flag, Assert.Throws<ProviderRefusedException>(() => fixture.Launcher.Preflight(context)).Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(fixture.Report));
     }
 }

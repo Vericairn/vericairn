@@ -10,7 +10,9 @@ namespace Vericairn.Packs.Software;
 internal static class CodexInventory
 {
     internal const string Version = "0.159.0-alpha.12.1";
+    // Include native discovery and model-conditional utilities even when this turn's mode hides their schemas.
     private static readonly string[] Tools = ["exec_command", "write_stdin", "apply_patch", "view_image", "update_plan", "request_user_input",
+        "request_user_input_async", "send_message_to_user_async", "clock.curr_time", "tool_search",
         "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "create_goal", "get_goal", "update_goal"];
     private static readonly string[] Enabled = ["goals", "shell_tool", "unified_exec", "view_image"];
     private static readonly string[] Disabled =
@@ -30,10 +32,10 @@ internal static class CodexInventory
     ];
 
     internal static IEnumerable<string> Settings => Enabled.Select(n => "features." + n + "=true").Concat(Disabled.Select(n => "features." + n + "=false"))
-        .Append("web_search=\"disabled\"");
+        .Concat(["web_search=\"disabled\"", "skills.bundled.enabled=false"]);
 
     internal static string Configuration(LaunchContext context) => "mcp_servers=" + CodexLauncher.Mcp(context) + "\nprojects=" + CodexLauncher.Projects(context)
-        + "\nweb_search=\"disabled\"\n[features]\ngoals = true\n" + string.Join('\n', Enabled.Where(n => n != "goals").Select(n => n + " = true").Concat(Disabled.Select(n => n + " = false"))) + "\n";
+        + "\nweb_search=\"disabled\"\nskills.bundled.enabled = false\n[features]\ngoals = true\n" + string.Join('\n', Enabled.Where(n => n != "goals").Select(n => n + " = true").Concat(Disabled.Select(n => n + " = false"))) + "\n";
 
     internal static RunPreflight Establish(LaunchContext context)
     {
@@ -46,9 +48,9 @@ internal static class CodexInventory
         string binding = HarnessInventory.Binding(context, command);
         string version = HarnessInventory.Version(context, "codex", "codex-cli " + Version, Version);
         string help = HarnessInventory.Probe(context, "codex", "--help");
-        HarnessInventory.Flags("codex", help, "--config", "--enable", "--disable");
+        HarnessInventory.Flags("codex", help, "-c", "--config", "--enable", "--disable");
         string execHelp = HarnessInventory.Probe(context, "codex", "exec", "--help");
-        HarnessInventory.Flags("codex exec", execHelp, "--config", "--json", "--cd", "--sandbox", "--model", "--ignore-rules");
+        HarnessInventory.Flags("codex exec", execHelp, "-c", "--config", "--json", "--cd", "--sandbox", "--model", "--ignore-rules");
         string mcpHelp = HarnessInventory.Probe(context, "codex", "mcp", "list", "--help");
         HarnessInventory.Flags("codex mcp list", mcpHelp, "--json");
         string features = HarnessInventory.Probe(context, "codex", [.. CodexLauncher.Overrides(context), "features", "list"]);
@@ -59,7 +61,7 @@ internal static class CodexInventory
         {
             qualification = "run-02-codex-v1", version, tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal),
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
-            webSearch = "disabled", projectTrust = "untrusted",
+            webSearch = "disabled", projectTrust = "untrusted", bundledSkills = "disabled",
             arguments = HarnessInventory.Arguments(context, "codex"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
         });

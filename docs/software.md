@@ -314,15 +314,17 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
-| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
-| `generic` | The command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Generic process launch is not complete agent support: it knows nothing of the harness's goal, sign-in, usage or stop, and it is listed and run with that label. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
+| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
+| `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
 recorded through the MCP tools as its checks, and the brief's prohibited effects, the goal's constraints and only the
 changes the brief permits as its constraints, on one line. The launcher argument construction and configuration checks are covered by the launcher tests; the limits of
 that qualification are stated below. The `command` setting of each launcher names another executable, or a JSON array of one and
-its leading arguments. No launcher reads a price, so a cap in currency is charged in full.
+its leading arguments. Native qualification refuses leading option flags in that setting: the launcher supplies every
+harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
+bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
 
 `vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--detach]`:
 
@@ -443,8 +445,10 @@ new run would be fenced. The runs' own files, their state, output and MCP config
 the machine that ran them, never in a record or a repository.
 
 Limitations: the launchers are tested with stand-in processes; no live coding agent or live sign-in has been qualified.
-Configuration checks use synthetic Codex `mcp list` probes (observed with 0.159.0-alpha.12.1) and Claude Code `--help`
-(2.1.296), without starting MCP servers. Windows has no graceful signal for a windowless process, so a harness that
+RUN-02 qualifies the launcher protocol for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`, using
+stand-in executables for version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
+help established the flag baselines; these qualification tests do not start a real coding agent or its configured MCP
+server. Windows has no graceful signal for a windowless process, so a harness that
 does not watch the stop file needs escalation. Files and keychains accessible to the worker's operating-system user
 remain accessible to the harness; use a dedicated user for credential isolation. The process boundaries and managed
 configuration limitations below apply. No MCP tool launches or stops a run.
@@ -517,13 +521,21 @@ workspace key. The probe does not start a coding agent or an MCP server. See the
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
 
 Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only the provisioned `claudeAiOauth` login from its
-credentials file. `--setting-sources ""` excludes ordinary user, project and local settings; the explicit settings
-disable hooks and enable no plugins, alongside `--strict-mcp-config`. Detected managed files, macOS managed
-preferences, Windows policy registry keys and known team/enterprise logins refuse launch because mandatory policy
-cannot be isolated by these flags. Remote or otherwise undetected managed policy is not qualified: managed accounts
-are unsupported. The flags were checked against help output only, not a live Claude Code session. These controls do
-not prevent deliberate same-user filesystem or keychain access, and live sign-in from the isolated login has not been
-qualified. See [Claude Code settings](https://code.claude.com/docs/en/settings).
+credentials file. Preflight requires its subscription type to be `pro` or `max`, and rechecks that classification before
+dispatch. Missing or unreadable login material, unknown subscription types, implicit keychain login, and managed
+accounts are not qualified. No credential content or credential digest enters the inventory.
+
+`--setting-sources ""` excludes user, project and local settings, and `--strict-mcp-config` restricts MCP to the explicit
+run file. `--settings '{"hooks":{},"enabledPlugins":{}}'` declares no external hooks or enabled plugins. The launcher
+also refuses repository customization sources, as detailed below. It deliberately does not set `disableAllHooks`:
+that setting disables the built-in `/goal` evaluator too. The evaluator is included as a built-in hook in the inventory;
+its native small-model inference uses the same provider route. Its exact model revision is not inferred.
+See [Claude Code goal requirements](https://code.claude.com/docs/en/goal#requirements).
+
+Detected managed files, macOS managed preferences and Windows policy registry keys refuse launch, including on the
+second preflight. Remote or otherwise undetected managed policy is not qualified. These controls do not prevent
+deliberate same-user filesystem or keychain access, and live sign-in from the isolated login has not been qualified.
+See [Claude Code settings](https://code.claude.com/docs/en/settings).
 
 Workspace export refuses symbolic links and Windows reparse points anywhere in `.vericairn`, including dangling links
 and nested entries, before recording a run. Unix writes use directory-relative no-follow opens and exclusive temporary
@@ -784,13 +796,86 @@ choice. WATCH-01 receives the admitted selection and inventory: execution discre
 tool invocations produce critical signals and use its existing attention and stop path. All original
 command, credentials, network, scope, loop and burn-rate auditing remains in place.
 
-**Qualification limit:** the shipped native Codex, Claude Code and generic launchers do not yet establish
-a complete inventory of all loaded tools, dependencies and configuration. They therefore refuse worker
-dispatch before running even feature probes. The older isolated configuration checks described above
-remain necessary but do not establish complete environment admission. RUN-01 tests exercise the admission
-contract with the stand-in harness only; no live coding agent was launched. A production launcher needs a
-qualified complete-inventory implementation before it can dispatch. This is not an operating-system
-sandbox or a hard network firewall; `worker-user` retains the existing same-user access limitations.
+### Native inventory qualification (RUN-02)
+
+Qualification belongs to a launcher and an exact version range, not to a harness name in general:
+
+| Launcher | Qualified version range | Admission evidence |
+|---|---|---|
+| `codex` | `0.159.0-alpha.12.1` only; both endpoints are that exact version | Exact `--version` response; root, exec and MCP-list help; effective feature and MCP probes in the prepared run environment; executable and entry-file hashes; configuration and instruction inspection. |
+| `claude-code` | `2.1.296` only; both endpoints are that exact version | Exact `--version` response and documented flags in `--help`; fixed built-in tool selection; fresh login-only home; no external setting sources; strict, verified explicit MCP file; configuration and instruction inspection. |
+| `generic` | None | No complete inventory implementation. Worker dispatch stays refused, before executing its command. |
+
+A missing flag, failed or malformed probe, missing required feature, unexpected enabled feature, unlisted version,
+extra MCP server (even disabled), altered transport, duplicate MCP field or unaccounted MCP option refuses admission.
+Help must declare the short aliases used by the commands too: Codex's `-c` and Claude Code's `-p`.
+The generic launcher cannot inherit either native launcher's qualification. No version before or after the two exact
+versions above is implicitly qualified, including another Codex alpha build.
+
+Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
+`request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,
+`list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource`, `create_goal`, `get_goal` and `update_goal`.
+It includes native MCP discovery and the model-conditional clock and user-input utilities; model and mode restrictions
+can hide their schemas on a particular turn. The inventory identifies the built-in capabilities, not a guarantee that
+every tool is callable on every turn. See the [Codex tool registry](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs).
+The launcher requires
+`goals`, `shell_tool`, `unified_exec` and `view_image` enabled, disables web search, ignores exec-policy rules, and
+explicitly disables these extension/tool features:
+
+`apps`, `plugins`, `remote_plugin`, `hooks`, `multi_agent`, `multi_agent_v2`, `browser_use`, `browser_use_external`,
+`browser_use_full_cdp_access`, `computer_use`, `in_app_browser`, `image_generation`, `code_mode`, `code_mode_host`,
+`code_mode_only`, `memories`, `workspace_dependencies`, `skill_search`, `skill_mcp_dependency_install`, `tool_suggest`,
+`sleep_tool`, `shell_snapshot`.
+
+The schema-defined `skills.bundled.enabled=false` also prevents bundled skill installation and discovery; it is set
+in both the generated file and session overrides. This prevents a fresh home from gaining an unlisted bundled skill
+at startup. See the [Codex configuration schema](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json).
+
+The effective feature listing must confirm each required state. The remaining non-tool feature allowlist is explicit
+in [CodexInventory](../src/Vericairn.Packs.Software/CodexInventory.cs); the entire observed feature table and help
+identity contribute to the inventory hash. Only `auth.json` is imported into `CODEX_HOME`; the launcher generates
+`config.toml`. Preflight permits only those files and empty probe scratch directories. It compares the generated
+configuration exactly and refuses detected system configuration or managed preference roots. Feature probes use the
+same overrides as dispatch, after preparation; the ambient user feature configuration is never the qualification.
+See the [Codex CLI flags](https://learn.chatgpt.com/docs/developer-commands?surface=cli) and
+[configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+Claude Code's `--tools` selects exactly `Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `TaskOutput`, `TaskStop` and
+`EndConversation`. The inventory also identifies the built-in goal evaluator, the `vericairn` MCP server and the
+`claude-code-setting-sources-none` configuration. It verifies the presence of every option it relies on: `--print`,
+`--output-format`, `--verbose`, `--permission-mode`, `--mcp-config`, `--strict-mcp-config`, `--setting-sources`,
+`--settings`, `--tools`, `--model`, `--effort`, and `--max-budget-usd`. All must be declarations in help, not prefixes
+or mentions in prose or another option's description. No MCP health command is run: strict configuration is established from the documented flag
+and the exact explicit server file, without starting its server. See the
+[Claude Code CLI reference](https://code.claude.com/docs/en/cli-reference) and
+[tools reference](https://code.claude.com/docs/en/tools-reference).
+
+Both preflights inspect the workspace, nested directories, ancestors and a linked worktree's common checkout.
+Claude Code refuses `.claude` settings, hooks, skills, plugins, agents, commands and other customization entries, plus
+`.mcp.json`. This qualification conservatively refuses those sources even where an individual file could be excluded
+by a flag. Codex refuses `.codex` project configuration and `.agents` customization sources, including separate user
+`.agents` skills outside `CODEX_HOME`. Uninspected links, inaccessible discovery roots or an inspection exceeding
+100,000 entries, 128 instruction files or 30 seconds also refuse. A customization directory containing only recognized
+instruction files is allowed. `AGENTS.md`, `AGENTS.override.md`, `CLAUDE.md` and `CLAUDE.local.md` are hashed and
+recorded as `configuration` components with version `content`, never as tools or executable authority. Readable
+instruction-file links are permitted. Refusals name discovered configuration using logical relative locations.
+
+The operator's `RunEnvironmentPolicy` must still exactly match the established inventory; observing it does not grant
+permission to admit it. The worker records its components, canonical `inventoryHash` and harness version in the intent.
+It repeats the entire preflight immediately before dispatch. Native preflight also checks that its evidence did not
+change while probing. The additive `RunPreflight.LocalBindingHash` compares command arguments, entry files, explicit
+MCP content and environment values locally; it is never copied into the intent or any other record. Thus machine
+bindings cannot silently change while the portable inventory remains the same. Any difference after intent refuses
+dispatch and records an unstarted, zero-charge failure.
+
+This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
+qualification. Real model calls, provider/account-dependent behavior and remote managed policy have not been qualified.
+The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
+attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
+Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
+existing `worker-user`, workspace-audit and process-containment limitations. Cross-platform release qualification
+still requires the builder's three-platform CI run. API v1 stays additive, record format 2 is unchanged, and RUN-02
+adds no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
 refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not

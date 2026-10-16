@@ -49,8 +49,8 @@ internal static class HarnessInventory
     {
         // Match complete option tokens on option lines; a prefix or a mention in prose is not a flag declaration.
         HashSet<string> flags = help.Split('\n').Select(l => l.Trim()).Where(l => l.StartsWith('-'))
-            .SelectMany(l => l.Split([' ', '\t', ',', '='], StringSplitOptions.RemoveEmptyEntries).TakeWhile(t => !t.StartsWith('<')))
-            .Where(t => t.StartsWith('-')).ToHashSet(StringComparer.Ordinal);
+            .SelectMany(l => l.Split([' ', '\t', ',', '='], StringSplitOptions.RemoveEmptyEntries).TakeWhile(t => t.StartsWith('-')))
+            .ToHashSet(StringComparer.Ordinal);
         foreach (string flag in required)
         {
             if (!flags.Contains(flag)) throw new ProviderRefusedException($"The {executable} help does not declare required isolation or launch flag {flag}; this version cannot be qualified.");
@@ -147,6 +147,7 @@ internal static class HarnessInventory
             bool approved = root.EnumerateObject().Count() == 1 && servers.EnumerateObject().Count() == 1 && server.EnumerateObject().Count() == 3
                 && server.GetProperty("command").GetString() == context.McpServer[0]
                 && server.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))
+                && OnlyProperties(env, context.McpEnvironment.Keys.ToArray())
                 && env.EnumerateObject().Count() == context.McpEnvironment.Count
                 && env.EnumerateObject().All(p => context.McpEnvironment.TryGetValue(p.Name, out string? value) && value == p.Value.GetString());
             if (!approved) throw new ProviderRefusedException("The explicit MCP configuration differs from the run's approved server table.");

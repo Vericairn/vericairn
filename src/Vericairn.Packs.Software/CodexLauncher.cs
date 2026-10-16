@@ -13,7 +13,7 @@ namespace Vericairn.Packs.Software;
 /// The Codex launcher (vericairn.launcher.agent/1): Codex's own /goal with the same condition as Claude Code's, through codex exec with
 /// its JSON events, in the workspace-write sandbox of the workspace, with the vericairn MCP server configured on its command line.
 /// Codex's /goal needs its goals feature, so before a run is recorded the launcher reads codex features list and refuses, saying why,
-/// when the feature is not enabled or cannot be verified. Every flag is one codex --help and codex exec --help list.
+/// when the effective feature is not enabled or cannot be verified. RUN-02 qualifies one exact version and confirms its flags in help.
 /// </summary>
 public sealed class CodexLauncher : IAgentLauncher
 {
@@ -59,13 +59,13 @@ public sealed class CodexLauncher : IAgentLauncher
         ["verify-goals", "launch", "observe-usage"],
         [
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
-            "Needs Codex's goals feature: before a run is recorded it reads codex features list, and refuses, saying why, when goals is not enabled or its state cannot be read.",
+            "Qualifies only codex-cli 0.159.0-alpha.12.1: version, documented flags, isolated configuration, effective features and MCP are established before intent and rechecked before dispatch.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
-            "Implemented against codex --help, codex exec --help and a stand-in process that speaks its events; not yet qualified against a live Codex.",
+            "Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Tested with stand-in executables; no live Codex or sign-in qualification.",
         ],
-        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "codex")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CODEX_HOME"];
@@ -158,7 +158,7 @@ public sealed class CodexLauncher : IAgentLauncher
                 && (!transport.TryGetProperty("cwd", out JsonElement cwd) || cwd.ValueKind == JsonValueKind.Null);
             JsonElement env = transport.GetProperty("env");
             approved &= context.McpEnvironment.Count == 0 && env.ValueKind == JsonValueKind.Null
-                || env.ValueKind == JsonValueKind.Object && env.EnumerateObject().Count() == context.McpEnvironment.Count
+                || HarnessInventory.OnlyProperties(env, context.McpEnvironment.Keys.ToArray()) && env.EnumerateObject().Count() == context.McpEnvironment.Count
                     && env.EnumerateObject().All(p => context.McpEnvironment.TryGetValue(p.Name, out string? value) && p.Value.GetString() == value);
             if (!approved)
             {

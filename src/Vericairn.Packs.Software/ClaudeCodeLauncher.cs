@@ -56,12 +56,12 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         ["launch", "observe-usage"],
         [
             "Runs claude -p \"/goal <condition>\" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's configuration> --strict-mcp-config in the workspace: Claude Code's own /goal, with the vericairn MCP server as its only MCP server.",
-            "Imports only Claude Code's provisioned login into a fresh run configuration; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
+            "Imports only a provisioned pro or max OAuth login into a fresh run configuration; implicit keychain login, managed accounts and environment credentials are not qualified.",
             "Watches provisional per-message tokens and settles tokens from the stream's complete final result; it reads no price, so a cap in currency is charged in full.",
-            "Excludes user, project and local settings sources, disables hooks and refuses detected managed settings; remote managed policy is not qualified and managed accounts are unsupported.",
-            "Implemented against claude --help and a stand-in process that speaks its stream; not yet qualified against a live Claude Code.",
+            "Excludes user, project and local setting sources and repository customizations; preserves and inventories the built-in goal evaluator. Selects nine built-in tools explicitly and refuses detected managed settings.",
+            "Qualifies only Claude Code 2.1.296 with every required flag confirmed by help, strict explicit MCP and two inventory checks. Tested with stand-in executables; no live Claude Code or sign-in qualification.",
         ],
-        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "claude")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CLAUDE_CONFIG_DIR"];
