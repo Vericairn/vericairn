@@ -819,6 +819,12 @@ Unsafe or excessive reports leave `complete-report` unknown. A changed fact rema
 it changes back. These observations are immutable once settled under the existing settlement rules.
 Older agent-run records may omit both fields; they establish no execution selection or environment claim.
 
+Validation also checks that each pinned policy is the policy actually present in its source record,
+that requested choices follow the recorded precedence and satisfy its restrictions, and that the
+inventory hash matches its canonical contents with every dependency and route declared. Imported
+intents receive these checks too. The worker selects the current work-order role and rechecks it
+before dispatch, even when the assignment pins an earlier work-order revision.
+
 WATCH-01 `signals` additionally admit `execution` and `tool-inventory` codes. They record critical
 execution discrepancies or invocations outside the admitted tool inventory; existing command audit
 signals remain intact. The efficiency Adapter stays disabled and absent; enabling it is unsupported.

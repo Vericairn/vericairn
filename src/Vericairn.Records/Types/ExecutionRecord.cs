@@ -45,10 +45,20 @@ internal static class ExecutionRecord
                 string? record = source.Ulid("record", false);
                 string? hash = source.Hash("hash", record is not null);
                 if (source.Nested("policy", true) is BodyReader policy) ExecutionPolicy.Validate(policy);
+                if ((scope is "roster" or "goal" or "assignment") != (record is not null))
+                {
+                    context.Error("operation.execution", "Recorded policy scopes pin their source record; launcher and run scopes have no record source.");
+                }
                 if (record is not null && scope is not null)
                 {
                     RecordEnvelope? origin = context.RequireReference("execution.provenance.record", record, scope);
                     if (origin is not null && origin.ComputedHash != hash) context.Error("operation.execution", "Execution provenance pins the exact contributing record hash.");
+                    if (origin is not null && source.Element.TryGetProperty("policy", out JsonElement policyValue)
+                        && source.Element.TryGetProperty("source", out JsonElement name) && name.ValueKind == JsonValueKind.String
+                        && !MatchesOrigin(origin, scope, name.GetString()!, policyValue))
+                    {
+                        context.Error("operation.execution", "Execution provenance preserves the policy of the exact named source and role.");
+                    }
                 }
                 source.NoOtherKeys();
             }
@@ -79,6 +89,7 @@ internal static class ExecutionRecord
                 environment.NoOtherKeys();
             }
             execution.NoOtherKeys();
+            if (!context.Findings.HasErrors) Consistency(context, execution.Element);
         }
 
         if (observed is not null)
@@ -119,5 +130,66 @@ internal static class ExecutionRecord
     private static void Identity(BodyReader reader, string field, bool required = true)
     {
         if (reader.Text(field, required, 160) is string value && !ExecutionPolicy.IsIdentity(value)) reader.Error("execution.identity", field, "A portable execution identity contains no machine path or environment value.");
+    }
+
+    private static bool MatchesOrigin(RecordEnvelope origin, string scope, string name, JsonElement policy) =>
+        (name == scope && origin.Body.TryGetProperty("execution", out JsonElement defaults) && CanonicalJson.Serialize(defaults) == CanonicalJson.Serialize(policy))
+        || (origin.Body.TryGetProperty("roles", out JsonElement roles) && roles.ValueKind == JsonValueKind.Array
+            && roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.Object && r.TryGetProperty("role", out JsonElement role) && role.ValueKind == JsonValueKind.String && role.GetString() == name
+                && r.TryGetProperty("execution", out JsonElement rolePolicy) && CanonicalJson.Serialize(rolePolicy) == CanonicalJson.Serialize(policy)));
+
+    private static void Consistency(ValidationContext context, JsonElement execution)
+    {
+        string[] scopes = ["launcher", "roster", "goal", "assignment", "run"];
+        var choices = new Dictionary<string, string>(StringComparer.Ordinal);
+        JsonElement requested = execution.GetProperty("requested");
+        JsonElement[] sources = execution.GetProperty("provenance").EnumerateArray().ToArray();
+        int previous = -1;
+        foreach (JsonElement source in sources)
+        {
+            int scope = Array.IndexOf(scopes, source.GetProperty("scope").GetString());
+            if (scope < previous || (scope == 0 && previous == 0)) Error("Execution provenance keeps launcher, roster, goal, assignment, then run precedence.");
+            previous = scope;
+            JsonElement policy = source.GetProperty("policy");
+            if (policy.TryGetProperty("choices", out JsonElement values))
+            {
+                foreach (JsonProperty value in values.EnumerateObject())
+                {
+                    choices[value.Name] = value.Value.GetString()!;
+                    if (value.Name == "adapter" && value.Value.GetString() != "disabled") Error("The efficiency Adapter is unsupported and remains disabled.");
+                }
+            }
+            if (!policy.TryGetProperty("restrictions", out JsonElement restrictions)) continue;
+            foreach ((string limit, string field) in new[] { ("requiredModel", "model"), ("requiredEffort", "effort"), ("dataBoundary", "dataBoundary") })
+            {
+                if (restrictions.TryGetProperty(limit, out JsonElement value) && value.GetString() != requested.GetProperty(field).GetString()) Error("Execution choices satisfy every inherited restriction.");
+            }
+            foreach ((string limit, string field) in new[] { ("permittedProviders", "provider"), ("permittedDestinations", "destination") })
+            {
+                if (restrictions.TryGetProperty(limit, out JsonElement allowed) && !allowed.EnumerateArray().Any(v => v.GetString() == requested.GetProperty(field).GetString())) Error("Execution choices stay within every inherited provider and destination restriction.");
+            }
+            if (restrictions.TryGetProperty("exactRevision", out JsonElement revision)
+                && (execution.GetProperty("resolvedRevision").GetString() == "unknown" || execution.GetProperty("resolvedRevision").GetString() != revision.GetString())) Error("Unknown or different model revisions cannot satisfy an exact pin.");
+            if (restrictions.TryGetProperty("maxCurrency", out JsonElement cost)
+                && (!context.Record.Body.TryGetProperty("cap", out JsonElement cap) || AgentRuns.Amount(cap, "currency") is not long amount
+                    || amount > cost.GetProperty("amount").GetInt64() || AgentRuns.CurrencyUnit(cap) != cost.GetProperty("unit").GetString())) Error("The run's reservation satisfies every inherited currency bound.");
+        }
+        if (sources[0].GetProperty("scope").GetString() != "launcher" || requested.EnumerateObject().Count() != choices.Count
+            || choices.Any(c => !requested.TryGetProperty(c.Key, out JsonElement value) || value.GetString() != c.Value)) Error("Requested execution choices are exactly the resolution of their recorded provenance.");
+
+        JsonElement environment = execution.GetProperty("environment");
+        JsonElement inventory = environment.GetProperty("inventory");
+        if (environment.GetProperty("inventoryHash").GetString() != Hashing.ContentHash.Sha256(CanonicalJson.SerializeUtf8(inventory))) Error("The admitted inventory hash identifies its exact canonical content.");
+        HashSet<string> ids = inventory.EnumerateArray().Select(c => c.GetProperty("id").GetString()!).ToHashSet(StringComparer.Ordinal);
+        HashSet<string> variables = environment.GetProperty("variables").EnumerateArray().Select(v => v.GetString()!).ToHashSet(StringComparer.Ordinal);
+        if (ids.Count != inventory.GetArrayLength() || !inventory.EnumerateArray().Any(c => c.GetProperty("kind").GetString() == "harness")) Error("The admitted inventory names its harness and each component exactly once.");
+        foreach (JsonElement component in inventory.EnumerateArray())
+        {
+            if (component.GetProperty("dependencies").EnumerateArray().Any(d => !ids.Contains(d.GetString()!))
+                || component.GetProperty("environment").EnumerateArray().Any(v => !variables.Contains(v.GetString()!))
+                || component.GetProperty("destinations").EnumerateArray().Any(d => d.GetString() is not ("local" or "estate") && d.GetString() != requested.GetProperty("destination").GetString())) Error("Every admitted dependency, environment need and route is declared by the run.");
+        }
+
+        void Error(string message) => context.Error("operation.execution", message);
     }
 }

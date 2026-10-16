@@ -166,7 +166,7 @@ public static class RunSelection
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(goal);
         ArgumentNullException.ThrowIfNull(assignment);
-        string role = WorkView.OrderOfAssignment(model, assignment) is RecordEnvelope order ? Routing.RoleOf(order) : Routing.DefaultRole;
+        string role = WorkView.OrderOfAssignment(model, assignment) is RecordEnvelope order ? Routing.RoleOf(model.Latest(order)) : Routing.DefaultRole;
         var sources = new List<RunPolicySource>();
         Add(RunWatchSettings.Roster(model, goal), "roster", true);
         Add(goal, "goal", true);

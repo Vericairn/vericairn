@@ -790,7 +790,9 @@ public sealed partial class EstateService
         try
         {
             JsonObject current = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, model.Latest(plan.Assignment)), request.Execution, Element(plan.Cap));
+            string role = WorkView.OrderOfAssignment(model, model.Latest(plan.Assignment)) is RecordEnvelope order ? Routing.RoleOf(model.Latest(order)) : Routing.DefaultRole;
             return JsonNode.DeepEquals(current["requested"], plan.Selection["requested"])
+                && role == plan.Selection["role"]!.GetValue<string>()
                 && JsonNode.DeepEquals(current["provenance"], plan.Selection["provenance"])
                 && JsonNode.DeepEquals(current["configurationHash"], plan.Selection["configurationHash"]);
         }
