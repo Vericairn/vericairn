@@ -76,10 +76,15 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
                 using JsonDocument credentials = JsonDocument.Parse(File.ReadAllText(Path.Combine(original, ".credentials.json")));
                 if (credentials.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth))
                 {
+                    if (oauth.TryGetProperty("subscriptionType", out JsonElement subscription) && subscription.GetString() is "team" or "enterprise")
+                    {
+                        throw new ProviderRefusedException("Claude Code organization logins can load remote managed settings that this launcher cannot verify; use an unmanaged worker login.");
+                    }
+
                     File.WriteAllText(login, JsonSerializer.Serialize(new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["claudeAiOauth"] = oauth }));
                 }
             }
-            catch (JsonException exception)
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
             {
                 throw new ProviderRefusedException("Claude Code's provisioned login could not be read.", exception);
             }
@@ -94,22 +99,50 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
 
     private static void RefuseManagedSettings()
     {
-        string directory = OperatingSystem.IsWindows() ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClaudeCode")
+        string directory = OperatingSystem.IsWindows() ? Path.Combine(Environment.GetEnvironmentVariable("ProgramW6432") ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClaudeCode")
             : OperatingSystem.IsMacOS() ? "/Library/Application Support/ClaudeCode" : "/etc/claude-code";
-        if (File.Exists(Path.Combine(directory, "managed-settings.json")) || Directory.Exists(Path.Combine(directory, "managed-settings.d"))
-            || (OperatingSystem.IsMacOS() && File.Exists("/Library/Managed Preferences/com.anthropic.claudecode.plist")))
+        RefuseManagedPaths([Path.Combine(directory, "managed-settings.json"), Path.Combine(directory, "managed-settings.d"), Path.Combine(directory, "managed-mcp.json")]);
+        if (OperatingSystem.IsMacOS())
         {
-            throw new ProviderRefusedException("Claude Code managed settings cannot be isolated by this launcher; use an unmanaged worker account.");
+            RefuseManagedPaths(["/Library/Managed Preferences/com.anthropic.claudecode.plist",
+                Path.Combine("/Library/Managed Preferences", Environment.UserName, "com.anthropic.claudecode.plist")]);
         }
 
         if (OperatingSystem.IsWindows())
         {
-            using RegistryKey? policy = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Policies\ClaudeCode");
-            using RegistryKey? userPolicy = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Policies\ClaudeCode");
-            if (policy is not null || userPolicy is not null)
+            foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
             {
-                throw new ProviderRefusedException("Claude Code managed settings cannot be isolated by this launcher; use an unmanaged worker account.");
+                foreach (RegistryHive hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+                {
+                    using RegistryKey root = RegistryKey.OpenBaseKey(hive, view);
+                    using RegistryKey? policy = root.OpenSubKey(@"SOFTWARE\Policies\ClaudeCode");
+                    if (policy is not null)
+                    {
+                        throw new ProviderRefusedException("Claude Code managed settings cannot be isolated by this launcher; use an unmanaged worker account.");
+                    }
+                }
             }
+        }
+    }
+
+    internal static void RefuseManagedPaths(IEnumerable<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            try
+            {
+                _ = File.GetAttributes(path); // Unlike File.Exists, access denied must not mean absent.
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                continue;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                throw new ProviderRefusedException("Claude Code managed configuration could not be checked; launch was refused.", exception);
+            }
+
+            throw new ProviderRefusedException("Claude Code managed configuration cannot be isolated by this launcher; use an unmanaged worker account.");
         }
     }
 

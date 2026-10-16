@@ -14,14 +14,58 @@ namespace Vericairn.Records.Tests;
 /// </summary>
 public class AgentRunLedgerTests
 {
+    [Fact]
+    public void AddingAGoalToAnUnfundedIdentityCannotBypassAdmission()
+    {
+        var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
+        RecordEnvelope reserved = ledger.Intent("reserved", """{"wallMinutes":9,"attemptsPerStep":10}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(reserved.Body.GetRawText())!.AsObject();
+        body["identity"] = "unfunded";
+        body["cap"]!["wallMinutes"] = 10;
+        body["target"]!.AsObject().Remove("goal");
+        RecordEnvelope initial = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString());
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        body["target"]!["goal"] = ledger.Goal;
+        body["status"] = "uncertain";
+        body["dispatchedAt"] = initial.At;
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: initial.Id);
+        var findings = ledger.Estate.Load().Findings.Where(f => f.Location == changed.ExpectedPath).ToList();
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-target-kept");
+        Assert.Contains(findings, f => f.Code == "operation.budget");
+    }
+
+    [Theory]
+    [InlineData("known-failure", "canceled")]
+    [InlineData("known-failure", "uncertain")]
+    [InlineData("known-failure", "dispatched")]
+    [InlineData("known-failure", "not-started")]
+    [InlineData("canceled", "uncertain")]
+    [InlineData("canceled", "dispatched")]
+    [InlineData("canceled", "not-started")]
+    [InlineData("observed-success", "uncertain")]
+    [InlineData("observed-success", "dispatched")]
+    [InlineData("observed-success", "not-started")]
+    public void SettledAgentRunStatesAreTerminalEvenWhenTheDispatchTimestampIsKept(string before, string after)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("terminal", Small, Usage, status: before);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = after;
+        body["reconciliation"] = "Historical facts do not authorize a new launch or reservation.";
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == changed.ExpectedPath && f.Code == "operation.agent-run-relaunch");
+    }
+
     [Theory]
     [InlineData("known-failure")]
     [InlineData("canceled")]
     public void ASettledIdentityCannotReopenAsUncertainAndReserveTheBudgetTwice(string status)
     {
         var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
-        RecordEnvelope prior = ledger.Run("settled", """{"wallMinutes":10,"attemptsPerStep":10}""", """{"wallMinutes":1,"unreported":[]}""", status: status);
+        RecordEnvelope prior = ledger.Run("settled", """{"wallMinutes":10,"attemptsPerStep":10}""",
+            status == "canceled" ? """{"wallMinutes":0,"unreported":[]}""" : """{"wallMinutes":1,"unreported":[]}""", dispatched: status != "canceled", status: status);
         ledger.Intent("remaining", """{"wallMinutes":9,"attemptsPerStep":10}""");
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
         var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
         body["status"] = "uncertain";
         body["reconciliation"] = "The earlier process exited; another launch is ambiguous.";

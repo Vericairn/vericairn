@@ -16,7 +16,8 @@ public sealed record PreparedWorkspace(string Path, string Branch, string Commit
 /// <summary>A local inventory of workspace files; fingerprints and local configuration never enter a record.</summary>
 /// <param name="Files">Repository-relative names and content or link fingerprints.</param>
 /// <param name="Problem">Why the inventory is incomplete, when it is.</param>
-public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null);
+/// <param name="Identity">An opaque local fingerprint of the physical workspace directory, when supplied by the provider.</param>
+public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null, string? Identity = null);
 
 /// <summary>
 /// The workspace contract, version 1 (vericairn.workspace/1): an isolated working tree of a repository on a work branch, made from this

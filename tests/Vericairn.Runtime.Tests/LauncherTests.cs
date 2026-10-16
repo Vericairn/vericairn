@@ -20,6 +20,59 @@ public class LauncherTests
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
+    [Theory]
+    [InlineData("team")]
+    [InlineData("enterprise")]
+    public void ClaudeRefusesKnownOrganizationLoginsWhoseRemotePolicyCannotBeVerified(string subscription)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-login-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, ".credentials.json"), "{\"claudeAiOauth\":{\"subscriptionType\":\"" + subscription + "\"}}");
+            LaunchContext context = Context(NoSettings) with
+            {
+                McpConfiguration = Path.Combine(root, "run", "mcp.json"),
+                Environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["CLAUDE_CONFIG_DIR"] = root },
+            };
+            Assert.Throws<ProviderRefusedException>(() => new ClaudeCodeLauncher().Prepare(context));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("managed-settings.json", false)]
+    [InlineData("managed-settings.d", true)]
+    [InlineData("managed-mcp.json", false)]
+    [InlineData("com.anthropic.claudecode.plist", false)]
+    public void ClaudeRefusesSyntheticManagedSourcesWithoutExecutingThem(string leaf, bool directory)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-managed-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, leaf);
+            ClaudeCodeLauncher.RefuseManagedPaths([path]);
+            if (directory)
+            {
+                Directory.CreateDirectory(path);
+            }
+            else
+            {
+                File.WriteAllText(path, "synthetic policy; never execute");
+            }
+
+            Assert.Throws<ProviderRefusedException>(() => ClaudeCodeLauncher.RefuseManagedPaths([path]));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void RealCodexProbesRejectMergedServersAndAddressCanonicalProjectTrustWithoutStartingServers()
     {
@@ -56,6 +109,22 @@ public class LauncherTests
             File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.vericairn.env]\nAMBIENT=\"synthetic\"\n");
             Assert.Throws<ProviderRefusedException>(() => CodexLauncher.VerifyMcp(context)); // Merged fields of the approved name are refused too.
 
+            // Codex also discovers the main repository when it starts in a linked worktree. Pin that actual launch workspace.
+            File.WriteAllText(Path.Combine(workspace, "README.md"), "synthetic repository");
+            Git(workspace, "add", "README.md");
+            Git(workspace, "commit", "-q", "-m", "Synthetic baseline");
+            string linked = Path.Combine(root, "linked.with.dots");
+            Git(workspace, "worktree", "add", "-q", "-b", "linked", linked);
+            linked = HarnessWorkspace.Canonical(linked);
+            Directory.CreateDirectory(Path.Combine(linked, ".codex"));
+            File.Copy(Path.Combine(workspace, ".codex", "config.toml"), Path.Combine(linked, ".codex", "config.toml"));
+            LaunchContext linkedContext = context with { Workspace = linked };
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust);
+            (int linkedCode, string linkedBaseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), linked);
+            Assert.Equal(0, linkedCode);
+            Assert.Contains("project_ambient", linkedBaseline, StringComparison.Ordinal);
+            CodexLauncher.VerifyMcp(linkedContext);
+
             string runDirectory = Path.Combine(root, "run");
             Directory.CreateDirectory(runDirectory);
             string alias = Path.Combine(root, "workspace-alias");
@@ -75,6 +144,18 @@ public class LauncherTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public void RealClaudeHelpListsTheIsolationFlagsWithoutLaunchingAnAgent()
+    {
+        string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CLAUDE");
+        Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CLAUDE to check isolation flags against --help only.");
+        (int code, string help, _) = HarnessProcess.Run([executable, "--help"], WorkerEnvironment.Build(WorkerEnvironment.Current(), []), TimeSpan.FromSeconds(30));
+        Assert.Equal(0, code);
+        Assert.Contains("--setting-sources <sources>", help, StringComparison.Ordinal);
+        Assert.Contains("--settings <file-or-json>", help, StringComparison.Ordinal);
+        Assert.Contains("--strict-mcp-config", help, StringComparison.Ordinal);
     }
 
     [Theory]

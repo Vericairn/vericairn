@@ -19,6 +19,8 @@ internal sealed class ContainedProcess
     private int detached;
 
     internal Func<int[], (int Count, int Error)>? ProcessInventory { get; set; }
+    internal Func<IEnumerable<string>>? ProcfsDirectories { get; set; }
+    internal Func<int, int, int>? UnixSignal { get; set; }
     private bool exited;
     private int exitCode;
 
@@ -142,7 +144,12 @@ internal sealed class ContainedProcess
             return true;
         }
 
-        foreach (string directory in Directory.EnumerateDirectories("/proc"))
+        if (!ProcfsInventoryVisible(File.ReadAllText("/proc/mounts")))
+        {
+            return false;
+        }
+
+        foreach (string directory in ProcfsDirectories?.Invoke() ?? Directory.EnumerateDirectories("/proc"))
         {
             if (!int.TryParse(Path.GetFileName(directory), out _))
             {
@@ -177,7 +184,16 @@ internal sealed class ContainedProcess
             }
         }
 
-        return true;
+        // The unreaped leader must still be visible. A filtered or unavailable procfs view is never an empty boundary.
+        return members.Contains(Id);
+    }
+
+    internal static bool ProcfsInventoryVisible(string mounts)
+    {
+        string[]? mounted = mounts.Split('\n').Select(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .LastOrDefault(fields => fields.Length >= 4 && fields[1] == "/proc");
+        return mounted is not null && mounted[2] == "proc"
+            && !mounted[3].Split(',').Any(option => option.StartsWith("hidepid=", StringComparison.Ordinal) && option is not ("hidepid=0" or "hidepid=off"));
     }
 
     public void Signal(bool force)
@@ -198,9 +214,15 @@ internal sealed class ContainedProcess
                 throw new Win32Exception(Marshal.GetLastPInvokeError());
             }
         }
-        else if (kill(-Id, force ? 9 : 15) != 0 && Marshal.GetLastPInvokeError() != 3)
+        else
         {
-            throw new Win32Exception(Marshal.GetLastPInvokeError());
+            // Even a cached exit observation is not permission to signal after another component stole child ownership.
+            _ = UnixStatus();
+            int result = UnixSignal?.Invoke(-Id, force ? 9 : 15) ?? kill(-Id, force ? 9 : 15);
+            if (result != 0 && Marshal.GetLastPInvokeError() != 3)
+            {
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
         }
     }
 
@@ -227,6 +249,11 @@ internal sealed class ContainedProcess
                 catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException)
                 {
                     // Inventory failures retain ownership and are retried.
+                }
+
+                if (closed)
+                {
+                    return;
                 }
 
                 Thread.Sleep(100);
@@ -262,10 +289,22 @@ internal sealed class ContainedProcess
             while (result < 0 && Marshal.GetLastPInvokeError() == 4);
         }
 
-        StandardOutput.Dispose();
-        StandardError.Dispose();
-        windowsProcess?.Dispose();
-        job?.Dispose();
+        try
+        {
+            StandardOutput.Dispose();
+        }
+        finally
+        {
+            try
+            {
+                StandardError.Dispose();
+            }
+            finally
+            {
+                windowsProcess?.Dispose();
+                job?.Dispose();
+            }
+        }
     }
 
     private bool RootExited()
@@ -277,7 +316,13 @@ internal sealed class ContainedProcess
 
         if (OperatingSystem.IsWindows())
         {
-            if (WaitForProcess(windowsProcess!, 0) != 0)
+            uint wait = WaitForProcess(windowsProcess!, 0);
+            if (wait == uint.MaxValue)
+            {
+                throw new Win32Exception(Marshal.GetLastPInvokeError());
+            }
+
+            if (wait != 0)
             {
                 return false;
             }
@@ -293,17 +338,14 @@ internal sealed class ContainedProcess
         {
             // siginfo_t is 128 bytes on Linux and smaller on Darwin. Both start with signo, errno, code;
             // Linux aligns its union to eight bytes; Darwin puts pid immediately after code.
-            byte[] info = new byte[128];
-            int result = waitid(1, (uint)Id, info, 4 | 1 | (OperatingSystem.IsMacOS() ? 0x20 : 0x1000000)); // P_PID, WEXITED | WNOHANG | WNOWAIT
-            if (result < 0)
+            byte[] info;
+            try
             {
-                int error = Marshal.GetLastPInvokeError();
-                if (error == 4)
-                {
-                    return false;
-                }
-
-                throw new Win32Exception(error);
+                info = UnixStatus();
+            }
+            catch (Win32Exception exception) when (exception.NativeErrorCode == 4)
+            {
+                return false;
             }
 
             if (BitConverter.ToInt32(info, OperatingSystem.IsMacOS() ? 12 : 16) == 0)
@@ -321,13 +363,44 @@ internal sealed class ContainedProcess
         return true;
     }
 
+    private byte[] UnixStatus()
+    {
+        byte[] info = new byte[128];
+        if (waitid(1, (uint)Id, info, 4 | 1 | (OperatingSystem.IsMacOS() ? 0x20 : 0x1000000)) < 0) // P_PID, WEXITED | WNOHANG | WNOWAIT
+        {
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
+        }
+
+        return info;
+    }
+
+    internal static void VerifyUnixHost(int processId, bool autoReap = false)
+    {
+        if (processId == 1 || autoReap)
+        {
+            // .NET's SIGCHLD handler reaps all children as PID 1, including children started through native APIs.
+            throw new Providers.ProviderRefusedException("A POSIX worker needs exclusive child ownership: run it under an init process, without ignored SIGCHLD or automatic child reaping.");
+        }
+    }
+
     // posix_spawn installs the group and redirections atomically, before the executable runs. addchdir_np is supplied by both
     // macOS and Linux's libc; there is no shell, fork of the managed runtime, or dependency on a setsid utility.
     private static ContainedProcess StartUnix(ProcessStartInfo info)
     {
+        VerifyUnixHost(Environment.ProcessId);
+        byte[] signalAction = new byte[256];
+        if (sigaction(OperatingSystem.IsMacOS() ? 20 : 17, 0, signalAction) != 0)
+        {
+            throw new Win32Exception(Marshal.GetLastPInvokeError());
+        }
+
+        int signalFlags = BitConverter.ToInt32(signalAction, OperatingSystem.IsMacOS() ? 12 : 136);
+        VerifyUnixHost(Environment.ProcessId, BitConverter.ToInt64(signalAction, 0) == 1
+            || (signalFlags & (OperatingSystem.IsMacOS() ? 0x20 : 2)) != 0); // SIG_IGN or SA_NOCLDWAIT
         nint attributes = Marshal.AllocHGlobal(1024);
         nint actions = Marshal.AllocHGlobal(1024);
         var descriptors = new List<int>();
+        var streams = new List<StreamReader>();
         var strings = new List<nint>();
         bool attrReady = false;
         bool actionsReady = false;
@@ -355,9 +428,27 @@ internal sealed class ContainedProcess
             descriptors.Remove(output[1]);
             _ = close(error[1]);
             descriptors.Remove(error[1]);
-            var result = new ContainedProcess(pid, Reader(output[0]), Reader(error[0]));
-            descriptors.Clear();
+            var result = new ContainedProcess(pid, TakeReader(output[0]), TakeReader(error[0]));
+            streams.Clear();
             return result;
+
+            StreamReader TakeReader(int descriptor)
+            {
+                // Transfer each descriptor once, including failure while constructing the second stream.
+                descriptors.Remove(descriptor);
+                var handle = new SafeFileHandle(descriptor, ownsHandle: true);
+                try
+                {
+                    StreamReader reader = Reader(handle);
+                    streams.Add(reader);
+                    return reader;
+                }
+                catch
+                {
+                    handle.Dispose();
+                    throw;
+                }
+            }
 
             int[] Pipe()
             {
@@ -407,6 +498,11 @@ internal sealed class ContainedProcess
         }
         finally
         {
+            foreach (StreamReader stream in streams)
+            {
+                stream.Dispose();
+            }
+
             foreach (int descriptor in descriptors)
             {
                 _ = close(descriptor);
@@ -431,8 +527,6 @@ internal sealed class ContainedProcess
             Marshal.FreeHGlobal(attributes);
         }
     }
-
-    private static StreamReader Reader(nint handle) => Reader(new SafeFileHandle(handle, ownsHandle: true));
 
     private static StreamReader Reader(SafeFileHandle handle) => new(new FileStream(handle, FileAccess.Read), new UTF8Encoding(false));
 
@@ -571,6 +665,7 @@ internal sealed class ContainedProcess
     [DllImport("libproc.dylib", SetLastError = true)] private static extern int proc_listpids(uint kind, uint group, [Out] int[] buffer, int size);
     [DllImport("libproc.dylib", SetLastError = true)] private static extern int proc_pidinfo(int pid, int flavor, ulong argument, [Out] byte[] buffer, int size);
     [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int signal);
+    [DllImport("libc", SetLastError = true)] private static extern int sigaction(int signal, nint action, [Out] byte[] previous);
     [DllImport("libc", SetLastError = true)] private static extern int waitid(int kind, uint pid, [Out] byte[] info, int options);
     [DllImport("libc", SetLastError = true)] private static extern int waitpid(int pid, out int status, int options);
     [DllImport("libc", SetLastError = true)] private static extern int pipe([Out] int[] pair);
@@ -597,7 +692,7 @@ internal sealed class ContainedProcess
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CreateProcessW(string? application, [In, Out] char[] command, nint processSecurity, nint threadSecurity, [MarshalAs(UnmanagedType.Bool)] bool inherit, uint flags, string environment, string directory, ref StartupInfo startup, out ProcessInformation process);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern uint ResumeThread(SafeWaitHandle thread);
     [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool TerminateProcess(SafeProcessHandle process, uint code);
-    [DllImport("kernel32.dll", EntryPoint = "WaitForSingleObject")] private static extern uint WaitForProcess(SafeProcessHandle handle, uint milliseconds);
+    [DllImport("kernel32.dll", EntryPoint = "WaitForSingleObject", SetLastError = true)] private static extern uint WaitForProcess(SafeProcessHandle handle, uint milliseconds);
     [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetExitCodeProcess(SafeProcessHandle process, out uint code);
 #pragma warning restore CA2101
 #pragma warning restore SYSLIB1054

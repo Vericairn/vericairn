@@ -140,7 +140,9 @@ public sealed class OperationType : IRecordType
         bool reserves = status is "not-started" or "dispatched" or "uncertain";
         RecordEnvelope? predecessor = context.Record.Supersedes is string previousId ? context.Find(previousId) : null;
         bool alreadyReserved = predecessor is not null && EstateModel.BodyString(predecessor, "action") == AgentRun
-            && EstateModel.BodyString(predecessor, "status") is "not-started" or "dispatched" or "uncertain";
+            && EstateModel.BodyString(predecessor, "status") is "not-started" or "dispatched" or "uncertain"
+            && predecessor.Body.TryGetProperty("target", out JsonElement previousTarget)
+            && target.ValueKind == JsonValueKind.Object && CanonicalJson.Serialize(previousTarget) == CanonicalJson.Serialize(target);
         if (reserves && !alreadyReserved && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
         {
             RecordEnvelope? goal = AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record);
@@ -189,7 +191,7 @@ public sealed class OperationType : IRecordType
         return decider.Principal is not null && decider.Principal == context.Record.By;
     }
 
-    /// <summary>A revision keeps the cap its run's intent recorded: what a run may spend is fixed before it starts.</summary>
+    /// <summary>A revision keeps its intent's cap and target: the allowance and what it funds are fixed before launch.</summary>
     private static void Kept(ValidationContext context, JsonElement cap)
     {
         if (context.Record.Supersedes is null)
@@ -201,6 +203,12 @@ public sealed class OperationType : IRecordType
         if (intent.Id != context.Record.Id && intent.Body.TryGetProperty("cap", out JsonElement recorded) && CanonicalJson.Serialize(recorded) != CanonicalJson.Serialize(cap))
         {
             context.Error("operation.cap", "An agent run keeps the cap its intent recorded in every revision; what a run may spend is fixed before it starts.");
+        }
+
+        if (intent.Id != context.Record.Id && intent.Body.TryGetProperty("target", out JsonElement target)
+            && context.Record.Body.TryGetProperty("target", out JsonElement current) && CanonicalJson.Serialize(target) != CanonicalJson.Serialize(current))
+        {
+            context.Error("operation.agent-run-target-kept", "An agent run keeps its intent's target, including its goal and assignment; moving a reservation requires a new admitted intent.");
         }
     }
 
@@ -415,9 +423,9 @@ public sealed class OperationType : IRecordType
             if (EstateModel.BodyString(previous, "action") == AgentRun
                 && (EstateModel.BodyString(context.Record, "action") != AgentRun
                     || (status == "dispatched" && previousStatus != "not-started")
-                    || (previousStatus is "known-failure" or "canceled" or "observed-success" && status is "not-started" or "dispatched" or "uncertain")))
+                    || (previousStatus is "known-failure" or "canceled" or "observed-success" && status != previousStatus)))
             {
-                context.Error("operation.agent-run-relaunch", "Every physical agent launch needs a new agent-run intent and budget admission; an existing run identity is never dispatched again.");
+                context.Error("operation.agent-run-relaunch", "An agent-run identity is launched at most once and never reopens after settlement or cancellation; a retry needs a new intent and budget admission.");
             }
 
             if (EstateModel.BodyString(previous, "action") == AgentRun

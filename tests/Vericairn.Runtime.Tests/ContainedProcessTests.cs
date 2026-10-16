@@ -11,6 +11,52 @@ namespace Vericairn.Runtime.Tests;
 public class ContainedProcessTests
 {
     [Fact]
+    public void AGroupIsNeverSignaledAfterAnotherReaperTakesItsLeader()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "POSIX wait ownership regression; Windows keeps an owned job handle.");
+        Assert.Throws<Vericairn.Runtime.Providers.ProviderRefusedException>(() => ContainedProcess.VerifyUnixHost(1));
+        Assert.Throws<Vericairn.Runtime.Providers.ProviderRefusedException>(() => ContainedProcess.VerifyUnixHost(2, autoReap: true));
+        using var run = new RunEstate();
+        ContainedProcess process = Start(run, "generic");
+        bool signaled = false;
+        try
+        {
+            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.Equal(process.Id, waitpid(process.Id, out _, 0)); // Deliberately emulate a foreign reaper.
+            process.UnixSignal = (_, _) => { signaled = true; return 0; }; // Never actually signal a potentially recycled group in a regression.
+            System.ComponentModel.Win32Exception failure = Assert.Throws<System.ComponentModel.Win32Exception>(() => process.Signal(force: true));
+            Assert.Equal(10, failure.NativeErrorCode); // ECHILD: ownership was lost.
+            Assert.False(signaled);
+        }
+        finally
+        {
+            process.Close();
+        }
+    }
+
+    [Fact]
+    public void LinuxProcfsCannotCertifyContainmentWithAFilteredInventoryOrAMissingLeader()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "This regression exercises Linux procfs; macOS uses libproc and Windows uses a Job Object.");
+        Assert.False(ContainedProcess.ProcfsInventoryVisible("proc /proc proc rw,hidepid=2 0 0"));
+        Assert.False(ContainedProcess.ProcfsInventoryVisible("proc /proc proc rw,hidepid=invisible 0 0"));
+        using var run = new RunEstate();
+        ContainedProcess process = Start(run, "generic");
+        try
+        {
+            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            process.ProcfsDirectories = () => [];
+            Assert.False(process.BoundaryExited());
+            process.ProcfsDirectories = null;
+            Assert.True(process.BoundaryExited());
+        }
+        finally
+        {
+            process.Close();
+        }
+    }
+
+    [Fact]
     public void FailedMacInventoryNeverCertifiesAnEmptyBoundaryAndCanBeRetried()
     {
         if (!OperatingSystem.IsMacOS())
@@ -19,18 +65,30 @@ public class ContainedProcessTests
         }
 
         using var run = new RunEstate();
-        ContainedProcess process = Start(run, "generic");
-        Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+        string stop = Path.Combine(run.Scratch, "stop-native-root");
+        ContainedProcess process = Start(run, "child-survives-root", stop);
         try
         {
+            Assert.True(SpinWait.SpinUntil(() => File.Exists(run.Report("child-survives-root")) && File.Exists(run.Report("child-survives-root") + ".child"), TimeSpan.FromSeconds(20)));
+            File.WriteAllText(stop, "stop the root; its child ignores this request");
+            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.False(process.BoundaryExited()); // The same-group child is still alive after its leader exits.
             process.ProcessInventory = _ => (0, 1); // EPERM: libproc returns zero on failure.
             Assert.False(process.BoundaryExited());
             Assert.False(process.BoundaryExited());
             process.ProcessInventory = null;
-            Assert.True(process.BoundaryExited());
+            Assert.False(process.BoundaryExited());
         }
         finally
         {
+            process.ProcessInventory = null;
+            if (!process.BoundaryExited())
+            {
+                process.Signal(force: true);
+            }
+
+            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.True(SpinWait.SpinUntil(process.BoundaryExited, TimeSpan.FromSeconds(20)));
             process.Close();
         }
     }
@@ -107,10 +165,15 @@ public class ContainedProcessTests
         }
     }
 
-    private static ContainedProcess Start(RunEstate run, string scenario)
+    private static ContainedProcess Start(RunEstate run, string scenario, string? stop = null)
     {
         List<string> command = FakeHarness.Command(scenario, run.Report(scenario));
         var info = new ProcessStartInfo(command[0]) { WorkingDirectory = run.Scratch };
+        if (stop is not null)
+        {
+            info.Environment["VERICAIRN_STOP_FILE"] = stop;
+        }
+
         foreach (string argument in command.Skip(1))
         {
             info.ArgumentList.Add(argument);

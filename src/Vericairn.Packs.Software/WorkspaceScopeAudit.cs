@@ -25,6 +25,7 @@ internal static class WorkspaceScopeAudit
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
+        string? identity = null;
         var watch = Stopwatch.StartNew();
         long bytes = 0;
         try
@@ -34,16 +35,21 @@ internal static class WorkspaceScopeAudit
                 return new WorkspaceSnapshot(files, "The workspace repository identity is unavailable; assignment scope is unverified.");
             }
 
+            identity = DirectoryIdentity(workspace);
             // Inventory the physical tree, including ignored and untracked files. Agent-modifiable Git configuration and
             // GIT_DIR/GIT_WORK_TREE never decide which ordinary workspace files the audit can see.
             Visit(workspace, "");
+            if (identity != DirectoryIdentity(workspace))
+            {
+                throw new IOException("The workspace changed identity during its inventory.");
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
         {
             problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
         }
 
-        return new WorkspaceSnapshot(files, problem);
+        return new WorkspaceSnapshot(files, problem, identity);
 
         void CheckDeadline()
         {
@@ -118,6 +124,47 @@ internal static class WorkspaceScopeAudit
         }
     }
 
+    private static string DirectoryIdentity(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using SafeFileHandle handle = CreateFileW(path, 0, 7, 0, 3, 0x02200000, 0); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+            byte[] identity = new byte[24]; // FILE_ID_INFO: volume serial number and 128-bit file id.
+            if (handle.IsInvalid || !GetFileInformationByHandleEx(handle, 9, out FileTag tag, 8)
+                || (tag.Attributes & (0x400u | 0x10u)) != 0x10u
+                || !GetFileIdentity(handle, 18, identity, identity.Length))
+            {
+                throw new IOException("The physical workspace identity is unavailable.");
+            }
+
+            return Hash(identity);
+        }
+
+        byte[] stat = new byte[256];
+        if (lstat(path, stat) != 0 || (BitConverter.ToUInt16(stat, ModeOffset()) & 0xf000) != 0x4000)
+        {
+            throw new IOException("The physical workspace is not an ordinary directory.");
+        }
+
+        // Darwin's device is 32 bits; Linux's is 64. The inode starts at offset eight on supported 64-bit platforms.
+        return Hash(stat.Take(OperatingSystem.IsMacOS() ? 4 : 8).Concat(stat.Skip(8).Take(8)).ToArray());
+    }
+
+    private static int ModeOffset()
+    {
+        if (OperatingSystem.IsMacOS())
+        {
+            return 4;
+        }
+
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm64 => 16,
+            Architecture.X64 => 24,
+            _ => throw new IOException("The scope observer cannot classify files on this architecture."),
+        };
+    }
+
     private static SafeFileHandle OpenRegular(string path)
     {
         if (OperatingSystem.IsWindows())
@@ -134,7 +181,7 @@ internal static class WorkspaceScopeAudit
         }
 
         byte[] stat = new byte[256];
-        int modeOffset = OperatingSystem.IsMacOS() ? 4 : RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? 16 : 24;
+        int modeOffset = ModeOffset();
         if (lstat(path, stat) != 0 || (BitConverter.ToUInt16(stat, modeOffset) & 0xf000) != 0x8000)
         {
             throw new IOException("The scope entry is not a regular file.");
@@ -160,6 +207,7 @@ internal static class WorkspaceScopeAudit
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] private static extern SafeFileHandle CreateFileW(string path, uint access, uint share, nint security, uint creation, uint flags, nint template);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern uint GetFileType(SafeFileHandle handle);
     [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int kind, out FileTag info, int size);
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileIdentity(SafeFileHandle handle, int kind, [Out] byte[] info, int size);
 #pragma warning restore CA2101
 #pragma warning restore SYSLIB1054
     [StructLayout(LayoutKind.Sequential)] private struct FileTag { public uint Attributes, Tag; }
@@ -172,6 +220,10 @@ internal static class WorkspaceScopeAudit
             .Where(Relative).ToArray();
         string[] outside = changes.Where(path => !patterns.Any(pattern => Matches(path, pattern))).ToArray();
         string? problem = before.Problem ?? after.Problem;
+        if (before.Identity != after.Identity)
+        {
+            problem ??= "The physical workspace identity changed after launch; assignment scope is unverified.";
+        }
         if (patterns.Length == 0)
         {
             problem ??= "The assignment declares no interpretable repository-relative permitted paths; no changed path is authorized by this audit.";

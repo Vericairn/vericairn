@@ -10,6 +10,38 @@ namespace Vericairn.Runtime.Tests;
 public class WorkspaceScopeTests
 {
     [Fact]
+    public void ReplacingThePhysicalWorkspaceCannotProduceACleanScopeAudit()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/replaced", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        Assert.Null(before.Problem);
+        string displaced = workspace.Path + "-displaced";
+        Directory.Move(workspace.Path, displaced);
+        Directory.CreateDirectory(workspace.Path);
+        File.Copy(Path.Combine(displaced, "README.md"), Path.Combine(workspace.Path, "README.md"));
+        File.Copy(Path.Combine(displaced, ".git"), Path.Combine(workspace.Path, ".git"));
+        File.WriteAllText(Path.Combine(displaced, "forbidden.txt"), "The agent's original workspace was moved.");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.NotNull(scope.Problem);
+        Assert.Contains("identity", scope.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReplacingGitAdministrationCannotHideFilesInThePhysicalWorkspace()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/git-file", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, ".git"), "gitdir: missing-administration\n");
+        File.WriteAllText(Path.Combine(workspace.Path, "forbidden.txt"), "outside scope");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Contains("forbidden.txt", scope.Outside);
+    }
+
+    [Fact]
     public async Task AFifoIsRejectedLocallyWithoutOpeningItAndNoBlockedAuditThreadSurvivesTheTest()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "FIFO acquisition is POSIX-specific; Windows checks disk handles without following reparses.");

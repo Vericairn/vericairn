@@ -61,25 +61,47 @@ public class WorkerTests
     {
         using var run = new RunEstate();
         string? attemptedAt = null;
+        string? signalAttemptedAt = null;
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
             BeforeTransmission = () =>
             {
-                Thread.Sleep(1100);
+                string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
                 attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+            },
+            BeforeSignal = force =>
+            {
+                if (!force)
+                {
+                    string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                    WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
+                    signalAttemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                }
             },
         };
         RunResponse started = run.Start("generic", "ack-stop", run.Report("transmission-time"));
         Assert.True(started.Ok, started.Message);
         WaitUntil(() => File.Exists(run.Report("transmission-time")));
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Observe transmission after the attempt.", 5));
-        Assert.Equal("contained", stopped.State);
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
         Assert.NotNull(attemptedAt);
         var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         Assert.True(File.Exists(files.StopFile));
-        Assert.True(string.CompareOrdinal(stopped.Stop!.TransmittedAt, RecordParser.FormatTimestamp(File.GetLastWriteTimeUtc(files.StopFile))) >= 0);
-        Assert.True(string.CompareOrdinal(stopped.Stop!.TransmittedAt, attemptedAt) >= 0);
-        Assert.True(string.CompareOrdinal(stopped.Stop.AcknowledgedAt, stopped.Stop.TransmittedAt) >= 0);
+        Assert.True(string.CompareOrdinal(stop.TransmittedAt, RecordParser.FormatTimestamp(File.GetLastWriteTimeUtc(files.StopFile))) >= 0);
+        Assert.True(string.CompareOrdinal(stop.TransmittedAt, attemptedAt) >= 0);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Null(signalAttemptedAt); // Windows transmits the stop file; it has no cooperative process-group signal.
+        }
+        else
+        {
+            Assert.NotNull(signalAttemptedAt);
+            Assert.True(string.CompareOrdinal(stop.TransmittedAt, signalAttemptedAt) >= 0);
+        }
+
+        Assert.True(string.CompareOrdinal(stop.AcknowledgedAt, stop.TransmittedAt) >= 0);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
         Assert.Equal(0, run.Service.Check().Errors);
     }
