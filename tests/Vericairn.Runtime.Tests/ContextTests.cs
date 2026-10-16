@@ -17,6 +17,86 @@ namespace Vericairn.Runtime.Tests;
 public class ContextTests
 {
     [Fact]
+    public void BudgetCountsTheFinalUtf8PayloadIncludingWithheldEntriesAndItsOwnAccounting()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        byte[] optional = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("café 漢字\n", 20_000)));
+        AddDocument(estate, "docs/large.md", optional);
+        using EstateService service = EstateService.Open(estate.Root);
+        ContextPackage unlimited = service.Context("H-1").Package!;
+        Assert.Equal("limit not set", unlimited.Payload.GetProperty("accounting").GetProperty("capSource").GetString());
+        long cap = unlimited.Bytes / 2;
+        ContextResponse response = service.Context("H-1", cap);
+        ContextPackage bounded = Assert.IsType<ContextPackage>(response.Package);
+        JsonElement accounting = bounded.Payload.GetProperty("accounting");
+        Assert.Equal(Encoding.UTF8.GetByteCount(response.Text), bounded.Bytes);
+        Assert.Equal(bounded.Bytes, accounting.GetProperty("bytes").GetInt64());
+        Assert.Equal(cap - bounded.Bytes, accounting.GetProperty("remainingBytes").GetInt64());
+        Assert.Equal(0, accounting.GetProperty("overageBytes").GetInt64());
+        Assert.Equal(JsonValueKind.Null, accounting.GetProperty("tokens").ValueKind);
+        Assert.Equal(JsonValueKind.Null, accounting.GetProperty("model").ValueKind);
+        Assert.Equal("not claimed", accounting.GetProperty("modelFit").GetString());
+        Assert.Contains("separate from the run spending cap", accounting.GetProperty("allocationKind").GetString(), StringComparison.Ordinal);
+        JsonElement withheld = Assert.Single(bounded.Payload.GetProperty("withheld").EnumerateArray());
+        Assert.Equal(optional.LongLength, withheld.GetProperty("originalBytes").GetInt64());
+        Assert.Equal("budget", withheld.GetProperty("reason").GetString());
+        string manifest = bounded.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
+        Assert.Equal(optional, service.ContextRead(manifest, withheld.GetProperty("key").GetString()!).Content);
+        Assert.Equal(bounded.Hash, service.Context("H-1", cap).Package!.Hash);
+        Assert.True(ContextAccounting.Verify(bounded));
+        JsonObject edited = JsonNode.Parse(bounded.Payload.GetRawText())!.AsObject();
+        edited["withheld"] = new JsonArray();
+        Assert.False(ContextAccounting.Verify(bounded with { Payload = JsonSerializer.SerializeToElement(edited) }));
+        Assert.Null(service.Context("H-1", 1).Package);
+        Assert.Equal("context-over-budget", service.Context("H-1", 1).Problem!.Code);
+        Assert.Equal("invalid", service.Context("H-1", 0).Problem!.Code);
+        Assert.Equal("invalid", service.Context("H-1", long.MaxValue).Problem!.Code);
+    }
+
+    [Fact]
+    public void MandatoryPayloadAndManifestOverheadAreNeverTruncatedToFit()
+    {
+        byte[] original = Encoding.UTF8.GetBytes("Required: café 漢字.\n");
+        var source = new ContextAssembly.Source(new JsonObject { ["kind"] = "document", ["path"] = "docs/required.md", ["byteHash"] = ContentHash.Sha256(original), ["bytes"] = original.LongLength }, original, true, "before deciding");
+        var basis = new JsonObject { ["scope"] = "one required original" };
+        Assert.Equal("context-over-budget", ContextAssembly.Select(basis, [source], "The full required instructions.", original.Length).Problem!.Code);
+        long cap = 10_000;
+        for (int i = 0; i < 10; i++)
+        {
+            long measured = ContextAssembly.Build(basis, [source], "The full required instructions.", cap).Bytes;
+            if (cap == measured)
+            {
+                break;
+            }
+
+            cap = measured;
+        }
+
+        ContextResponse exact = ContextAssembly.Select(basis, [source], "The full required instructions.", cap);
+        Assert.NotNull(exact.Package);
+        Assert.Equal(cap, Encoding.UTF8.GetByteCount(exact.Text));
+        Assert.Equal(original, Convert.FromBase64String(exact.Package.Payload.GetProperty("originals")[0].GetProperty("content").GetString()!));
+        ContextResponse overflow = ContextAssembly.Select(basis, [source], "The full required instructions.", cap - 1);
+        Assert.Null(overflow.Package);
+        Assert.Equal("context-over-budget", overflow.Problem!.Code);
+        Assert.Contains("Nothing was truncated or dispatched", overflow.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AccountingRemainsExactAcrossDecimalBoundaries()
+    {
+        for (int cap = 900; cap <= 1100; cap++)
+        {
+            ContextPackage package = ContextAccounting.Measure(new JsonObject { ["text"] = "A multibyte payload: 漢字 café." }, cap);
+            Assert.True(ContextAccounting.Verify(package));
+            JsonElement accounting = package.Payload.GetProperty("accounting");
+            Assert.Equal(Math.Max(0, cap - package.Bytes), accounting.GetProperty("remainingBytes").GetInt64());
+            Assert.Equal(Math.Max(0, package.Bytes - cap), accounting.GetProperty("overageBytes").GetInt64());
+        }
+    }
+
+    [Fact]
     public void SelectionOrdersMandatoryMaterialFirstAndLabelsEveryPartialOriginal()
     {
         byte[] bytes = Encoding.UTF8.GetBytes("café and more material\n");

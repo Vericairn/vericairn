@@ -33,7 +33,7 @@ internal static class ContextAssembly
         ["bytes"] = file.Bytes.LongLength,
     }, file.Bytes, mandatory, dependency);
 
-    internal static ContextPackage Build(JsonObject basis, IEnumerable<Source> selected, string presentation)
+    internal static ContextPackage Build(JsonObject basis, IEnumerable<Source> selected, string presentation, long? maxBytes = null)
     {
         List<Source> sources = selected.OrderByDescending(s => s.Mandatory)
             .ThenBy(s => s.Identity["kind"]!.GetValue<string>(), StringComparer.Ordinal)
@@ -137,24 +137,102 @@ internal static class ContextAssembly
             ["method"] = "deterministic record views",
             ["synthesis"] = "off",
             ["review"] = "derived, not accepted",
+            ["loss"] = "irreversible reduction of this representation; original retained",
+            ["limitations"] = "The view does not reproduce every original field; it cannot replace required originals.",
             ["basis"] = entries.DeepClone(),
             ["text"] = presentation,
         };
         string derivativeHash = ContentHash.Sha256(Bytes(derivative));
+        var derivatives = new JsonArray(new JsonObject { ["hash"] = derivativeHash, ["role"] = "presentation" });
+        foreach (JsonObject excerpt in excerpts.Cast<JsonObject>())
+        {
+            derivatives.Add(new JsonObject { ["hash"] = ContentHash.Sha256(Bytes(excerpt)), ["role"] = "excerpt", ["source"] = excerpt["source"]!.DeepClone() });
+        }
+
         var payload = new JsonObject
         {
             ["format"] = Format,
             ["manifest"] = new JsonObject { ["hash"] = manifestHash, ["content"] = manifest },
             ["originals"] = originals,
             ["presentation"] = derivative,
-            ["derivatives"] = new JsonArray(new JsonObject { ["hash"] = derivativeHash, ["role"] = "presentation" }),
+            ["derivatives"] = derivatives,
             ["excerpts"] = excerpts,
             ["withheld"] = withheld,
             ["completeness"] = withheld.Count == 0 ? "Complete for the declared selection; no claim about sources outside it."
                 : "Mandatory originals are inlined; inspect every withheld entry before depending on optional material. No claim about sources outside this selection.",
             ["limitations"] = new JsonArray("This derived package grants no authority; check current authority before acting.", "Remote is not built."),
         };
-        return Measure(payload);
+        return ContextAccounting.Measure(payload, maxBytes);
+    }
+
+    internal static ContextResponse Select(JsonObject basis, IReadOnlyList<Source> selected, string presentation, long? maxBytes)
+    {
+        if (maxBytes is <= 0 or > CanonicalJson.MaxSafeInteger)
+        {
+            return new ContextResponse("The context byte allocation must be a positive safe integer.\n", null,
+                new Problem("invalid", "The context byte allocation must be a positive safe integer.", []));
+        }
+
+        ContextPackage full = Build(basis, selected, presentation, maxBytes);
+        if (maxBytes is not long cap || full.Bytes <= cap)
+        {
+            return new ContextResponse(Serialize(full), full, null);
+        }
+
+        // Use the manifest's order for every optional selection, independent of the enumeration supplied by a caller.
+        List<Source> candidates = selected.OrderByDescending(s => s.Mandatory)
+            .ThenBy(s => Encoding.UTF8.GetString(Bytes(s.Identity)), StringComparer.Ordinal)
+            .ThenBy(s => s.Dependency, StringComparer.Ordinal).ToList();
+        List<Source> chosen = candidates.Select(s => s.Mandatory ? s : s with { Inline = false, ExcerptBytes = null }).ToList();
+        ContextPackage package = Build(basis, chosen, presentation, cap);
+        // Very small originals can cost less than their withheld entries. Include all cost-reducing ones first.
+        for (int i = 0; i < chosen.Count; i++)
+        {
+            if (chosen[i].Mandatory || chosen[i].Original is null)
+            {
+                continue;
+            }
+
+            Source prior = chosen[i];
+            chosen[i] = candidates[i];
+            ContextPackage trial = Build(basis, chosen, presentation, cap);
+            if (trial.Bytes <= package.Bytes)
+            {
+                package = trial;
+            }
+            else
+            {
+                chosen[i] = prior;
+            }
+        }
+
+        if (package.Bytes > cap)
+        {
+            string message = $"Context over budget: mandatory originals, the complete manifest, withheld list and accounting require {package.Bytes.ToString(CultureInfo.InvariantCulture)} bytes; allocation {cap.ToString(CultureInfo.InvariantCulture)} bytes; overage {(package.Bytes - cap).ToString(CultureInfo.InvariantCulture)} bytes. Nothing was truncated or dispatched. Narrow the next step, retrieve in bounded stages or obtain a larger context allocation within the run cap.";
+            return new ContextResponse(message + "\n", null, new Problem("context-over-budget", message, []));
+        }
+
+        for (int i = 0; i < chosen.Count; i++)
+        {
+            if (chosen[i].Mandatory || chosen[i].Inline || chosen[i].Original is null)
+            {
+                continue;
+            }
+
+            Source prior = chosen[i];
+            chosen[i] = candidates[i];
+            ContextPackage trial = Build(basis, chosen, presentation, cap);
+            if (trial.Bytes <= cap)
+            {
+                package = trial;
+            }
+            else
+            {
+                chosen[i] = prior;
+            }
+        }
+
+        return new ContextResponse(Serialize(package), package, null);
     }
 
     internal static ContextPackage Measure(JsonObject payload)

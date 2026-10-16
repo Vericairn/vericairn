@@ -17,7 +17,7 @@ public sealed partial class EstateService
     private const string ContextDenied = "Completeness cannot be confirmed.";
 
     /// <inheritdoc />
-    public ContextResponse Context(string workOrder)
+    public ContextResponse Context(string workOrder, long? maxBytes = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
@@ -30,11 +30,11 @@ public sealed partial class EstateService
             }
 
             RecordEnvelope? order = WorkView.FindOrder(model, workOrder);
-            return order is null ? ContextRefusal("not-found", "No work order has that identity.") : ContextLocked(model, files, order);
+            return order is null ? ContextRefusal("not-found", "No work order has that identity.") : ContextLocked(model, files, order, maxBytes);
         }
     }
 
-    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order)
+    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null)
     {
         List<FindingDto> errors = model.Findings.Where(f => f.Severity == Severity.Error)
             .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)).ToList();
@@ -64,9 +64,13 @@ public sealed partial class EstateService
         }
 
         JsonObject basis = ContextSelection.Basis(model, "The work order's record dependency closure and current document catalogue; document originals are optional unless referenced by the work. Unrelated records, output objects and unrecorded conversation are outside this selection.", order);
-        ContextPackage package = ContextAssembly.Build(basis, sources, WorkView.RenderBrief(model, order));
-        RetainContext(package, sources);
-        return new ContextResponse(ContextAssembly.Serialize(package), package, null);
+        ContextResponse response = ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order), maxBytes);
+        if (response.Package is { } package)
+        {
+            RetainContext(package, sources);
+        }
+
+        return response;
     }
 
     private void RetainContext(ContextPackage package, IEnumerable<ContextAssembly.Source> sources)

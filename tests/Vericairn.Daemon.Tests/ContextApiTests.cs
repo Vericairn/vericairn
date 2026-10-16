@@ -25,6 +25,7 @@ public class ContextApiTests
         ContextResponse served = client.Context("C-1");
         Assert.Null(served.Problem);
         Assert.Equal(local.Package!.Hash, served.Package!.Hash);
+        Assert.Equal("context-over-budget", client.Context("C-1", 1).Problem!.Code);
         string manifest = served.Package.Payload.GetProperty("manifest").GetProperty("hash").GetString()!;
         foreach (JsonElement source in served.Package.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray())
         {

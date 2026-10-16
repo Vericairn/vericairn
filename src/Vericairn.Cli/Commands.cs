@@ -105,9 +105,9 @@ internal static class Commands
     }));
 
     /// <summary>Prepare and retain context through the runtime's common contract.</summary>
-    public static int ContextPrepare(string root, string workOrder, bool json) => WithApi(root, api =>
+    public static int ContextPrepare(string root, string workOrder, bool json, long? maxBytes = null) => WithApi(root, api =>
     {
-        ContextResponse response = api.Context(workOrder);
+        ContextResponse response = api.Context(workOrder, maxBytes);
         Console.Out.Write(json ? JsonSerializer.Serialize(response.Package is null ? (object)response.Problem! : response.Package, ProtocolJson.Options) : response.Text);
         return response.Problem is null ? Clean : Failed;
     });

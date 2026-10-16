@@ -16,6 +16,24 @@ namespace Vericairn.Cli.Tests;
 public class ContextJourneyTests
 {
     [Fact]
+    public void PrepareUsesTheSameMeasuredPayloadThroughCliAndMcpAndRejectsOverflow()
+    {
+        using var estate = new HandoffEstate();
+        estate.Add("work-order", estate.OperatorId, """{"key":"C-1","kind":"ordinary","title":"Context","intent":"Continue.","scope":["work"],"exitQuestion":"Complete?","inputs":[],"deliverables":["result"]}""");
+        using EstateService api = EstateService.Open(estate.Root);
+        var registry = new ToolRegistry(api, null);
+        string text = CliHarness.Ok("--estate", estate.Root, "context", "prepare", "C-1", "--max-bytes", "100000").Out;
+        ToolCallResult mcp = registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "100000" });
+        Assert.Equal(text, mcp.Text);
+        using JsonDocument payload = JsonDocument.Parse(text);
+        Assert.Equal(Encoding.UTF8.GetByteCount(text), payload.RootElement.GetProperty("accounting").GetProperty("bytes").GetInt64());
+        Assert.False(mcp.IsError);
+        Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "context", "prepare", "C-1", "--max-bytes", "1").Code);
+        Assert.True(registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "1" }).IsError);
+        Assert.True(registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1", ["maxBytes"] = "not a cap" }).IsError);
+    }
+
+    [Fact]
     public void EveryGeneratedWithheldCommandAndMcpReadReturnsThePinnedBytesOrItsUnavailableState()
     {
         using var estate = new HandoffEstate();

@@ -19,6 +19,26 @@ records, its canonical record hash as well. Missing or corrupted bytes never
 fall back to a new revision. The SDK exposes the same operations. These are
 additive API v1 routes and introduce no record type. Remote is not built.
 
+The optional `maxBytes` query on context preparation is the admitted **context
+input allocation**, separate from any run spending cap. With no cap, all
+available selected sources are included and accounting says `limit not set`.
+Under a cap, mandatory originals remain complete and optional sources are
+selected deterministically. The whole manifest, withheld entries and accounting
+must fit too, or `context-over-budget` returns no package. `accounting.bytes`
+measures the exact final canonical pretty UTF-8 payload including that report;
+`remainingBytes` and `overageBytes` use the same count. The package sidecar pins
+the payload hash and count; edits invalidate it. A counted serialization-padding
+field is possible where decimal digit boundaries otherwise oscillate.
+
+Tokens and model are explicitly unknown: no qualified local tokenizer is
+available, no byte-to-token estimate is used, and no counting call uploads
+content. Model fit and autonomous dispatch remain unqualified by this byte
+measurement. The caller must resolve existing conversation, harness/tool
+framing, model limits and reserves before budget-dependent dispatch. Transport
+framing and provider-billed usage are separate unknowns, not zero. The MCP
+`context_prepare` text and ordinary `context prepare` stdout are exactly this
+measured payload; API/SDK JSON envelopes and `--json` sidecars are transport.
+
 This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.

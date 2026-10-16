@@ -28,7 +28,7 @@ public interface IEstateApi
     ResumeResponse ResumeHandoff(HandoffPackage package);
 
     /// <summary>Retain the deterministic context package for a work order; no record or authority is authored.</summary>
-    ContextResponse Context(string workOrder);
+    ContextResponse Context(string workOrder, long? maxBytes = null);
 
     /// <summary>Read a pinned original through a retained context manifest, rechecking access and hashes.</summary>
     ContextReadResponse ContextRead(string manifest, string source);

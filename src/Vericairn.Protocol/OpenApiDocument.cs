@@ -113,7 +113,7 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
             }
 
-            if (method == "GET" && path == "/v1/handoff")
+            if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional canonical payload byte limit. Overflow refuses the whole hand-over." });
             }
@@ -125,13 +125,16 @@ public static class OpenApiDocument
 
             if (path.Contains('{', StringComparison.Ordinal))
             {
-                var parameters = new JsonArray();
+                JsonArray parameters = operation["parameters"] as JsonArray ?? new JsonArray();
                 foreach (string name in path.Split('/').Where(s => s.StartsWith('{')).Select(s => s.Trim('{', '}')))
                 {
                     parameters.Add(new JsonObject { ["name"] = name, ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" } });
                 }
 
-                operation["parameters"] = parameters;
+                if (operation["parameters"] is null)
+                {
+                    operation["parameters"] = parameters;
+                }
             }
 
             if (method == "POST" && path != "/v1/shutdown")

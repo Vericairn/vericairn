@@ -97,8 +97,10 @@ internal static class CliApp
         var context = new Command("context", "Prepare measured context and retrieve pinned originals under current permission.");
         var prepare = new Command("prepare", "Retain the context package for a work order.");
         var work = new Argument<string>("work-order");
+        var allocation = new Option<long?>("--max-bytes") { Description = "Remaining context input allocation in bytes, separate from the run spending cap. Mandatory overflow is refused." };
         prepare.Arguments.Add(work);
-        prepare.SetAction(p => Commands.ContextPrepare(p.GetValue(estateOption)!, p.GetValue(work)!, p.GetValue(jsonOption)));
+        prepare.Options.Add(allocation);
+        prepare.SetAction(p => Commands.ContextPrepare(p.GetValue(estateOption)!, p.GetValue(work)!, p.GetValue(jsonOption), p.GetValue(allocation)));
         context.Subcommands.Add(prepare);
 
         var read = new Command("read", "Read and verify an exact retained original, never silently its latest revision.");

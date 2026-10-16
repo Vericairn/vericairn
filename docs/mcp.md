@@ -19,6 +19,12 @@ receives no source metadata. These tools author no records; preparation retains
 the derived artifact and originals in existing object custody. Regenerate the
 estate orientation when adopting this changed tool list. Remote is not built.
 
+`context_prepare` accepts an optional `maxBytes` decimal string for the remaining
+context allocation. Its text block is the exact measured canonical payload,
+including withheld entries and injected accounting. Mandatory overflow produces
+an error and no package. Tokens are unknown; the surrounding MCP transport and
+the model provider's hidden framing are not measured as model input.
+
 Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps and what still stands between the goal and its acceptance) and, from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON).
 Status and progress include repository checks, documents read local covered files and installed contributions, and device availability depends on keys held here. Those portions are observations from this runtime, not solely from the shared records.
 
