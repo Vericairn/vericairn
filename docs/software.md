@@ -179,6 +179,12 @@ missing nine records dated 04:29–04:34 UTC. For 0.7.0, run
 `vericairn docs notes --from 0.6.1 --to 0.7.0 --out docs/releases/0.7.0 --since 2026-10-16T04:29:43Z`
 against the estate that holds those records. This deliberately overlaps 0.6.1; its frozen set stays unchanged.
 
+The product's CLI test suite checks every file of each frozen set against
+`docs/releases/frozen-sha256.json`: changed bytes, missing files and added files fail the guard. Published and withdrawn
+sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
+editable until frozen and indexed. This is a test guard, not a write barrier in `docs notes` or the reference generator:
+run generation only against a set under preparation.
+
 Generated API parameter rows omit the description separator when there is no description and carry no trailing
 spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no
 legacy scope label.

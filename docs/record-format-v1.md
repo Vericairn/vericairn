@@ -160,13 +160,16 @@ is not the effect; `vericairn release submit` and `release observe` write these 
   against who authored the subject.
 - Acceptance pins an exact subject hash. Milestones are accepted by the operator; ordinary work may be
   self-accepted only under the `self-accept-ordinary-work` authority scope, or accepted by another principal
-  under `accept-work`. If the subject changes afterwards, the acceptance is reported as unresolved, not invalid.
-- A record whose subject is pinned to a revision that has been superseded since is reported as referring to an
+  under `accept-work`. If the subject changes afterwards, a current acceptance is reported as unresolved, not invalid.
+- A current record whose subject is pinned to a revision that has been superseded since is reported as referring to an
   earlier revision (`record.subject-stale`, a warning), unless the latest revision answers it, as the publication
   of the exact release candidate and the withdrawal of the release do; an admission follows its device across
   revisions instead ([record-format-v2.md](record-format-v2.md#a-device-keeps-its-identity)). A record about an
   earlier revision of a release that was withdrawn since, such as a review of a first candidate that was corrected
-  and then withdrawn, is information naming the withdrawal (`record.subject-withdrawn`).
+  and then withdrawn, is information naming the withdrawal (`record.subject-withdrawn`). Once a referring record is
+  itself superseded, its `record.subject-stale` and `acceptance.unresolved` findings stop; a replacement that still pins
+  an earlier subject revision remains flagged. Historical records still undergo structural, hash, signature and
+  authority validation, so supersession never repairs an invalid pinned hash. This applies to both record formats.
 - Document revisions pin files under `design/` and `docs/` by hash; editing a pinned file without a new
   revision record is a drift error.
 - Decisions keep the operator's words verbatim in `statement` and carry a `synthesis`: a clean, thorough restatement
