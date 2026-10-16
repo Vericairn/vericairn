@@ -3,6 +3,7 @@
 This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.
+The NuGet installation described below is prepared for 0.7.0 and becomes available after its publication.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -599,6 +600,31 @@ an earlier check was current, shown with when, and `unavailable` otherwise. A co
 the state of workers.
 
 ## The SDK
+
+In a .NET 10 project, install the Community SDK with:
+
+```sh
+dotnet add package Vericairn
+```
+
+The `Vericairn` package brings `Vericairn.Sdk`, whose namespace and assembly stay unchanged, along with
+`Vericairn.Protocol` and `Vericairn.Records`. Records is required by public SDK types such as
+`DeviceRequestSigner` and `PairingOptions.KeyStore`. The front door adds no assembly; keeping the SDK's
+existing package identity avoids duplicating its types. `Vericairn.Runtime` and `Vericairn.Daemon` remain
+separate packages for embedded implementations and daemon hosts, and `Vericairn.Mcp` remains the protocol
+adapter for MCP hosts. Daemon hosts also need the ASP.NET Core shared framework. None contains Pro code.
+
+Install and start the command line for a local estate with:
+
+```sh
+dotnet tool install --global dotnet-vc
+dotnet vc doctor
+dotnet vc --estate <estate root> runtime start
+```
+
+The command tables in this draft also show the archive spelling, `vericairn ...`; a NuGet installation
+uses `dotnet vc ...` with the same arguments. See the [installation draft](install.md) for local tool
+manifests and self-contained archives.
 
 `new VericairnClient(endpoint)` connects over the local socket; `VericairnClient.Loopback(endpoint, signer)`
 connects over pinned loopback TLS and signs every request with the signer, which `DeviceRequestSigner.Find`

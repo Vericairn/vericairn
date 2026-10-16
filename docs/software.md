@@ -5,7 +5,8 @@ intent recorded before every external effect, and publication left to the operat
 
 This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Its worker and launchers first appeared
 in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
-the release-note and progress classification of accepted work, as the sections below describe.
+the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
+path below is prepared for 0.7.0.
 
 ## Where each part lives
 
@@ -200,6 +201,41 @@ that result's exact hash or its work order's current revision and hash. This inc
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
 work-order revision does not count for the current revision. Every remaining current result appears only under **Work
 recorded, not yet accepted**. The progress report uses the same classification for each published release.
+
+## Vericairn's NuGet publication
+
+From 0.7.0, `.github/workflows/release.yml` packs the Community command line and libraries with the release
+version checked against `VersionPrefix` in `Directory.Build.props`, clearing the development suffix.
+It attaches the `.nupkg` and `.snupkg` files to the draft release and lists every file in `SHA256SUMS`,
+alongside the self-contained archives. No package is pushed while the release is a candidate, so a
+withdrawn draft has not occupied that version on NuGet.
+
+Only the operator's publication triggers `.github/workflows/nuget.yml` (`release: types: [published]`).
+That workflow downloads the published release's package assets and `SHA256SUMS` by release id, requires
+every package and symbol asset to appear exactly once in the checksums, and verifies each hash before
+requesting credentials. Missing, extra or changed package assets refuse publication. Non-package archive
+entries remain in the release's checksum file; this workflow downloads and pushes only the packages.
+
+The workflow has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
+GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
+returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the workflow never
+checks out or rebuilds the packages. It pushes the verified package files and then their verified symbol
+files. A failed or partly completed publication needs operator inspection before any retry; the workflow
+does not silently skip an existing version. See the [operator setup note](releases/README.md#nuget-publication-setup).
+
+Once publication succeeds, a .NET 10 SDK installation uses:
+
+```sh
+dotnet tool install --global dotnet-vc
+dotnet vc version
+dotnet vc doctor
+dotnet add package Vericairn
+```
+
+Run the last command in the project that will use the SDK. `Vericairn` brings `Vericairn.Sdk`, Protocol
+and Records; Runtime, Daemon and Mcp are separate host and adapter packages. The module names and
+`vericairn.*` contribution identifiers earlier in this document are unchanged. The software pack, git
+adapter and GitHub provider still ship inside the command line; they are not separate NuGet packages.
 
 ## Coding agents: the worker and its launchers
 
