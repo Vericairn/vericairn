@@ -284,8 +284,8 @@ internal static partial class Docs
             lines.Add($"- Record format: reads {reads}, writes {writes}.");
         }
 
-        // A result is listed as accepted only when an acceptance of its exact revision is on record; any other result of the
-        // period is a claim to inspect, never part of what the release is known to contain. The progress report reads the same.
+        // Only current results are listed. An acceptance of the result's exact revision or its work order's current revision
+        // puts it under accepted work; the latter creates no acceptance of the result itself. The progress report reads the same.
         (IReadOnlyList<ReleaseContents.Accepted> acceptedResults, IReadOnlyList<RecordEnvelope> openResults) = ReleaseContents.Results(model, window);
         lines.Add(string.Empty);
         lines.Add("## Work accepted");
@@ -305,7 +305,7 @@ internal static partial class Docs
         {
             lines.Add("## Work recorded, not yet accepted");
             lines.Add(string.Empty);
-            lines.Add("Results of this period with no acceptance of their exact revision: claims to inspect, not part of what the release is known to contain.");
+            lines.Add("Current results of this period with neither an acceptance of their exact revision nor of their work order's current revision: claims to inspect, not part of what the release is known to contain.");
             lines.Add(string.Empty);
             foreach (RecordEnvelope result in openResults)
             {

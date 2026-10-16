@@ -168,6 +168,13 @@ notes state, to the minute, and with no previous set at the previous publication
 the beginning instead. Until the version's publication is recorded they end at the second before they are
 generated.
 
+Only current results in that window are listed: a result superseded by a later result is omitted, even when the later
+result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
+that result's exact hash or its work order's current revision and hash. This includes another principal's results with
+no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
+work-order revision does not count for the current revision. Every remaining current result appears only under **Work
+recorded, not yet accepted**. The progress report uses the same classification for each published release.
+
 ## Coding agents: the worker and its launchers
 
 The worker contract, `vericairn.worker/1` (the estate's `design/goals.md` § 7), carries one assignment with a coding agent

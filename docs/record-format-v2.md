@@ -188,6 +188,12 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
 
 ## What holds a work order
 
+Release notes and the progress report omit superseded results. They list a current result in their release window as
+accepted work when a current acceptance pins the result's exact hash or the current revision and hash of its work
+order, following the attempt and assignment. The latter includes results written by another principal, without
+creating an acceptance of those results or changing who may accept them. Acceptance of an earlier work-order revision
+does not count for its current revision; every other current result in the window is listed as recorded, not yet accepted.
+
 A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
 `design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any
 revision) holds it until it is accepted. A record in its `blockedBy` holds it while it is open: an ask while it is
