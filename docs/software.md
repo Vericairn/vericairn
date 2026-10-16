@@ -74,6 +74,79 @@ in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled ru
 the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
 path below is prepared for 0.7.0.
 
+## Context packages (0.7.0)
+
+For 0.7.0, the foundation's context package preserves exact originals apart from
+derived presentation. `vericairn context prepare <work-order>` computes the step's
+working instructions, effects and pinned inputs. Only optional documents named
+by the work, its inputs or governing decisions enter the selection.
+Required record and document originals come first. Optional originals not fully included have
+a withheld entry with their identity, reason, availability, measured or unknown
+size, dependency, reduction and generated retrieval route. Excerpts carry byte
+extents and say `irreversible reduction of this representation; original retained`;
+unavailable originals say `irreversible reduction; original unavailable`.
+
+The selection follows this work's assignments, results, decisions and effects.
+The remaining document catalogue is explicitly outside the selection.
+`vericairn context catalogue` lists its current revision identities without
+reading document bodies; MCP uses `records_list` with `type=document-revision`.
+A prerequisite work record is a pinned input; sharing a decision does not import
+another assignment or its historical file inputs. Required document references
+remain exact, including an older revision explicitly needed by this step. The
+package states this scope; nothing withheld never means the whole estate was read.
+
+`vericairn context read <pin> --original` returns verified original bytes on
+standard output; `--out <file>` creates a new file without overwriting and
+`--json` returns identity plus base64 bytes. Each generated, shell-safe `vc1_`
+pin encodes the estate and exact source identity, so no retained manifest is
+needed. Records are read by id, record hash and byte hash from immutable record
+custody. Documents are read by path, revision record and byte hash from the
+working tree only while those bytes still match. Changed, missing or unsupported
+sources are unavailable in this copy; neither the latest revision nor an object
+store is substituted. Missing mandatory originals refuse the dependent step.
+Remote is not built or qualified.
+
+Briefs on every surface, preparation, retrieval and hand-over author nothing and
+write nothing. At run dispatch, the worker retains `context.json` (the complete
+machine brief) and `brief.md` in its existing local run directory under the
+Vericairn home. That is the dispatch custody chosen here; it never adds context
+objects or records to the estate repository. The existing workspace export is
+still git-ignored. Retention is not required for read-time retrieval.
+
+`context prepare --max-bytes <allocation>` uses exact UTF-8 bytes of the final
+payload, including accounting and omission overhead. The allocation is supplied
+separately from a run's spending cap. Optional sources fit in deterministic
+order after mandatory material; a required original or complete manifest that
+cannot fit refuses the package. With no allocation, preparation and MCP briefs
+inline mandatory material and withhold named optional originals, with their
+sizes and retrieval commands. A standalone human `work brief` keeps the full
+selected scope and reports `limit not set`, never a model-fit claim. Token counts are unknown:
+this build has no qualified local tokenizer and adds no package or network
+tokenization call. A worker must establish its model's input bound, existing
+context, framing and reserves before relying on a fit claim.
+
+`work brief` keeps the existing lead and adds the package's content, complete
+withheld list, and readable originals. Markdown and the full machine brief each
+have an exact measurement and content identity; their accounting is included in
+the count. The worker exports this same content contract and pins the exported
+text in the existing run-intent evidence. A routed run's preflight can include
+its signed pending assignment, explicitly labeled as requiring admission with
+the run intent before launch. This does not grant authority or resolve a partial
+record batch; the existing grouped-write checks still own that boundary.
+Model-specific context allocation and qualified autonomous fit remain a launcher
+integration responsibility, separate from the existing run spending cap.
+
+The local contract is exercised through CLI, MCP, API/SDK and both repository-synced and local-only record custody. Those fixtures do not qualify a live model or harness. Provider
+billed usage, model fit, compaction recovery and any later adapter transformation
+need their own measurements and qualification. There is no new Remote reader,
+transport, signing capability or user interface: Remote is not built.
+COMMS-01 resolves the recipient's presentation depth for both human and MCP
+briefs. The final text is measured after that lead and communication section are
+added; depth changes neither the canonical context identity nor original bytes.
+CLI and Workbench hand-over presentations also count their final communication
+lead, preserving the protected original rendering in full. API v1 additions preserve the legacy hand-over discriminator and
+resume input, and the artifacts introduce no record type or format upgrade.
+
 ## Where each part lives
 
 The foundation (`Vericairn.Records`, `Vericairn.Runtime`, `Vericairn.Protocol`, the daemon, the SDK, the
@@ -693,6 +766,14 @@ provider state are outside that selection. The sidecar measures and hashes the
 canonical payload; token counts and model-context fit are not claimed. A copy
 with the same records and pin produces the same package. Records remain originals,
 apart from the deterministic presentation, with synthesis off.
+
+Hand-over uses the same context manifest, source identities, loss labels and
+accounting as work briefs. The `vericairn.handoff/1` marker and resume fields stay
+as an API v1 compatibility view; `contextFormat` names `vericairn.context/1`.
+The original `records show` link is kept for older clients, while
+`originalRetrieve` is the pinned, verified `context read` route. New and earlier
+retained hand-overs can be compared; changed source identities never rewrite
+the old basis. Its human rendering has a separate exact byte count and hash.
 
 `vericairn resume handoff.json` compares that retained basis to the current copy.
 Use `--json` for the full machine comparison or `resume -` to read the package

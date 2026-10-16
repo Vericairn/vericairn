@@ -8,6 +8,40 @@
 
 ## Tools
 
+For 0.7.0, `context_prepare` computes the same context package as
+`vericairn context prepare <work-order>`. `context_read` takes `pin`, the
+self-contained `vc1_` identity in a source entry, and returns the same identity
+and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
+The pin is shell-safe encoded data, never an instruction copied from content.
+Hash verification and current access checks belong to the runtime. Records come
+from immutable record custody; documents come from the working tree only while
+their bytes match the pinned revision. Missing or changed bytes are unavailable,
+never substituted from object custody or a newer revision. A denied reader
+receives no source metadata. These read tools author nothing and write nothing.
+Regenerate the estate orientation when adopting this changed tool list and
+`context_read` argument schema. Remote is not built.
+
+`context_prepare` and `work_brief` accept an optional `maxBytes` decimal string for the remaining
+context allocation. Without it, both inline mandatory material and withhold
+all selected optional sources. Only documents named by the work, its inputs
+or governing decisions are optional selections. The rest of the catalogue is
+explicitly outside selection; `vericairn context catalogue` or `records_list`
+with `type=document-revision` lists it without reading original bodies.
+A standalone human `work brief` still includes the full selected scope.
+The `context_prepare` text block is the exact measured canonical payload,
+including withheld entries and injected accounting. Mandatory overflow produces
+an error and no package. Tokens are unknown; the surrounding MCP transport and
+the model provider's hidden framing are not measured as model input.
+
+`work_brief` now includes the same context content, its complete withheld list
+and readable mandatory originals after its lead. COMMS-01's `recipient` and
+`assignment` arguments resolve that lead and communication section. The entire
+resulting text, including those additions, has an exact UTF-8 byte measurement;
+personal depth does not change canonical context content. The work brief and `context_prepare` compute and return artifacts without
+writing anything. Only worker dispatch retains a copy, in the run's local
+directory under the Vericairn home. Unavailable required
+material refuses the brief and sets the MCP error flag.
+
 Reads are visible to every connection and return what the records say: `estate_health`, `estate_status` (the canonical status document), `estate_check` (validation and repository checks), `estate_progress` (the progress report as `vericairn progress` prints it, or with `form` `json` its canonical JSON), `work_brief` (the brief as Markdown, with the latest result's next step), `work_observe`, `record_get`, `records_list` (the current records of one type, as compact rows), `decisions_list`, `decision_get`, `releases_list`, `devices_list`, `documents_due` (the living documents that are due or unavailable, with their levels and reasons), `goal_get` (a goal in the machine form of `vericairn goal show`, or without an id the estate's goals with their status), `goal_progress` (a goal condition by condition: each verdict and its reason, the current evaluation, the steps and what still stands between the goal and its acceptance) and, from 0.6.0, `asks_list` (what waits on a principal named by `to`, or on every principal: the asks still open or notified, at most three in one delivery with the recommendation first and the consequence of leaving each unanswered, the rest waiting in order, as `vericairn ask` prints it or with `form` `json` its canonical JSON).
 Status and progress include repository checks, documents read local covered files and installed contributions, and device availability depends on keys held here. Those portions are observations from this runtime, not solely from the shared records.
 

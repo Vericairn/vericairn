@@ -79,6 +79,7 @@ public class HandoffJourneyTests
             Assert.Equal(ContentHash.Sha256(bytes), original.GetProperty("byteHash").GetString());
             Assert.Empty(payload.GetProperty("withheld").EnumerateArray());
             string text = CliHarness.Ok("--estate", estate.Root, "handoff").Out;
+            Assert.StartsWith("Presentation measurement: " + System.Text.Encoding.UTF8.GetByteCount(text).ToString(System.Globalization.CultureInfo.InvariantCulture) + " UTF-8 bytes", text, StringComparison.Ordinal);
             Assert.Contains("Continue?", text, StringComparison.Ordinal);
             Assert.Contains("Limit not set", text, StringComparison.Ordinal);
             Assert.Contains("Originals (complete)", text, StringComparison.Ordinal);

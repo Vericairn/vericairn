@@ -100,8 +100,9 @@ public sealed partial class EstateService
         RunPlan plan;
         lock (gate)
         {
-            EstateModel model = LoadWith(carried);
-            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, request, launcher, configuration);
+            List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+            EstateModel model = EstateLoader.Load(session.Root, files);
+            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, files, request, launcher, configuration);
             if (planned is null)
             {
                 if (limited is not null)
@@ -178,6 +179,7 @@ public sealed partial class EstateService
         try
         {
             directory.Create();
+            directory.RetainContext(plan.Context, plan.Brief);
             var mcp = new JsonObject
             {
                 ["mcpServers"] = new JsonObject
@@ -647,7 +649,7 @@ public sealed partial class EstateService
         && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
-    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
+    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, IReadOnlyList<RecordFile> files, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
     {
         RecordEnvelope? assignment = Latest(model, request.Assignment, "assignment");
         if (assignment is null)
@@ -783,9 +785,17 @@ public sealed partial class EstateService
             return (null, exception.Message, null);
         }
 
+        // This snapshot includes the signed pending assignment. The run's existing grouped-write preflight
+        // must admit it with the intent before launch. A stranded older batch is reconciled by that write;
+        // ordinary briefs and hand-overs still refuse while the batch remains incomplete.
         string? recipient = CommunicationRecipient(model, goal);
-        string brief = CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), Communication(recipient, recipient is null ? null : assignment.Id));
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, brief, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false, profile: Communication(recipient, recipient is null ? null : assignment.Id));
+        if (contextBrief.Problem is not null)
+        {
+            return (null, contextBrief.Problem.Message, null);
+        }
+
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, contextBrief.Json, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }
 
     private static bool SelectionStillCurrent(EstateModel model, RecordEnvelope goal, RunPlan plan, RunConfiguration configuration, IAgentLauncher launcher, RunStartRequest request)
@@ -1253,7 +1263,7 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, JsonElement Context, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

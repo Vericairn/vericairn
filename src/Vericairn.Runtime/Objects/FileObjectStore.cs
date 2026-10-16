@@ -57,12 +57,17 @@ public sealed class FileObjectStore : IObjectStore
     public byte[]? Read(string hash)
     {
         string path = PathOf(hash);
-        if (!File.Exists(path))
+        byte[] bytes;
+        try
+        {
+            bytes = File.ReadAllBytes(path);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return null;
         }
 
-        byte[] bytes = File.ReadAllBytes(path);
+        // Access denial must not masquerade as absence (File.Exists suppresses that distinction).
         string actual = ContentHash.Sha256(bytes);
         return actual == hash ? bytes : throw ObjectCorruptedException.For(hash, actual);
     }

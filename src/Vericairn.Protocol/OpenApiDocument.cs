@@ -23,6 +23,10 @@ public static class OpenApiDocument
         ("GET", "/v1/progress"),
         ("GET", "/v1/handoff"),
         ("POST", "/v1/resume"),
+        ("GET", "/v1/context/work/{key}"),
+        ("GET", "/v1/context/work/{key}/brief"),
+        ("GET", "/v1/context/original/{pin}"),
+        ("GET", "/v1/context/{manifest}/sources/{source}"),
         ("GET", "/v1/validate"),
         ("GET", "/v1/check"),
         ("GET", "/v1/records/{id}"),
@@ -106,7 +110,7 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
-            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief")
+            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief" or "/v1/context/work/{key}/brief")
             {
                 operation["parameters"] = new JsonArray(CommunicationParameterNames
                     .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
@@ -122,9 +126,11 @@ public static class OpenApiDocument
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "nonce", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "32 random bytes, base64url, fresh for each connection." });
             }
 
-            if (method == "GET" && path == "/v1/handoff")
+            if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}" or "/v1/context/work/{key}/brief")
             {
-                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional canonical payload byte limit. Overflow refuses the whole hand-over." });
+                JsonArray parameters = operation["parameters"] is JsonArray existing ? (JsonArray)existing.DeepClone() : new JsonArray();
+                parameters.Add(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional context allocation in canonical payload bytes, separate from a run spending cap. Mandatory originals, manifest and accounting must fit or the package is refused." });
+                operation["parameters"] = parameters;
             }
 
             if (method == "GET" && path == "/v1/asks")
@@ -140,7 +146,10 @@ public static class OpenApiDocument
                     parameters.Add(new JsonObject { ["name"] = name, ["in"] = "path", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" } });
                 }
 
-                operation["parameters"] = parameters;
+                if (operation["parameters"] is null)
+                {
+                    operation["parameters"] = parameters;
+                }
             }
 
             if (method == "POST" && path != "/v1/shutdown")
@@ -401,6 +410,10 @@ public static class OpenApiDocument
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
+        ("GET", "/v1/context/work/{key}/brief") => "BriefResponse: measured agent brief; mandatory originals inline, named optional sources withheld unless a context allocation is given and they fit. Writes nothing.",
+        ("GET", "/v1/context/work/{key}") => "ContextResponse: compute a deterministic work context package and exact originals; writes nothing.",
+        ("GET", "/v1/context/original/{pin}") => "ContextReadResponse: self-contained pinned identity and exact bytes from immutable records or a matching working-tree document. Rechecks access and hashes; writes nothing.",
+        ("GET", "/v1/context/{manifest}/sources/{source}") => "ContextReadResponse: legacy manifest handles return original-unavailable after access checking; prepare again for a self-contained pin.",
         ("GET", "/v1/progress") => "The progress report: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON. Record-derived sections agree for the same records; repository checks, latest local agent claims and worker observations are labelled separately and can differ by runtime.",
         ("GET", "/v1/validate") => "Validate every record and the manifest.",
         ("GET", "/v1/check") => "Validate and run the repository checks.",

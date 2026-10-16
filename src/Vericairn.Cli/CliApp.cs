@@ -47,6 +47,7 @@ internal static partial class CliApp
         root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
+        root.Subcommands.Add(ContextFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
@@ -94,6 +95,34 @@ internal static partial class CliApp
         version.SetAction(_ => Commands.Version());
         root.Subcommands.Add(version);
         return root;
+    }
+
+    private static Command ContextFamily(Option<string> estateOption, Option<bool> jsonOption)
+    {
+        var context = new Command("context", "Prepare measured context and retrieve pinned originals under current permission.");
+        var catalogue = new Command("catalogue", "List the current document revision catalogue without selecting or reading its bodies.");
+        catalogue.SetAction(p => Commands.ContextCatalogue(p.GetValue(estateOption)!, p.GetValue(jsonOption)));
+        context.Subcommands.Add(catalogue);
+        var prepare = new Command("prepare", "Compute the context package for a work order without writing.");
+        var work = new Argument<string>("work-order");
+        var allocation = new Option<long?>("--max-bytes") { Description = "Remaining context input allocation in bytes, separate from the run spending cap. Mandatory overflow is refused." };
+        prepare.Arguments.Add(work);
+        prepare.Options.Add(allocation);
+        prepare.SetAction(p => Commands.ContextPrepare(p.GetValue(estateOption)!, p.GetValue(work)!, p.GetValue(jsonOption), p.GetValue(allocation)));
+        context.Subcommands.Add(prepare);
+
+        var read = new Command("read", "Read and verify a pinned original, never silently its latest revision.");
+        var manifest = new Argument<string>("pin") { Description = "Self-contained pinned identity from the package." };
+        var source = new Option<string?>("--source") { Description = "Legacy manifest handles are unavailable; prepare context again for a pin." };
+        var original = new Option<bool>("--original") { Required = true, Description = "Return only the pinned original." };
+        var output = new Option<string?>("--out") { Description = "Write exact bytes to a new file; never overwrite." };
+        read.Arguments.Add(manifest);
+        read.Options.Add(source);
+        read.Options.Add(original);
+        read.Options.Add(output);
+        read.SetAction(p => Commands.ContextRead(p.GetValue(estateOption)!, p.GetValue(manifest)!, p.GetValue(source)!, p.GetValue(original), p.GetValue(output), p.GetValue(jsonOption)));
+        context.Subcommands.Add(read);
+        return context;
     }
 
     private static Command McpFamily(Option<string> estateOption, Option<bool> jsonOption)

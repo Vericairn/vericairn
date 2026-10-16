@@ -13,7 +13,7 @@ namespace Vericairn.Runtime.Tests;
 /// recorded, its answer, when it gives one, being the launcher's refusal; and when the worker asks it for the command, after the
 /// intent is recorded and before the launch.
 /// </summary>
-internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Action<LaunchContext>? prepared = null) : IAgentLauncher
+internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify = null, Action? command = null, Action<LaunchContext>? prepared = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null) : IAgentLauncher
 {
     public string Launcher => inner.Launcher;
 
@@ -37,10 +37,10 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public IReadOnlyList<string> EnvironmentNames => inner.EnvironmentNames;
 
     /// <summary>Puts a hooked Claude Code launcher in the place of the run estate's own, beside its other providers.</summary>
-    public static void Install(RunEstate run, Func<string?>? verify = null, Action? command = null)
+    public static void Install(RunEstate run, Func<string?>? verify = null, Action? command = null, Func<string, IReadOnlyList<HarnessAction>>? readActions = null)
     {
         var registry = new ProviderRegistry();
-        registry.Register(new HookedLauncher(new ReportedLauncher(new ClaudeCodeLauncher()), verify, command));
+        registry.Register(new HookedLauncher(new ReportedLauncher(new ClaudeCodeLauncher()), verify, command, readActions: readActions));
         registry.Register(new ReportedLauncher(new CodexLauncher()));
         registry.Register(new ReportedLauncher(new GenericLauncher()));
         registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
@@ -64,5 +64,5 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
 
     public HarnessSignal? Read(string line) => inner.Read(line);
 
-    public IReadOnlyList<HarnessAction> ReadActions(string line) => inner.ReadActions(line);
+    public IReadOnlyList<HarnessAction> ReadActions(string line) => readActions?.Invoke(line) ?? inner.ReadActions(line);
 }

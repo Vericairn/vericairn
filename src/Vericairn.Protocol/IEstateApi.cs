@@ -39,6 +39,15 @@ public interface IEstateApi
     /// <summary>Compare a retained hand-over with this copy now, including additions, supersessions, missing records, the pin and observed state. Read-only.</summary>
     ResumeResponse ResumeHandoff(HandoffPackage package);
 
+    /// <summary>Compute the deterministic context package for a work order; writes nothing.</summary>
+    ContextResponse Context(string workOrder, long? maxBytes = null);
+
+    /// <summary>Read an original by its self-contained pinned identity, rechecking access and hashes.</summary>
+    ContextReadResponse ContextRead(string pin);
+
+    /// <summary>Legacy manifest handles are unavailable; prepare again for a self-contained pin. Checks access first.</summary>
+    ContextReadResponse ContextRead(string manifest, string source);
+
     /// <summary>Validate every record and the manifest.</summary>
     FindingsResponse Validate();
 
@@ -57,11 +66,20 @@ public interface IEstateApi
     /// <summary>The brief of a work order, or null when no work order has that key or id.</summary>
     BriefResponse? Brief(string workOrder);
 
+    /// <summary>A measured agent brief: mandatory originals and named optional sources withheld unless an allocation is given and they fit.</summary>
+    BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null);
+
     /// <summary>A personalized brief with complete original obligations and an explicit communication section; its canonical JSON is unchanged.</summary>
     BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
     {
         BriefResponse? brief = Brief(workOrder);
-        return brief is null ? null : brief with { Markdown = CommunicationPresentation.Brief(brief.Markdown, Communication(recipient, assignment, view)) };
+        if (brief is null || brief.Problem is not null)
+        {
+            return brief;
+        }
+
+        (string text, ContextTextMeasurement measurement) = ContextTextMeasurement.Presentation(CommunicationPresentation.Brief(brief.Markdown, Communication(recipient, assignment, view)));
+        return brief with { Markdown = text, MarkdownMeasurement = measurement };
     }
 
     /// <summary>What an observer sees of a work order, or null.</summary>

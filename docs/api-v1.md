@@ -1,6 +1,6 @@
 # API version 1
 
-This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
+This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 and CONTEXT-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
 The release documentation index records that history.
 The NuGet installation described below is prepared for 0.7.0 and becomes available after its publication.
@@ -14,6 +14,100 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 (`Vericairn.Sdk`) calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
+
+## Context artifacts (0.7.0 addition)
+
+`GET /v1/context/work/{key}` (`Context`) computes and returns a
+`vericairn.context/1` package. It authors no record and writes nothing.
+`GET /v1/context/original/{pin}` (`ContextRead`) returns the pinned identity and
+exact original bytes (base64 in JSON). The shell-safe `vc1_` pin is unpadded
+base64url of canonical JSON containing the estate and source identity. A record
+pin contains its id, canonical record hash, path and byte hash; a document pin
+contains its path, revision record id and hash, and byte hash. It is an identity,
+not authority, and requires no retained manifest.
+
+Both operations recheck the requesting device under the runtime gate. A reader
+who loses access receives only `Completeness cannot be confirmed.` from the
+context operation, without source metadata. Transport authentication can refuse
+the request before the operation. Embedded/local-socket reads retain their OS
+authority. The existing boundary is estate-wide; no per-source ACL is claimed.
+
+Records are read from immutable record custody (the repository's `records/`,
+or the live store for the local-only profile). Documents are read from normalized
+`docs/` or `design/` working-tree paths, without following symbolic links, only
+while their bytes match the pinned revision. No object-store fallback, retained
+manifest, latest revision or other source is substituted. Unavailable or changed
+bytes return `original-unavailable`. The earlier unreleased manifest/source
+route remains callable but returns unavailable after access checking; prepare
+again for a self-contained pin. The SDK exposes both API v1 routes. No new record
+type is introduced. Remote is not built.
+
+Briefs, preparation, hand-over and retrieval do not retain artifacts in the
+estate repository or object store. At dispatch only, the worker retains the
+complete machine brief in `context.json` and its human rendering in `brief.md`
+in the run's existing local directory under the Vericairn home. Its exported
+workspace brief remains git-ignored. These local files are not records, object
+custody or an editable authority ledger. Context payloads are not object-store
+objects and are not limited by that store's per-object limit.
+
+The optional `maxBytes` query on context preparation is the admitted **context
+input allocation**, separate from any run spending cap. Without an allocation,
+only mandatory originals are inlined; named optional originals have withheld
+entries with sizes and retrieval pins, even when they are small. Accounting
+says `limit not set`, not that it fits a model. With an allocation, mandatory
+originals remain complete and optional bodies are included deterministically
+when they fit. The whole manifest, withheld entries and accounting
+must fit too, or `context-over-budget` returns no package. `accounting.bytes`
+measures the exact final canonical pretty UTF-8 payload including that report;
+`remainingBytes` and `overageBytes` use the same count. The package sidecar pins
+the payload hash and count; edits invalidate it. A counted serialization-padding
+field is possible where decimal digit boundaries otherwise oscillate.
+
+Tokens and model are explicitly unknown: no qualified local tokenizer is
+available, no byte-to-token estimate is used, and no counting call uploads
+content. Model fit and autonomous dispatch remain unqualified by this byte
+measurement. The caller must resolve existing conversation, harness/tool
+framing, model limits and reserves before budget-dependent dispatch. Transport
+framing and provider-billed usage are separate unknowns, not zero. The MCP
+`context_prepare` text and ordinary `context prepare` stdout are exactly this
+measured payload; API/SDK JSON envelopes and `--json` sidecars are transport.
+
+Context preparation and retrieval answer handled requests with HTTP 200 and a
+`ContextResponse` or `ContextReadResponse`; callers must inspect `problem`.
+`incomplete-context` means required source material is missing or invalid,
+`context-over-budget` means the complete mandatory payload cannot fit.
+Retrieval uses `original-unavailable` for a missing pinned original and
+`invalid-context` for failed verification, always without returned bytes.
+`invalid`, `not-found` and `denied` also appear in these response bodies;
+transport authentication may instead reject the request with HTTP 401.
+
+Selection includes mandatory working material and optional documents explicitly
+named by the work, its inputs or governing decisions. The remaining catalogue
+is outside the selection, with `vericairn context catalogue`,
+`GET /v1/records?type=document-revision` and the equivalent `records_list` call
+provided for listing its identities without reading bodies.
+
+`GET /v1/context/work/{key}/brief` (`BriefContext`) is the agent-facing brief.
+Its default is mandatory originals plus the withheld list; `maxBytes` can admit
+optional bodies when they fit. It accepts the same recipient, assignment and
+communication view queries as the human brief. MCP `work_brief` uses this route
+and keeps COMMS-01's recipient and assignment arguments. Personal depth changes
+only the measured Markdown presentation; canonical JSON and its context
+identities remain independent of the recipient. The standalone
+human `GET /v1/work/{key}/brief` and `work brief`, including its JSON form, keep
+§ 9's full selected scope with no cap. Neither form imports unmentioned
+catalogue bodies.
+
+`GET /v1/work/{key}/brief` keeps its existing machine fields and human lead and
+adds the package under `json.context`, including its withheld list and measured
+payload. The complete machine brief has its own `json.accounting`; the additive
+`jsonMeasurement` sidecar hashes and measures that entire canonical JSON. The
+complete Markdown includes the resolved communication lead and section,
+readable originals, the manifest and withheld list;
+`markdownMeasurement` pins its exact UTF-8 bytes, including the accounting line
+in the text. Neither human depth nor a change to the lead can silently reduce
+the context contract. A context refusal appears as the additive `problem` and
+does not yield a complete brief. Existing JSON fields retain their meaning.
 
 ## One owner
 
@@ -563,10 +657,9 @@ is nothing to record yet, and a refusal is its `problem`, not an HTTP status. Th
 /v1/runs` and `POST /v1/runs/{id}/stop`, from 0.6.0) answer the same way, with a `RunResponse` or a
 `RunStopResponse`; a run that is not found is a `problem` with code `not-found` inside. So do the step and the
 hand-over (`POST /v1/goals/{id}/step` and `POST /v1/work/takeover`, from 0.6.0), with a `GoalStepResponse` or a
-`TakeoverResponse`. A read of a missing subject answers 404 with an empty body.
+`TakeoverResponse`. Other reads of a missing subject answer 404 with an empty body; the context responses above carry their own problem.
 
-Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step and
-takeover routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step, takeover, context and hand-over/resume routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
 in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family
@@ -691,16 +784,25 @@ Watching observes the process boundary on the worker's machine. Remote execution
 ## Hand-over (HANDOFF-01)
 
 `GET /v1/handoff[?maxBytes=<positive integer>]` is additive to API v1. The SDK's
-`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`, and
-`problem`. A refusal returns HTTP 200 with `package: null` and a problem naming
+`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`,
+`problem` and the additive `textMeasurement`. A refusal returns HTTP 200 with `package: null` and a problem naming
 all missing or invalid sources; clients must inspect `problem`. This read authors
 no record and dispatches no work.
 
 The package is a `vericairn.handoff/1` payload with a sidecar `hash` and `bytes`.
-Both measure the payload's canonical pretty UTF-8 serialization, including all
+That discriminator and the original resume fields remain for API v1 compatibility;
+`contextFormat: vericairn.context/1` identifies the shared context content contract.
+Its manifest, source custody, derivative identities, withheld list and accounting
+are assembled by the same implementation as work context. New resumes validate
+the shared manifest and accounting as well as the retained originals; earlier
+`vericairn.handoff/1` baselines remain readable.
+The hash and byte count measure the payload's canonical pretty UTF-8 serialization, including all
 originals, source identities, derived presentation, accounting and framing;
-they exclude the sidecar and the separately rendered response text. The pin,
-record format, latest recorded timestamp and observed state come from the same
+they exclude the sidecar and the separately rendered response text.
+The human text is independently measured and hashed by `textMeasurement`,
+including its accounting line. `maxBytes` governs the canonical payload; it is
+not a fit claim for the alternate human rendering or a model's hidden framing.
+The pin, record format, latest recorded timestamp and observed state come from the same
 record snapshot. No wall-clock timestamp is mistaken for a human observation.
 Selection is deterministic: all records held by this copy, including superseded
 records, sorted by id. Every original has its exact record hash, retained byte
@@ -718,7 +820,8 @@ does not fit, including mandatory originals and manifest overhead. It never
 silently truncates, substitutes a summary or claims fit to a model context.
 Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
-by the caller; the read does not store another status ledger or grant authority.
+by the caller. Preparing it writes nothing: no objects, records, status ledger
+or authority are stored.
 Remote is not built.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,

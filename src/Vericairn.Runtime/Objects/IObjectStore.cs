@@ -15,7 +15,7 @@ public interface IObjectStore : IDisposable
     /// <summary>True when the object is held.</summary>
     bool Has(string hash);
 
-    /// <summary>The object's bytes, verified against its hash; null when absent. A held object whose bytes no longer match throws <see cref="ObjectCorruptedException"/>.</summary>
+    /// <summary>The object's bytes, verified against its hash; null when absent. Access denial propagates to the caller, never reports absence. A held object whose bytes no longer match throws <see cref="ObjectCorruptedException"/>.</summary>
     byte[]? Read(string hash);
 
     /// <summary>Every hash held, in ordinal order.</summary>

@@ -120,7 +120,10 @@ public static class WorkView
     }
 
     /// <summary>The brief for a work order as Markdown: everything a contributor needs, and nothing from outside the records.</summary>
-    public static string RenderBrief(EstateModel model, RecordEnvelope order)
+    public static string RenderBrief(EstateModel model, RecordEnvelope order) => RenderBrief(model, order, includeDocumentCatalogue: true);
+
+    /// <summary>The same obligations with a catalogue listing or a link to it; selection belongs to the context package.</summary>
+    public static string RenderBrief(EstateModel model, RecordEnvelope order, bool includeDocumentCatalogue)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(order);
@@ -165,10 +168,17 @@ public static class WorkView
             AppendAssignment(model, text, order, assignment);
         }
 
-        text.Append("## Design documents (current revisions)\n\n");
-        foreach (RecordEnvelope revision in model.Current("document-revision").OrderBy(r => EstateModel.BodyString(r, "path"), StringComparer.Ordinal))
+        if (includeDocumentCatalogue)
         {
-            text.Append("- ").Append(EstateModel.BodyString(revision, "path")).Append(" (revision ").Append(revision.Body.TryGetProperty("revision", out JsonElement rev) ? rev.GetRawText() : "?").Append(", ").Append(EstateModel.BodyString(revision, "hash")).Append(")\n");
+            text.Append("## Design documents (current revisions)\n\n");
+            foreach (RecordEnvelope revision in model.Current("document-revision").OrderBy(r => EstateModel.BodyString(r, "path"), StringComparer.Ordinal))
+            {
+                text.Append("- ").Append(EstateModel.BodyString(revision, "path")).Append(" (revision ").Append(revision.Body.TryGetProperty("revision", out JsonElement rev) ? rev.GetRawText() : "?").Append(", ").Append(EstateModel.BodyString(revision, "hash")).Append(")\n");
+            }
+        }
+        else
+        {
+            text.Append("## Document selection\n\nThe context manifest names this step's selected originals. The rest of the document catalogue is outside the selection; list it with `vericairn context catalogue`.\n");
         }
 
         text.Append('\n');

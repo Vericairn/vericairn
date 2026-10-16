@@ -470,12 +470,13 @@ public sealed class RunSupervisor
                         }
                     }
                 }
-                catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException or ArgumentException or System.Text.RegularExpressions.RegexMatchTimeoutException)
+                catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException
+                    or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or TimeoutException)
                 {
                     lock (gate)
                     {
                         tokensIncomplete = true;
-                        AddSignal(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), "The worker could not parse a harness event; usage and command audit may be incomplete."));
+                        AddSignal(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), "The worker could not fully inspect a harness event; usage and command audit may be incomplete."));
                     }
                 }
 

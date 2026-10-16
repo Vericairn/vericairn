@@ -10,6 +10,37 @@ publication. This draft describes 0.6.1 with the unreleased FIX-09 corrections; 
 FIX-08's corrections and continues to read formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
 validation and the run ledger nevertheless need a build that understands their rules.
 
+## Derived context artifacts (0.7.0)
+
+`vericairn.context/1` is a versioned derived artifact, not a record type or an
+editable ledger. Its `vericairn.context-manifest/1` pins the declared basis and
+exact source identities; it is distinct from the estate release manifest.
+Retrieval pins carry the source identity themselves: record id, record hash and
+byte hash, or document path, revision record and byte hash. Reads write nothing
+and need no retained manifest. Documents are available only while working-tree
+bytes match; record custody is immutable. Only dispatch retains context, in the
+worker's local run directory under the Vericairn home, never estate objects or
+records.
+Record canonical hashes and original-file byte hashes are separate. Originals
+remain separate from attributed derivatives, whose synthesis defaults to off.
+The package's content hash and serialized byte count are a sidecar over the
+canonical pretty UTF-8 payload. Changing the payload invalidates that identity.
+Mandatory originals remain inline. Default agent packages withhold optional
+material explicitly named by the work, its inputs or governing decisions; the
+remaining catalogue is outside selection and has a listing command. Standalone
+human briefs include the full selected scope. Context allocation is independent
+of a run spending cap and never authorizes truncating mandatory material.
+This contract needs no estate upgrade and introduces no record format 3.
+
+Context manifests and payloads are returned, never stored by a read, in both
+repository-synced and local-only estates. Preparation and retrieval author no
+records and write no files. The work brief carries this contract; hand-over
+keeps its API v1 discriminator and comparison fields as a compatibility view
+of the same manifest, source and accounting implementation. Run-intent evidence
+continues to pin the exported brief's byte hash through its existing field.
+Neither the context artifact nor a pending assignment it describes admits work,
+accepts a result, clears an uncertain effect or changes any existing record.
+
 ## Why a new format number
 
 A release can add a type or an optional field without changing the format number; record format 1 grew that way from
