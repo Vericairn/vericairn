@@ -23,6 +23,100 @@ public class WorkerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void AWindowsJobThatFinishesDrainingAfterLeaderExitDoesNotTurnASuccessfulRunIntoAFailure(bool inventoryUnavailable)
+    {
+        int inventories = 0;
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = new WorkerClock(),
+            Heartbeat = TimeSpan.FromMilliseconds(20),
+            WindowsJobInventory = () => Interlocked.Increment(ref inventories) <= 2
+                ? inventoryUnavailable ? throw new System.ComponentModel.Win32Exception(5) : 1u
+                : 0u,
+        });
+        RunResponse started = run.Start("generic", "claude", run.Report("pending-job-exit"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        string summary = AgentRuns.Find(run.Estate.Load(), started.Run)!.Latest.Body.GetProperty("observed").GetProperty("summary").GetString()!;
+        Assert.True(settled.Status == "observed-success", summary);
+        Assert.Null(settled.Stop);
+        Assert.Contains("exited with code 0", summary, StringComparison.Ordinal);
+        Assert.True(inventories >= 3);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AWindowsJobThatOutlivesItsLeadersShutdownGraceIsStoppedAndReservedUntilObservedEmpty()
+    {
+        var clock = new WorkerClock();
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+        using var repeated = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        int inventories = 0;
+        int empty = 0;
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = clock,
+            Heartbeat = TimeSpan.FromMilliseconds(20),
+            Grace = TimeSpan.FromSeconds(1),
+            WindowsJobInventory = () =>
+            {
+                if (Interlocked.Increment(ref inventories) == 2)
+                {
+                    repeated.Set();
+                    Assert.True(resume.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inspection was not released.");
+                }
+
+                return Volatile.Read(ref empty) == 0 ? 1u : 0u;
+            },
+        });
+        string report = run.Report("surviving-job");
+        RunResponse started = run.Start("generic", "child-survives-root", report);
+        System.Diagnostics.Process? child = null;
+        try
+        {
+            Assert.True(started.Ok, started.Message);
+            WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
+            child = System.Diagnostics.Process.GetProcessById(Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>());
+            // End only the ready leader. Its child ignores this file and remains in the actual native boundary to signal.
+            new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).TransmitStop(new StopRequest("2026-10-15T12:00:00Z", "test"));
+            Assert.True(repeated.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inventory was not retried.");
+            Assert.Null(run.Row(started.Run).Stop);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+            clock.Advance(TimeSpan.FromSeconds(1));
+            resume.Set();
+            WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+            clock.Advance(TimeSpan.FromSeconds(1));
+            WaitUntil(() => run.Row(started.Run).Stop?.EscalatedAt is not null);
+            Assert.Null(run.Row(started.Run).Stop!.ContainedAt);
+            Assert.Equal("dispatched", run.Row(started.Run).Status);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+            WaitUntil(() => child.HasExited);
+            Volatile.Write(ref empty, 1);
+            RunRow settled = run.Settled(started.Run);
+            Assert.Equal("known-failure", settled.Status);
+            Assert.NotNull(settled.Stop!.ContainedAt);
+            Assert.Equal(0, run.Service.Check().Errors);
+        }
+        finally
+        {
+            Volatile.Write(ref empty, 1);
+            resume.Set();
+            if (child is not null)
+            {
+                if (!child.HasExited)
+                {
+                    child.Kill(entireProcessTree: true);
+                }
+
+                child.Dispose();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void AStopRechecksTheRequestingDeviceEvenWhenItsPrincipalStillHasAnotherAdmittedDevice(bool rotate)
     {
         using var run = new RunEstate(keepOperatorKey: true);

@@ -330,6 +330,10 @@ successful inventory must show every remaining member exited, including kernel z
 process queries, unavailable or filtered Linux procfs, and macOS inventory errors leave the run uncontained and
 reserved, and are retried. A failed escalation is retained as evidence and retried without claiming a kill.
 
+After root exit, the worker allows one shutdown grace for the boundary to empty naturally, keeping its reservation and
+retrying inventory throughout. This includes a Windows console host finishing after its client. A boundary still not
+observed empty after that grace receives a stop and, if necessary, escalation; only observed containment settles it.
+
 On POSIX the worker observes its leader without reaping it, holding its process-group identity through the last
 inventory and signal. It refuses a numeric group signal after losing child ownership or closing that owner. Native
 cleanup reaps the leader once. A detached lifecycle owner retains this responsibility after supervision is abandoned,

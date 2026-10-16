@@ -11,6 +11,29 @@ namespace Vericairn.Runtime.Tests;
 public class ContainedProcessTests
 {
     [Fact]
+    public void WindowsAccountingRequiresAnEmptySuccessfulInventoryEvenAfterItsLeaderExits()
+    {
+        using var run = new RunEstate();
+        ContainedProcess process = Start(run, "generic");
+        try
+        {
+            // Inject the native accounting result so its decision logic runs on every test platform.
+            process.WindowsJobInventory = () => 1u;
+            Assert.False(process.BoundaryExited()); // The leader's exit has not been observed yet.
+            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.False(process.BoundaryExited()); // The job can still contain a helper or descendant.
+            process.WindowsJobInventory = () => throw new System.ComponentModel.Win32Exception(5);
+            Assert.Throws<System.ComponentModel.Win32Exception>(() => process.BoundaryExited());
+            process.WindowsJobInventory = () => 0u;
+            Assert.True(process.BoundaryExited());
+        }
+        finally
+        {
+            process.Close();
+        }
+    }
+
+    [Fact]
     public void AGroupIsNeverSignaledAfterAnotherReaperTakesItsLeader()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "POSIX wait ownership regression; Windows keeps an owned job handle.");

@@ -452,7 +452,9 @@ public class GoalStepTests
         Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
         GoalStepResponse retried = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId, run.Resource, Command(run, "retried")));
         Assert.True(retried.Ok, retried.Message);
-        Assert.Equal("observed-success", run.Settled(retried.Run!.Run).Status);
+        RunRow settled = run.Settled(retried.Run!.Run);
+        RecordEnvelope observed = AgentRuns.Find(run.Estate.Load(), retried.Run.Run)!.Latest;
+        Assert.True(settled.Status == "observed-success", observed.Body.GetProperty("observed").GetProperty("summary").GetString());
         Assert.True(run.Estate.Load().ById.ContainsKey(stranded));
         Assert.Empty(run.Service.Reconcile());
         Assert.Equal(0, run.Service.Check().Errors);

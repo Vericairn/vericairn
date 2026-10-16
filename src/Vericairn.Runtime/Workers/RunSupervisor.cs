@@ -143,6 +143,7 @@ public sealed class RunSupervisor
         try
         {
             process = ContainedProcess.Start(info);
+            process.WindowsJobInventory = options.WindowsJobInventory;
         }
         catch (Win32Exception exception)
         {
@@ -190,16 +191,18 @@ public sealed class RunSupervisor
 
     private RunOutcome? Observe(CancellationToken abandon)
     {
+        long? rootExitedTick = null;
         while (true)
         {
             bool rootExited = process.WaitForExit(options.Heartbeat);
-            if (rootExited && BoundaryExited())
-            {
-                break;
-            }
-
             if (rootExited)
             {
+                rootExitedTick ??= options.Clock.GetTimestamp();
+                if (BoundaryExited())
+                {
+                    break;
+                }
+
                 Thread.Sleep(options.Heartbeat);
             }
 
@@ -237,9 +240,12 @@ public sealed class RunSupervisor
 
                 if (state.Stop is null)
                 {
-                    if (rootExited)
+                    // The root's exit and the boundary's exit are separate observations. In particular, Windows' hidden
+                    // console host can finish just after its client. Keep the reservation and retry inventory for one
+                    // shutdown grace before requesting a stop; normal boundary teardown is not a failed harness run.
+                    if (rootExitedTick is long rootExit && options.Clock.GetElapsedTime(rootExit) >= options.Grace)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited while descendants remained in its containment boundary"));
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited but its containment boundary was not observed empty within the shutdown grace"));
                     }
                     else if (directory.ReadStop() is StopRequest asked)
                     {
@@ -326,7 +332,7 @@ public sealed class RunSupervisor
         options.BeforeTransmission?.Invoke();
         try
         {
-            File.WriteAllText(directory.StopFile, JsonSerializer.Serialize(request, ProtocolJson.Options));
+            directory.TransmitStop(request);
             transmission.Append("the stop file the harness is told of in VERICAIRN_STOP_FILE");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
