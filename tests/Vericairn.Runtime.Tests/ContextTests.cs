@@ -17,6 +17,52 @@ namespace Vericairn.Runtime.Tests;
 public class ContextTests
 {
     [Fact]
+    public void SharedDecisionsDoNotImportUnrelatedWorkOrItsMissingInputs()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Shared rule","stake":"medium","statement":"Keep originals.","summary":"Keep originals.","synthesis":"Preserve the source.","effects":["retain originals"],"notAuthorized":["deleting originals"],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z"}""");
+        RecordEnvelope missing = AddDocument(estate, "docs/other-step.md", Encoding.UTF8.GetBytes("Required only for the other step."));
+        File.Delete(Path.Combine(estate.Root, "docs/other-step.md"));
+        JsonObject current = JsonNode.Parse(HandoffTests.Order)!.AsObject();
+        current["inputs"] = new JsonArray(new JsonObject { ["type"] = "decision", ["id"] = decision.Id });
+        RecordEnvelope active = estate.Add("work-order", estate.OperatorId, current.ToJsonString());
+        JsonObject other = current.DeepClone().AsObject();
+        other["key"] = "OTHER";
+        other["inputs"]!.AsArray().Add(new JsonObject { ["type"] = "document-revision", ["id"] = missing.Id });
+        RecordEnvelope unrelated = estate.Add("work-order", estate.OperatorId, other.ToJsonString());
+        JsonObject shared = JsonNode.Parse(decision.Body.GetRawText())!.AsObject();
+        shared["affects"] = new JsonArray(active.Id, unrelated.Id);
+        RecordEnvelope affecting = estate.Add("decision", estate.OperatorId, shared.ToJsonString());
+        using EstateService service = EstateService.Open(estate.Root);
+        ContextResponse response = service.Context("H-1");
+        Assert.Null(response.Problem);
+        Assert.DoesNotContain(response.Package!.Payload.GetProperty("manifest").GetProperty("content").GetProperty("sources").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == unrelated.Id);
+        Assert.Single(response.Package.Payload.GetProperty("withheld").EnumerateArray());
+        Assert.Contains(response.Package.Payload.GetProperty("originals").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == affecting.Id && s.GetProperty("mandatory").GetBoolean());
+        Assert.Equal("incomplete-context", service.Context("OTHER").Problem!.Code);
+    }
+
+    [Fact]
+    public void APrerequisiteWorkRecordDoesNotMakeItsHistoricalFileInputsMandatoryForThisStep()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope missing = AddDocument(estate, "docs/prior-step.md", Encoding.UTF8.GetBytes("A prior step's original."));
+        File.Delete(Path.Combine(estate.Root, "docs/prior-step.md"));
+        JsonObject previous = JsonNode.Parse(HandoffTests.Order)!.AsObject();
+        previous["key"] = "PRIOR";
+        previous["inputs"] = new JsonArray(new JsonObject { ["type"] = "document-revision", ["id"] = missing.Id });
+        RecordEnvelope prior = estate.Add("work-order", estate.OperatorId, previous.ToJsonString());
+        JsonObject current = JsonNode.Parse(HandoffTests.Order)!.AsObject();
+        current["inputs"] = new JsonArray(new JsonObject { ["type"] = "work-order", ["id"] = prior.Id });
+        estate.Add("work-order", estate.OperatorId, current.ToJsonString());
+        using EstateService service = EstateService.Open(estate.Root);
+        ContextResponse response = service.Context("H-1");
+        Assert.Null(response.Problem);
+        Assert.Contains(response.Package!.Payload.GetProperty("originals").EnumerateArray(), s => s.TryGetProperty("id", out JsonElement id) && id.GetString() == prior.Id && s.GetProperty("mandatory").GetBoolean());
+        Assert.Equal("incomplete-context", service.Context("PRIOR").Problem!.Code);
+    }
+
+    [Fact]
     public void UnreadableOriginalsDiscloseNoPathSizeOrIdentity()
     {
         if (OperatingSystem.IsWindows() || Environment.UserName == "root")

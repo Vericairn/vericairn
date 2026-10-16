@@ -74,7 +74,7 @@ public sealed partial class EstateService
                 new FindingDto("error", "context.original-unavailable", s.Identity["path"]!.GetValue<string>(), s.Dependency)).ToList()));
         }
 
-        JsonObject basis = ContextSelection.Basis(model, "The work order's record dependency closure and current document catalogue; document originals are optional unless referenced by the work. Unrelated records, output objects and unrecorded conversation are outside this selection.", order);
+        JsonObject basis = ContextSelection.Basis(model, "This work step's instructions, governing decisions, effects and pinned input records, plus the current document catalogue. Referenced prerequisite work remains an input, not another assignment. Historical file bodies outside this step, unrelated records, output objects and unrecorded conversation are outside this selection.", order);
         if (!checkBatches)
         {
             basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";

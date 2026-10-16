@@ -11,50 +11,75 @@ using Vericairn.Runtime.Objects;
 
 namespace Vericairn.Runtime.Service;
 
-/// <summary>Conservative dependency closure for a work step, followed by the brief's optional document catalogue.</summary>
+/// <summary>The working instructions and effects of one step, their pinned inputs, and the optional document catalogue.</summary>
 internal static partial class ContextSelection
 {
     internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, IObjectStore objects)
     {
-        var required = new HashSet<string>(model.Chain(order), StringComparer.Ordinal);
+        var working = new HashSet<string>(model.Chain(order), StringComparer.Ordinal);
+        var required = new HashSet<string>(StringComparer.Ordinal);
+        var requiredDocuments = new HashSet<string>(StringComparer.Ordinal);
         if (model.CurrentEstate is { } charter)
         {
-            required.UnionWith(model.Chain(charter));
+            working.UnionWith(model.Chain(charter));
         }
 
-        // Working constraints are seeds too, so their governing decisions and revisions enter the closure.
-        required.UnionWith(model.Current("authority").Select(r => r.Id));
-        required.UnionWith(model.Current("roster").Select(r => r.Id));
-        // Reverse edges follow work/effect records, never every record authored by a shared principal.
+        working.UnionWith(model.Current("authority").Select(r => r.Id));
+        working.UnionWith(model.Current("roster").Select(r => r.Id));
+        // A prerequisite's original record is an input, not another active assignment. Do not walk
+        // back through everything sharing a decision, or require every historical file behind it.
         bool changed;
         do
         {
             changed = false;
             foreach (RecordEnvelope record in model.Records)
             {
-                if (required.Contains(record.Id))
+                if (working.Contains(record.Id))
                 {
                     foreach (string id in References(record).Where(model.ById.ContainsKey))
                     {
-                        changed |= required.Add(id);
-                    }
+                        RecordEnvelope input = model.ById[id];
+                        AddChain(model, required, input);
+                        if (input.Type == "document-revision")
+                        {
+                            requiredDocuments.Add(id);
+                        }
 
-                    changed |= required.Add(model.Latest(record).Id);
+                        if (input.Type is "decision" or "operation" or "goal")
+                        {
+                            changed |= AddChain(model, working, input);
+                        }
+                    }
                 }
-                else if (References(record).Any(id => required.Contains(id) && model.ById.TryGetValue(id, out RecordEnvelope? target) &&
-                    (target.Type is not ("principal" or "estate" or "device" or "resource" or "document-revision") || (target.Type == "device" && record.Type == "admission"))))
+                else if ((record.Subject is { } subject && working.Contains(subject.Id)) ||
+                    (record.Type == "decision" && record.Body.TryGetProperty("affects", out JsonElement affects) && Strings(affects).Any(working.Contains)) ||
+                    (record.Type is "operation" or "goal" or "ask" && References(record).Any(id => working.Contains(id) &&
+                        model.ById[id].Type is "work-order" or "assignment" or "attempt" or "result" or "operation" or "goal")))
                 {
-                    changed |= required.Add(record.Id);
+                    changed |= AddChain(model, working, record);
                 }
             }
         }
         while (changed);
 
+        required.UnionWith(working);
         foreach (RecordEnvelope record in model.Records.Where(r => required.Contains(r.Id)).ToList())
         {
             if (model.CurrentPrincipal(record.By) is { } principal)
             {
                 required.UnionWith(model.Chain(principal));
+            }
+
+            foreach (var signature in record.Signatures)
+            {
+                if (model.ById.TryGetValue(signature.Device, out RecordEnvelope? device))
+                {
+                    AddChain(model, required, device);
+                    foreach (RecordEnvelope admission in model.OfType("admission").Where(r => References(r).Contains(device.Id)))
+                    {
+                        AddChain(model, required, admission);
+                    }
+                }
             }
         }
 
@@ -62,12 +87,12 @@ internal static partial class ContextSelection
         var sources = model.Records.Where(r => required.Contains(r.Id) || (r.Type == "document-revision" && model.IsCurrent(r)))
             .Select(r => ContextAssembly.Record(r, byPath[r.ExpectedPath], required.Contains(r.Id),
                 required.Contains(r.Id) ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; document catalogue")).ToList();
-        foreach (RecordEnvelope revision in model.OfType("document-revision").Where(r => required.Contains(r.Id) || model.IsCurrent(r)))
+        foreach (RecordEnvelope revision in model.OfType("document-revision").Where(r => requiredDocuments.Contains(r.Id) || model.IsCurrent(r)))
         {
             string path = EstateModel.BodyString(revision, "path")!;
             string hash = EstateModel.BodyString(revision, "hash")!;
             byte[]? bytes = objects.Read(hash) ?? LocalOriginal(model.Root, path, hash);
-            bool mandatory = required.Contains(revision.Id);
+            bool mandatory = requiredDocuments.Contains(revision.Id);
             sources.Add(new ContextAssembly.Source(new JsonObject
             {
                 ["kind"] = "document", ["path"] = path, ["revision"] = revision.Id,
@@ -89,13 +114,20 @@ internal static partial class ContextSelection
         ["asOf"] = model.Records.OrderBy(r => r.At, StringComparer.Ordinal).LastOrDefault()?.At,
         ["asOfMethod"] = "latest recorded timestamp in the observed file set; not live external health",
         ["scope"] = scope,
-        ["selection"] = "deterministic record dependency closure, including record identities named in text and signature devices; mandatory originals before optional catalogue sources",
+        ["selection"] = order is null ? "deterministic complete record selection; every retained record original is mandatory" : "deterministic working instructions and effects, governing decisions, exact input records and signature devices; prerequisite work remains an input, not another active assignment; historical file bodies outside this step are not selected; mandatory originals before optional catalogue sources",
         ["audience"] = "authorized estate reader",
         ["access"] = "estate-wide read permission; rechecked on retrieval",
         ["nextTask"] = order is null ? "Review current state before continuing on another surface or copy." : "Continue the recorded work; inspect current constraints and return contract.",
         ["communication"] = "presentation supplied by the caller; no depth selection by the context contract",
         ["execution"] = null,
     };
+
+    private static bool AddChain(EstateModel model, HashSet<string> selected, RecordEnvelope record)
+    {
+        int before = selected.Count;
+        selected.UnionWith(model.Chain(model.Latest(record)));
+        return selected.Count != before;
+    }
 
     private static IEnumerable<string> References(RecordEnvelope record)
     {
@@ -114,7 +146,8 @@ internal static partial class ContextSelection
             yield return signature.Device;
         }
 
-        foreach (string value in Strings(record.Body))
+        // A decision's affected peers are targets of that decision, not extra inputs to this step.
+        foreach (string value in record.Body.EnumerateObject().Where(p => record.Type != "decision" || p.Name != "affects").SelectMany(p => Strings(p.Value)))
         {
             yield return value;
             foreach (Match match in RecordIds().Matches(value))
