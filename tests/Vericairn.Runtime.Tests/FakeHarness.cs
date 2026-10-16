@@ -147,6 +147,24 @@ internal static class FakeHarness
             case "watch-codex-warning-hold":
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"curl https://example.invalid"}}""");
                 return Linger(acknowledge: true);
+            case "watch-claude-mixed-credentials" or "watch-claude-mixed-network":
+                object mixed = scenario == "watch-claude-mixed-credentials"
+                    ? new { paths = new[] { "~/.ssh/id_rsa", "src/invalid\0.cs" } }
+                    : new { url = "https://example.invalid", cwd = "invalid\0directory", file_path = "outside.txt" };
+                Emit(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "p1", name = "Read", input = mixed } } } }));
+                return 0;
+            case "watch-claude-unverified-path" or "watch-claude-unverified-workdir" or "watch-claude-unverified-filesystem" or "watch-claude-unverified-check":
+                object input = scenario == "watch-claude-unverified-workdir"
+                    ? new { cwd = "invalid\0directory", command = "cat outside.txt" }
+                    : new { file_path = scenario switch
+                    {
+                        "watch-claude-unverified-path" => "src/invalid\0.cs",
+                        "watch-claude-unverified-filesystem" => new string('a', 512),
+                        _ => "src/a.cs",
+                    } };
+                Emit(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "p1", name = "Read", input } } } }));
+                WaitForFile(report + ".finish");
+                return 0;
             case "watch-codex-loop":
                 for (int i = 0; i < 10; i++)
                 {

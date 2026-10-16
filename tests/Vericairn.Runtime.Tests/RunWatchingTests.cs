@@ -79,6 +79,97 @@ public class RunWatchingTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Theory]
+    [InlineData("watch-claude-unverified-path")]
+    [InlineData("watch-claude-unverified-workdir")]
+    [InlineData("watch-claude-unverified-filesystem")]
+    public void InvalidInvocationPathsProduceAnUnverifiedWarningWithoutStopping(string scenario)
+    {
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "**", StringComparison.Ordinal));
+        AssertUnverifiedRunContinues(run, scenario);
+    }
+
+    [Theory]
+    [InlineData("watch-claude-mixed-credentials", "credentials", true)]
+    [InlineData("watch-claude-mixed-network", "network", false)]
+    public void UndecidableItemsDoNotEraseCompletedActionVerdicts(string scenario, string code, bool critical)
+    {
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        RunResponse started = run.Start("claude-code", scenario, run.Report("mixed-audit"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal(critical ? "critical" : "warning", Assert.Single(settled.Signals!, s => s.Code == code).Severity);
+        RunSignal unverified = Assert.Single(settled.Signals!, s => s.Code == "audit-unverified");
+        Assert.Equal("warning", unverified.Severity);
+        Assert.Contains("invocation check", unverified.Summary, StringComparison.Ordinal);
+        Assert.Equal(critical ? "known-failure" : "observed-success", settled.Status);
+        if (critical)
+        {
+            Assert.Equal("worker", settled.Stop!.RequestedBy);
+            Assert.NotNull(settled.Stop.ContainedAt);
+        }
+        else
+        {
+            Assert.Null(settled.Stop);
+            Assert.DoesNotContain(settled.Signals!, s => s.Code is "scope" or "credentials");
+        }
+
+        Assert.All(settled.Signals!, s => Assert.NotNull(s.Attention));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData("argument")]
+    [InlineData("io")]
+    [InlineData("access")]
+    [InlineData("unsupported")]
+    [InlineData("timeout")]
+    [InlineData("regex-timeout")]
+    public void AuditExceptionsProduceAnUnverifiedWarningWithoutStopping(string failure)
+    {
+        Exception exception = failure switch
+        {
+            "argument" => new ArgumentException("Synthetic audit failure."),
+            "io" => new IOException("Synthetic audit failure."),
+            "access" => new UnauthorizedAccessException("Synthetic audit failure."),
+            "unsupported" => new NotSupportedException("Synthetic audit failure."),
+            "timeout" => new TimeoutException("Synthetic audit failure."),
+            _ => new System.Text.RegularExpressions.RegexMatchTimeoutException(),
+        };
+        using var run = new RunEstate();
+        HookedLauncher.Install(run, readActions: _ => throw exception);
+        AssertUnverifiedRunContinues(run, "watch-claude-unverified-check");
+    }
+
+    private static void AssertUnverifiedRunContinues(RunEstate run, string scenario)
+    {
+        string report = run.Report("unverified");
+        RunResponse started = run.Start("claude-code", scenario, report);
+        Assert.True(started.Ok, started.Message);
+        try
+        {
+            WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 });
+            RunRow live = run.Row(started.Run);
+            RunSignal signal = Assert.Single(live.Signals!);
+            Assert.Equal("audit-unverified", signal.Code);
+            Assert.Equal("warning", signal.Severity);
+            Assert.Null(live.Stop);
+            Assert.Equal("dispatched", live.Status);
+            Assert.DoesNotContain("Synthetic audit failure", signal.Summary, StringComparison.Ordinal);
+        }
+        finally
+        {
+            File.WriteAllText(report + ".finish", "release");
+        }
+
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.NotNull(Assert.Single(settled.Signals!).Attention);
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     [Fact]
     public void AgentProgressClaimsDoNotResetWorkerObservedSilence()
     {
