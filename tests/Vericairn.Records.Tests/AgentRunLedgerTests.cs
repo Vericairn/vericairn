@@ -15,6 +15,23 @@ namespace Vericairn.Records.Tests;
 public class AgentRunLedgerTests
 {
     [Fact]
+    public void AnUncertainAssignmentCannotBeRetriedAndLaterReconciliationDoesNotRewriteAdmission()
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10,"concurrency":2}""");
+        RecordEnvelope uncertain = ledger.Run("original", Small, usage: null, status: "uncertain");
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        RecordEnvelope retry = ledger.Intent("retry", Small);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == retry.ExpectedPath && f.Code == "operation.unreconciled");
+
+        var settled = System.Text.Json.Nodes.JsonNode.Parse(uncertain.Body.GetRawText())!.AsObject();
+        settled["status"] = "known-failure";
+        settled["observed"] = System.Text.Json.Nodes.JsonNode.Parse("""{"summary":"The original process exited; its effect was reconciled.","at":"2026-10-13T12:00:40Z"}""");
+        settled["usage"] = System.Text.Json.Nodes.JsonNode.Parse(Usage);
+        ledger.Estate.Add("operation", ledger.Estate.OperatorId, settled.ToJsonString(), supersedes: uncertain.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == retry.ExpectedPath && f.Code == "operation.unreconciled");
+    }
+
+    [Fact]
     public void AddingAGoalToAnUnfundedIdentityCannotBypassAdmission()
     {
         var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
