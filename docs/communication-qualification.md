@@ -34,9 +34,9 @@ not-applicable portions of the same design case are separate rows.
 
 ## Reproducible coverage
 
-The new qualification and regression cases are in these files. Theory rows
-count as individual test cases; the two 12-row matrices cover every supported
-depth/frequency pair.
+This table records the initial qualification and regression cases at `7590bc7`.
+Theory rows count as individual test cases; the two 12-row matrices cover every
+supported depth/frequency pair. The CI follow-up below adds three theory rows.
 
 | Test file | Coverage | Cases |
 |---|---|---:|
@@ -119,6 +119,33 @@ After the offline restore, equivalent build/test commands are:
 dotnet build -c Release --no-restore -m:1 -nr:false -p:UseSharedCompilation=false -p:UsedAvaloniaProducts=
 dotnet test -c Release --no-build --max-parallel-test-modules 1
 ```
+
+## CI follow-up: review visibility
+
+PR 87's builder reported that the review-finding test passed on Windows but
+failed on macOS and Linux. This was a test artifact: the assertion could run
+before the review tab's layout created its text controls. The window-wide
+search could also pass on the same original text in Home's hidden attention
+items. A minimum-size window alone did not reproduce it locally. Starting in
+Work, so Home never realizes those items, and opening and inspecting the review
+in one dispatcher turn reproduced all three missing-text failures.
+
+The test now explicitly lays out the window and searches only within the
+selected review or its review row. It scrolls each expected text span into view
+and checks its character bounds against the scroll viewport and window,
+including both unperformed checks, every finding and location, the review
+summary, and a newly submitted finding. All three depths are exercised at
+720 by 480 and 1200 by 800. The existing view makes every tested span reachable;
+no product view change was needed. The other new Workbench tests in this round
+do not inspect window visuals and have no window-size or realization dependency.
+
+These three additional theory rows expand the original 50 new cases to 53.
+The follow-up offline Release build passed with zero warnings and errors.
+The whole suite on macOS arm64 passed: 1,019 total, 1,007 succeeded, 12 skipped
+for the reasons listed above, and zero failed. The full Workbench suite also
+passed with `CI=true` and `DOTNET_PROCESSOR_COUNT=2`: 48 succeeded, one opt-in
+live-estate case skipped. No shared headless settings were changed.
+The corrected three-platform CI run remains the builder's next check.
 
 ## Remaining gaps and next round
 
