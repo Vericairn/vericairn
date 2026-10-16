@@ -1,0 +1,99 @@
+name: nuget
+
+# A candidate may be withdrawn. Only the operator's publication releases its exact package assets.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: 10.0.x
+      - name: Download the published release's packages and checksums
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ github.event.release.id }}
+        # Address the release by its event's id, so a moved or reused tag cannot select another release.
+        run: |
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+
+          repository = os.environ["GH_REPO"]
+          release_id = int(os.environ["RELEASE_ID"])
+          release = json.loads(subprocess.check_output(["gh", "api", f"repos/{repository}/releases/{release_id}"]))
+          if release["id"] != release_id or release["draft"] or not release["published_at"]:
+              raise SystemExit("The event's release is not published.")
+          assets = [asset for asset in release["assets"]
+                    if asset["name"] == "SHA256SUMS" or asset["name"].endswith((".nupkg", ".snupkg"))]
+          names = [asset["name"] for asset in assets]
+          if "SHA256SUMS" not in names or len(names) != len(set(names)):
+              raise SystemExit("Missing checksums or duplicate asset names.")
+          directory = Path("packages")
+          directory.mkdir()
+          for asset in assets:
+              name = asset["name"]
+              if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
+                  raise SystemExit(f"Unsafe asset name: {name}")
+              with (directory / name).open("xb") as output:
+                  subprocess.run(["gh", "api", f"repos/{repository}/releases/assets/{asset['id']}",
+                                  "--header", "Accept: application/octet-stream"], stdout=output, check=True)
+      - name: Verify every package against SHA256SUMS
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+          import re
+
+          directory = Path("packages")
+          manifest = {}
+          for line in (directory / "SHA256SUMS").read_text().splitlines():
+              match = re.fullmatch(r"([a-fA-F0-9]{64}) [ *]([A-Za-z0-9][A-Za-z0-9._-]*)", line)
+              if not match or match[2] in manifest:
+                  raise SystemExit(f"Malformed or duplicate checksum entry: {line}")
+              manifest[match[2]] = match[1].lower()
+          expected = {name for name in manifest if name.endswith((".nupkg", ".snupkg"))}
+          actual = {path.name for path in directory.iterdir() if path.suffix in (".nupkg", ".snupkg")}
+          if expected != actual or not any(name.endswith(".nupkg") for name in actual) or not any(name.endswith(".snupkg") for name in actual):
+              raise SystemExit("Package assets and checksums must match, including packages and symbols.")
+          for name in sorted(actual):
+              path = directory / name
+              if path.is_symlink() or not path.is_file():
+                  raise SystemExit(f"Not a regular package file: {name}")
+              if name.endswith(".snupkg") and name.removesuffix(".snupkg") + ".nupkg" not in actual:
+                  raise SystemExit(f"Symbol package has no matching package: {name}")
+              with path.open("rb") as content:
+                  digest = hashlib.file_digest(content, "sha256").hexdigest()
+              if digest != manifest[name]:
+                  raise SystemExit(f"Checksum mismatch: {name}")
+              print(f"Verified {name}")
+      - uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        id: login
+        with:
+          user: ${{ vars.NUGET_USER }}
+      - name: Push the verified packages and symbols
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        # Suppress the implicit symbol push so each verified file is sent exactly once, explicitly.
+        run: |
+          set -eu
+          for package in packages/*.nupkg; do
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json --no-symbols
+          done
+          for symbols in packages/*.snupkg; do
+            dotnet nuget push "$symbols" --api-key "$NUGET_API_KEY" \
+              --source https://api.nuget.org/v3/index.json
+          done
