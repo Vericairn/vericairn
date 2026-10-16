@@ -534,3 +534,11 @@ Resume exits 0 for a valid comparison, 1 when the current view has errors or
 missing/changed originals, and 2 for an invalid baseline. It submits nothing and
 never rewrites the retained package. Review changes and current authority before
 continuing under the existing assignment and original operation identities.
+
+`vericairn status` shows when a person last explicitly observed the estate,
+including the observation record and hash, or says unknown. To record an
+observation, a person runs `vericairn status --observe --by <principal-id>`.
+The runtime supplies the timestamp and snapshot identities; ordinary status
+reads, agent reads and repository probes do not update them. Both flags are
+required, and an agent cannot author an estate observation. Format-1 estates
+must be explicitly upgraded before this write is available.

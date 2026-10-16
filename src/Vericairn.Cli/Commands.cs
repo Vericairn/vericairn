@@ -42,8 +42,29 @@ internal static class Commands
     public static int Check(string root, bool json) =>
         IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
 
-    public static int Status(string root, bool json)
+    public static int Status(string root, bool json, bool observe = false, string? by = null)
     {
+        if (observe || by is not null)
+        {
+            if (!observe || string.IsNullOrWhiteSpace(by))
+            {
+                return Fail("Recording an observation requires both --observe and --by with a human principal id.");
+            }
+
+            return WithApi(root, api =>
+            {
+                WriteOutcome written = api.ObserveEstate(new EstateObserveRequest(by));
+                if (!written.Ok)
+                {
+                    return ReportOutcome(written, json);
+                }
+
+                StatusResponse observed = api.Status();
+                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : observed.Text);
+                return observed.HasErrors ? HasErrors : Clean;
+            });
+        }
+
         if (!IsEstate(root))
         {
             return WithFiles(root, model =>

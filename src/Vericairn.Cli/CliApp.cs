@@ -44,7 +44,11 @@ internal static class CliApp
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
 
         var status = new Command("status", "Show the estate's current state derived from its records.");
-        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
+        var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
+        var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
+        status.Options.Add(observeStatus);
+        status.Options.Add(observer);
+        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer)));
         root.Subcommands.Add(status);
 
         var progress = new Command("progress", "Show the progress report, rendered from the records alone: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");

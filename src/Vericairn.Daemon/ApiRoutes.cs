@@ -20,6 +20,7 @@ public static class ApiRoutes
         string v = ApiVersion.Prefix;
         app.MapGet($"{v}/health", () => Results.Json(service.Health(), ProtocolJson.Options));
         app.MapGet($"{v}/status", () => Results.Json(service.Status(), ProtocolJson.Options));
+        app.MapPost($"{v}/status/observations", (EstateObserveRequest request) => Outcome(service.ObserveEstate(request)));
         app.MapGet($"{v}/progress", () => Results.Json(service.Progress(), ProtocolJson.Options));
         app.MapGet($"{v}/handoff", (long? maxBytes) => Results.Json(service.Handoff(maxBytes), ProtocolJson.Options));
         app.MapPost($"{v}/resume", (HandoffPackage package) => Results.Json(service.ResumeHandoff(package), ProtocolJson.Options));

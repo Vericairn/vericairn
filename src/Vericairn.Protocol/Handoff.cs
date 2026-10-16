@@ -23,3 +23,7 @@ public sealed record HandoffResponse(string Text, HandoffPackage? Package, Probl
 /// <param name="HasErrors">Whether current records are invalid, missing or changed in place.</param>
 /// <param name="Problem">Why the baseline could not be used; null on a comparison.</param>
 public sealed record ResumeResponse(string Text, JsonElement? Json, bool HasErrors, Problem? Problem);
+
+/// <summary>An explicit observation of the estate's status by a person. The runtime supplies the timestamp, subject and facts.</summary>
+/// <param name="By">The observing human principal.</param>
+public sealed record EstateObserveRequest(string By);

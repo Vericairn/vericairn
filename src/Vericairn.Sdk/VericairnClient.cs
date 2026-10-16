@@ -149,6 +149,9 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
 
     /// <inheritdoc />
+    public WriteOutcome ObserveEstate(EstateObserveRequest request) => Post<EstateObserveRequest, WriteOutcome>("/v1/status/observations", request)!;
+
+    /// <inheritdoc />
     public ProgressResponse Progress() => Get<ProgressResponse>("/v1/progress")!;
 
     /// <inheritdoc />

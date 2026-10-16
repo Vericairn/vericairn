@@ -15,6 +15,9 @@ public interface IEstateApi
     /// <summary>Current status.</summary>
     StatusResponse Status();
 
+    /// <summary>Record that a person explicitly observed this estate's status; ordinary reads never advance this timestamp.</summary>
+    WriteOutcome ObserveEstate(EstateObserveRequest request);
+
     /// <summary>The progress report, rendered from the records alone, with the same check status runs.</summary>
     ProgressResponse Progress();
 

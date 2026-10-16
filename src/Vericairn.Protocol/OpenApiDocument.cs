@@ -14,6 +14,7 @@ public static class OpenApiDocument
     [
         ("GET", "/v1/health"),
         ("GET", "/v1/status"),
+        ("POST", "/v1/status/observations"),
         ("GET", "/v1/progress"),
         ("GET", "/v1/handoff"),
         ("POST", "/v1/resume"),
@@ -283,6 +284,7 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
@@ -328,6 +330,7 @@ public static class OpenApiDocument
 
     private static string RequestSchema(string path) => path switch
     {
+        "/v1/status/observations" => "EstateObserveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
         "/v1/work/assign" => "AssignRequest",
@@ -368,6 +371,7 @@ public static class OpenApiDocument
     {
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
         ("GET", "/v1/status") => "Current status: human text and the canonical JSON that is identical on every machine.",
+        ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",
         ("GET", "/v1/progress") => "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator; text and canonical JSON.",

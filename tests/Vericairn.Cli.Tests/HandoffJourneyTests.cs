@@ -15,6 +15,23 @@ namespace Vericairn.Cli.Tests;
 public class HandoffJourneyTests
 {
     [Fact]
+    public void StatusOnlyRecordsAnObservationWhenAPersonExplicitlyAsks()
+    {
+        using var estate = new HandoffEstate();
+        int count = estate.Load().Records.Count;
+        CliHarness.Outcome unread = CliHarness.Ok("--estate", estate.Root, "--json", "status");
+        Assert.Equal(JsonValueKind.Null, unread.Json.GetProperty("lastObservedByPerson").ValueKind);
+        Assert.Equal(count, estate.Load().Records.Count);
+        Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "status", "--observe").Code);
+        Assert.Equal(2, CliHarness.Run("--estate", estate.Root, "status", "--by", estate.OperatorId).Code);
+        Assert.NotEqual(0, CliHarness.Run("--estate", estate.Root, "status", "--observe", "--by", estate.BuilderId).Code);
+        CliHarness.Outcome observed = CliHarness.Ok("--estate", estate.Root, "--json", "status", "--observe", "--by", estate.OperatorId);
+        Assert.Equal(estate.OperatorId, observed.Json.GetProperty("lastObservedByPerson").GetProperty("by").GetString());
+        Assert.Equal(count + 1, estate.Load().Records.Count);
+        Assert.Equal(observed.Out, CliHarness.Ok("--estate", estate.Root, "--json", "status").Out);
+    }
+
+    [Fact]
     public void ANewSurfaceResumesTheRetainedPackageWithoutSubmittingWork()
     {
         using var estate = new HandoffEstate();

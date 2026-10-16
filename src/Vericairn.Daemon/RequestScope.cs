@@ -133,6 +133,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     {
         ["GET /v1/health"] = null,
         ["GET /v1/status"] = null,
+        ["POST /v1/status/observations"] = typeof(EstateObserveRequest),
         ["GET /v1/progress"] = null,
         ["GET /v1/handoff"] = null,
         ["POST /v1/resume"] = typeof(HandoffPackage),
@@ -217,6 +218,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
         [typeof(HandoffPackage)] = (_, _, _) => null,
+        [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
         [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
         [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),

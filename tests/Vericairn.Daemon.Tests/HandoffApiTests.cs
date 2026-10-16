@@ -15,6 +15,26 @@ public class HandoffApiTests
     public HandoffApiTests() => DaemonTestHome.Ensure();
 
     [Fact]
+    public async Task AnObservationRequiresTheBoundPersonAndDoesNotFollowFromARead()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId);
+        using VericairnClient agent = VericairnClient.LocalNetwork(paired, harness.Signer(paired));
+        Assert.Throws<HttpRequestException>(() => agent.ObserveEstate(new EstateObserveRequest(harness.Estate.OperatorId)));
+        Assert.False(agent.ObserveEstate(new EstateObserveRequest(harness.Estate.BuilderId)).Ok);
+        Assert.Empty(harness.Estate.Load().OfType("observation"));
+        RuntimeConnection human = harness.Pair(harness.Estate.OperatorId);
+        using VericairnClient person = VericairnClient.LocalNetwork(human, harness.Signer(human));
+        int records = harness.Estate.Load().Records.Count;
+        Assert.Equal(JsonValueKind.Null, person.Status().Json.GetProperty("lastObservedByPerson").ValueKind);
+        Assert.Equal(records, harness.Estate.Load().Records.Count);
+        WriteOutcome observed = person.ObserveEstate(new EstateObserveRequest(harness.Estate.OperatorId));
+        Assert.True(observed.Ok, observed.Problem?.Message);
+        Assert.Equal(observed.Written!.Id, person.Status().Json.GetProperty("lastObservedByPerson").GetProperty("record").GetString());
+        Assert.Equal(records + 1, harness.Estate.Load().Records.Count);
+    }
+
+    [Fact]
     public async Task AuthenticatedHandoffAndResumeAreReadsWithoutAWriteLedgerEntry()
     {
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
