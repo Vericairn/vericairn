@@ -23,8 +23,9 @@ namespace Vericairn.Daemon;
 /// <summary>A device a request was authenticated as, on loopback or the local network: what the request may act for once it is bound.</summary>
 /// <param name="Identity">The device's identity.</param>
 /// <param name="Principal">The principal it acts for, and the only one its requests may name as acting.</param>
+/// <param name="PublicKey">The current key that verified its signature, rechecked under the estate's write lock.</param>
 /// <param name="LocalNetwork">Whether the request came over the local network.</param>
-internal sealed record AuthenticatedDevice(string Identity, string Principal, bool LocalNetwork);
+internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork);
 
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
@@ -164,7 +165,7 @@ internal sealed class RequestAuthenticator
             return problem;
         }
 
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: false);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: false);
         return null;
     }
 
@@ -245,7 +246,7 @@ internal sealed class RequestAuthenticator
             return Denied($"{operation} acts on the runtime's own machine and is refused over the local network; run it on that machine.");
         }
 
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, LocalNetwork: true);
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: true);
         return null;
     }
 

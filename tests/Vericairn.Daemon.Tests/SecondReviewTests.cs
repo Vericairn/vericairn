@@ -470,7 +470,7 @@ public class SecondReviewTests
         var context = new DefaultHttpContext();
         context.Request.Method = "POST";
         context.Request.Path = "/v1/records";
-        context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice(harness.OperatorDevice, harness.Estate.OperatorId, LocalNetwork: false);
+        context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice(harness.OperatorDevice, harness.Estate.OperatorId, "key", LocalNetwork: false);
         bool reached = false;
         object? result = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, new Uri("https://example.invalid/")), _ =>
         {

@@ -30,7 +30,7 @@ public class Goal04ScopeTests
             var context = new DefaultHttpContext();
             context.Request.Method = "POST";
             context.Request.Path = step ? "/v1/goals/{id}/step" : "/v1/work/takeover";
-            context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice("device", harness.Estate.BuilderId, lan);
+            context.Items[RequestAuthenticator.DeviceItem] = new AuthenticatedDevice("device", harness.Estate.BuilderId, "key", lan);
             object request = step ? new GoalStepRequest(by!) : new TakeoverRequest("assignment", by!, harness.Estate.OperatorId);
             bool reached = false;
             object? result = await scope.InvokeAsync(new DefaultEndpointFilterInvocationContext(context, request), _ =>

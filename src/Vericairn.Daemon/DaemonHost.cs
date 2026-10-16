@@ -114,6 +114,9 @@ public sealed class DaemonHost : IAsyncDisposable
 
     internal TimeProvider Time { get; }
 
+    /// <summary>A test's hook between device authentication and the operation's write, outside the estate's gate.</summary>
+    internal Action? BeforeDeviceWrite { get; set; }
+
     /// <summary>The endpoint file of an estate on this machine, beside its live store.</summary>
     public static string EndpointFilePath(string root) => DaemonDiscovery.EndpointFilePath(root);
 
@@ -291,7 +294,7 @@ public sealed class DaemonHost : IAsyncDisposable
         app.Use(host.HandleRequestAsync);
         // Every route is reached through one group, whose filter holds a device-signed request to its device's principal once bound.
         RouteGroupBuilder routes = app.MapGroup(string.Empty);
-        routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log));
+        routes.AddEndpointFilter(new RequestScope(service, new LocalNetworkLedger(directory), host.Log, () => host.BeforeDeviceWrite?.Invoke()));
         ApiRoutes.Map(routes, service, () => _ = Task.Run(host.StopAsync));
         DaemonRoutes.Map(routes, host);
         try

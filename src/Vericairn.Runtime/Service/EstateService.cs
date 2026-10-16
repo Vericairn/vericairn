@@ -352,6 +352,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             // Presence and the Secure Enclave are named in device records from record format 2: an older estate refuses them, and its
             // default custody is the strongest that format can name.
             EstateModel model = session.Load();
+            if (RequestDeviceRefusal(model) is Problem denied)
+            {
+                return WriteOutcome.Fail(denied);
+            }
+
             long format = model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat;
             bool person = model.CurrentPrincipal(request.Principal) is { } principal && EstateModel.BodyString(principal, "kind") == "human";
             IDeviceKeyStore store;
@@ -437,6 +442,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            if (RequestDeviceRefusal(model) is Problem denied)
+            {
+                return WriteOutcome.Fail(denied);
+            }
+
             if (Revisable(model, request.Device, out RecordEnvelope? device, out string? identity, out IDeviceKeyStore? current) is { } refusal)
             {
                 return Refuse(refusal);
@@ -614,6 +624,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            if (RequestDeviceRefusal(model) is Problem denied)
+            {
+                return WriteOutcome.Fail(denied);
+            }
+
             if ((model.Manifest?.RecordFormat ?? session.Manifest.RecordFormat) < 2)
             {
                 return Refuse("A recovery device is recorded in record format 2; upgrade the estate to a release that writes format 2 first.");
@@ -1764,6 +1779,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 }
             }
 
+            if (RequestDeviceRefusal(model) is Problem denied)
+            {
+                return (null, denied);
+            }
+
             // Migrations stage their files first; nothing is written until every step succeeded.
             var context = new MigrationContext(session.Root, model);
             foreach (IRecordFormatMigration step in EstateUpgrade.Steps(plan))
@@ -1831,6 +1851,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            if (RequestDeviceRefusal(model) is Problem denied)
+            {
+                return (null, denied);
+            }
+
             try
             {
                 ExportSummary summary = EstateExport.Write(session, request.Output, request.By);
@@ -1893,17 +1918,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         lock (gate)
         {
-            EstateModel model = session.Load();
-            if (!model.ById.TryGetValue(deviceId, out RecordEnvelope? record) || record.Type != "device")
-            {
-                return null;
-            }
-
-            RecordEnvelope device = model.Latest(record);
-            RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
-            string state = model.IsCurrent(device) && SignatureChecks.IsAdmitted(model, device) ? "admitted" : admission is not null && EstateModel.BodyString(admission, "status") == "revoked" ? "revoked" : "not admitted";
-            return new DeviceStanding(model.Chain(device)[0], EstateModel.BodyString(device, "principal") ?? string.Empty, EstateModel.BodyString(device, "publicKey") ?? string.Empty, ProfilesOf(device), state);
+            return Standing(session.Load(), deviceId);
         }
+    }
+
+    private static DeviceStanding? Standing(EstateModel model, string deviceId)
+    {
+        if (!model.ById.TryGetValue(deviceId, out RecordEnvelope? record) || record.Type != "device")
+        {
+            return null;
+        }
+
+        RecordEnvelope device = model.Latest(record);
+        RecordEnvelope? admission = SignatureChecks.AdmissionOf(model, device);
+        string state = model.IsCurrent(device) && SignatureChecks.IsAdmitted(model, device) ? "admitted" : admission is not null && EstateModel.BodyString(admission, "status") == "revoked" ? "revoked" : "not admitted";
+        return new DeviceStanding(model.Chain(device)[0], EstateModel.BodyString(device, "principal") ?? string.Empty, EstateModel.BodyString(device, "publicKey") ?? string.Empty, ProfilesOf(device), state);
     }
 
     /// <summary>
@@ -2124,6 +2153,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         lock (gate)
         {
+            if (RequestDeviceRefusal(session.Load()) is Problem denied)
+            {
+                return (null, denied);
+            }
+
             string hash = session.Objects.Put(bytes);
             return (new ObjectStored(hash, bytes.LongLength, session.Objects.Kind), null);
         }
@@ -2211,6 +2245,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>Signs, stores and validates; a record that would make the estate invalid is removed again. Caller holds the gate.</summary>
     private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
+        if (RequestDeviceRefusal(current) is Problem denied)
+        {
+            return WriteOutcome.Fail(denied);
+        }
+
         (AuthoredRecord? record, string? refusal) = AuthorLocked(draft, current, signers);
         if (record is null)
         {
@@ -2284,6 +2323,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private (IReadOnlyList<RecordWritten> Written, Problem? Problem) StoreTogetherLocked(IReadOnlyList<AuthoredRecord> records, string purpose, string? workOrder)
     {
+        if (RequestDeviceRefusal(session.Load()) is Problem denied)
+        {
+            return ([], denied);
+        }
+
         FindingList relevant = Invalid(LoadWith(records), records, stored: false);
         if (relevant.HasErrors)
         {
