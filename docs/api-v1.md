@@ -1,5 +1,8 @@
 # API version 1
 
+This draft describes the 0.6.1 code. Features marked "from 0.6.0" first appeared in that candidate, which was withdrawn
+before publication; 0.6.1 carries them with FIX-08's corrections. The release documentation index records that history.
+
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
 (`OpenApiDocument.Json`, served at `/openapi/v1.json`). The problem codes are those listed under Outcomes
@@ -70,8 +73,9 @@ exactly as sent), the signed-at time and the lower-case hex SHA-256 of the body 
 is UTF-8: one whose `Content-Type` names another charset is refused, and so is one that begins with a byte order
 mark; any other body is taken as the bytes it is. The daemon accepts a signature only from a device that is
 current and admitted now in the estate it serves, no more than five minutes old by its own clock when the request starts and
-still when its body is in, and once: authentication reads the body only until the signature is five minutes old,
-and a request whose body has not arrived by then is refused. It remembers each device's accepted signatures until five minutes
+still when its body is in, and once within this runtime instance. From 0.6.1 authentication allows at most 30 seconds to
+read the body after the device's header check, or the signature's remaining five-minute validity if shorter;
+a request whose body has not arrived by that deadline is refused. It remembers each device's accepted signatures until five minutes
 after their signing time, when they would be refused as stale anyway, refuses a signature already stale, and
 forgets none sooner: a device with 10,000 in that window is refused until older ones lapse, so no flood, by that
 device or another, and no body held back, makes room for a replay. It remembers a signature by its 64 bytes with
@@ -107,8 +111,9 @@ Writes completed before a revocation remain; the refused write produces nothing.
 operations continue to use the caller's operating-system authority.
 
 The SDK signs each request when it sends it, including the identity proof on a new connection, with
-`DeviceRequestSigner`, which uses the device key in this machine's custody. A copied request is refused, as
-stale after five minutes and as a repeat before then, and a copied key file is useless where platform custody
+`DeviceRequestSigner`, which uses the device key in this machine's custody. A copied request is refused as stale after
+five minutes and as a repeat within the same runtime instance; the startup cutoff and five-second lead bound the
+restart exception described above. A copied key file is useless where platform custody
 holds the key.
 
 Every HTTP refusal (status 400 or above) completes its response before cleanup: authentication, pairing,
@@ -447,7 +452,7 @@ from its files and live store, even while a daemon serves it.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.6.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.6.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
