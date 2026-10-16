@@ -151,6 +151,17 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["execution"]?.GetValue<string>() is string execution)
+        {
+            string model = arguments[Array.IndexOf(arguments, "--model") + 1];
+            string effort = codex
+                ? JsonSerializer.Deserialize<string>(arguments.Single(a => a.StartsWith("model_reasoning_effort=", StringComparison.Ordinal)).Split('=', 2)[1])!
+                : arguments[Array.IndexOf(arguments, "--effort") + 1];
+            Console.WriteLine(JsonSerializer.Serialize(new { type = codex ? "thread.started" : "system", subtype = "init",
+                model = execution == "different" ? "model-a" : model, effort }));
+            // No usage or exact model revision is reported by this scenario.
+            return 0;
+        }
         if (behavior["actions"]?.GetValue<string>() is string actions)
         {
             string server = actions == "ambient" ? "ambient" : "vericairn";
@@ -262,6 +273,8 @@ internal static class FakeHarness
         {
             IReadOnlyList<Vericairn.Runtime.Workers.RunComponent> inventory = ReportedLauncher.Inventory;
             if (scenario == "inventory-unexpected") inventory = [.. inventory, inventory[0] with { Id = "unexpected-hook", Kind = "hook" }];
+            if (scenario == "inventory-tool") inventory = [.. inventory, inventory[0] with { Id = "unexpected-tool", Kind = "tool" }];
+            if (scenario == "inventory-environment") inventory = [.. inventory, inventory[0] with { Id = "requesting-tool", Kind = "tool", Environment = ["UNADMITTED_TOOL_SETTING"] }];
             if (scenario == "inventory-route") inventory = [inventory[0] with { Destinations = ["undeclared-route"] }, .. inventory.Skip(1)];
             string revision = "revision-1";
             if (scenario == "inventory-changes")

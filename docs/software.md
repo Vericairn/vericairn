@@ -552,6 +552,10 @@ cap remain those of its intent, and a dispatch timestamp cannot change or be add
 newly reserves allowance is checked for admission, including a revision; an existing reservation is recognized only
 for the same in-flight target. Generic operations retain their reconciliation and retry rules.
 
+An assignment with a run recorded as `uncertain` cannot start another run, even on another branch or goal
+with spare allowance. Reconcile the original operation first; changing its assignment revision does not
+clear the uncertainty. This admission rule applies both to worker requests and to newly authored run records.
+
 From 0.6.1 a later revision cannot rewrite any settled fact, including usage, the observation, liveness, scope or
 containment. Evidence may only be appended; missing stop facts and previously absent optional fields may be added
 only under the existing record and chronology rules, without granting a new status transition. The ledger uses the

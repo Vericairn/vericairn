@@ -782,6 +782,12 @@ public sealed partial class ShellViewModel : Observable
         {
             ObserveResponse? observed = connection.Api.Observe(keyOrId);
             BriefResponse? brief = connection.Api.BriefFor(keyOrId, CommunicationRecipient());
+            if (brief?.Problem is not null)
+            {
+                Open(new TextDocument(keyOrId, brief.Markdown + "\n" + AssignmentComposer.Refusal(brief.Problem), "refused"));
+                return;
+            }
+
             if (observed is null || brief is null)
             {
                 Open(new TextDocument(keyOrId, $"No work order '{keyOrId}'.", "missing"));
@@ -807,6 +813,12 @@ public sealed partial class ShellViewModel : Observable
 
         AssignmentRow? row = Assignments.FirstOrDefault(a => a.Id == assignmentId);
         BriefResponse? brief = row is null ? null : Try(() => connection.Api.Brief(row.Key) ?? new BriefResponse(string.Empty, default));
+        if (brief?.Problem is not null)
+        {
+            Open(new TextDocument(assignmentId, brief.Markdown + "\n" + AssignmentComposer.Refusal(brief.Problem), "refused"));
+            return null;
+        }
+
         JsonElement node = default;
         if (brief is not null && brief.Json.TryGetProperty("assignments", out JsonElement list) && list.ValueKind == JsonValueKind.Array)
         {
@@ -883,7 +895,8 @@ public sealed partial class ShellViewModel : Observable
                 string? subjectId = review.Envelope.TryGetProperty("subject", out JsonElement s) && s.ValueKind == JsonValueKind.Object ? Str(s, "id") : null;
                 if (subjectId == record.Id)
                 {
-                    reviews.Add(new ReviewRow(review.Id, Str(review.Envelope, "by") ?? "?", Str(rb, "independence") ?? "?", Str(rb, "outcome") ?? "?", Str(rb, "summary") ?? string.Empty));
+                    reviews.Add(new ReviewRow(review.Id, Str(review.Envelope, "by") ?? "?", Str(rb, "independence") ?? "?", Str(rb, "outcome") ?? "?", Str(rb, "summary") ?? string.Empty,
+                        rb.TryGetProperty("findings", out JsonElement findings) ? findings : default));
                 }
             }
 

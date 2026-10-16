@@ -19,7 +19,7 @@ public class QualifiedWatchTests
     [InlineData("claude", true)]
     public void QualifiedRunsKeepRun01SelectionAndInventoryAndWatch01ToolChecks(string harness, bool ambient)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        using var fixture = new NativeRun(harness, newer: true, qualify: true);
         fixture.Probe.Behavior("actions", ambient ? "ambient" : "admitted");
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);

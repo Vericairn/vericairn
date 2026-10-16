@@ -327,6 +327,16 @@ public static class AgentRuns
             refusals.Add(("operation.budget", used));
         }
 
+        if (assignment is not null)
+        {
+            IReadOnlyList<string> step = model.ById.TryGetValue(assignment, out RecordEnvelope? record) ? model.Chain(model.Latest(record)) : [assignment];
+            Run? uncertain = All(model, before).FirstOrDefault(r => r.Status == "uncertain" && r.Assignment is not null && step.Contains(r.Assignment));
+            if (uncertain is not null)
+            {
+                refusals.Add(("operation.unreconciled", $"Run {uncertain.Id} of assignment {assignment} is uncertain; reconcile its effect under its original identity before retrying, including on another branch or goal."));
+            }
+        }
+
         return refusals;
     }
 

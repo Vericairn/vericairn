@@ -16,7 +16,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude")]
     public void ARecordedQualificationAdmitsExactlyTheNewerVersionAndPinsTheIntent(string harness)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        using var fixture = new NativeRun(harness, newer: true, qualify: true);
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);
         fixture.Run.Settled(started.Run);
@@ -34,7 +34,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude")]
     public void TheShippedBaselineIsNamedInTheIntent(string harness)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness);
+        using var fixture = new NativeRun(harness);
         RunResponse started = fixture.Start();
         Assert.True(started.Ok, started.Message);
         fixture.Run.Settled(started.Run);
@@ -51,7 +51,7 @@ public class QualifiedAdmissionTests
     [InlineData("codex", "mcpAuth", "changed")]
     public void AnySuccessfulProbeDigestDriftRefusesBeforeIntent(string harness, string key, string value)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        using var fixture = new NativeRun(harness, newer: true, qualify: true);
         fixture.Probe.Behavior(key, value);
         RunResponse refused = fixture.Start();
         Assert.False(refused.Ok);
@@ -68,7 +68,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude", true)]
     public void UnqualifiedOrRevokedVersionsRefuse(string harness, bool revoked)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: revoked);
+        using var fixture = new NativeRun(harness, newer: true, qualify: revoked);
         if (revoked) Revoke(fixture);
         RunResponse refused = fixture.Start();
         Assert.False(refused.Ok);
@@ -82,7 +82,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude")]
     public void RevocationAfterIntentRefusesDispatchWithoutACharge(string harness)
     {
-        NativeAdmissionTests.NativeRun? fixture = null;
+        NativeRun? fixture = null;
         using (fixture = new(harness, (_, _) => Revoke(fixture!), newer: true, qualify: true))
         {
             RunResponse refused = fixture.Start();
@@ -94,7 +94,7 @@ public class QualifiedAdmissionTests
         }
     }
 
-    private static void Revoke(NativeAdmissionTests.NativeRun fixture)
+    private static void Revoke(NativeRun fixture)
     {
         var original = fixture.Run.Estate.Load().ById[fixture.Qualification!.Id];
         JsonObject body = JsonNode.Parse(original.Body.GetRawText())!.AsObject();
@@ -108,7 +108,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude")]
     public void RevocationDuringTheFinalProbeIsSeenBeforeDispatch(string harness)
     {
-        NativeAdmissionTests.NativeRun? fixture = null;
+        NativeRun? fixture = null;
         int probes = 0;
         using (fixture = new(harness, newer: true, qualify: true, afterProbe: () => { if (++probes == 2) Revoke(fixture!); }))
         {
@@ -126,7 +126,7 @@ public class QualifiedAdmissionTests
     [InlineData("claude", "2.1.298 (Claude Code)")]
     public void QualificationNeverImpliesANeighboringVersion(string harness, string version)
     {
-        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        using var fixture = new NativeRun(harness, newer: true, qualify: true);
         fixture.Probe.Behavior("version", version);
         RunResponse refused = fixture.Start();
         Assert.False(refused.Ok);
@@ -140,8 +140,8 @@ public class QualifiedAdmissionTests
     [InlineData("claude")]
     public void AQualificationMadeElsewhereAppliesOnlyWhenEveryLocalProbeMatches(string harness)
     {
-        using var source = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
-        using var target = new NativeAdmissionTests.NativeRun(harness, newer: true);
+        using var source = new NativeRun(harness, newer: true, qualify: true);
+        using var target = new NativeRun(harness, newer: true);
         // Copy the qualified probe facts into a second test estate, signed by that estate's operator. Neither local path is a fact.
         JsonElement body = source.Run.Estate.Load().ById[source.Qualification!.Id].Body;
         RecordWritten imported = RunEstate.Ok(target.Run.Service.NewRecord(new("harness-qualification", target.Run.Estate.OperatorId, body)));

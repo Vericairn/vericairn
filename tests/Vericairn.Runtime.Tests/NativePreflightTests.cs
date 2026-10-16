@@ -159,5 +159,4 @@ internal sealed class NativeProbe : IDisposable
         File.WriteAllText(Report + ".behavior", behavior.ToJsonString());
     }
     public void Dispose() => Directory.Delete(Root, recursive: true);
-
 }
