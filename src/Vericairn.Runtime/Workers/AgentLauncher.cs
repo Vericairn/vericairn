@@ -27,7 +27,9 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
 /// <param name="UsageStarted">A turn began whose usage is in flight.</param>
 /// <param name="UsageCompleted">A turn ended.</param>
 /// <param name="Acknowledged">The harness acknowledged a stop.</param>
-public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false);
+/// <param name="UsageId">A message identity for a provisional usage snapshot.</param>
+/// <param name="UsageTokens">The latest provisional token count for that identity, not a second charge.</param>
+public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false, string? UsageId = null, long? UsageTokens = null);
 
 /// <summary>A tool invocation from a harness event, never from an assistant's narrative or a tool's output.</summary>
 /// <param name="Id">The harness's invocation identity, used to deduplicate lifecycle events.</param>
@@ -76,6 +78,9 @@ public interface IAgentLauncher
 
     /// <summary>The launcher's default silence limit; a goal may override it.</summary>
     TimeSpan StallLimit => TimeSpan.FromMinutes(10);
+
+    /// <summary>Default command-loop and token-rate thresholds, overridden by recorded goal and roster limits.</summary>
+    RunWatchSettings WatchDefaults => new();
 
     /// <summary>Native spending controls used by this launcher; unlisted units have no native enforcement.</summary>
     string Limitations => "No native token or currency limit; the worker uses soft accounting thresholds only.";

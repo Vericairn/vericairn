@@ -141,6 +141,24 @@ internal static class FakeHarness
 
         switch (scenario)
         {
+            case "watch-codex-loop":
+                for (int i = 0; i < 10; i++)
+                {
+                    Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "call-" + i, type = "command_execution", command = "echo stand-in" } }));
+                    Emit(JsonSerializer.Serialize(new { type = "item.completed", item = new { id = "call-" + i, type = "command_execution", command = "echo stand-in", aggregated_output = "stand-in" } }));
+                }
+
+                return 0;
+            case "watch-codex-burn":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":199990,"output_tokens":10}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":199990,"output_tokens":10}}""");
+                return 0;
+            case "watch-claude-usage":
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":20}}}""");
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":20}}}""");
+                Emit("""{"type":"assistant","message":{"id":"m1","usage":{"input_tokens":100,"output_tokens":25}}}""");
+                Emit("""{"type":"result","usage":{"input_tokens":100,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""");
+                return 0;
             case "watch-claude-audit":
                 Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"outside.txt","content":"synthetic"}}]}}""");
                 return 0;

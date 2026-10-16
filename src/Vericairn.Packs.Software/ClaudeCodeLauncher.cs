@@ -19,6 +19,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
 
+    /// <inheritdoc />
+    public RunWatchSettings WatchDefaults => new(NormalTokensPerMinute: 20000);
+
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
     public const string LauncherId = "claude-code";
 
@@ -166,19 +169,31 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public HarnessSignal? Read(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (!line.TrimStart().StartsWith('{') || !line.Contains("\"result\"", StringComparison.Ordinal))
+        if (!line.TrimStart().StartsWith('{'))
         {
             return null;
         }
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "result")
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+
+        if (type.GetString() == "assistant" && root.TryGetProperty("message", out JsonElement message)
+            && message.TryGetProperty("id", out JsonElement id) && id.ValueKind == JsonValueKind.String && message.TryGetProperty("usage", out _))
+        {
+            long? provisional = HarnessUsage.Message(message);
+            return new HarnessSignal(UsageStarted: true, UsageIncomplete: provisional is null, UsageId: id.GetString(), UsageTokens: provisional);
+        }
+
+        if (type.GetString() != "result")
         {
             return null;
         }
 
         long? tokens = HarnessUsage.Total(root, "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens");
-        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null);
+        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null, UsageCompleted: true);
     }
 }

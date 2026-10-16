@@ -23,6 +23,9 @@ public sealed class GenericLauncher : IAgentLauncher
     public bool Generic => true;
 
     /// <inheritdoc />
+    public RunWatchSettings WatchDefaults => new(NormalTokensPerMinute: 10000);
+
+    /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "generic-process",
         IAgentLauncher.Contract,

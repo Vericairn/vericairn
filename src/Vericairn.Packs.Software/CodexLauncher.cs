@@ -20,6 +20,9 @@ public sealed class CodexLauncher : IAgentLauncher
     /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
 
+    /// <inheritdoc />
+    public RunWatchSettings WatchDefaults => new(NormalTokensPerMinute: 30000);
+
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
     public const string LauncherId = "codex";
 

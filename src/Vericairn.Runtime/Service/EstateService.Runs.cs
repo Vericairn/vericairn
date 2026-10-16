@@ -187,7 +187,8 @@ public sealed partial class EstateService
                 return RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded.");
             }
 
-            plan = plan with { StallSeconds = StallSeconds(goal!, settings, launcher) };
+            plan = plan with { StallSeconds = StallSeconds(goal!, settings, launcher), Watch = launcher.WatchDefaults,
+                HistoryRate = RunWatch.History(AgentRuns.Of(model, goal!).Runs, launcher.Launcher) };
             var target = new JsonObject
             {
                 ["assignment"] = plan.Assignment.Id,
@@ -201,6 +202,8 @@ public sealed partial class EstateService
                 ["stallSeconds"] = plan.StallSeconds.ToString(CultureInfo.InvariantCulture),
             };
             target["capMode"] = "soft";
+            target["watch"] = JsonSerializer.Serialize(plan.Watch, ProtocolJson.Options);
+            target["watchHistoryTokensPerMinute"] = plan.HistoryRate?.ToString(CultureInfo.InvariantCulture) ?? "unavailable";
             if (excepted is not null)
             {
                 target["custodyException"] = excepted.Id;
@@ -299,7 +302,7 @@ public sealed partial class EstateService
                 lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"));
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate);
                 }
             }
         }
@@ -1076,7 +1079,7 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, int StallSeconds);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

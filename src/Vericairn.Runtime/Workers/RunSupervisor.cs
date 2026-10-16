@@ -69,8 +69,10 @@ public sealed class RunSupervisor
     private readonly IReadOnlyList<string> permitted;
     private readonly HashSet<string> actions = new(StringComparer.Ordinal);
     private readonly Queue<string> actionOrder = new();
+    private readonly RunWatch watch;
+    private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
 
-    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate)
     {
         this.process = process;
         this.launcher = launcher;
@@ -83,6 +85,7 @@ public sealed class RunSupervisor
         this.attention = attention;
         this.workspace = workspace;
         this.permitted = permitted;
+        watch = new RunWatch(watchSettings, tokenCap, historyRate);
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
         launchedTick = options.Clock.GetTimestamp();
@@ -112,7 +115,7 @@ public sealed class RunSupervisor
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
     /// </summary>
-    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null, IReadOnlyList<string>? permitted = null)
+    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null, IReadOnlyList<string>? permitted = null, RunWatchSettings? watchSettings = null, decimal? historyRate = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(environment);
@@ -169,7 +172,7 @@ public sealed class RunSupervisor
         };
         try
         {
-            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? []);
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate);
             supervisor.Save();
             return supervisor;
         }
@@ -225,6 +228,7 @@ public sealed class RunSupervisor
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
                 state.Heartbeats++;
                 state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
+                ObserveRate();
                 TimeSpan silence = options.Clock.GetElapsedTime(lastEventTick);
                 RunLiveness liveness = state.Liveness!;
                 if (silence.TotalSeconds >= liveness.StallSeconds)
@@ -441,6 +445,11 @@ public sealed class RunSupervisor
                             {
                                 AddSignal(observation);
                             }
+
+                            foreach (RunSignal observation in watch.Action(action))
+                            {
+                                AddSignal(observation);
+                            }
                         }
                     }
                 }
@@ -469,6 +478,20 @@ public sealed class RunSupervisor
 
                     try
                     {
+                        if (signal is { UsageId: string usageId, UsageTokens: long snapshot })
+                        {
+                            long previous = usageSnapshots.GetValueOrDefault(usageId);
+                            if (snapshot < previous || snapshot < 0 || usageSnapshots.Count >= 4096 && !usageSnapshots.ContainsKey(usageId))
+                            {
+                                tokensIncomplete = true;
+                            }
+                            else
+                            {
+                                tokens = checked((tokens ?? 0) + snapshot - previous);
+                                usageSnapshots[usageId] = snapshot;
+                            }
+                        }
+
                         if (signal?.Tokens is long total)
                         {
                             if (total < 0 || total < tokens)
@@ -503,6 +526,8 @@ public sealed class RunSupervisor
                         price = cost;
                         priceUnit = signal.PriceUnit;
                     }
+
+                    ObserveRate();
                 }
 
                 if (signal?.Acknowledged == true)
@@ -544,6 +569,14 @@ public sealed class RunSupervisor
         {
             state.Signals.Add(signal);
             Save();
+        }
+    }
+
+    private void ObserveRate()
+    {
+        foreach (RunSignal observation in watch.Usage(tokensIncomplete ? null : tokens, options.Clock.GetElapsedTime(launchedTick)))
+        {
+            AddSignal(observation);
         }
     }
 
