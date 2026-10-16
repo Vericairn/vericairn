@@ -15,6 +15,143 @@ namespace Vericairn.Records.Tests;
 public class AgentRunLedgerTests
 {
     [Fact]
+    public void AddingAGoalToAnUnfundedIdentityCannotBypassAdmission()
+    {
+        var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
+        RecordEnvelope reserved = ledger.Intent("reserved", """{"wallMinutes":9,"attemptsPerStep":10}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(reserved.Body.GetRawText())!.AsObject();
+        body["identity"] = "unfunded";
+        body["cap"]!["wallMinutes"] = 10;
+        body["target"]!.AsObject().Remove("goal");
+        RecordEnvelope initial = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString());
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        body["target"]!["goal"] = ledger.Goal;
+        body["status"] = "uncertain";
+        body["dispatchedAt"] = initial.At;
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: initial.Id);
+        var findings = ledger.Estate.Load().Findings.Where(f => f.Location == changed.ExpectedPath).ToList();
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-target-kept");
+        Assert.Contains(findings, f => f.Code == "operation.budget");
+    }
+
+    [Theory]
+    [InlineData("known-failure", "canceled")]
+    [InlineData("known-failure", "uncertain")]
+    [InlineData("known-failure", "dispatched")]
+    [InlineData("known-failure", "not-started")]
+    [InlineData("canceled", "uncertain")]
+    [InlineData("canceled", "dispatched")]
+    [InlineData("canceled", "not-started")]
+    [InlineData("observed-success", "uncertain")]
+    [InlineData("observed-success", "dispatched")]
+    [InlineData("observed-success", "not-started")]
+    public void SettledAgentRunStatesAreTerminalEvenWhenTheDispatchTimestampIsKept(string before, string after)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("terminal", Small, Usage, status: before);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = after;
+        body["reconciliation"] = "Historical facts do not authorize a new launch or reservation.";
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == changed.ExpectedPath && f.Code == "operation.agent-run-relaunch");
+    }
+
+    [Theory]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
+    public void ASettledIdentityCannotReopenAsUncertainAndReserveTheBudgetTwice(string status)
+    {
+        var ledger = new Ledger("""{"wallMinutes":10,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("settled", """{"wallMinutes":10,"attemptsPerStep":10}""",
+            status == "canceled" ? """{"wallMinutes":0,"unreported":[]}""" : """{"wallMinutes":1,"unreported":[]}""", dispatched: status != "canceled", status: status);
+        ledger.Intent("remaining", """{"wallMinutes":9,"attemptsPerStep":10}""");
+        Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = "uncertain";
+        body["reconciliation"] = "The earlier process exited; another launch is ambiguous.";
+        body["dispatchedAt"] = "2026-10-13T12:00:45Z";
+        body.Remove("observed");
+        body.Remove("usage");
+        RecordEnvelope reopened = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        var findings = ledger.Estate.Load().Findings.Where(f => f.Location == reopened.ExpectedPath).ToList();
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-relaunch");
+        Assert.Contains(findings, f => f.Code == "operation.agent-run-dispatch-kept");
+        Assert.Contains(findings, f => f.Code == "operation.budget");
+    }
+
+    [Theory]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
+    [InlineData("uncertain")]
+    public void AnAgentRunIdentityCannotBeDispatchedAgainEvenWithReconciliation(string status)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("one-launch", Small, status == "uncertain" ? null : Usage, status: status);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["status"] = "dispatched";
+        body["reconciliation"] = "The earlier process exited; try again.";
+        body.Remove("observed");
+        body.Remove("usage");
+        RecordEnvelope retried = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == retried.ExpectedPath && f.Code == "operation.agent-run-relaunch");
+    }
+
+    [Theory]
+    [InlineData("acknowledgedAt", "2026-10-13T12:00:21Z")]
+    [InlineData("escalatedAt", "2026-10-13T12:00:21Z")]
+    [InlineData("containedAt", "2026-10-13T12:00:25Z")]
+    [InlineData("containedAt", "2026-10-13T12:00:41Z")]
+    public void StopFactsCannotPrecedeTheirCausesOrFollowSettlement(string field, string value)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        var stop = System.Text.Json.Nodes.JsonNode.Parse("""{"requestedAt":"2026-10-13T12:00:20Z","requestedBy":"worker","transmittedAt":"2026-10-13T12:00:22Z","transmission":"Sent.","acknowledgedAt":"2026-10-13T12:00:30Z","acknowledgment":"Seen late.","escalatedAt":"2026-10-13T12:00:26Z","escalation":"Signalled.","containedAt":"2026-10-13T12:00:32Z"}""")!.AsObject();
+        stop[field] = value;
+        RecordEnvelope recorded = ledger.Run("out-of-order", Small, Usage, stop: stop.ToJsonString());
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.stop-order" && f.Location.StartsWith(recorded.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("stop")]
+    [InlineData("requestedAt")]
+    [InlineData("transmittedAt")]
+    [InlineData("transmission")]
+    [InlineData("containedAt")]
+    public void ARevisionCannotRemoveOrChangeRecordedStopFacts(string field)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("kept", Small, Usage, stop: """{"requestedAt":"2026-10-13T12:00:20Z","requestedBy":"worker","transmittedAt":"2026-10-13T12:00:22Z","transmission":"Sent.","containedAt":"2026-10-13T12:00:32Z"}""");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        if (field == "stop")
+        {
+            body.Remove("stop");
+        }
+        else if (field == "transmission")
+        {
+            body["stop"]![field] = "A different account.";
+        }
+        else
+        {
+            body["stop"]!.AsObject().Remove(field);
+        }
+
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.stop-kept" && f.Location == changed.ExpectedPath);
+    }
+
+    [Theory]
+    [InlineData("scope", "{\"changed\":1,\"outsideCount\":2,\"outside\":[\"outside.txt\"]}", "operation.scope")]
+    [InlineData("liveness", "{\"stallSeconds\":1,\"lastEventAt\":\"2026-10-13T12:00:20Z\",\"attentionAt\":\"2026-10-13T12:00:30Z\",\"stoppedAt\":\"2026-10-13T12:00:29Z\"}", "operation.liveness")]
+    public void WorkerObservationsValidateScopeCountsAndStallFactOrder(string field, string json, string code)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("observations", Small, Usage);
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body[field] = System.Text.Json.Nodes.JsonNode.Parse(json);
+        RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        Assert.Contains(ledger.Estate.Load().Findings, f => f.Location == changed.ExpectedPath && f.Code == code);
+    }
+
+    [Fact]
     public void ARunIsChargedWhatItsUsageReportsAndItsCapForWhatWasNotReported()
     {
         var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":4,"tokens":10000}""");

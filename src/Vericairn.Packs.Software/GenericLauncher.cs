@@ -34,6 +34,7 @@ public sealed class GenericLauncher : IAgentLauncher
             "Reads no usage, so every unit the run's cap states other than its wall minutes is charged in full.",
         ],
         [
+            new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"),
             new ProviderSetting("command", "The harness's executable, or a JSON array of it and its leading arguments.", true),
             new ProviderSetting("arguments", "A JSON array of the arguments after the command; {condition}, {brief}, {mcp-config} and {workspace} in them are replaced.", false),
         ]);

@@ -465,7 +465,7 @@ public sealed record RunStopRequest(string By, string? Reason = null, int? Grace
 /// <param name="Acknowledgment">How it acknowledged it.</param>
 /// <param name="EscalatedAt">When the worker escalated it, the harness not having stopped within the grace period.</param>
 /// <param name="Escalation">What the escalation did.</param>
-/// <param name="ContainedAt">When the worker observed the harness gone.</param>
+/// <param name="ContainedAt">When the worker observed the whole launch boundary exited.</param>
 public sealed record RunStop(string RequestedAt, string RequestedBy, string? Reason = null, string? TransmittedAt = null, string? Transmission = null, string? AcknowledgedAt = null, string? Acknowledgment = null, string? EscalatedAt = null, string? Escalation = null, string? ContainedAt = null)
 {
     /// <summary>The furthest fact observed: contained, escalated, acknowledged, transmitted or requested.</summary>
@@ -473,15 +473,15 @@ public sealed record RunStop(string RequestedAt, string RequestedBy, string? Rea
     public string State => ContainedAt is not null ? "contained" : EscalatedAt is not null ? "escalated" : AcknowledgedAt is not null ? "acknowledged" : TransmittedAt is not null ? "transmitted" : "requested";
 }
 
-/// <summary>What starting a run did: what was recorded and launched, never more. A problem means nothing was launched.</summary>
+/// <summary>What starting a run observed and recorded. An uncertain launch retains its reservation even without established supervision.</summary>
 /// <param name="Run">The run's id: its intent's record id, once recorded.</param>
 /// <param name="Status">The run's operation status after this call: dispatched when launched.</param>
 /// <param name="Message">What happened and what follows, in words.</param>
-/// <param name="Ok">Whether the harness was launched.</param>
+/// <param name="Ok">Whether launch was observed and supervision established.</param>
 /// <param name="Operation">The latest operation revision written.</param>
 /// <param name="Cap">The run's cap, as its intent records it.</param>
 /// <param name="Workspace">The workspace, a repository and branch.</param>
-/// <param name="Problem">Why nothing was launched.</param>
+/// <param name="Problem">Why start was refused or failed, when reported.</param>
 public sealed record RunResponse(string Run, string Status, string Message, bool Ok, RecordWritten? Operation = null, JsonElement? Cap = null, string? Workspace = null, Problem? Problem = null);
 
 /// <summary>What asking a run to stop observed: the stop's facts, the furthest one its state.</summary>
@@ -492,6 +492,21 @@ public sealed record RunResponse(string Run, string Status, string Message, bool
 /// <param name="Stop">The stop's facts.</param>
 /// <param name="Problem">Why no stop was asked.</param>
 public sealed record RunStopResponse(string Run, string State, string Message, bool Ok, RunStop? Stop = null, Problem? Problem = null);
+
+/// <summary>Event-stream liveness observed by the worker, never asserted by the harness.</summary>
+/// <param name="StallSeconds">Silence limit; attention at one limit and stop at two.</param>
+/// <param name="LastEventAt">When stdout last produced an event, or launch before any event.</param>
+/// <param name="AttentionAt">When the worker first observed silence reach the limit.</param>
+/// <param name="Attention">The attention ask, once recorded.</param>
+/// <param name="StoppedAt">When the worker stopped the run for twice-limit silence.</param>
+public sealed record RunLiveness(int StallSeconds, string LastEventAt, string? AttentionAt = null, string? Attention = null, string? StoppedAt = null);
+
+/// <summary>The worker's comparison of workspace files before and after the run, against the assignment's permitted paths.</summary>
+/// <param name="Changed">Files added, removed or changed, including committed, untracked and ignored files.</param>
+/// <param name="OutsideCount">How many changed paths fall outside the permitted paths.</param>
+/// <param name="Outside">Repository-relative outside paths, at most one thousand; unsafe names are represented by their hash.</param>
+/// <param name="Problem">Why the audit could not establish the whole scope, when unavailable or incomplete.</param>
+public sealed record RunScope(int Changed, int OutsideCount, IReadOnlyList<string> Outside, string? Problem = null);
 
 /// <summary>One agent run as the records and this machine show it.</summary>
 /// <param name="Run">The run's id: its intent's record id.</param>
@@ -508,8 +523,10 @@ public sealed record RunStopResponse(string Run, string State, string Message, b
 /// <param name="Stop">A stop's facts, recorded or observed here.</param>
 /// <param name="Heartbeat">When the worker on this machine last observed it running.</param>
 /// <param name="Observed">Whether a worker on this machine observes it now.</param>
+/// <param name="Scope">The settlement's workspace scope audit.</param>
+/// <param name="Liveness">The worker's event-stream observation and any stall attention.</param>
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
-public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic);
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null);
 
 /// <summary>One unit of a goal's ledger.</summary>
 /// <param name="Unit">wallMinutes, tokens or currency.</param>

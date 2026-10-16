@@ -27,7 +27,7 @@ internal sealed class RunEstate : IDisposable
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
-    public RunEstate(string budget = """{"wallMinutes":60,"attemptsPerStep":3}""", bool keepOperatorKey = false, WorkerOptions? options = null)
+    public RunEstate(string budget = """{"wallMinutes":60,"attemptsPerStep":3}""", bool keepOperatorKey = false, WorkerOptions? options = null, string? brief = null)
     {
         Estate = new TestEstate(recordFormat: 2);
         Scratch = Path.Combine(Path.GetTempPath(), "vericairn-run-" + Ulid.NewUlid().Value);
@@ -37,9 +37,12 @@ internal sealed class RunEstate : IDisposable
         registry.Register(new ClaudeCodeLauncher());
         registry.Register(new CodexLauncher());
         registry.Register(new GenericLauncher());
-        registry.Register(new GitWorktreeWorkspaces());
+        registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         Service.Providers = registry;
-        Service.WorkerOptions = options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
+        Service.WorkerOptions = (options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) }) with
+        {
+            Environment = options?.Environment ?? new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CODEX_HOME"] = Path.Combine(Scratch, "stand-in-login") },
+        };
 
         OperatorDevice = Ok(Service.DeviceCreate(new DeviceCreateRequest(Estate.OperatorId, "Operator's laptop", "file"))).Id;
         Ok(Service.DeviceAdmit(new AdmitRequest(OperatorDevice, Estate.OperatorId, "The first authority.")));
@@ -53,7 +56,7 @@ internal sealed class RunEstate : IDisposable
         Goal = Ok(Service.GoalPropose(new GoalProposeRequest(Estate.OperatorId, Json($$$"""{"title":"Build the widget","objective":"Ship the widget.","completion":[{"record":{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}}],"constraints":["no change outside the widget"],"kind":"finite","sponsor":"{{{Estate.OperatorId}}}","budget":{{{budget}}},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""")))).Id;
         Ok(Service.GoalActivate(Goal, new GoalActionRequest(Estate.OperatorId)));
         Ok(Service.NewRecord(new NewRecordRequest("work-order", Estate.OperatorId, Json($$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build the widget.","scope":["widget"],"exitQuestion":"Does the widget build and pass its tests?","inputs":[{"type":"goal","id":"{{Goal}}"}],"deliverables":["widget"]}"""))));
-        Assignment = Ok(Service.Assign(new AssignRequest("W-1", Estate.BuilderId, Estate.OperatorId, Json(Brief)))).Id;
+        Assignment = Ok(Service.Assign(new AssignRequest("W-1", Estate.BuilderId, Estate.OperatorId, Json(brief ?? Brief)))).Id;
 
         Clone = Path.Combine(Scratch, "widget");
         Directory.CreateDirectory(Clone);

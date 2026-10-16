@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using Vericairn.Protocol;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -15,6 +16,15 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
 {
+    private readonly IReadOnlyList<string>? auditCommand;
+
+    /// <summary>Uses the installed Vericairn command as the isolated scope observer.</summary>
+    public GitWorktreeWorkspaces()
+    {
+    }
+
+    internal GitWorktreeWorkspaces(IReadOnlyList<string> auditCommand) => this.auditCommand = auditCommand;
+
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "git-worktree",
@@ -67,6 +77,12 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
 
         return new PreparedWorkspace(directory, branch, Head(directory), false);
     }
+
+    /// <inheritdoc />
+    public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand);
+
+    /// <inheritdoc />
+    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline, Capture(workspace), permitted);
 
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
 

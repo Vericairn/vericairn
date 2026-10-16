@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -19,6 +20,592 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class WorkerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AWindowsJobThatFinishesDrainingAfterLeaderExitDoesNotTurnASuccessfulRunIntoAFailure(bool inventoryUnavailable)
+    {
+        int inventories = 0;
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = new WorkerClock(),
+            Heartbeat = TimeSpan.FromMilliseconds(20),
+            WindowsJobInventory = () => Interlocked.Increment(ref inventories) <= 2
+                ? inventoryUnavailable ? throw new System.ComponentModel.Win32Exception(5) : 1u
+                : 0u,
+        });
+        RunResponse started = run.Start("generic", "claude", run.Report("pending-job-exit"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        string summary = AgentRuns.Find(run.Estate.Load(), started.Run)!.Latest.Body.GetProperty("observed").GetProperty("summary").GetString()!;
+        Assert.True(settled.Status == "observed-success", summary);
+        Assert.Null(settled.Stop);
+        Assert.Contains("exited with code 0", summary, StringComparison.Ordinal);
+        Assert.True(inventories >= 3);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AWindowsJobThatOutlivesItsLeadersShutdownGraceIsStoppedAndReservedUntilObservedEmpty()
+    {
+        var clock = new WorkerClock();
+        CancellationToken cancellation = TestContext.Current.CancellationToken;
+        using var repeated = new ManualResetEventSlim();
+        using var resume = new ManualResetEventSlim();
+        int inventories = 0;
+        int empty = 0;
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = clock,
+            Heartbeat = TimeSpan.FromMilliseconds(20),
+            Grace = TimeSpan.FromSeconds(1),
+            WindowsJobInventory = () =>
+            {
+                if (Interlocked.Increment(ref inventories) == 2)
+                {
+                    repeated.Set();
+                    Assert.True(resume.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inspection was not released.");
+                }
+
+                return Volatile.Read(ref empty) == 0 ? 1u : 0u;
+            },
+        });
+        string report = run.Report("surviving-job");
+        RunResponse started = run.Start("generic", "child-survives-root", report);
+        System.Diagnostics.Process? child = null;
+        try
+        {
+            Assert.True(started.Ok, started.Message);
+            WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
+            child = System.Diagnostics.Process.GetProcessById(Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>());
+            // End only the ready leader. Its child ignores this file and remains in the actual native boundary to signal.
+            new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).TransmitStop(new StopRequest("2026-10-15T12:00:00Z", "test"));
+            Assert.True(repeated.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inventory was not retried.");
+            Assert.Null(run.Row(started.Run).Stop);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+            clock.Advance(TimeSpan.FromSeconds(1));
+            resume.Set();
+            WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+            clock.Advance(TimeSpan.FromSeconds(1));
+            WaitUntil(() => run.Row(started.Run).Stop?.EscalatedAt is not null);
+            Assert.Null(run.Row(started.Run).Stop!.ContainedAt);
+            Assert.Equal("dispatched", run.Row(started.Run).Status);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+            WaitUntil(() => child.HasExited);
+            Volatile.Write(ref empty, 1);
+            RunRow settled = run.Settled(started.Run);
+            Assert.Equal("known-failure", settled.Status);
+            Assert.NotNull(settled.Stop!.ContainedAt);
+            Assert.Equal(0, run.Service.Check().Errors);
+        }
+        finally
+        {
+            Volatile.Write(ref empty, 1);
+            resume.Set();
+            if (child is not null)
+            {
+                if (!child.HasExited)
+                {
+                    child.Kill(entireProcessTree: true);
+                }
+
+                child.Dispose();
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AStopRechecksTheRequestingDeviceEvenWhenItsPrincipalStillHasAnotherAdmittedDevice(bool rotate)
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        string backup = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(run.Estate.OperatorId, "Other operator device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(backup, run.Estate.OperatorId, "The operator still has authority.")));
+        Except(run, DateTimeOffset.UtcNow.AddHours(1), "Exercise a device-signed stop with a stand-in.");
+        string report = run.Report("device-stop");
+        RunResponse started = run.Start("generic", "ack-stop", report);
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(report));
+        var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        try
+        {
+            DeviceStanding device = run.Service.Standing(run.OperatorDevice)!;
+            using EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey);
+            RunEstate.Ok(rotate
+                ? run.Service.DeviceRotate(new DeviceRotateRequest(device.Identity))
+                : run.Service.DeviceRevoke(new RevokeRequest(device.Identity, run.Estate.OperatorId, "Revoked after authentication.")));
+            RunStopResponse refused = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The old request must not queue this stop.", 0));
+            Assert.False(refused.Ok);
+            Assert.Equal("denied", refused.Problem!.Code);
+            Assert.Equal(request.Refusal!.Message, refused.Problem.Message);
+            Assert.Null(directory.ReadStop());
+            Assert.False(File.Exists(directory.StopFile));
+            Assert.Equal("dispatched", run.Row(started.Run).Status);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        }
+        finally
+        {
+            DeviceStanding device = run.Service.Standing(backup)!;
+            using EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey);
+            Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop with the other admitted device.", 0)).Ok);
+            Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
+        }
+
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void DispatchAndStallWritesRecheckAnActiveRequestWithoutLosingTheWorkersReservationOrOwnership()
+    {
+        var clock = new WorkerClock();
+        using var run = new RunEstate(keepOperatorKey: true, options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        string backup = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(run.Estate.OperatorId, "Other operator device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(backup, run.Estate.OperatorId, "The runtime can still record its observations.")));
+        Except(run, DateTimeOffset.UtcNow.AddHours(1), "Exercise guarded worker writes with a stand-in.");
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeDispatchRecord = () => RunEstate.Ok(run.Service.DeviceRevoke(new RevokeRequest(run.OperatorDevice, run.Estate.OperatorId, "Revoked after launch and before dispatch storage."))),
+        };
+        DeviceStanding device = run.Service.Standing(run.OperatorDevice)!;
+        RunResponse started;
+        using (EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey))
+        {
+            started = run.Start("generic", "silent-ignore", run.Report("guarded-writes"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
+            Assert.True(started.Ok, started.Message); // A live launch stays owned and reserved even when its record write is denied.
+            Assert.Equal("not-started", started.Status);
+            Assert.Equal("denied", request.Refusal!.Code);
+            WaitUntil(() => File.Exists(run.Report("guarded-writes")));
+            clock.Advance(TimeSpan.FromSeconds(60));
+            WaitUntil(() => run.Row(started.Run).Liveness?.AttentionAt is not null);
+            Assert.Empty(run.Service.Records("ask"));
+            Assert.Single(AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        }
+
+        // Once the request ends, continuing supervision is the runtime's work, not another use of the revoked credential.
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        RunRow settled = run.Settled(started.Run);
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(["not-started", "dispatched", "known-failure"], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData("codex", "codex-incomplete")]
+    [InlineData("codex", "codex-overflow")]
+    [InlineData("codex", "codex-unfinished")]
+    [InlineData("claude-code", "claude-incomplete")]
+    public void AnyUnaccountedUsageChargesTheWholeTokenCap(string launcher, string scenario)
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000}""");
+        RunResponse started = run.Start(launcher, scenario, run.Report("unknown-usage"));
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.False(row.Usage!.Value.TryGetProperty("tokens", out _));
+        Assert.Contains(row.Usage.Value.GetProperty("unreported").EnumerateArray(), u => u.GetString() == "tokens");
+        Assert.Equal(5000, row.Charged.GetProperty("tokens").GetInt64());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData("claude", "observed-success", 1734)]
+    [InlineData("claude-fails", "known-failure", 55)]
+    public void AFailedDispatchWriteIsRecoveredBeforeSettlementSoUsageIsNeverReleasedAsUnstarted(string scenario, string status, long tokens)
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000}""");
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { BeforeDispatchRecord = () => throw new IOException("The stand-in dispatch write failed.") };
+        RunResponse started = run.Start("claude-code", scenario, run.Report("dispatch-recovery"), by: run.Estate.OperatorId);
+        Assert.True(started.Ok, started.Message);
+        Assert.Contains("dispatch could not be recorded", started.Message, StringComparison.Ordinal);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal(status, row.Status);
+        Assert.Equal(tokens, row.Charged.GetProperty("tokens").GetInt64());
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(["not-started", "dispatched", status], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.True(recorded.Dispatched);
+        Assert.All(recorded.Revisions, r => Assert.Equal(run.Estate.OperatorId, r.By));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TransmissionIsTimestampedAfterItsActualTransportAttemptOnEveryPlatform()
+    {
+        using var run = new RunEstate();
+        string? attemptedAt = null;
+        string? signalAttemptedAt = null;
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeTransmission = () =>
+            {
+                string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
+                attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+            },
+            BeforeSignal = force =>
+            {
+                if (!force)
+                {
+                    string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                    WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
+                    signalAttemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                }
+            },
+        };
+        RunResponse started = run.Start("generic", "ack-stop", run.Report("transmission-time"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("transmission-time")));
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Observe transmission after the attempt.", 5));
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
+        Assert.NotNull(attemptedAt);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        Assert.True(File.Exists(files.StopFile));
+        Assert.True(string.CompareOrdinal(stop.TransmittedAt, RecordParser.FormatTimestamp(File.GetLastWriteTimeUtc(files.StopFile))) >= 0);
+        Assert.True(string.CompareOrdinal(stop.TransmittedAt, attemptedAt) >= 0);
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Null(signalAttemptedAt); // Windows transmits the stop file; it has no cooperative process-group signal.
+        }
+        else
+        {
+            Assert.NotNull(signalAttemptedAt);
+            Assert.True(string.CompareOrdinal(stop.TransmittedAt, signalAttemptedAt) >= 0);
+        }
+
+        Assert.True(string.CompareOrdinal(stop.AcknowledgedAt, stop.TransmittedAt) >= 0);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheStallLimitIsPinnedFromTheGoalCurrentWhenTheIntentIsRecorded()
+    {
+        var clock = new WorkerClock();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        HookedLauncher.Install(run, verify: () =>
+        {
+            var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
+            goal["limits"] = new JsonObject { ["stallSeconds"] = 60 };
+            string revision = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
+            RunEstate.Ok(run.Service.GoalActivate(revision, new GoalActionRequest(run.Estate.OperatorId)));
+            return null;
+        });
+        RunResponse started = run.Start("claude-code", "silent-ignore", run.Report("revised-stall"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("revised-stall")));
+        clock.Advance(TimeSpan.FromSeconds(120));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal(60, settled.Liveness!.StallSeconds);
+        Assert.Equal("60", AgentRuns.Find(run.Estate.Load(), started.Run)!.Target("stallSeconds"));
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
+    {
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"the widget\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
+        RunResponse started = run.Start("generic", "scope-edits", run.Report("scope"));
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal("observed-success", row.Status);
+        Assert.Equal(8, row.Scope!.Changed);
+        Assert.Equal(6, row.Scope.OutsideCount);
+        Assert.Equal([".gitignore", "README-old.md", "README.md", "committed.txt", "ignored/outside.txt", "outside.txt"], row.Scope.Outside);
+        Assert.Null(row.Scope.Problem);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(6, recorded.Latest.Body.GetProperty("scope").GetProperty("outsideCount").GetInt32());
+        Assert.Contains("Scope attention: 6", recorded.Latest.Body.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.All(recorded.Revisions, revision => Assert.Equal(run.Estate.OperatorId, revision.By));
+        Assert.Empty(run.Service.Records("acceptance"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void WorkerObservedSilenceRaisesAttentionThenStopsAndContainsAtTwiceTheGoalLimit()
+    {
+        var clock = new WorkerClock();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
+        goal["limits"] = new JsonObject { ["stallSeconds"] = 60 };
+        string revised = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
+        RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(run.Estate.OperatorId)));
+        RunResponse started = run.Start("generic", "silent-ignore", run.Report("stalled"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "3" });
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("stalled")));
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        RunRow attention = run.Row(started.Run);
+        Assert.Equal("dispatched", attention.Status);
+        Assert.Equal(60, attention.Liveness!.StallSeconds);
+        Assert.Null(attention.Stop);
+        Assert.Equal(60, attention.Charged.GetProperty("wallMinutes").GetInt64());
+        RecordEnvelope ask = Assert.Single(run.Estate.Load().Current("ask"));
+        Assert.Equal(started.Run, ask.Subject!.Id);
+        Assert.Equal(run.Estate.OperatorId, EstateModel.BodyString(ask, "to"));
+        Assert.Contains("worker observed", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("known-failure", settled.Status);
+        Assert.NotNull(settled.Liveness!.AttentionAt);
+        Assert.NotNull(settled.Liveness.StoppedAt);
+        Assert.Contains("twice the stall limit of 60 seconds", settled.Stop!.Reason, StringComparison.Ordinal);
+        Assert.NotNull(settled.Stop.EscalatedAt);
+        Assert.NotNull(settled.Stop.ContainedAt);
+        Assert.Equal(ask.Id, settled.Liveness.Attention);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void NewEventsResetSilenceWithoutErasingTheAttentionAlreadyObserved()
+    {
+        var clock = new WorkerClock();
+        using var eventSeen = new ManualResetEventSlim();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, AfterEvent = eventSeen.Set, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        RunResponse started = run.Start("generic", "silent-recovery", run.Report("recovered"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("recovered")));
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        File.WriteAllText(run.Report("recovered") + ".recover", "release");
+        WaitUntil(() => eventSeen.IsSet);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        long heartbeat = files.Read()!.Heartbeats;
+        clock.Advance(TimeSpan.FromSeconds(30)); // The old silence deadline; the new event reset it.
+        WaitUntil(() => files.Read()?.Heartbeats is long beats && beats > heartbeat);
+        Assert.Null(run.Row(started.Run).Stop);
+        File.WriteAllText(run.Report("recovered") + ".finish", "release");
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.NotNull(settled.Liveness!.AttentionAt);
+        Assert.NotNull(settled.Liveness.Attention);
+        Assert.Null(settled.Liveness.StoppedAt);
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheDefaultStallLimitIsTenMinutesAndAnInvalidOverrideLaunchesNothing()
+    {
+        using var run = new RunEstate();
+        RunResponse invalid = run.Start("generic", "generic", run.Report("invalid-stall"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "0" });
+        Assert.False(invalid.Ok);
+        Assert.Empty(run.Service.Records("operation"));
+        RunResponse started = run.Start("generic", "generic", run.Report("default-stall"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal(600, run.Settled(started.Run).Liveness!.StallSeconds);
+    }
+
+    [Fact]
+    public void NativeCurrencyLimitAndSoftCapDisclosureAreRecordedBeforeLaunch()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":5000,"currency":{"amount":1000,"unit":"USD"}}""");
+        string report = run.Report("native-budget");
+        RunResponse started = run.Start("claude-code", "claude", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        List<string> args = Assert.Single(FakeHarness.Reports(report))["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal("9.00", args[args.IndexOf("--max-budget-usd") + 1]);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal("soft", recorded.Target("capMode"));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.Contains("token threshold 4500 of 5000; currency threshold 900 of 1000", StringComparison.Ordinal));
+        Assert.Contains(recorded.Intent.Body.GetProperty("evidence").EnumerateArray(), e => e.GetProperty("summary").GetString()!.Contains("no native total-token cap", StringComparison.Ordinal));
+        Assert.Equal(1000, row.Charged.GetProperty("currency").GetProperty("amount").GetInt64());
+    }
+
+    [Fact]
+    public void TokenHeadroomStopsBelowTheReservationAndPassesTheNativeTrackingLimit()
+    {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"tokens":1000}""");
+        string report = run.Report("headroom");
+        RunResponse started = run.Start("codex", "codex-headroom", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow row = run.Settled(started.Run);
+        Assert.Equal(1000, row.Cap.GetProperty("tokens").GetInt64());
+        Assert.Equal(950, row.Charged.GetProperty("tokens").GetInt64());
+        Assert.Contains("threshold of 900", row.Stop!.Reason, StringComparison.Ordinal);
+        List<string> args = FakeHarness.Reports(report)[2]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Contains("features.rollout_budget.enabled=true", args);
+        Assert.Contains("features.rollout_budget.limit_tokens=900", args);
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public void ClaudeGetsFreshLoginOnlyConfigurationAndExcludesEveryOrdinarySettingsSource()
+    {
+        using var run = new RunEstate();
+        string original = Path.Combine(run.Scratch, "claude-user");
+        Directory.CreateDirectory(original);
+        File.WriteAllText(Path.Combine(original, "settings.json"), """{"env":{"ANTHROPIC_API_KEY":"synthetic-filtered-value"},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"nonexistent-hook-sentinel"}]}]},"enabledPlugins":{"ambient":true}}""");
+        File.WriteAllText(Path.Combine(original, ".credentials.json"), "{\"claudeAiOauth\":{\"synthetic-login\":true},\"mcpOAuth\":{\"ambient\":true}}");
+        var source = new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CLAUDE_CONFIG_DIR"] = original };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = source };
+        string report = run.Report("isolated-claude");
+        RunResponse started = run.Start("claude-code", "claude", report);
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        JsonObject given = Assert.Single(FakeHarness.Reports(report));
+        string home = given["environment"]!["CLAUDE_CONFIG_DIR"]!.GetValue<string>();
+        Assert.NotEqual(original, home);
+        Assert.False(File.Exists(Path.Combine(home, "settings.json")));
+        string login = File.ReadAllText(Path.Combine(home, ".credentials.json"));
+        Assert.Contains("claudeAiOauth", login, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcpOAuth", login, StringComparison.Ordinal);
+        Assert.Null(given["environment"]!["ANTHROPIC_API_KEY"]);
+        List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
+        Assert.Equal("{\"disableAllHooks\":true,\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
+    }
+
+    [Fact]
+    public void CodexRefusesAnEffectiveAmbientServerBeforeStartingAnyAgent()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("ambient-codex");
+        RunResponse started = run.Start("codex", "codex-ambient", report);
+        Assert.False(started.Ok);
+        Assert.Contains("effective MCP configuration", started.Message, StringComparison.Ordinal);
+        Assert.Equal("known-failure", run.Row(started.Run).Status);
+        Assert.All(FakeHarness.Reports(report), given => Assert.DoesNotContain("exec", given["arguments"]!.AsArray().Select(a => a!.GetValue<string>())));
+        Assert.False(run.Row(started.Run).Charged.TryGetProperty("wallMinutes", out _));
+    }
+
+    [Fact]
+    public void CodexGetsAFreshConfigurationWithoutAmbientServersPluginsOrHooks()
+    {
+        using var run = new RunEstate();
+        string original = Path.Combine(run.Scratch, "codex-user");
+        Directory.CreateDirectory(original);
+        File.WriteAllText(Path.Combine(original, "config.toml"), "[mcp_servers.ambient]\ncommand = \"unapproved\"\n");
+        File.WriteAllText(Path.Combine(original, "auth.json"), "{\"stand-in-login\":true}");
+        File.WriteAllText(Path.Combine(original, "hooks.json"), "{}");
+        var source = new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CODEX_HOME"] = original };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = source };
+        string report = run.Report("isolated-codex");
+        RunResponse started = run.Start("codex", "codex", report);
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", run.Settled(started.Run).Status);
+        JsonObject given = FakeHarness.Reports(report)[2];
+        string home = given["environment"]!["CODEX_HOME"]!.GetValue<string>();
+        Assert.NotEqual(original, home);
+        string configuration = File.ReadAllText(Path.Combine(home, "config.toml"));
+        Assert.StartsWith("mcp_servers={vericairn=", configuration, StringComparison.Ordinal);
+        Assert.Contains("[features]\ngoals = true", configuration, StringComparison.Ordinal);
+        Assert.DoesNotContain("ambient", configuration, StringComparison.Ordinal);
+        Assert.Equal(File.ReadAllText(Path.Combine(original, "auth.json")), File.ReadAllText(Path.Combine(home, "auth.json")));
+        Assert.False(File.Exists(Path.Combine(home, "hooks.json")));
+        List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Single(args, a => a.StartsWith("mcp_servers=", StringComparison.Ordinal));
+        Assert.DoesNotContain("ambient", string.Join(' ', args), StringComparison.Ordinal);
+        Assert.Contains("trust_level=\"untrusted\"", string.Join(' ', args), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFailedEscalationIsKeptAndRetriedWithoutClaimingAKill()
+    {
+        using var run = new RunEstate();
+        int escalations = 0;
+        bool failureObserved = false;
+        RunDirectory? files = null;
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeSignal = force =>
+            {
+                if (force && Interlocked.Increment(ref escalations) == 1)
+                {
+                    throw new System.ComponentModel.Win32Exception("A stand-in signal failure.");
+                }
+
+                if (force)
+                {
+                    RunObservedState? state = files!.Read();
+                    failureObserved = state?.Stop?.EscalatedAt is null && state?.EscalationFailure?.Contains("will be retried", StringComparison.Ordinal) == true;
+                }
+            },
+        };
+        RunResponse started = run.Start("generic", "ignore-stop", run.Report("retry-signal"));
+        Assert.True(started.Ok, started.Message);
+        files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        WaitUntil(() => File.Exists(run.Report("retry-signal")));
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop.", 0));
+        Assert.True(stopped.Ok, stopped.Message);
+        _ = run.Settled(started.Run);
+        Assert.True(escalations >= 2);
+        Assert.True(failureObserved);
+        Assert.Contains("failed", files.Read()!.EscalationFailure, StringComparison.Ordinal);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+    }
+
+    [Fact]
+    public void ContainmentWaitsForTheChildEvenWhenTheRootAcknowledgesAndExits()
+    {
+        using var run = new RunEstate();
+        string report = run.Report("descendants");
+        RunResponse started = run.Start("generic", "child-survives-root", report);
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
+        int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
+        Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
+        if (!OperatingSystem.IsWindows())
+        {
+            Assert.Equal(Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>());
+        }
+
+        RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop the whole boundary.", 1));
+        Assert.True(stopped.Ok, stopped.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        Assert.NotNull(settled.Stop!.AcknowledgedAt);
+        Assert.NotNull(settled.Stop.EscalatedAt);
+        Assert.NotNull(settled.Stop.ContainedAt);
+        try
+        {
+            Assert.True(System.Diagnostics.Process.GetProcessById(child).HasExited);
+        }
+        catch (ArgumentException)
+        {
+            // The operating system already reaped it.
+        }
+
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void AFailedInitialStateWriteKeepsTheLaunchedRunsAllowanceAndSupervision()
+    {
+        using var run = new RunEstate();
+        HookedLauncher.Install(run, command: () =>
+        {
+            string id = Assert.Single(run.Service.Records("operation")).Id;
+            var directory = new RunDirectory(run.Service.Session.Manifest.Estate, id);
+            Directory.CreateDirectory(directory.StateFile);
+        });
+        RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("state-failure"));
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("dispatched", run.Row(started.Run).Status);
+        Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        Assert.Equal(run.Estate.OperatorId, AgentRuns.Find(run.Estate.Load(), started.Run)!.Intent.By);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        Directory.Delete(files.StateFile);
+        WaitUntil(() => File.Exists(run.Report("state-failure")) && run.Row(started.Run).Observed);
+        Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in.", 0)).Ok);
+        Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
+        Assert.Equal("known-failure", run.Settled(started.Run).Status);
+    }
+
     [Fact]
     public void ClaudeCodeCarriesTheAssignmentWithItsCapRecordedBeforeItStartsAndItsUsageAfter()
     {
@@ -67,8 +654,8 @@ public class WorkerTests
         JsonObject given = Assert.Single(FakeHarness.Reports(report));
         List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         string workspace = given["directory"]!.GetValue<string>();
-        string mcp = arguments[^2];
-        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config"], arguments);
+        string mcp = arguments[arguments.IndexOf("--mcp-config") + 1];
+        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], arguments);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
@@ -87,7 +674,7 @@ public class WorkerTests
             Assert.False(env.ContainsKey(credential), credential + " reached the harness.");
         }
 
-        Assert.Equal(environment["CLAUDE_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"]!.GetValue<string>());
+        Assert.NotEqual(environment["CLAUDE_CONFIG_DIR"], env["CLAUDE_CONFIG_DIR"]!.GetValue<string>());
         Assert.Equal(environment[VericairnHome.EnvironmentVariable], env[VericairnHome.EnvironmentVariable]!.GetValue<string>());
         Assert.Equal(started.Run, env["VERICAIRN_RUN"]!.GetValue<string>());
         Assert.True(env.ContainsKey("PATH") || env.ContainsKey("Path"));
@@ -127,19 +714,18 @@ public class WorkerTests
         Assert.Equal("observed-success", row.Status);
         Assert.Equal(1400, row.Usage!.Value.GetProperty("tokens").GetInt64());
         List<JsonObject> given = FakeHarness.Reports(report);
-        Assert.Equal(2, given.Count);
+        Assert.Equal(3, given.Count);
         Assert.Equal(["features", "list"], given[0]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
-        List<string> arguments = given[1]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
-        string workspace = given[1]["directory"]!.GetValue<string>();
+        List<string> arguments = given[2]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        string workspace = given[2]["directory"]!.GetValue<string>();
         string home = WorkerEnvironment.Current()[VericairnHome.EnvironmentVariable];
         string cd = arguments[3];
         Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), cd, StringComparison.Ordinal);
         Assert.EndsWith(Path.Combine("workspaces", "work-w-1"), workspace, StringComparison.Ordinal);
-        Assert.Equal(
-            ["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c", "mcp_servers.vericairn.command=\"vericairn-under-test\"", "-c", $"mcp_servers.vericairn.args=[\"--estate\", {Toml(run.Service.Root)}, \"mcp\", \"serve\", \"--as\", \"{run.Estate.BuilderId}\"]"],
-            arguments.Take(10));
-        Assert.Contains("-c", arguments);
-        Assert.Contains($"mcp_servers.vericairn.env.VERICAIRN_HOME={Toml(home)}", arguments);
+        Assert.Equal(["exec", "--json", "--cd", cd, "--sandbox", "workspace-write", "-c"], arguments.Take(7));
+        Assert.StartsWith("mcp_servers={vericairn={command=\"vericairn-under-test\"", arguments[7], StringComparison.Ordinal);
+        Assert.Contains($"\"VERICAIRN_HOME\"={Toml(home)}", arguments[7], StringComparison.Ordinal);
+        Assert.Equal("projects={" + Toml(workspace) + "={trust_level=\"untrusted\"}}", arguments[9]);
         Assert.StartsWith("/goal Does the widget build and pass its tests? Checks: the tests pass;", arguments[^1], StringComparison.Ordinal);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
     }
@@ -191,14 +777,13 @@ public class WorkerTests
 
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The widget is cancelled.", 1));
         Assert.True(stopped.Ok, stopped.Message);
-        Assert.Equal("contained", stopped.State);
-        RunStop stop = stopped.Stop!;
+        RunStop stop = run.Settled(started.Run).Stop!;
         Assert.Equal(run.Estate.OperatorId, stop.RequestedBy);
         Assert.NotNull(stop.TransmittedAt);
         Assert.Contains("VERICAIRN_STOP_FILE", stop.Transmission, StringComparison.Ordinal);
         Assert.Null(stop.AcknowledgedAt);
         Assert.NotNull(stop.EscalatedAt);
-        Assert.Contains("process tree was killed", stop.Escalation, StringComparison.Ordinal);
+        Assert.Contains("containment boundary", stop.Escalation, StringComparison.Ordinal);
         Assert.NotNull(stop.ContainedAt);
         Assert.True(string.CompareOrdinal(stop.RequestedAt, stop.ContainedAt) <= 0);
 
@@ -224,24 +809,26 @@ public class WorkerTests
         // A state file caught half written reads as nothing for a moment; the worker writes it whole again at its next heartbeat.
         File.WriteAllText(new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).StateFile, "{");
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Replaced.", 5));
-        Assert.Equal("contained", stopped.State);
-        Assert.NotNull(stopped.Stop!.TransmittedAt);
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
+        Assert.NotNull(stop.TransmittedAt);
     }
 
     [Fact]
     public void AStopTheHarnessAcknowledgesIsContainedWithoutEscalation()
     {
-        using var run = new RunEstate();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = new WorkerClock(), Heartbeat = TimeSpan.FromMilliseconds(50) });
         RunResponse started = run.Start("generic", "ack-stop", run.Report("ack"));
         Assert.True(started.Ok, started.Message);
         WaitUntil(() => File.Exists(run.Report("ack")) && run.Row(started.Run).Observed);
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, null, 5));
-        Assert.Equal("contained", stopped.State);
-        Assert.NotNull(stopped.Stop!.TransmittedAt);
-        Assert.NotNull(stopped.Stop.AcknowledgedAt);
-        Assert.Contains("acknowledgment", stopped.Stop.Acknowledgment, StringComparison.Ordinal);
-        Assert.Null(stopped.Stop.EscalatedAt);
-        Assert.NotNull(stopped.Stop.ContainedAt);
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
+        Assert.NotNull(stop.TransmittedAt);
+        Assert.NotNull(stop.AcknowledgedAt);
+        Assert.Contains("acknowledgment", stop.Acknowledgment, StringComparison.Ordinal);
+        Assert.Null(stop.EscalatedAt);
+        Assert.NotNull(stop.ContainedAt);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
         RunStopResponse again = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId));
         Assert.False(again.Ok);
@@ -296,8 +883,9 @@ public class WorkerTests
         RunResponse started = run.Start("claude-code", "close-output", run.Report("closing"));
         Assert.True(started.Ok, started.Message);
         WaitUntil(() => File.Exists(run.Report("closing")));
-        Thread.Sleep(1000);
+        WaitUntil(() => File.Exists(run.Report("closing") + ".closed"));
         Assert.Equal("dispatched", run.Row(started.Run).Status);
+        File.WriteAllText(run.Report("closing") + ".finish", "release");
         RunRow row = run.Settled(started.Run);
         Assert.Equal("observed-success", row.Status);
         Assert.Empty(row.Usage!.Value.GetProperty("unreported").EnumerateArray());
@@ -305,28 +893,25 @@ public class WorkerTests
     }
 
     [Fact]
-    public void TheWallMinutesCapStopsARunAndCrossingItMarksTheGoalBudgetLimited()
+    public void TheWorkerReservesShutdownHeadroomBeforeTheWallMinutesAllowanceEnds()
     {
-        var options = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
+        var clock = new WorkerClock();
+        var options = new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
         using var run = new RunEstate("""{"wallMinutes":3,"attemptsPerStep":3}""", options: options);
         RunResponse started = run.Start("generic", "ack-stop", run.Report("capped"));
         Assert.True(started.Ok, started.Message);
         Assert.Equal(3, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
+        WaitUntil(() => File.Exists(run.Report("capped")));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
         Assert.Equal("worker", row.Stop!.RequestedBy);
-        Assert.Contains("reached its cap of 3 wall minutes", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.Contains("shutdown headroom", row.Stop.Reason, StringComparison.Ordinal);
         Assert.NotNull(row.Stop.ContainedAt);
-        Assert.True(row.Usage!.Value.GetProperty("wallMinutes").GetInt64() >= 3);
+        Assert.Equal(1, row.Usage!.Value.GetProperty("wallMinutes").GetInt64());
 
-        // The cap crossed fences new runs: the goal is budget-limited, an ask to its sponsor to raise the budget or stop.
-        JsonElement goal = run.Service.Goal(run.Goal)!.Json;
-        Assert.Equal("budget-limited", goal.GetProperty("status").GetString());
-        RecordResponse status = run.Service.Records("goal-status").OrderBy(s => s.Id, StringComparer.Ordinal).Last();
-        Assert.Equal(run.Estate.OperatorId, status.Envelope.GetProperty("by").GetString());
-        Assert.Contains("wallMinutes", status.Envelope.GetProperty("body").GetProperty("note").GetString(), StringComparison.Ordinal);
-        RunResponse fenced = run.Start("generic", "ack-stop", run.Report("fenced"));
-        Assert.Contains("is budget-limited", fenced.Message, StringComparison.Ordinal);
+        Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
+        Assert.True(Assert.Single(Assert.Single(run.Service.Runs().Goals).Units).Remaining > 0);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -340,7 +925,7 @@ public class WorkerTests
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
         Assert.Equal("worker", row.Stop!.RequestedBy);
-        Assert.Contains("crossed the run's cap of 1000", row.Stop.Reason, StringComparison.Ordinal);
+        Assert.Contains("threshold of 900, below the reserved cap of 1000", row.Stop.Reason, StringComparison.Ordinal);
         Assert.NotNull(row.Stop.AcknowledgedAt);
         Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
         Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());
@@ -367,10 +952,11 @@ public class WorkerTests
         Assert.Contains("2 of the goal's runs are in flight, and its budget allows 2 at a time", third.Message, StringComparison.Ordinal);
         Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
 
-        foreach (RunResponse started in new[] { first, second })
+        foreach ((RunResponse started, string report) in new[] { (first, "first"), (second, "second") })
         {
-            WaitUntil(() => run.Row(started.Run).Observed);
-            Assert.Equal("contained", run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).State);
+            WaitUntil(() => File.Exists(run.Report(report)) && run.Row(started.Run).Observed);
+            Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).Ok);
+            Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         }
 
         // Settled, each is charged what it used, and the allowance they held is free again.

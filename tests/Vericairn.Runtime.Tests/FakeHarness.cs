@@ -19,6 +19,8 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 internal static class FakeHarness
 {
+    private static readonly string[] GitIdentity = ["-c", "user.name=Stand-in", "-c", "user.email=stand-in@example.invalid", "-c", "commit.gpgsign=false"];
+
     /// <summary>The argument that makes the test executable a stand-in harness.</summary>
     public const string Marker = "--vericairn-stand-in-harness";
 
@@ -33,6 +35,13 @@ internal static class FakeHarness
         }
 
         command.AddRange([Marker, scenario, report]);
+        return command;
+    }
+
+    internal static List<string> ScopeCommand()
+    {
+        List<string> command = Command("unused", "unused");
+        command.RemoveRange(command.Count - 3, 3);
         return command;
     }
 
@@ -86,9 +95,43 @@ internal static class FakeHarness
             ["environment"] = environment,
             ["directory"] = Directory.GetCurrentDirectory(),
             ["process"] = Environment.ProcessId,
+            ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
-        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "ignore-stop" or "ack-stop" ? HoldTerminate() : null;
-        File.AppendAllText(report, line.ToJsonString() + "\n");
+        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
+        // Publish the complete report atomically, after installing the stop handler. Existence is a readiness barrier.
+        if (scenario != "child-survives-root")
+        {
+            PublishReport();
+        }
+
+        void PublishReport()
+        {
+            string prior = File.Exists(report) ? File.ReadAllText(report) : string.Empty;
+            File.WriteAllText(report + ".new", prior + line.ToJsonString() + "\n");
+            File.Move(report + ".new", report, overwrite: true);
+        }
+        if (arguments.Contains("mcp") && arguments.Contains("list"))
+        {
+            var configuration = JsonNode.Parse(File.ReadAllText(Environment.GetEnvironmentVariable("VERICAIRN_MCP_CONFIG")!))!.AsObject();
+            JsonNode server = configuration["mcpServers"]!["vericairn"]!;
+            var listed = new JsonArray(new JsonObject
+            {
+                ["name"] = "vericairn", ["enabled"] = true,
+                ["transport"] = new JsonObject
+                {
+                    ["type"] = "stdio", ["command"] = server["command"]!.DeepClone(), ["args"] = server["args"]!.DeepClone(),
+                    ["env"] = server["env"]!.DeepClone(), ["env_vars"] = new JsonArray(), ["cwd"] = null,
+                },
+            });
+            if (scenario == "codex-ambient")
+            {
+                listed.Add(new JsonObject { ["name"] = "ambient", ["enabled"] = true });
+            }
+
+            Emit(listed.ToJsonString());
+            return 0;
+        }
+
         bool listing = arguments.Contains("features") && arguments.Contains("list");
         switch (scenario)
         {
@@ -102,9 +145,9 @@ internal static class FakeHarness
                 Emit("""{"type":"assistant","message":{"id":"m1","type":"message","role":"assistant","content":[{"type":"text","text":"Working."}]}}""");
                 return 0;
             case "claude-fails":
-                Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"output_tokens":5}}""");
+                Emit("""{"type":"result","subtype":"error_during_execution","is_error":true,"num_turns":1,"usage":{"input_tokens":50,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}}""");
                 return 1;
-            case "codex" or "codex-spender" when listing:
+            case "codex" or "codex-ambient" or "codex-spender" or "codex-incomplete" or "codex-overflow" or "codex-unfinished" or "codex-headroom" when listing:
                 Emit("apps                                     stable             true");
                 Emit("goals                                    stable             true");
                 Emit("hooks                                    stable             true");
@@ -117,6 +160,25 @@ internal static class FakeHarness
                 Emit("""{"type":"turn.started"}""");
                 Emit("""{"type":"turn.completed","usage":{"input_tokens":400,"cached_input_tokens":0,"output_tokens":50}}""");
                 return 0;
+            case "codex-incomplete":
+                Emit("""{"type":"turn.completed","usage":{}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}""");
+                return 0;
+            case "codex-overflow":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":9223372036854775807,"output_tokens":0}}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":0}}""");
+                return 0;
+            case "codex-unfinished":
+                Emit("""{"type":"turn.started"}""");
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":2}}""");
+                Emit("""{"type":"turn.started"}""");
+                return 1;
+            case "claude-incomplete":
+                Emit("""{"type":"result","usage":{"input_tokens":1,"output_tokens":2}}""");
+                return 0;
+            case "codex-headroom":
+                Emit("""{"type":"turn.completed","usage":{"input_tokens":800,"output_tokens":150}}""");
+                return Linger(acknowledge: true);
             case "codex-spender":
                 Emit("""{"type":"thread.started","thread_id":"stand-in"}""");
                 Emit("""{"type":"turn.completed","usage":{"input_tokens":900,"cached_input_tokens":0,"output_tokens":150}}""");
@@ -130,18 +192,65 @@ internal static class FakeHarness
             case "codex-broken" when listing:
                 Console.Error.WriteLine("error: unrecognized subcommand 'features'");
                 return 2;
+            case "scope-edits":
+                Directory.CreateDirectory("src");
+                Directory.CreateDirectory("docs");
+                Directory.CreateDirectory("ignored");
+                File.WriteAllText("src/allowed.cs", "permitted source");
+                File.WriteAllText("docs/allowed.md", "permitted document");
+                File.WriteAllText(".gitignore", "ignored/\n");
+                File.WriteAllText("ignored/outside.txt", "ignored but outside scope");
+                File.WriteAllText("outside.txt", "untracked and outside scope");
+                File.WriteAllText("committed.txt", "committed and outside scope");
+                File.Move("README.md", "README-old.md");
+                Git( "add", "README.md", "README-old.md", "src", "docs", ".gitignore", "committed.txt");
+                Git( "commit", "-q", "-m", "Stand-in changes");
+                return 0;
             case "generic":
                 Emit("The generic harness ran.");
+                return 0;
+            case "child-survives-root":
+                var childInfo = new ProcessStartInfo { FileName = Command("ignore-stop", report + ".child")[0], UseShellExecute = false };
+                foreach (string argument in Command("ignore-stop", report + ".child").Skip(1))
+                {
+                    childInfo.ArgumentList.Add(argument);
+                }
+
+                using (Process.Start(childInfo))
+                {
+                    WaitForFile(report + ".child");
+                    PublishReport();
+                    return Linger(acknowledge: true);
+                }
+            case "silent-ignore":
+                return Linger(acknowledge: false, output: false);
+            case "silent-recovery":
+                WaitForFile(report + ".recover");
+                Emit("{\"event\":\"working\"}");
+                File.WriteAllText(report + ".recovered", "ready");
+                WaitForFile(report + ".finish");
                 return 0;
             case "ignore-stop":
                 return Linger(acknowledge: false);
             case "ack-stop":
                 return Linger(acknowledge: true);
-            case "close-output":
+            case "scope-hang":
+                Thread.Sleep(TimeSpan.FromMinutes(2));
+                return 0;
+            case "close-output" or "close-output-short":
                 Emit("Closing my output and working on.");
                 Console.Out.Close();
                 Console.Error.Close();
-                Thread.Sleep(TimeSpan.FromSeconds(3));
+                if (scenario == "close-output")
+                {
+                    File.WriteAllText(report + ".closed", "ready");
+                    WaitForFile(report + ".finish");
+                }
+                else
+                {
+                    Thread.Sleep(TimeSpan.FromSeconds(3)); // Native detached-owner test's eventual exit, not an observation window.
+                }
+
                 return 0;
             case not null when scenario.StartsWith("mcp:", StringComparison.Ordinal):
                 return Mcp(scenario["mcp:".Length..], arguments);
@@ -213,20 +322,45 @@ internal static class FakeHarness
             return 1;
         }
 
-        Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"output_tokens":100}}""");
+        Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100}}""");
         return 0;
+    }
+
+    private static void Git(params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in GitIdentity.Concat(arguments))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using Process git = Process.Start(info) ?? throw new IOException("The stand-in could not start git.");
+        Task<string> output = git.StandardOutput.ReadToEndAsync();
+        Task<string> error = git.StandardError.ReadToEndAsync();
+        if (!git.WaitForExit(30_000))
+        {
+            git.Kill(entireProcessTree: true);
+            throw new IOException("The stand-in git command timed out.");
+        }
+
+        if (git.ExitCode != 0)
+        {
+            throw new IOException("The stand-in git command failed: " + error.Result + output.Result);
+        }
+    }
+
+    private static void WaitForFile(string path)
+    {
+        if (!SpinWait.SpinUntil(() => File.Exists(path), TimeSpan.FromMinutes(2)))
+        {
+            throw new IOException("The stand-in readiness barrier timed out.");
+        }
     }
 
     private static string Text(JsonObject reply) => reply["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? reply.ToJsonString();
 
-    /// <summary>Works until stopped: acknowledging a stop, by the stop file or SIGTERM, and exiting; or ignoring every stop until killed.</summary>
-    /// <summary>Set when SIGTERM reaches a stand-in that lingers.</summary>
     private static readonly ManualResetEventSlim Terminated = new(false);
 
-    /// <summary>
-    /// Holds SIGTERM off for a stand-in that lingers and notes that it came. It is in place before the stand-in reports, so a test that
-    /// waits for the report never stops a stand-in whose handler is not yet set, which SIGTERM would end before any escalation.
-    /// </summary>
     private static PosixSignalRegistration? HoldTerminate()
     {
         try
@@ -239,18 +373,25 @@ internal static class FakeHarness
         }
         catch (PlatformNotSupportedException)
         {
-            // Windows sends no SIGTERM to a windowless process.
             return null;
         }
     }
 
-    private static int Linger(bool acknowledge)
+    private static int Linger(bool acknowledge, bool output = true)
     {
         string? stopFile = Environment.GetEnvironmentVariable("VERICAIRN_STOP_FILE");
         DateTimeOffset until = DateTimeOffset.UtcNow.AddMinutes(2);
         while (DateTimeOffset.UtcNow < until)
         {
-            Emit("working");
+            if (output)
+            {
+                Emit("working");
+            }
+            else
+            {
+                Console.Error.WriteLine("stderr activity is not the event stream");
+            }
+
             if (acknowledge && (Terminated.IsSet || (stopFile is not null && File.Exists(stopFile))))
             {
                 Emit("""{"vericairn":"stop-acknowledged"}""");
@@ -262,6 +403,11 @@ internal static class FakeHarness
 
         return 0;
     }
+
+#pragma warning disable SYSLIB1054
+    [DllImport("libc")]
+    private static extern int getpgid(int pid);
+#pragma warning restore SYSLIB1054
 
     private static void Emit(string line)
     {

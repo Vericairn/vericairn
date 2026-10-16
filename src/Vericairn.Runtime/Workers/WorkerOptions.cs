@@ -6,6 +6,18 @@ namespace Vericairn.Runtime.Workers;
 /// <summary>How the worker paces and places the runs it supervises on this machine.</summary>
 public sealed record WorkerOptions
 {
+    internal Action? AfterEvent { get; init; }
+
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
+
+    internal Action? BeforeTransmission { get; init; }
+
+    internal Action<bool>? BeforeSignal { get; init; }
+
+    internal Action? BeforeDispatchRecord { get; init; }
+
+    internal Func<uint>? WindowsJobInventory { get; init; }
+
     /// <summary>The worker's defaults.</summary>
     public static WorkerOptions Default { get; } = new();
 

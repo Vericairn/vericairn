@@ -20,16 +20,20 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Tokens">The tokens it reported, when it reported any.</param>
 /// <param name="Price">The price it reported, in minor units, when its launcher reads one.</param>
 /// <param name="PriceUnit">The price's currency.</param>
+/// <param name="Liveness">Worker-observed silence and stall handling.</param>
+/// <param name="EscalationFailure">An escalation failure retained after retry.</param>
+/// <param name="Elapsed">Monotonic time observed from launch through containment, when available.</param>
 /// <param name="Stop">A stop's facts, when one was asked.</param>
-public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop);
+public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null, TimeSpan? Elapsed = null);
 
 /// <summary>
 /// The worker's supervision of one harness process (the estate's design/goals.md § 7, steps 4 and 6). It observes the process at
 /// every heartbeat, reads its output through its launcher for usage and for an acknowledged stop, and settles nothing itself: only
-/// the process's exit ends the supervision, so output that closes or a connection that is lost is not a stopped run. A stop asked of
+/// the whole boundary's observed exit ends supervision, so output that closes or a connection lost is not a stopped run. A stop asked of
 /// the run is transmitted once (the stop file the harness is told of, and SIGTERM on Linux and macOS); if the harness has not
-/// stopped within the grace period, the stop is escalated by killing its process tree; containment is the exit observed. The run's
-/// cap of wall minutes, and of tokens when the harness reports them, is enforced the same way, with the worker as the stop's author.
+/// stopped within the grace period, escalation terminates its launch boundary and is retried after failure. Containment requires
+/// observing the whole boundary exited. Operational wall, token and currency thresholds leave headroom below the reserved soft
+/// accounting caps, with the worker as the stop's author; stdout silence raises attention at one stall limit and stops at two.
 /// </summary>
 public sealed class RunSupervisor
 {
@@ -38,23 +42,30 @@ public sealed class RunSupervisor
 
     private const long OutputLimit = 16L * 1024 * 1024;
     private readonly object gate = new();
-    private readonly Process process;
+    private readonly ContainedProcess process;
     private readonly IAgentLauncher launcher;
     private readonly RunDirectory directory;
     private readonly WorkerOptions options;
     private readonly RunObservedState state;
-    private readonly DateTimeOffset? deadline;
+    private readonly TimeSpan wallTime;
+    private readonly long launchedTick;
+    private long transmittedTick;
     private readonly long wallMinutes;
     private readonly long? tokenCap;
+    private readonly RunLimits? limits;
     private readonly Thread[] readers;
     private long written;
     private long? tokens;
+    private bool tokensIncomplete;
+    private bool usageInFlight;
     private long? price;
     private string? priceUnit;
     private DateTimeOffset? transmitted;
     private TimeSpan grace;
+    private readonly Func<RunLiveness, string?>? attention;
+    private long lastEventTick;
 
-    private RunSupervisor(Process process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention)
     {
         this.process = process;
         this.launcher = launcher;
@@ -63,8 +74,13 @@ public sealed class RunSupervisor
         this.state = state;
         this.wallMinutes = wallMinutes;
         this.tokenCap = tokenCap;
+        this.limits = limits;
+        this.attention = attention;
+        state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
-        deadline = launchedAt + (options.Minute * wallMinutes);
+        launchedTick = options.Clock.GetTimestamp();
+        lastEventTick = launchedTick;
+        wallTime = limits?.WallTime ?? (options.Minute * wallMinutes);
         grace = options.Grace;
         readers =
         [
@@ -83,11 +99,13 @@ public sealed class RunSupervisor
     /// <summary>The harness's process id.</summary>
     public int ProcessId => process.Id;
 
+    internal bool NativeResourcesClosed => process.IsClosed;
+
     /// <summary>
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
     /// that it never waits on one. Throws <see cref="ProviderRefusedException"/> when it cannot be started.
     /// </summary>
-    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap)
+    public static RunSupervisor Start(string run, IReadOnlyList<string> command, string workspace, IReadOnlyDictionary<string, string> environment, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, long wallMinutes, long? tokenCap, RunLimits? limits = null, TimeSpan? stallLimit = null, Func<RunLiveness, string?>? attention = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         ArgumentNullException.ThrowIfNull(environment);
@@ -121,10 +139,11 @@ public sealed class RunSupervisor
             info.Environment[name] = value;
         }
 
-        Process process;
+        ContainedProcess process;
         try
         {
-            process = Process.Start(info) ?? throw new ProviderRefusedException($"{command[0]} did not start.");
+            process = ContainedProcess.Start(info);
+            process.WindowsJobInventory = options.WindowsJobInventory;
         }
         catch (Win32Exception exception)
         {
@@ -132,15 +151,6 @@ public sealed class RunSupervisor
         }
 
         DateTimeOffset launchedAt = DateTimeOffset.UtcNow;
-        try
-        {
-            process.StandardInput.Close();
-        }
-        catch (IOException)
-        {
-            // A harness that already exited closed it first.
-        }
-
         var state = new RunObservedState
         {
             Run = run,
@@ -150,8 +160,17 @@ public sealed class RunSupervisor
             LaunchedAt = RecordParser.FormatTimestamp(launchedAt),
             Heartbeat = RecordParser.FormatTimestamp(launchedAt),
         };
-        directory.Write(state);
-        return new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap);
+        try
+        {
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention);
+            supervisor.Save();
+            return supervisor;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
+        {
+            process.Detach();
+            throw new RunLaunchException(launchedAt, exception);
+        }
     }
 
     /// <summary>
@@ -160,10 +179,36 @@ public sealed class RunSupervisor
     /// </summary>
     public RunOutcome? Supervise(CancellationToken abandon)
     {
-        while (!process.WaitForExit(options.Heartbeat))
+        try
         {
+            return Observe(abandon);
+        }
+        finally
+        {
+            process.Detach(); // Idempotent; Close makes this a no-op after observed containment.
+        }
+    }
+
+    private RunOutcome? Observe(CancellationToken abandon)
+    {
+        long? rootExitedTick = null;
+        while (true)
+        {
+            bool rootExited = process.WaitForExit(options.Heartbeat);
+            if (rootExited)
+            {
+                rootExitedTick ??= options.Clock.GetTimestamp();
+                if (BoundaryExited())
+                {
+                    break;
+                }
+
+                Thread.Sleep(options.Heartbeat);
+            }
+
             if (abandon.IsCancellationRequested)
             {
+                process.Detach();
                 return null;
             }
 
@@ -172,23 +217,59 @@ public sealed class RunSupervisor
             {
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
                 state.Heartbeats++;
-                state.Tokens = tokens;
+                state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
+                TimeSpan silence = options.Clock.GetElapsedTime(lastEventTick);
+                RunLiveness liveness = state.Liveness!;
+                if (silence.TotalSeconds >= liveness.StallSeconds)
+                {
+                    liveness = liveness with { AttentionAt = liveness.AttentionAt ?? RecordParser.FormatTimestamp(now) };
+                    if (liveness.Attention is null)
+                    {
+                        try
+                        {
+                            liveness = liveness with { Attention = attention?.Invoke(liveness) };
+                        }
+                        catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+                        {
+                            // Attention recording is retried; a failed record must never prevent containment.
+                        }
+                    }
+
+                    state.Liveness = liveness;
+                }
+
                 if (state.Stop is null)
                 {
-                    if (directory.ReadStop() is StopRequest asked)
+                    // The root's exit and the boundary's exit are separate observations. In particular, Windows' hidden
+                    // console host can finish just after its client. Keep the reservation and retry inventory for one
+                    // shutdown grace before requesting a stop; normal boundary teardown is not a failed harness run.
+                    if (rootExitedTick is long rootExit && options.Clock.GetElapsedTime(rootExit) >= options.Grace)
                     {
-                        Begin(asked, now);
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited but its containment boundary was not observed empty within the shutdown grace"));
                     }
-                    else if (now >= deadline)
+                    else if (directory.ReadStop() is StopRequest asked)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its cap of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes"), now);
+                        Begin(asked);
                     }
-                    else if (tokenCap is long cap && tokens > cap)
+                    else if (silence.TotalSeconds >= 2L * liveness.StallSeconds)
                     {
-                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported crossed the run's cap of {cap.ToString(CultureInfo.InvariantCulture)}"), now);
+                        state.Liveness = liveness with { StoppedAt = RecordParser.FormatTimestamp(now) };
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the worker observed the event stream silent for twice the stall limit of {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds"));
+                    }
+                    else if (options.Clock.GetElapsedTime(launchedTick) >= wallTime)
+                    {
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its wall-time stop threshold below its allowance of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes, reserving shutdown headroom"));
+                    }
+                    else if ((limits?.Tokens ?? tokenCap) is long cap && tokens >= cap)
+                    {
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the tokens the harness reported reached the operational threshold of {cap.ToString(CultureInfo.InvariantCulture)}, below the reserved cap of {tokenCap?.ToString(CultureInfo.InvariantCulture)}"));
+                    }
+                    else if (limits?.Currency is long currency && priceUnit == limits.CurrencyUnit && price >= currency)
+                    {
+                        Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"));
                     }
                 }
-                else if (transmitted is DateTimeOffset at && state.Stop.EscalatedAt is null && now - at >= grace)
+                else if (transmitted is not null && options.Clock.GetElapsedTime(transmittedTick) >= grace)
                 {
                     Escalate(now);
                 }
@@ -197,7 +278,6 @@ public sealed class RunSupervisor
             }
         }
 
-        DateTimeOffset exited = DateTimeOffset.UtcNow;
         foreach (Thread reader in readers)
         {
             reader.Join(TimeSpan.FromSeconds(5));
@@ -205,16 +285,19 @@ public sealed class RunSupervisor
 
         lock (gate)
         {
+            DateTimeOffset exited = DateTimeOffset.UtcNow;
             state.ExitCode = process.ExitCode;
             state.ExitedAt = RecordParser.FormatTimestamp(exited);
-            state.Tokens = tokens;
+            state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
             if (state.Stop is not null)
             {
                 state.Stop = state.Stop with { ContainedAt = RecordParser.FormatTimestamp(exited) };
             }
 
             Save();
-            return new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokens, price, priceUnit, state.Stop);
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick));
+            process.Close();
+            return outcome;
         }
     }
 
@@ -229,14 +312,27 @@ public sealed class RunSupervisor
         }
     }
 
-    private void Begin(StopRequest request, DateTimeOffset now)
+    private bool BoundaryExited()
+    {
+        try
+        {
+            return process.BoundaryExited();
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private void Begin(StopRequest request)
     {
         grace = request.GraceSeconds is int seconds and >= 0 ? TimeSpan.FromSeconds(seconds) : options.Grace;
         state.Stop = new RunStop(request.RequestedAt, request.RequestedBy, request.Reason);
         var transmission = new StringBuilder();
+        options.BeforeTransmission?.Invoke();
         try
         {
-            File.WriteAllText(directory.StopFile, JsonSerializer.Serialize(request, ProtocolJson.Options));
+            directory.TransmitStop(request);
             transmission.Append("the stop file the harness is told of in VERICAIRN_STOP_FILE");
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -251,26 +347,30 @@ public sealed class RunSupervisor
         }
         else
         {
-            string? failure = Terminate(process.Id);
-            transmission.Append(failure is null ? ", and SIGTERM to the harness" : $"; SIGTERM was not sent ({failure})");
+            string? failure = Signal(force: false);
+            transmission.Append(failure is null ? ", and SIGTERM to the whole process group" : $"; SIGTERM was not sent ({failure})");
         }
 
-        transmitted = now;
-        state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(now), Transmission = transmission.ToString() };
+        transmittedTick = options.Clock.GetTimestamp();
+        transmitted = DateTimeOffset.UtcNow;
+        state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
     }
 
     private void Escalate(DateTimeOffset now)
     {
-        try
+        string? failure = Signal(force: true);
+        if (failure is not null)
         {
-            process.Kill(entireProcessTree: true);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception or NotSupportedException)
-        {
-            // It exited meanwhile; the exit is observed next.
+            state.EscalationFailure = "Containment escalation failed; it will be retried: " + failure;
+            return;
         }
 
-        state.Stop = state.Stop! with { EscalatedAt = RecordParser.FormatTimestamp(now), Escalation = $"the harness had not stopped {grace.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds after the stop was transmitted, so its process tree was killed" };
+        if (state.Stop!.EscalatedAt is not null)
+        {
+            return;
+        }
+
+        state.Stop = state.Stop with { EscalatedAt = RecordParser.FormatTimestamp(now), Escalation = $"the harness had not stopped {grace.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds after the stop was transmitted, so termination of its containment boundary was requested; containment requires observing the whole boundary empty" };
     }
 
     private void Acknowledge(string how)
@@ -297,6 +397,13 @@ public sealed class RunSupervisor
                     continue;
                 }
 
+                lock (gate)
+                {
+                    lastEventTick = options.Clock.GetTimestamp();
+                    state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+                    options.AfterEvent?.Invoke();
+                }
+
                 if (IsAcknowledgment(line))
                 {
                     Acknowledge("the harness printed its acknowledgment on its output");
@@ -310,20 +417,55 @@ public sealed class RunSupervisor
                 }
                 catch (Exception exception) when (exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException)
                 {
-                    // A line the launcher cannot read reports nothing.
+                    lock (gate)
+                    {
+                        tokensIncomplete = true;
+                    }
                 }
 
                 lock (gate)
                 {
                     state.Output = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-                    if (signal?.Tokens is long total)
+                    tokensIncomplete |= signal?.UsageIncomplete == true;
+                    if (signal?.UsageStarted == true)
                     {
-                        tokens = total;
+                        usageInFlight = true;
                     }
 
-                    if (signal?.TokensAdded is long added)
+                    if (signal?.UsageCompleted == true)
                     {
-                        tokens = (tokens ?? 0) + added;
+                        usageInFlight = false;
+                    }
+
+                    try
+                    {
+                        if (signal?.Tokens is long total)
+                        {
+                            if (total < 0 || total < tokens)
+                            {
+                                tokensIncomplete = true;
+                            }
+                            else
+                            {
+                                tokens = total;
+                            }
+                        }
+
+                        if (signal?.TokensAdded is long added)
+                        {
+                            if (added < 0)
+                            {
+                                tokensIncomplete = true;
+                            }
+                            else
+                            {
+                                tokens = checked((tokens ?? 0) + added);
+                            }
+                        }
+                    }
+                    catch (OverflowException)
+                    {
+                        tokensIncomplete = true;
                     }
 
                     if (signal?.Price is long cost)
@@ -341,7 +483,7 @@ public sealed class RunSupervisor
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            // The output closed; only the process's exit ends the run.
+            // Output closure proves no exit; the whole launch boundary must be observed exited.
         }
     }
 
@@ -397,28 +539,17 @@ public sealed class RunSupervisor
         }
     }
 
-    /// <summary>Sends SIGTERM to a process with the kill command; null when it was sent, else why not.</summary>
-    private static string? Terminate(int processId)
+    private string? Signal(bool force)
     {
         try
         {
-            var info = new ProcessStartInfo("kill") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
-            info.ArgumentList.Add("-s");
-            info.ArgumentList.Add("TERM");
-            info.ArgumentList.Add(processId.ToString(CultureInfo.InvariantCulture));
-            using Process kill = Process.Start(info) ?? throw new InvalidOperationException("kill did not start");
-            string error = kill.StandardError.ReadToEnd();
-            if (!kill.WaitForExit(5000))
-            {
-                kill.Kill();
-                return "kill did not answer";
-            }
-
-            return kill.ExitCode == 0 ? null : error.Trim().Length > 0 ? error.Trim() : $"kill exited {kill.ExitCode.ToString(CultureInfo.InvariantCulture)}";
+            options.BeforeSignal?.Invoke(force);
+            process.Signal(force);
+            return null;
         }
-        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException or NotSupportedException)
         {
-            return "the kill command could not be started here";
+            return "the boundary could not be signalled";
         }
     }
 }

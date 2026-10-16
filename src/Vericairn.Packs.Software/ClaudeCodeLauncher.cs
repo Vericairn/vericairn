@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
 using System.Text.Json;
+using Microsoft.Win32;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -21,6 +23,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public string Launcher => LauncherId;
 
     /// <inheritdoc />
+    public string Limitations => "Claude Code receives --max-budget-usd for USD at the currency threshold below its reservation. This is an estimated-spend soft limit that can overshoot; no native total-token cap is available. Other currencies have no native cap.";
+
+    /// <inheritdoc />
     public string? Harness => "Claude Code";
 
     /// <inheritdoc />
@@ -31,11 +36,12 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         ["launch", "observe-usage"],
         [
             "Runs claude -p \"/goal <condition>\" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's configuration> --strict-mcp-config in the workspace: Claude Code's own /goal, with the vericairn MCP server as its only MCP server.",
-            "Signs in with Claude Code's own login under the user's home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
+            "Imports only Claude Code's provisioned login into a fresh run configuration; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Reads the tokens of the stream's final result; it reads no price, so a cap in currency is charged in full.",
+            "Excludes user, project and local settings sources, disables hooks and refuses detected managed settings; remote managed policy is not qualified and managed accounts are unsupported.",
             "Implemented against claude --help and a stand-in process that speaks its stream; not yet qualified against a live Claude Code.",
         ],
-        [new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Claude Code executable, or a JSON array of it and its leading arguments.", false, "claude")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CLAUDE_CONFIG_DIR"];
@@ -44,10 +50,113 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => HarnessProcess.Problem(settings, "claude");
 
     /// <inheritdoc />
+    public LaunchContext Prepare(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RefuseManagedSettings();
+        string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "claude");
+        Directory.CreateDirectory(home);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        string? original = context.Environment.GetValueOrDefault("CLAUDE_CONFIG_DIR");
+        if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
+        {
+            original = Path.Combine(user, ".claude");
+        }
+
+        // Only the explicitly provisioned harness login is imported. Settings, plugins and hook files stay behind.
+        if (original is not null && File.Exists(Path.Combine(original, ".credentials.json")))
+        {
+            string login = Path.Combine(home, ".credentials.json");
+            try
+            {
+                using JsonDocument credentials = JsonDocument.Parse(File.ReadAllText(Path.Combine(original, ".credentials.json")));
+                if (credentials.RootElement.TryGetProperty("claudeAiOauth", out JsonElement oauth))
+                {
+                    if (oauth.TryGetProperty("subscriptionType", out JsonElement subscription) && subscription.GetString() is "team" or "enterprise")
+                    {
+                        throw new ProviderRefusedException("Claude Code organization logins can load remote managed settings that this launcher cannot verify; use an unmanaged worker login.");
+                    }
+
+                    File.WriteAllText(login, JsonSerializer.Serialize(new Dictionary<string, JsonElement>(StringComparer.Ordinal) { ["claudeAiOauth"] = oauth }));
+                }
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                throw new ProviderRefusedException("Claude Code's provisioned login could not be read.", exception);
+            }
+            if (!OperatingSystem.IsWindows() && File.Exists(login))
+            {
+                File.SetUnixFileMode(login, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
+        return context with { Environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CLAUDE_CONFIG_DIR"] = home } };
+    }
+
+    private static void RefuseManagedSettings()
+    {
+        string directory = OperatingSystem.IsWindows() ? Path.Combine(Environment.GetEnvironmentVariable("ProgramW6432") ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "ClaudeCode")
+            : OperatingSystem.IsMacOS() ? "/Library/Application Support/ClaudeCode" : "/etc/claude-code";
+        RefuseManagedPaths([Path.Combine(directory, "managed-settings.json"), Path.Combine(directory, "managed-settings.d"), Path.Combine(directory, "managed-mcp.json")]);
+        if (OperatingSystem.IsMacOS())
+        {
+            RefuseManagedPaths(["/Library/Managed Preferences/com.anthropic.claudecode.plist",
+                Path.Combine("/Library/Managed Preferences", Environment.UserName, "com.anthropic.claudecode.plist")]);
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (RegistryView view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                foreach (RegistryHive hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+                {
+                    using RegistryKey root = RegistryKey.OpenBaseKey(hive, view);
+                    using RegistryKey? policy = root.OpenSubKey(@"SOFTWARE\Policies\ClaudeCode");
+                    if (policy is not null)
+                    {
+                        throw new ProviderRefusedException("Claude Code managed settings cannot be isolated by this launcher; use an unmanaged worker account.");
+                    }
+                }
+            }
+        }
+    }
+
+    internal static void RefuseManagedPaths(IEnumerable<string> paths)
+    {
+        foreach (string path in paths)
+        {
+            try
+            {
+                _ = File.GetAttributes(path); // Unlike File.Exists, access denied must not mean absent.
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                continue;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                throw new ProviderRefusedException("Claude Code managed configuration could not be checked; launch was refused.", exception);
+            }
+
+            throw new ProviderRefusedException("Claude Code managed configuration cannot be isolated by this launcher; use an unmanaged worker account.");
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config"];
+        var limits = new List<string>();
+        if (context.Limits is { Currency: long amount, CurrencyUnit: "USD" })
+        {
+            limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
+        }
+
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>
@@ -61,20 +170,12 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.GetString() != "result" || !root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String || type.GetString() != "result")
         {
             return null;
         }
 
-        long tokens = 0;
-        foreach (string field in new[] { "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens" })
-        {
-            if (usage.TryGetProperty(field, out JsonElement count) && count.TryGetInt64(out long value))
-            {
-                tokens += value;
-            }
-        }
-
-        return new HarnessSignal(Tokens: tokens);
+        long? tokens = HarnessUsage.Total(root, "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens");
+        return new HarnessSignal(Tokens: tokens, UsageIncomplete: tokens is null);
     }
 }

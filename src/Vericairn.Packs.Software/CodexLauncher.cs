@@ -27,6 +27,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public string Launcher => LauncherId;
 
     /// <inheritdoc />
+    public string Limitations => "Codex receives native rollout budget tracking at its token threshold below the reservation; tracking is not a hard limit. There is no native currency cap; unreported currency is charged in full.";
+
+    /// <inheritdoc />
     public string? Harness => "Codex";
 
     /// <inheritdoc />
@@ -36,14 +39,14 @@ public sealed class CodexLauncher : IAgentLauncher
         "implemented",
         ["verify-goals", "launch", "observe-usage"],
         [
-            "Runs codex exec --json --cd <workspace> --sandbox workspace-write -c mcp_servers.vericairn.command=... -c mcp_servers.vericairn.args=[...] \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
+            "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Needs Codex's goals feature: before a run is recorded it reads codex features list, and refuses, saying why, when goals is not enabled or its state cannot be read.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
-            "The MCP servers of the user's own Codex configuration stay configured beside vericairn.",
+            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
             "Implemented against codex --help, codex exec --help and a stand-in process that speaks its events; not yet qualified against a live Codex.",
         ],
-        [new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
+        [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; the goal limit overrides it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array of it and its leading arguments.", false, "codex")]);
 
     /// <inheritdoc />
     public IReadOnlyList<string> EnvironmentNames => ["CODEX_HOME"];
@@ -86,50 +89,130 @@ public sealed class CodexLauncher : IAgentLauncher
     }
 
     /// <inheritdoc />
+    public LaunchContext Prepare(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        context = context with { Workspace = HarnessWorkspace.Canonical(context.Workspace) };
+        string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "codex");
+        Directory.CreateDirectory(home);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        File.WriteAllText(Path.Combine(home, "config.toml"), "mcp_servers=" + Mcp(context) + "\nprojects=" + Projects(context) + "\n[features]\ngoals = true\n");
+        string? original = context.Environment.GetValueOrDefault("CODEX_HOME");
+        if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
+        {
+            original = Path.Combine(user, ".codex");
+        }
+
+        // Import only Codex's explicitly provisioned harness login, never configuration, MCP OAuth stores, plugins or hooks.
+        if (original is not null && File.Exists(Path.Combine(original, "auth.json")))
+        {
+            string login = Path.Combine(home, "auth.json");
+            File.Copy(Path.Combine(original, "auth.json"), login, overwrite: false);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(login, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+
+        var environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CODEX_HOME"] = home };
+        LaunchContext prepared = context with { Environment = environment };
+        VerifyMcp(prepared);
+        return prepared;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var command = new List<string>(HarnessProcess.Command(context.Settings, "codex")) { "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write" };
-        command.Add("-c");
-        command.Add("mcp_servers.vericairn.command=" + Toml(context.McpServer[0]));
-        command.Add("-c");
-        command.Add("mcp_servers.vericairn.args=[" + string.Join(", ", context.McpServer.Skip(1).Select(Toml)) + "]");
-        foreach ((string name, string value) in context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal))
+        var limits = new List<string>();
+        if (context.Limits?.Tokens is long tokens)
         {
-            command.Add("-c");
-            command.Add($"mcp_servers.vericairn.env.{name}={Toml(value)}");
+            limits.AddRange(["-c", "features.rollout_budget.enabled=true", "-c", "features.rollout_budget.limit_tokens=" + tokens.ToString(CultureInfo.InvariantCulture)]);
         }
 
-        command.Add("/goal " + context.Condition);
-        return command;
+        return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
+            "-c", "mcp_servers=" + Mcp(context),
+            "-c", "projects=" + Projects(context),
+            .. limits, "/goal " + context.Condition];
     }
+
+    // Override one whole projects value: CLI dotted-key parsing does not interpret TOML quotes in a path segment.
+    internal static string Projects(LaunchContext context) => "{" + Toml(context.Workspace) + "={trust_level=\"untrusted\"}}";
+
+    internal static void VerifyMcp(LaunchContext context)
+    {
+        (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, "codex"),
+            "-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context), "mcp", "list", "--json"], context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(output);
+            JsonElement root = document.RootElement;
+            if (code != 0 || root.ValueKind != JsonValueKind.Array || root.GetArrayLength() != 1)
+            {
+                throw new ProviderRefusedException("Codex's effective MCP configuration is not the run's approved server table; ambient or incompatible managed configuration must be removed before launch.");
+            }
+
+            JsonElement server = root[0];
+            JsonElement transport = server.GetProperty("transport");
+            bool approved = server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
+                && transport.GetProperty("type").GetString() == "stdio" && transport.GetProperty("command").GetString() == context.McpServer[0]
+                && transport.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))
+                && transport.GetProperty("env_vars").GetArrayLength() == 0
+                && (!transport.TryGetProperty("cwd", out JsonElement cwd) || cwd.ValueKind == JsonValueKind.Null);
+            JsonElement env = transport.GetProperty("env");
+            approved &= context.McpEnvironment.Count == 0 && env.ValueKind == JsonValueKind.Null
+                || env.ValueKind == JsonValueKind.Object && env.EnumerateObject().Count() == context.McpEnvironment.Count
+                    && env.EnumerateObject().All(p => context.McpEnvironment.TryGetValue(p.Name, out string? value) && p.Value.GetString() == value);
+            if (!approved)
+            {
+                throw new ProviderRefusedException("Codex's effective MCP transport differs from the run's approved configuration; launch was refused.");
+            }
+        }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            throw new ProviderRefusedException("Codex's effective MCP configuration could not be verified; launch was refused.", exception);
+        }
+    }
+
+    private static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";
 
     /// <summary>Each completed turn reports the tokens it spent, its input and output tokens, added to the run's tally.</summary>
     public HarnessSignal? Read(string line)
     {
         ArgumentNullException.ThrowIfNull(line);
-        if (!line.TrimStart().StartsWith('{') || !line.Contains("turn.completed", StringComparison.Ordinal))
+        if (!line.TrimStart().StartsWith('{'))
         {
             return null;
         }
 
         using JsonDocument document = JsonDocument.Parse(line);
         JsonElement root = document.RootElement;
-        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.GetString() != "turn.completed" || !root.TryGetProperty("usage", out JsonElement usage) || usage.ValueKind != JsonValueKind.Object)
+        if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("type", out JsonElement type) || type.ValueKind != JsonValueKind.String)
         {
             return null;
         }
 
-        long tokens = 0;
-        foreach (string field in new[] { "input_tokens", "output_tokens" })
+        if (type.GetString() == "turn.started")
         {
-            if (usage.TryGetProperty(field, out JsonElement count) && count.TryGetInt64(out long value))
-            {
-                tokens += value;
-            }
+            return new HarnessSignal(UsageStarted: true);
         }
 
-        return new HarnessSignal(TokensAdded: tokens);
+        if (type.GetString() == "turn.failed")
+        {
+            return new HarnessSignal(UsageIncomplete: true, UsageCompleted: true);
+        }
+
+        if (type.GetString() != "turn.completed")
+        {
+            return null;
+        }
+
+        long? tokens = HarnessUsage.Total(root, "input_tokens", "output_tokens");
+        return new HarnessSignal(TokensAdded: tokens, UsageIncomplete: tokens is null, UsageCompleted: true);
     }
 
     /// <summary>A TOML basic string, which a -c override's value is parsed as.</summary>

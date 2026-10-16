@@ -41,6 +41,9 @@ public sealed class RunObservedState
     /// <summary>When the harness last wrote to its output.</summary>
     public string? Output { get; set; }
 
+    /// <summary>The worker's event-stream observation.</summary>
+    public RunLiveness? Liveness { get; set; }
+
     /// <summary>The tokens the harness reported so far, when it reported any.</summary>
     public long? Tokens { get; set; }
 
@@ -55,6 +58,9 @@ public sealed class RunObservedState
 
     /// <summary>The status the settlement recorded, once it was recorded.</summary>
     public string? Settled { get; set; }
+
+    /// <summary>A failed containment escalation, retained even after a successful retry.</summary>
+    public string? EscalationFailure { get; set; }
 
     /// <summary>Why the settlement could not be recorded, when it could not.</summary>
     public string? Problem { get; set; }
@@ -118,10 +124,11 @@ public sealed class RunDirectory
     public void Write(RunObservedState state)
     {
         ArgumentNullException.ThrowIfNull(state);
-        string temporary = StateFile + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(state, ProtocolJson.Options));
-        File.Move(temporary, StateFile, overwrite: true);
+        WriteWhole(StateFile, state);
     }
+
+    /// <summary>Publishes the stop file whole, replacing an existing entry without opening it for writing.</summary>
+    internal void TransmitStop(StopRequest request) => WriteWhole(StopFile, request);
 
     /// <summary>The stop asked of the run, or null.</summary>
     public StopRequest? ReadStop() => ReadJson<StopRequest>(StopRequestFile);
@@ -140,6 +147,26 @@ public sealed class RunDirectory
         catch (IOException) when (File.Exists(StopRequestFile))
         {
             return ReadStop() ?? request;
+        }
+    }
+
+    private static void WriteWhole<T>(string target, T value)
+    {
+        // CREATE_ALWAYS refuses an existing hidden/system file on Windows. Exclusive staging plus rename also avoids
+        // writing through an existing link, and a unique staging name leaves a stranded earlier write untouched.
+        string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                JsonSerializer.Serialize(stream, value, ProtocolJson.Options);
+            }
+
+            File.Move(temporary, target, overwrite: true);
+        }
+        finally
+        {
+            File.Delete(temporary);
         }
     }
 

@@ -394,8 +394,8 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 | `GET /v1/providers` | The provider and adapter implementations available to the runtime on its machine (`ProviderRow`: provider, kind release or source, and from 0.6.0 launcher or workspace, implementation, contract, status, operations, limitations, declared settings with defaults, the destination setting, the served locations). Being available selects nothing. |
 | `GET /v1/launchers` | The coding-agent launchers available to the runtime on its machine, providers of `vericairn.launcher.agent/1`, as `ProviderRow`s of kind launcher; the generic launcher's first limitation says that generic process launch is not complete agent support. From 0.6.0 |
 | `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused over the local network, and, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator, nor holds `local-engineering`, nor is the sponsor of the goal the run is charged to when the sponsor is a person (from 0.6.0), when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why) and the goal's sponsor recorded no custody exception in force for the goal (from 0.6.0; judged before the workspace is prepared and again when the intent is recorded, so an exception revised or expired meanwhile lifts nothing; a run launched under one names the exception in force when its intent was recorded, and the response says what it lifted; judged a last time immediately before the launch, when an exception that lapsed or a key that arrived after the intent launches nothing and the run's next revision is `canceled`, neither in flight nor charged, the response's status `canceled`), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
-| `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, and whether its launcher is generic), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
-| `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The request waits for what the worker observes for at most 30 seconds, whatever grace it names, and answers with what it has; the settlement records the rest. From 0.6.0 |
+| `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, whether its launcher is generic, optional event-stream `liveness` and settled workspace `scope`), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
+| `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The main observation wait is capped at 30 seconds, whatever grace the request names, with a bounded settlement wait after exit; the response reports what is observed so far, and clients poll for later facts. From 0.6.0 |
 | `POST /v1/releases/submit` | Submit a release as intent before effect, on the runtime's machine (refused over the local network, as observing is, since both use the provider's credentials there): the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it. From 0.6.0 a device-signed export names its device's principal as `by`, which must be an operator or hold the `administer` scope; over the local network it is refused |
@@ -415,6 +415,65 @@ for the next start.
 Restore, `recover compare`, `docs notes` and `docs regenerate` do not go through the API. Restore
 creates another copy. The other three load this copy (and, for compare, the other copy too) directly
 from its files and live store, even while a daemon serves it.
+
+## Worker run observations
+
+`RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
+fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
+target and cap stay pinned to the intent. Every record newly reserving allowance is checked for budget admission.
+Before admission the worker refuses linked `.vericairn` metadata and exports files without following links.
+
+Codex and Claude Code receive fresh configuration directories containing only their approved harness login. Codex
+uses the canonical workspace path for project trust and verifies the effective MCP list: merged ambient servers or
+changed transport settings refuse launch. Claude Code excludes user, project and local setting sources, disables hooks
+and enables no plugins, alongside strict MCP configuration. Detected managed settings and known organization logins
+refuse launch; remote or undetected managed policy is not qualified and managed accounts are unsupported. A
+configuration refusal after intent but before process launch settles as an uncharged known failure. These controls
+do not isolate same-user files or keychains, and no live coding agent or live sign-in has been qualified; see
+[software.md](software.md#harness-configuration-and-workspace-exports).
+
+A state or dispatch write failure after launch keeps the allowance reserved. The worker retries state writes and
+recovers an observed dispatch before recording settlement; an unavailable recovery leaves the intent in flight. An
+uncertain response is not proof that no process was created. `ok` means a launch was observed and supervision
+established; `status` may still be `not-started` if the dispatch record could not be persisted. The response explains
+this case.
+
+New intents state `target.capMode: "soft"` and record their native controls and thresholds in evidence. The full cap
+is reserved, while operational thresholds leave grace plus a heartbeat of wall headroom and ten percent of
+token/currency headroom for usage in flight. Native controls can overshoot and unsupported units are explicitly soft;
+the ledger's remainder can therefore become negative. Elapsed wall usage and stop grace use a monotonic clock.
+Malformed, incomplete or overflowing token usage, including an unfinished turn, leaves the token unit unreported and
+charged at its cap.
+
+`GET /v1/runs` adds two optional observations to each `RunRow`:
+
+- `liveness`: `stallSeconds`, `lastEventAt`, optional `attentionAt`, `attention` (ask id) and `stoppedAt`. The worker
+  observes stdout events with a monotonic clock. The launcher default is 600 seconds, changed by its `stall-seconds`
+  setting (1–86400), with the goal's `limits.stallSeconds` taking precedence. The current goal is read again when the intent pins the limit. One limit of silence raises an attention
+  ask; twice the limit stops and contains the run. Events reset silence but never erase attention. An in-flight row
+  reads local observations; settlement records them in the operation.
+
+- `scope`: `changed`, `outsideCount`, `outside`
+  and optional `problem`. Settlement compares file inventories before launch and after boundary exit against
+  repository-relative paths/globs in `brief.permittedChanges`. The inventory reads the physical workspace independently
+  of Git configuration and verifies its root identity against the launch baseline. Committed, renamed, deleted,
+  untracked and ignored changes count. Non-regular files, an unavailable helper or a deadline mark the audit incomplete;
+  each inventory and the pattern comparison have a 30-second deadline, with bounded helper cleanup. Outside changes or
+  incomplete audit are flagged in the observed summary. At most 1000 outside names are listed; unsafe names are hashed.
+  With `problem` present, counts can be partial and zero outside paths does not mean clean. Git administration,
+  changes outside the workspace and changes reverted before settlement are excluded. This is a net observation, not
+  attribution, acceptance or a filesystem sandbox.
+
+A stop's acknowledgment and escalation follow transmission; containment follows all prior facts and does not follow
+`observed.at`. Stop facts remain unchanged across revisions. Transmission is timestamped after delivery attempts
+finish, rather than at an earlier heartbeat. Windows transmission creates the stop file; POSIX also attempts SIGTERM
+to the owned process group. The stop endpoint's bounded wait can return before containment; clients poll
+`GET /v1/runs` for later observations. Containment requires a successful inventory showing the whole Windows Job
+Object or POSIX process group exited, not just the root process. Failed inventories and escalations are retried without
+claiming containment or a kill. POSIX group signals require the unreaped leader's ownership. A lost observer leaves
+the reservation in flight while a detached lifecycle owner retains native cleanup responsibility. POSIX group/session
+escape and worker crash are not contained; PID 1 and auto-reaping hosts refuse launch. Windows job assignment has a
+creation gap before the job owns the suspended child. See [platform limits](software.md#launch-accounting-and-containment).
 
 ## Outcomes and problems
 

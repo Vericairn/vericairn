@@ -358,9 +358,9 @@ public class SecondReviewTests
         RunResponse started = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("ignore-stop", Path.Combine(scratch, "report.jsonl")) }));
         Assert.True(started.Ok, started.Message);
         DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (!api.Runs().Runs.Single(r => r.Run == started.Run).Observed)
+        while (!api.Runs().Runs.Single(r => r.Run == started.Run).Observed || !File.Exists(Path.Combine(scratch, "report.jsonl")))
         {
-            Assert.True(DateTimeOffset.UtcNow < until, "The run was never observed.");
+            Assert.True(DateTimeOffset.UtcNow < until, "The run was never observed ready to receive a stop.");
             await Task.Delay(100, TestContext.Current.CancellationToken);
         }
 

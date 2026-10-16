@@ -20,6 +20,187 @@ public class LauncherTests
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
+    [Theory]
+    [InlineData("team")]
+    [InlineData("enterprise")]
+    public void ClaudeRefusesKnownOrganizationLoginsWhoseRemotePolicyCannotBeVerified(string subscription)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-login-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.WriteAllText(Path.Combine(root, ".credentials.json"), "{\"claudeAiOauth\":{\"subscriptionType\":\"" + subscription + "\"}}");
+            LaunchContext context = Context(NoSettings) with
+            {
+                McpConfiguration = Path.Combine(root, "run", "mcp.json"),
+                Environment = new Dictionary<string, string>(StringComparer.Ordinal) { ["CLAUDE_CONFIG_DIR"] = root },
+            };
+            Assert.Throws<ProviderRefusedException>(() => new ClaudeCodeLauncher().Prepare(context));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("managed-settings.json", false)]
+    [InlineData("managed-settings.d", true)]
+    [InlineData("managed-mcp.json", false)]
+    [InlineData("com.anthropic.claudecode.plist", false)]
+    public void ClaudeRefusesSyntheticManagedSourcesWithoutExecutingThem(string leaf, bool directory)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-managed-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(root);
+        try
+        {
+            string path = Path.Combine(root, leaf);
+            ClaudeCodeLauncher.RefuseManagedPaths([path]);
+            if (directory)
+            {
+                Directory.CreateDirectory(path);
+            }
+            else
+            {
+                File.WriteAllText(path, "synthetic policy; never execute");
+            }
+
+            Assert.Throws<ProviderRefusedException>(() => ClaudeCodeLauncher.RefuseManagedPaths([path]));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RealCodexProbesRejectMergedServersAndAddressCanonicalProjectTrustWithoutStartingServers()
+    {
+        string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CODEX");
+        Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CODEX to run read-only mcp list probes with synthetic configuration.");
+        string root = Path.Combine(Path.GetTempPath(), "vericairn-config-" + Ulid.NewUlid().Value);
+        string workspace = Path.Combine(root, "workspace.with.dots");
+        string home = Path.Combine(root, "home");
+        Directory.CreateDirectory(workspace);
+        Directory.CreateDirectory(home);
+        try
+        {
+            Git(workspace, "init", "-q");
+            workspace = HarnessWorkspace.Canonical(workspace);
+            Directory.CreateDirectory(Path.Combine(workspace, ".codex"));
+            File.WriteAllText(Path.Combine(workspace, ".codex", "config.toml"), "[mcp_servers.project_ambient]\ncommand=\"nonexistent-project-sentinel\"\n");
+            var environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), []);
+            environment["CODEX_HOME"] = home;
+            var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = executable };
+            LaunchContext context = Context(settings) with
+            {
+                Workspace = workspace, Environment = environment, McpServer = ["nonexistent-approved-sentinel"],
+                McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
+            };
+            string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\n");
+            (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), workspace);
+            Assert.Equal(0, code);
+            Assert.Contains("project_ambient", baseline, StringComparison.Ordinal);
+            Assert.Contains("ambient", baseline, StringComparison.Ordinal);
+            Assert.Throws<ProviderRefusedException>(() => CodexLauncher.VerifyMcp(context)); // Extra lower-layer server is refused.
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust);
+            CodexLauncher.VerifyMcp(context); // Whole projects value suppresses the project layer, even with dots in its canonical key.
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.vericairn.env]\nAMBIENT=\"synthetic\"\n");
+            Assert.Throws<ProviderRefusedException>(() => CodexLauncher.VerifyMcp(context)); // Merged fields of the approved name are refused too.
+
+            // Codex also discovers the main repository when it starts in a linked worktree. Pin that actual launch workspace.
+            File.WriteAllText(Path.Combine(workspace, "README.md"), "synthetic repository");
+            Git(workspace, "add", "README.md");
+            Git(workspace, "commit", "-q", "-m", "Synthetic baseline");
+            string linked = Path.Combine(root, "linked.with.dots");
+            Git(workspace, "worktree", "add", "-q", "-b", "linked", linked);
+            linked = HarnessWorkspace.Canonical(linked);
+            Directory.CreateDirectory(Path.Combine(linked, ".codex"));
+            File.Copy(Path.Combine(workspace, ".codex", "config.toml"), Path.Combine(linked, ".codex", "config.toml"));
+            LaunchContext linkedContext = context with { Workspace = linked };
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust);
+            (int linkedCode, string linkedBaseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), linked);
+            Assert.Equal(0, linkedCode);
+            Assert.Contains("project_ambient", linkedBaseline, StringComparison.Ordinal);
+            CodexLauncher.VerifyMcp(linkedContext);
+
+            string runDirectory = Path.Combine(root, "run");
+            Directory.CreateDirectory(runDirectory);
+            string alias = Path.Combine(root, "workspace-alias");
+            if (!OperatingSystem.IsWindows())
+            {
+                Directory.CreateSymbolicLink(alias, workspace);
+            }
+
+            context = context with { Workspace = OperatingSystem.IsWindows() ? workspace : alias, McpConfiguration = Path.Combine(runDirectory, "mcp.json") };
+            LaunchContext prepared = new CodexLauncher().Prepare(context);
+            Assert.Equal(workspace, prepared.Workspace);
+            string configuration = File.ReadAllText(Path.Combine(prepared.Environment["CODEX_HOME"], "config.toml"));
+            Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
+            Assert.DoesNotContain("workspace-alias", configuration, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RealClaudeHelpListsTheIsolationFlagsWithoutLaunchingAnAgent()
+    {
+        string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CLAUDE");
+        Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CLAUDE to check isolation flags against --help only.");
+        (int code, string help, _) = HarnessProcess.Run([executable, "--help"], WorkerEnvironment.Build(WorkerEnvironment.Current(), []), TimeSpan.FromSeconds(30));
+        Assert.Equal(0, code);
+        Assert.Contains("--setting-sources <sources>", help, StringComparison.Ordinal);
+        Assert.Contains("--settings <file-or-json>", help, StringComparison.Ordinal);
+        Assert.Contains("--strict-mcp-config", help, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("{\"input_tokens\":1}")]
+    [InlineData("{\"input_tokens\":-1,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":1.5,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":\"1\",\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":null,\"output_tokens\":2}")]
+    [InlineData("{\"input_tokens\":9223372036854775807,\"output_tokens\":1}")]
+    [InlineData("{\"input_tokens\":9223372036854775808,\"output_tokens\":1}")]
+    public void IncompleteOrInvalidUsageIsNeverATokenSignal(string usage)
+    {
+        HarnessSignal codex = new CodexLauncher().Read("{\"type\":\"turn.completed\",\"usage\":" + usage + "}")!;
+        HarnessSignal claude = new ClaudeCodeLauncher().Read("{\"type\":\"result\",\"usage\":" + usage + "}")!;
+        Assert.Null(codex.TokensAdded);
+        Assert.True(codex.UsageIncomplete);
+        Assert.Null(claude.Tokens);
+        Assert.True(claude.UsageIncomplete);
+    }
+
+    [Fact]
+    public void NativeControlsReceiveTheOperationalAllowanceAndUnsupportedUnitsStaySoft()
+    {
+        using var cap = System.Text.Json.JsonDocument.Parse("""{"wallMinutes":1,"tokens":1001,"currency":{"amount":1001,"unit":"USD"}}""");
+        RunLimits limits = RunLimits.For(cap.RootElement, WorkerOptions.Default);
+        Assert.Equal(TimeSpan.FromSeconds(48), limits.WallTime);
+        Assert.Equal(900, limits.Tokens);
+        Assert.Equal(900, limits.Currency);
+        LaunchContext context = Context(NoSettings) with { Limits = limits };
+        Assert.Equal(["--max-budget-usd", "9.00"], new ClaudeCodeLauncher().Command(context).TakeLast(2));
+        Assert.DoesNotContain("--max-budget-usd", new ClaudeCodeLauncher().Command(context with { Limits = limits with { CurrencyUnit = "EUR" } }));
+        Assert.Contains("features.rollout_budget.limit_tokens=900", new CodexLauncher().Command(context));
+        Assert.Contains("No native token or currency limit", ((IAgentLauncher)new GenericLauncher()).Limitations, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompleteZeroUsageIsKnownAndClaudeRequiresItsCacheCounts()
+    {
+        var launcher = new ClaudeCodeLauncher();
+        Assert.True(launcher.Read("""{"type":"result","usage":{"input_tokens":1,"output_tokens":1}}""")!.UsageIncomplete);
+        Assert.Equal(0, launcher.Read("""{"type":"result","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""")!.Tokens);
+        Assert.Null(launcher.Read("""{"type":"result","usage":{"input_tokens":9223372036854775807,"output_tokens":0,"cache_creation_input_tokens":1,"cache_read_input_tokens":0}}""")!.Tokens);
+    }
+
     [Fact]
     public void EachLauncherDeclaresItsContractAndTheGenericOneIsLabeled()
     {
@@ -50,7 +231,7 @@ public class LauncherTests
     {
         var launcher = new ClaudeCodeLauncher();
         LaunchContext context = Context(NoSettings);
-        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config"], launcher.Command(context));
+        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], launcher.Command(context));
         Assert.Equal(["/opt/claude/bin/claude", "--debug", "-p"], launcher.Command(Context(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = """["/opt/claude/bin/claude","--debug"]""" })).Take(3));
         Assert.Null(launcher.Verify(NoSettings, NoSettings));
         Assert.Contains("JSON array of one or more non-empty strings", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = "[]" }, NoSettings), StringComparison.Ordinal);
@@ -58,7 +239,7 @@ public class LauncherTests
         Assert.Equal(1734, launcher.Read("""{"type":"result","subtype":"success","usage":{"input_tokens":1000,"cache_creation_input_tokens":200,"cache_read_input_tokens":300,"output_tokens":234},"total_cost_usd":0.01}""")!.Tokens);
         Assert.Null(launcher.Read("""{"type":"assistant","message":{"usage":{"input_tokens":5,"output_tokens":1}}}"""));
         Assert.Null(launcher.Read("Some text the harness printed."));
-        Assert.Null(launcher.Read("""{"type":"result","subtype":"success"}"""));
+        Assert.True(launcher.Read("""{"type":"result","subtype":"success"}""")!.UsageIncomplete);
     }
 
     [Fact]
@@ -66,11 +247,14 @@ public class LauncherTests
     {
         var launcher = new CodexLauncher();
         LaunchContext context = Context(NoSettings) with { McpServer = ["C:\\Program Files\\vericairn.exe", "--estate", "/estates/the \"widget\"", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["VERICAIRN_HOME"] = "/home/me/.config/vericairn" } };
-        Assert.Equal(
-            ["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c", "mcp_servers.vericairn.command=\"C:\\\\Program Files\\\\vericairn.exe\"", "-c", "mcp_servers.vericairn.args=[\"--estate\", \"/estates/the \\\"widget\\\"\", \"mcp\", \"serve\", \"--as\", \"01M4TRNE1GYEK4P8MXQAB3C8Q4\"]", "-c", "mcp_servers.vericairn.env.VERICAIRN_HOME=\"/home/me/.config/vericairn\"", "/goal Is it done? Checks: it builds."],
-            launcher.Command(context));
+        IReadOnlyList<string> command = launcher.Command(context);
+        Assert.Equal(["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c"], command.Take(8));
+        Assert.StartsWith("mcp_servers={vericairn={command=", command[8], StringComparison.Ordinal);
+        Assert.Contains("env={\"VERICAIRN_HOME\"=\"/home/me/.config/vericairn\"}", command[8], StringComparison.Ordinal);
+        Assert.Equal("projects={\"/work/widget\"={trust_level=\"untrusted\"}}", command[10]);
+        Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
-        Assert.Null(launcher.Read("""{"type":"turn.started"}"""));
+        Assert.True(launcher.Read("""{"type":"turn.started"}""")!.UsageStarted);
         Assert.Null(launcher.Read("""{"type":"item.completed","item":{"text":"turn.completed"}}"""));
     }
 

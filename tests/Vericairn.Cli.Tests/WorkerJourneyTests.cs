@@ -108,7 +108,16 @@ public class WorkerJourneyTests
                 harness = FakeHarness.Reports(report)[0]["process"]!.GetValue<int>();
             }
 
-            Thread.Sleep(1500);
+            using (EstateService observer = EstateService.Open(root))
+            {
+                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
+                while (Assert.Single(observer.Runs().Runs, row => row.Run == run).Observed)
+                {
+                    Assert.True(DateTimeOffset.UtcNow < until, "The disposed supervisor remained observed.");
+                    Thread.Sleep(50);
+                }
+            }
+
             CliHarness.Outcome stopped = CliHarness.Ok("--estate", root, "worker", "stop", run, "--by", op, "--reason", "Nobody watches it.");
             Assert.Contains($"run {run}  stop requested", stopped.Out, StringComparison.Ordinal);
             Assert.Contains("transmitted: not observed", stopped.Out, StringComparison.Ordinal);

@@ -48,7 +48,7 @@ public sealed class GoalType : IRecordType
         new("roles", "object[]", false, "Role overrides for this goal: role, principals in order of preference, optional note.", 2),
         new("budget", "object", true, "Caps by unit, granted by the sponsor's activation; wallMinutes and attemptsPerStep are required. Units: " + Caps.Units + ".", 2),
         new("plan", "object", true, "policy (proposed-by-planner|given), approval (sponsor-approves|self-approves-ordinary), and workOrders (ulid[]) for a given plan.", 2),
-        new("limits", "object", false, "Stop conditions: consecutiveFailures (a positive integer) and deadline (a timestamp).", 2),
+        new("limits", "object", false, "Stop conditions: consecutiveFailures (a positive integer), deadline (a timestamp) and stallSeconds (event-stream silence limit, 1–86400 seconds).", 2),
         new("inputs", "reference[]", true, "Decisions, work orders and designs it builds on: {type, id, hash?}; may be empty.", 2),
     ];
 
@@ -109,6 +109,7 @@ public sealed class GoalType : IRecordType
         {
             limits.Number("consecutiveFailures", false, 1, 1000);
             limits.Timestamp("deadline", false);
+            limits.Number("stallSeconds", false, 1, 86400);
             limits.NoOtherKeys();
         }
 

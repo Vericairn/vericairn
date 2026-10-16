@@ -54,6 +54,8 @@ public sealed class OperationType : IRecordType
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
         new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts and kept in every revision; wallMinutes is required. A run that names its goal starts only while the goal is active, with the units its budget grants, within what remains of them, its concurrency and its attempts per step. Units: " + Caps.Units + ".", 2),
         new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
+        new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
+        new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
     ];
 
@@ -118,13 +120,30 @@ public sealed class OperationType : IRecordType
             }
         }
 
+        if (context.Record.Supersedes is string priorId && context.Find(priorId) is RecordEnvelope prior && prior.Body.TryGetProperty("stop", out JsonElement priorStop) && priorStop.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty fact in priorStop.EnumerateObject())
+            {
+                if (stop is null || !stop.Element.TryGetProperty(fact.Name, out JsonElement kept) || CanonicalJson.Serialize(kept) != CanonicalJson.Serialize(fact.Value))
+                {
+                    context.Error("operation.stop-kept", $"A run keeps its recorded stop fact '{fact.Name}' unchanged in every revision.");
+                }
+            }
+        }
+
         if (stop is not null)
         {
             Stop(context, status, stop);
         }
 
         // The intent of a run that names its goal: the goal active, and the cap within its budget, judged from the records before it.
-        if (context.Record.Supersedes is null && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
+        bool reserves = status is "not-started" or "dispatched" or "uncertain";
+        RecordEnvelope? predecessor = context.Record.Supersedes is string previousId ? context.Find(previousId) : null;
+        bool alreadyReserved = predecessor is not null && EstateModel.BodyString(predecessor, "action") == AgentRun
+            && EstateModel.BodyString(predecessor, "status") is "not-started" or "dispatched" or "uncertain"
+            && predecessor.Body.TryGetProperty("target", out JsonElement previousTarget)
+            && target.ValueKind == JsonValueKind.Object && CanonicalJson.Serialize(previousTarget) == CanonicalJson.Serialize(target);
+        if (reserves && !alreadyReserved && cap is not null && target.ValueKind == JsonValueKind.Object && target.TryGetProperty("goal", out JsonElement named) && named.ValueKind == JsonValueKind.String)
         {
             RecordEnvelope? goal = AgentRuns.GoalAt(context.Model, named.GetString()!, context.Record);
             if (goal is null)
@@ -172,7 +191,7 @@ public sealed class OperationType : IRecordType
         return decider.Principal is not null && decider.Principal == context.Record.By;
     }
 
-    /// <summary>A revision keeps the cap its run's intent recorded: what a run may spend is fixed before it starts.</summary>
+    /// <summary>A revision keeps its intent's cap and target: the allowance and what it funds are fixed before launch.</summary>
     private static void Kept(ValidationContext context, JsonElement cap)
     {
         if (context.Record.Supersedes is null)
@@ -184,6 +203,12 @@ public sealed class OperationType : IRecordType
         if (intent.Id != context.Record.Id && intent.Body.TryGetProperty("cap", out JsonElement recorded) && CanonicalJson.Serialize(recorded) != CanonicalJson.Serialize(cap))
         {
             context.Error("operation.cap", "An agent run keeps the cap its intent recorded in every revision; what a run may spend is fixed before it starts.");
+        }
+
+        if (intent.Id != context.Record.Id && intent.Body.TryGetProperty("target", out JsonElement target)
+            && context.Record.Body.TryGetProperty("target", out JsonElement current) && CanonicalJson.Serialize(target) != CanonicalJson.Serialize(current))
+        {
+            context.Error("operation.agent-run-target-kept", "An agent run keeps its intent's target, including its goal and assignment; moving a reservation requires a new admitted intent.");
         }
     }
 
@@ -242,6 +267,32 @@ public sealed class OperationType : IRecordType
             context.Error("operation.stop", "A stop is acknowledged or escalated only once it was transmitted.");
         }
 
+        foreach ((string name, string? at) in new[] { ("acknowledgedAt", acknowledgedAt), ("escalatedAt", escalatedAt) })
+        {
+            if (at is not null && transmittedAt is not null && string.CompareOrdinal(at, transmittedAt) < 0)
+            {
+                stop.Error("operation.stop-order", name, "Acknowledgment and escalation cannot precede transmission.");
+            }
+        }
+
+        if (containedAt is not null)
+        {
+            foreach (string? earlier in new[] { requestedAt, transmittedAt, acknowledgedAt, escalatedAt })
+            {
+                if (earlier is not null && string.CompareOrdinal(containedAt, earlier) < 0)
+                {
+                    stop.Error("operation.stop-order", "containedAt", "Containment cannot precede any earlier stop fact.");
+                }
+            }
+
+            if (context.Record.Body.TryGetProperty("observed", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
+                && observed.TryGetProperty("at", out JsonElement settled) && settled.ValueKind == JsonValueKind.String
+                && string.CompareOrdinal(containedAt, settled.GetString()) > 0)
+            {
+                stop.Error("operation.stop-order", "containedAt", "Containment cannot follow the observed settlement time.");
+            }
+        }
+
         if (containedAt is not null && status is not ("observed-success" or "known-failure"))
         {
             context.Error("operation.stop", "Containment is observed when the run settles; a run still in flight records no containment.");
@@ -296,6 +347,48 @@ public sealed class OperationType : IRecordType
         BodyReader? cap = body.Since(2, "cap") ? body.Nested("cap", false) : null;
         BodyReader? usage = body.Since(2, "usage") ? body.Nested("usage", false) : null;
         BodyReader? stop = body.Since(2, "stop") ? body.Nested("stop", false) : null;
+        BodyReader? scope = body.Since(2, "scope") ? body.Nested("scope", false) : null;
+        if (scope is not null)
+        {
+            long? changed = scope.Number("changed", true, 0, int.MaxValue);
+            long? outside = scope.Number("outsideCount", true, 0, int.MaxValue);
+            IReadOnlyList<string>? paths = scope.StringArray("outside", true, allowEmpty: true, maxItemLength: 600);
+            scope.Text("problem", false, 2000);
+            if (outside > changed || paths?.Count > outside || paths?.Count > 1000)
+            {
+                context.Error("operation.scope", "Scope counts cover every outside path, with at most one thousand names listed.");
+            }
+
+            if (EstateModel.BodyString(context.Record, "action") != AgentRun || status is not ("known-failure" or "observed-success"))
+            {
+                context.Error("operation.scope", "A scope audit describes a settled agent run.");
+            }
+
+            scope.NoOtherKeys();
+        }
+
+        BodyReader? liveness = body.Since(2, "liveness") ? body.Nested("liveness", false) : null;
+        if (liveness is not null)
+        {
+            if (EstateModel.BodyString(context.Record, "action") != AgentRun)
+            {
+                context.Error("operation.liveness", "Event-stream liveness describes agent runs only.");
+            }
+
+            liveness.Number("stallSeconds", true, 1, 86400);
+            liveness.Timestamp("lastEventAt", true);
+            string? attentionAt = liveness.Timestamp("attentionAt", false);
+            string? attention = liveness.Ulid("attention", false);
+            string? stoppedAt = liveness.Timestamp("stoppedAt", false);
+            context.RequireReference("liveness.attention", attention, "ask");
+            if (stoppedAt is not null && (attentionAt is null || string.CompareOrdinal(stoppedAt, attentionAt) < 0))
+            {
+                context.Error("operation.liveness", "A stall stop follows its worker-observed attention fact.");
+            }
+
+            liveness.NoOtherKeys();
+        }
+
         body.NoOtherKeys();
         if (context.Format >= 2)
         {
@@ -327,7 +420,22 @@ public sealed class OperationType : IRecordType
         else
         {
             string previousStatus = EstateModel.BodyString(previous, "status") ?? "?";
-            if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider"))
+            if (EstateModel.BodyString(previous, "action") == AgentRun
+                && (EstateModel.BodyString(context.Record, "action") != AgentRun
+                    || (status == "dispatched" && previousStatus != "not-started")
+                    || (previousStatus is "known-failure" or "canceled" or "observed-success" && status != previousStatus)))
+            {
+                context.Error("operation.agent-run-relaunch", "An agent-run identity is launched at most once and never reopens after settlement or cancellation; a retry needs a new intent and budget admission.");
+            }
+
+            if (EstateModel.BodyString(previous, "action") == AgentRun
+                && (EstateModel.BodyString(previous, "dispatchedAt") is not null || previousStatus is "known-failure" or "canceled" or "observed-success")
+                && dispatchedAt != EstateModel.BodyString(previous, "dispatchedAt"))
+            {
+                context.Error("operation.agent-run-dispatch-kept", "An agent run keeps its original dispatch timestamp; a retry requires a new admitted intent.");
+            }
+
+            if (previous.Type != Name || EstateModel.BodyString(previous, "identity") != identity || EstateModel.BodyString(previous, "provider") != EstateModel.BodyString(context.Record, "provider") || EstateModel.BodyString(previous, "action") != EstateModel.BodyString(context.Record, "action"))
             {
                 context.Error("operation.identity", "A revision keeps the operation's identity and provider; a different effect is a different operation.");
             }

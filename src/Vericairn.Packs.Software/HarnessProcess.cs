@@ -65,10 +65,11 @@ internal static class HarnessProcess
     }
 
     /// <summary>Runs a short command with only the environment given and waits for it; throws <see cref="ProviderRefusedException"/> when it cannot start or does not answer in time.</summary>
-    public static (int Code, string Output, string Error) Run(IReadOnlyList<string> command, IReadOnlyDictionary<string, string> environment, TimeSpan timeout)
+    public static (int Code, string Output, string Error) Run(IReadOnlyList<string> command, IReadOnlyDictionary<string, string> environment, TimeSpan timeout, string? workspace = null)
     {
         var info = new ProcessStartInfo(command[0])
         {
+            WorkingDirectory = workspace ?? string.Empty,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
