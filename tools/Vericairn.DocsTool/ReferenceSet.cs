@@ -363,7 +363,9 @@ internal static class ReferenceSet
                         foreach (JsonElement parameter in parameters.EnumerateArray())
                         {
                             bool required = parameter.TryGetProperty("required", out JsonElement r) && r.ValueKind == JsonValueKind.True;
-                            lines.Add("- `" + Str(parameter, "name") + "` (" + Str(parameter, "in") + (required ? ", required" : string.Empty) + "): " + Str(parameter, "description"));
+                            string? parameterDescription = Str(parameter, "description");
+                            string detail = string.IsNullOrWhiteSpace(parameterDescription) ? string.Empty : ": " + parameterDescription.TrimEnd();
+                            lines.Add("- `" + Str(parameter, "name") + "` (" + Str(parameter, "in") + (required ? ", required" : string.Empty) + ")" + detail);
                         }
 
                         lines.Add(string.Empty);

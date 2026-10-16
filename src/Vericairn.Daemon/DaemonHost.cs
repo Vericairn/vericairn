@@ -63,6 +63,9 @@ public sealed record DaemonOptions
 /// </summary>
 public sealed class DaemonHost : IAsyncDisposable
 {
+    /// <summary>The most connections Kestrel admits at once, across all listeners and including TLS handshakes.</summary>
+    internal const int ConcurrentConnections = 32;
+
     private static readonly object LoopbackMarker = new();
     private static readonly object LocalNetworkMarker = new();
     private static readonly object CertificateMarker = new();
@@ -229,6 +232,7 @@ public sealed class DaemonHost : IAsyncDisposable
         builder.WebHost.UseKestrelHttpsConfiguration();
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
+            kestrel.Limits.MaxConcurrentConnections = ConcurrentConnections;
             if (pipe)
             {
                 // Kestrel's named-pipe transport creates the pipe with CurrentUserOnly, its default, and no PipeSecurity: the pipe's
@@ -249,7 +253,11 @@ public sealed class DaemonHost : IAsyncDisposable
 
                     // Tracked from the moment the connection is accepted, before TLS, so a compromise also closes handshakes under way.
                     listen.Use(host.Track(LoopbackMarker));
-                    listen.UseHttps(new HttpsConnectionAdapterOptions { ServerCertificateSelector = host.SelectCertificate });
+                    listen.UseHttps(new HttpsConnectionAdapterOptions
+                    {
+                        ServerCertificateSelector = host.SelectCertificate,
+                        SslProtocols = TlsScreenStream.Protocols,
+                    });
                 });
             }
 

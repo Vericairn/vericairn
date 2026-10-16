@@ -59,7 +59,10 @@ public class DocsTests
             Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
             Assert.DoesNotContain("`-?, -h, --help`", cli, StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
-            Assert.Contains("## `POST /v1/records`", File.ReadAllText(Path.Combine(output, "api-reference.md")), StringComparison.Ordinal);
+            string api = File.ReadAllText(Path.Combine(output, "api-reference.md"));
+            Assert.Contains("## `POST /v1/records`", api, StringComparison.Ordinal);
+            Assert.Contains("- `id` (path, required)\n", api, StringComparison.Ordinal);
+            Assert.All(api.Split('\n'), line => Assert.Equal(line.TrimEnd(), line));
             Assert.Contains("## `acceptance`", File.ReadAllText(Path.Combine(output, "record-reference.md")), StringComparison.Ordinal);
         }
         finally
@@ -180,6 +183,11 @@ public class DocsTests
             CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--supersedes", candidate.Id, "--at", "2026-09-01T01:02:00Z", "--body", CliHarness.WriteJson(scratch, "published.json", release.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-09-01T01:02:00Z\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal)));
             WorkOrder(root, scratch, op, "W-2", "2026-09-01T02:00:00Z");
 
+            // A format-2 admission has no legacy scope; its notes must not invent an empty scope label.
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Notes device", "--custody", "file").Id;
+            string admission = CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Admission for the notes.").Id;
+            Thread.Sleep(1100); // Pre-publication notes end at the second before generation.
+
             // The previous set records the window of its notes: these begin at its end, so W-1 is in them, and they record their own.
             string sets = Path.Combine(scratch, "releases");
             Directory.CreateDirectory(Path.Combine(sets, "0.1.0"));
@@ -192,6 +200,8 @@ public class DocsTests
             Assert.DoesNotContain("**W-0**", notes, StringComparison.Ordinal);
             Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
             Assert.Contains("**W-2**", notes, StringComparison.Ordinal);
+            Assert.Contains($"Device admitted to author records ({admission}).", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("scope  (", notes, StringComparison.Ordinal);
             Assert.Contains("## The release itself\n\nNone in this window.", notes, StringComparison.Ordinal);
             Assert.Contains("## Other releases recorded in this window\n\n- 0.1.0 candidate", notes, StringComparison.Ordinal);
             Assert.Contains("- 0.1.0 published", notes, StringComparison.Ordinal);
@@ -208,6 +218,8 @@ public class DocsTests
                 Assert.True(regenerated.RootElement.TryGetProperty("commands", out _));
             }
 
+            CheckExplicitNotesStart(root, output);
+
             // A set made before the window was recorded gives the end its notes state, to the minute.
             File.WriteAllText(Path.Combine(sets, "0.1.0", "manifest.json"), """{"format":"vericairn.docs/1","version":"0.1.0"}""");
             File.WriteAllText(Path.Combine(sets, "0.1.0", "release-notes.md"), "# Release notes, Vericairn 0.1.0\n\nPrepared by `vericairn docs notes` before the release build (one entry moved after generation), from the estate's records since the publication of 0.0.9 (2026-08-01 00:00 UTC) up to 2026-09-01 00:30 UTC; the records are the source and this page is a rendering.\n\n## What the release contains\n\nUp to 2026-09-01 01:00 UTC; the records are the source of nothing here.\n");
@@ -217,14 +229,16 @@ public class DocsTests
             Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
             Assert.DoesNotContain("**W-0**", notes, StringComparison.Ordinal);
 
-            // Notes that state no end are refused until the time is named; with no previous set the notes begin at the publication.
+            CheckExplicitNotesStart(root, output);
+
+            // An unreadable end cannot prove that an explicit start leaves no gap; with no previous set the publication bounds it.
             File.WriteAllText(Path.Combine(sets, "0.1.0", "release-notes.md"), "# Release notes, Vericairn 0.1.0\n\nWritten by hand.\n");
             CliHarness.Outcome unread = CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output);
             Assert.Equal(2, unread.Code);
             Assert.Contains("--since", unread.Err, StringComparison.Ordinal);
-            CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:40:00Z");
-            Assert.Contains("since 2026-09-01 00:40 UTC (the time named when they were generated) up to ", File.ReadAllText(Path.Combine(output, "release-notes.md")), StringComparison.Ordinal);
-            Assert.Equal("2026-09-01T00:40:00Z", JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))).RootElement.GetProperty("notes").GetProperty("from").GetString());
+            CliHarness.Outcome unverifiable = CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:40:00Z");
+            Assert.Equal(2, unverifiable.Code);
+            Assert.Contains("cannot verify", unverifiable.Err, StringComparison.Ordinal);
             Assert.Equal(2, CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01 00:40").Code);
             string elsewhere = Path.Combine(scratch, "elsewhere", "0.2.0");
             CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", elsewhere);
@@ -263,6 +277,29 @@ public class DocsTests
 
     private static void WorkOrder(string root, string scratch, string by, string key, string at) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", by, "--at", at, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
+
+    private static void CheckExplicitNotesStart(string root, string output)
+    {
+        string manifest = File.ReadAllText(Path.Combine(output, "manifest.json"));
+        string notes = File.ReadAllText(Path.Combine(output, "release-notes.md"));
+        CliHarness.Outcome later = CliHarness.Run("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:30:01Z");
+        Assert.Equal(2, later.Code);
+        Assert.Contains("later than the previous set's end", later.Err, StringComparison.Ordinal);
+        Assert.Equal(manifest, File.ReadAllText(Path.Combine(output, "manifest.json")));
+        Assert.Equal(notes, File.ReadAllText(Path.Combine(output, "release-notes.md")));
+
+        CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:09:43Z");
+        using JsonDocument earlier = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json")));
+        Assert.Equal("2026-09-01T00:09:43Z", earlier.RootElement.GetProperty("notes").GetProperty("from").GetString());
+        notes = File.ReadAllText(Path.Combine(output, "release-notes.md"));
+        Assert.Contains("since 2026-09-01T00:09:43Z", notes, StringComparison.Ordinal);
+        Assert.Contains("explicitly widened to include records missed by the previous set", notes, StringComparison.Ordinal);
+        Assert.Contains("**W-0**", notes, StringComparison.Ordinal);
+        Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
+
+        CliHarness.Ok("--estate", root, "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output, "--since", "2026-09-01T00:30:00Z");
+        Assert.DoesNotContain("**W-0**", File.ReadAllText(Path.Combine(output, "release-notes.md")), StringComparison.Ordinal);
+    }
 
     private static string Declaration(string directory)
     {

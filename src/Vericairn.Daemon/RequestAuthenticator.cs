@@ -52,6 +52,9 @@ internal sealed class RequestAuthenticator
     /// <summary>The most a device-signed request buffers, matching the estate's maximum object size.</summary>
     internal const long SignedBodyLimit = 8 * 1024 * 1024;
 
+    /// <summary>The most loopback bodies read concurrently before their signatures have verified, shared by every device.</summary>
+    internal const int ConcurrentLoopbackBodies = 8;
+
     /// <summary>The absolute body-read deadline after the device's header check passes.</summary>
     internal static readonly TimeSpan BodyReadTimeout = TimeSpan.FromSeconds(30);
 
@@ -98,6 +101,7 @@ internal sealed class RequestAuthenticator
     private readonly Func<string?> identity;
     private readonly TimeProvider time;
     private DateTimeOffset acceptingSince = DateTimeOffset.MaxValue;
+    private int readingLoopbackBodies;
 
     /// <summary>
     /// An authenticator for the estate a service holds, on the runtime's clock; <paramref name="identity"/> gives the runtime identity's
@@ -150,40 +154,53 @@ internal sealed class RequestAuthenticator
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
         }
 
-        if (await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false) is not (byte[] digest, byte[] body))
+        int concurrent = Interlocked.Increment(ref readingLoopbackBodies);
+        try
         {
-            return Denied(Late);
-        }
+            if (concurrent > ConcurrentLoopbackBodies)
+            {
+                throw new BadHttpRequestException($"The runtime is already verifying {ConcurrentLoopbackBodies} concurrent loopback request bodies; retry after a request finishes.", StatusCodes.Status503ServiceUnavailable);
+            }
 
-        if (Encoded(request, body) is Problem encoding)
+            if (await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false) is not (byte[] digest, byte[] body))
+            {
+                return Denied(Late);
+            }
+
+            if (Encoded(request, body) is Problem encoding)
+            {
+                return encoding;
+            }
+
+            // Fresh still once the body is in: a body that arrives later does not carry a signature past its five minutes.
+            if (Freshness(signedAt) is Problem late)
+            {
+                return late;
+            }
+
+            DeviceStanding? standing = service.Standing(device);
+            if (standing is null || standing.Admission != "admitted")
+            {
+                return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
+            }
+
+            if (standing.PublicKey != admitted.PublicKey)
+            {
+                return Denied("The device's current key changed while the request body arrived; sign it afresh.");
+            }
+
+            if (Signed(standing, signedAt, digest, signature) is Problem problem)
+            {
+                return problem;
+            }
+
+            context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: false);
+            return null;
+        }
+        finally
         {
-            return encoding;
+            Interlocked.Decrement(ref readingLoopbackBodies);
         }
-
-        // Fresh still once the body is in: a body that arrives later does not carry a signature past its five minutes.
-        if (Freshness(signedAt) is Problem late)
-        {
-            return late;
-        }
-
-        DeviceStanding? standing = service.Standing(device);
-        if (standing is null || standing.Admission != "admitted")
-        {
-            return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
-        }
-
-        if (standing.PublicKey != admitted.PublicKey)
-        {
-            return Denied("The device's current key changed while the request body arrived; sign it afresh.");
-        }
-
-        if (Signed(standing, signedAt, digest, signature) is Problem problem)
-        {
-            return problem;
-        }
-
-        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: false);
-        return null;
     }
 
     /// <summary>

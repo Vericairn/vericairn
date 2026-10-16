@@ -1,7 +1,8 @@
 # API version 1
 
-This draft describes the 0.6.1 code. Features marked "from 0.6.0" first appeared in that candidate, which was withdrawn
-before publication; 0.6.1 carries them with FIX-08's corrections. The release documentation index records that history.
+This draft describes the 0.6.1 code with the unreleased FIX-09 corrections. Features marked "from 0.6.0" first
+appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
+The release documentation index records that history.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -41,7 +42,7 @@ files, registered clones or installed contributions differ.
 | Profile | Transport | Authentication |
 |---|---|---|
 | Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
-| Loopback | TLS on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
+| Loopback | TLS 1.2 only on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
 | Local network, from 0.6.0 | Mutual TLS 1.2 at the address and port the operator configured; off unless configured, and on a wildcard or public address only when the operator allows it | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests bound to the estate and the runtime identity, under the device's permitted profiles |
 
 On Windows the pipe is created by Kestrel's named-pipe transport with its default, `CurrentUserOnly`, and no
@@ -65,6 +66,9 @@ made, accepts that certificate and no other, and consults no trust store, so a l
 rotation refuses the new certificate on its next connection and is made again from the endpoint file, as every
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
+
+Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
+are refused during the handshake, before any HTTP request is read.
 
 A loopback request carries three headers: `Vericairn-Device` (the device record id), `Vericairn-Signed-At` (RFC
 3339 UTC seconds) and `Vericairn-Signature` (base64url, 64 bytes). The signature is ECDSA P-256 over the SHA-256
@@ -135,6 +139,14 @@ bounded discard and cancels only the pending pipe read. Local-socket bodies reta
 to authentication or binding only within its limit. The original body reader remains available for discard
 instead of becoming unreadable after a size-limit failure. Size refusals are `413`; cleanup does not raise the
 parsing limit.
+
+Loopback permits at most eight simultaneous body reads awaiting signature verification across all devices.
+The slot is held through signature verification and released on every outcome, including a timeout, disconnect,
+or size refusal. With all slots occupied, a further admitted-device request receives `503` with problem code
+`refused` before any authentication body read; it follows the same completed-response and bounded-discard path.
+There is no queue of waiting bodies. Clients may retry with a fresh signature when capacity is available.
+Kestrel admits at most 32 simultaneous connections across all listeners, including handshakes and idle
+connections. Excess connections close at the transport before TLS or HTTP; no HTTP response exists at that stage.
 
 From 0.6.0 a device-signed request acts for its device's principal, on loopback as on the local network. When the
 request an operation receives names the principal acting, in its `by` or `principal`, as records, assignments,
@@ -403,7 +415,7 @@ paired device by its own key, the design the Remote profile in 0.7.0 needs.
 | `GET /v1/health` | The daemon's identity: API and product version, estate, root, profile, record format, start time, process |
 | `GET /v1/status` | Status text and canonical status JSON, including the findings of this copy's repository checks |
 | `GET /v1/progress` | The progress report, from 0.6.0 (`ProgressResponse`: the text `vericairn progress` prints, every line naming the records it rests on; its canonical JSON, format `vericairn.progress/1`; and whether the check it shows found errors). Record-derived sections agree for the same records; repository-check findings also depend on local files. Its sections: where the estate stands (the pin and the record format with the records that set them, and status's check); the work orders by the state status derives; each published release and what it contained, the release notes' derivation over the records after the publication before it up to its own, omitting superseded results and counting a current result as accepted work when a current acceptance pins its exact hash or its work order's current revision and hash (including another principal's results without accepting those result records; an earlier work-order revision's acceptance does not count); what comes next by release, which until goals plan releases is each release work order not yet accepted (a work order whose key begins with `REL-`) and the work orders among its inputs; the next eligible work, the planned work orders that nothing holds ([record-format-v2.md](record-format-v2.md#what-holds-a-work-order)); and what waits on the operator: the asks put to an operator and awaiting an answer, with their recommendations, and the acceptances only an operator gives (milestone work orders submitted, results awaiting review toward milestones not accepted, release candidates without an operator's acceptance of their exact hash, and goals ready for an operator's acceptance) |
-| `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks |
+| `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks. `record.subject-stale` and `acceptance.unresolved` apply only while the referring record is current; superseded judgments retain historical integrity validation but no longer need reconsideration. A stale replacement is still flagged. |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
 | `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), it is written unsigned, except an admission from record format 2, which is always signed. The record is validated with the estate and removed again when the estate would be invalid. |
