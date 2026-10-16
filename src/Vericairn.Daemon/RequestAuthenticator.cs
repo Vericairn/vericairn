@@ -1,41 +1,127 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers;
 using System.Buffers.Text;
+using System.Formats.Asn1;
 using System.Globalization;
+using System.IO.Pipelines;
 using System.Numerics;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Primitives;
+using Microsoft.Net.Http.Headers;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Daemon;
 
+/// <summary>A device a request was authenticated as, on loopback or the local network: what the request may act for once it is bound.</summary>
+/// <param name="Identity">The device's identity.</param>
+/// <param name="Principal">The principal it acts for, and the only one its requests may name as acting.</param>
+/// <param name="PublicKey">The current key that verified its signature, rechecked under the estate's write lock.</param>
+/// <param name="LocalNetwork">Whether the request came over the local network.</param>
+internal sealed record AuthenticatedDevice(string Identity, string Principal, string PublicKey, bool LocalNetwork);
+
 /// <summary>
 /// Verifies device-signed requests on profiles without operating-system identity: the device must be admitted now in the estate
-/// the daemon serves, the signing time must be within the permitted skew, the signature must verify over the method, the request
-/// target, the time and the body, and a signature is accepted once, in whichever of its equivalent forms it comes.
+/// the daemon serves, the signing time must be since this instance started accepting requests, no later than its clock and within
+/// the permitted age when the request starts and still once its body is in,
+/// a JSON body must be UTF-8 without a byte order mark, the signature must verify over the method, the request target, the time
+/// and the body (and, on the local network, the estate and this runtime's identity), and a signature is accepted once, in
+/// whichever of its equivalent forms it comes. On the local network the device must also be permitted that profile and present a
+/// TLS client certificate its own key issued, as the records say before its body and again after it, and the operations on the
+/// runtime's own machine are refused. The device it verified is left on the request, so that once the request is bound
+/// <see cref="RequestScope"/> holds it to its own principal.
 /// </summary>
 internal sealed class RequestAuthenticator
 {
-    private const int Remembered = 4096;
+    /// <summary>The key under which a verified request carries its <see cref="AuthenticatedDevice"/>.</summary>
+    internal static readonly object DeviceItem = new();
+
+    /// <summary>The profile name a device must be permitted to use the local network.</summary>
+    internal const string LocalNetworkProfile = "local-network";
+
+    /// <summary>The most a pairing message's body may hold: what reaches the runtime without a credential is read only this far.</summary>
+    internal const long PairingBodyLimit = 16 * 1024;
+
+    /// <summary>The route of the runtime identity's proof, whose request is signed as on loopback.</summary>
+    internal const string ProofRoute = "GET " + RuntimeIdentityScheme.Path;
+
+    /// <summary>The routes of the pairing exchange, which a device without a credential reaches; the code authenticates them.</summary>
+    internal static readonly IReadOnlySet<string> PairingRoutes = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "POST /v1/pairing/hello", "POST /v1/pairing/confirm" };
+
+    /// <summary>
+    /// Operations whose effect is on the runtime's own machine: its process, its key custody, its files, its certificate, the release
+    /// provider's credentials there (a release's submission and observation), its object store, and the coding agents it launches.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> MachineLocal = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "POST /v1/shutdown",
+        "POST /v1/devices",
+        "POST /v1/devices/rename",
+        "POST /v1/devices/rotate",
+        "POST /v1/devices/recovery",
+        "POST /v1/estate/export",
+        "POST /v1/pairings",
+        "POST /v1/runtime/certificate",
+        "POST /v1/releases/submit",
+        "POST /v1/releases/observe",
+        "POST /v1/objects",
+        "POST /v1/runs",
+        "POST /v1/goals/{id}/step",
+    };
+
+
+    /// <summary>The OID of ecdsa-with-SHA256, the only signature a device-issued client certificate carries.</summary>
+    private const string EcdsaWithSha256 = "1.2.840.10045.4.3.2";
 
     /// <summary>The order n of the P-256 group: an ECDSA signature (r, s) and its twin (r, n - s) verify alike.</summary>
     private static readonly BigInteger GroupOrder = BigInteger.Parse("0FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
 
-    private readonly EstateService service;
-    private readonly HashSet<string> seen = new(StringComparer.Ordinal);
-    private readonly Queue<string> order = new();
-    private readonly object gate = new();
+    private const string Stale = "The signing time is malformed or more than five minutes from the runtime's clock.";
 
-    public RequestAuthenticator(EstateService service)
+    private const string Late = "The request's body did not arrive within five minutes of its signing time; sign it afresh.";
+
+    private readonly EstateService service;
+    private readonly ReplayCache replays;
+    private readonly Func<string?> identity;
+    private readonly TimeProvider time;
+    private DateTimeOffset acceptingSince = DateTimeOffset.MaxValue;
+
+    /// <summary>
+    /// An authenticator for the estate a service holds, on the runtime's clock; <paramref name="identity"/> gives the runtime identity's
+    /// public key now, or null when it has none.
+    /// </summary>
+    public RequestAuthenticator(EstateService service, int replayCapacity, Func<string?> identity, TimeProvider time)
     {
         this.service = service;
+        this.identity = identity;
+        this.time = time;
+        replays = new ReplayCache(replayCapacity);
     }
 
-    /// <summary>Null when the request is authenticated; otherwise the problem to answer with.</summary>
+    /// <summary>Sets the instance's signing cutoff immediately before its listeners open; it is never rounded down.</summary>
+    internal void StartAccepting() => acceptingSince = time.GetUtcNow();
+
+    /// <summary>
+    /// The first whole-second signing time this instance accepts. Publishing readiness after this time lets existing clients sign
+    /// immediately, without rounding the cutoff down and admitting a replay from a restart within the same second.
+    /// </summary>
+    internal DateTimeOffset FirstSigningTime => DateTimeOffset.FromUnixTimeSeconds(acceptingSince.ToUnixTimeSeconds() + 1);
+
+    /// <summary>The operation a request reaches, as its method and route pattern, for example POST /v1/shutdown; the path itself when no route matched.</summary>
+    internal static string Operation(HttpContext context)
+    {
+        string path = (context.GetEndpoint() as RouteEndpoint)?.RoutePattern.RawText ?? context.Request.Path.Value ?? string.Empty;
+        return context.Request.Method.ToUpperInvariant() + " /" + path.Trim('/');
+    }
+
+    /// <summary>Null when a loopback request is authenticated; otherwise the problem to answer with.</summary>
     public async Task<Problem?> VerifyAsync(HttpContext context)
     {
         HttpRequest request = context.Request;
@@ -47,49 +133,342 @@ internal sealed class RequestAuthenticator
             return Denied($"Loopback requests are signed by an admitted device: send {RequestSigning.DeviceHeader}, {RequestSigning.SignedAtHeader} and {RequestSigning.SignatureHeader}, or use the local socket.");
         }
 
-        if (!RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) || (DateTimeOffset.UtcNow - at).Duration() > RequestSigning.MaxSkew)
+        if (Freshness(signedAt) is Problem freshness)
         {
-            return Denied("The signing time is malformed or more than five minutes from the runtime's clock.");
+            return freshness;
         }
 
-        request.EnableBuffering();
-        byte[] body;
-        using (var buffer = new MemoryStream())
+        if (await DigestAsync(context, signedAt, binding: null).ConfigureAwait(false) is not (byte[] digest, byte[] body))
         {
-            await request.Body.CopyToAsync(buffer).ConfigureAwait(false);
-            body = buffer.ToArray();
+            return Denied(Late);
         }
 
-        request.Body.Position = 0;
-        string target = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.ToString() + request.QueryString;
-        byte[] digest = RequestSigning.Digest(request.Method, target, signedAt, body);
-        string? publicKey = service.AdmittedDevicePublicKey(device);
-        if (publicKey is null)
+        if (Encoded(request, body) is Problem encoding)
+        {
+            return encoding;
+        }
+
+        // Fresh still once the body is in: a body that arrives later does not carry a signature past its five minutes.
+        if (Freshness(signedAt) is Problem late)
+        {
+            return late;
+        }
+
+        DeviceStanding? standing = service.Standing(device);
+        if (standing is null || standing.Admission != "admitted")
         {
             return Denied($"Device {device} is unknown here or not admitted now; an administrator admits devices with 'vericairn devices admit'.");
         }
 
-        if (!RecordSigning.Verify(publicKey, digest, signature))
+        if (Signed(standing, signedAt, digest, signature) is Problem problem)
+        {
+            return problem;
+        }
+
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: false);
+        return null;
+    }
+
+    /// <summary>
+    /// Null when a local-network request may proceed; otherwise the problem to answer with. The pairing exchange passes, since its
+    /// code authenticates it; every other request comes from a device that is current, admitted now and permitted the local network,
+    /// over a TLS connection whose client certificate the device's current key issued, and is signed by that key, fresh and once.
+    /// </summary>
+    public async Task<Problem?> VerifyLocalNetworkAsync(HttpContext context)
+    {
+        string operation = Operation(context);
+        if (PairingRoutes.Contains(operation))
+        {
+            // The host bounds the exchange before binding, while preserving the original reader for refusal cleanup.
+            return null;
+        }
+
+        HttpRequest request = context.Request;
+        string? device = Header(request, RequestSigning.DeviceHeader);
+        string? signedAt = Header(request, RequestSigning.SignedAtHeader);
+        string? signature = Header(request, RequestSigning.SignatureHeader);
+        X509Certificate2? certificate = context.Connection.ClientCertificate;
+        if (device is null || signedAt is null || signature is null)
+        {
+            return Denied(NotPaired);
+        }
+
+        if (Admits(service.Standing(device), certificate) is Problem refused)
+        {
+            return refused;
+        }
+
+        if (Freshness(signedAt) is Problem freshness)
+        {
+            return freshness;
+        }
+
+        // Signed for this estate and this runtime's identity (version 2), so no other runtime accepts it, nor this one what was
+        // signed for another. The identity proof's request alone is signed as on loopback (version 1): the device sends it before
+        // anything has proven which runtime answers, and the proof is bound to the asking connection's client certificate.
+        if (identity() is not string own)
+        {
+            return Denied("This runtime has no identity to verify local-network requests for.");
+        }
+
+        (string, string)? binding = operation == ProofRoute ? null : (service.Session.Manifest.Estate, own);
+        if (await DigestAsync(context, signedAt, binding).ConfigureAwait(false) is not (byte[] digest, byte[] body))
+        {
+            return Denied(Late);
+        }
+
+        if (Encoded(request, body) is Problem encoding)
+        {
+            return encoding;
+        }
+
+        // Once the body is in, the time again, and the device as the records say it is now: revoked, rotated to another key or
+        // withdrawn from the profile while its body arrived, it is refused as it would have been at its head.
+        if (Freshness(signedAt) is Problem late)
+        {
+            return late;
+        }
+
+        DeviceStanding? standing = service.Standing(device);
+        Problem? changed = Admits(standing, certificate);
+        if (changed is not null || standing is null)
+        {
+            return changed ?? Denied(NotPaired);
+        }
+
+        if (Signed(standing, signedAt, digest, signature) is Problem problem)
+        {
+            return problem;
+        }
+
+        if (MachineLocal.Contains(operation))
+        {
+            return Denied($"{operation} acts on the runtime's own machine and is refused over the local network; run it on that machine.");
+        }
+
+        context.Items[DeviceItem] = new AuthenticatedDevice(standing.Identity, standing.Principal, standing.PublicKey, LocalNetwork: true);
+        return null;
+    }
+
+    /// <summary>The one refusal a local-network request gets until its connection's certificate shows the client holds a paired device's key.</summary>
+    private const string NotPaired = "Local-network requests come from a paired device: present the TLS client certificate its device key issued and sign every request (Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature). A new device pairs first, with a pairing code from an administrator.";
+
+    /// <summary>
+    /// Null when the device, as the records say it is now, may use the local network over a connection with this certificate. Until
+    /// the certificate shows the client holds the device's current key every refusal is the same one, so nobody learns from it whether
+    /// a device exists, is revoked, or is permitted the profile; then revocation counts from the next request on, on an open
+    /// connection too.
+    /// </summary>
+    private Problem? Admits(DeviceStanding? standing, X509Certificate2? certificate)
+    {
+        if (standing is null || certificate is null || !IssuedBy(certificate, standing.PublicKey, time.GetUtcNow()))
+        {
+            return Denied(NotPaired);
+        }
+
+        if (standing.Admission == "revoked")
+        {
+            return Denied($"Device {standing.Identity} is revoked, and a revoked device is refused at once on every profile.");
+        }
+
+        if (standing.Admission != "admitted")
+        {
+            return Denied($"Device {standing.Identity} is not admitted now; an administrator admits devices.");
+        }
+
+        return standing.Profiles.Contains(LocalNetworkProfile, StringComparer.Ordinal)
+            ? null
+            : Denied($"Device {standing.Identity} is not permitted the local-network profile; its permitted profiles are {(standing.Profiles.Count == 0 ? "none" : string.Join(", ", standing.Profiles))}.");
+    }
+
+    /// <summary>
+    /// True when a TLS client certificate is within its validity and carries an ECDSA P-256 signature with SHA-256 by the device's key:
+    /// a certificate the device's key issued for the TLS key the connection proved it holds. Its subject names no device, and is not read.
+    /// </summary>
+    internal static bool IssuedBy(X509Certificate2 certificate, string publicKey, DateTimeOffset now)
+    {
+        if (now < new DateTimeOffset(certificate.NotBefore.ToUniversalTime()) - RequestSigning.MaxSkew
+            || now > new DateTimeOffset(certificate.NotAfter.ToUniversalTime()))
+        {
+            return false;
+        }
+
+        try
+        {
+            var reader = new AsnReader(certificate.RawData, AsnEncodingRules.DER);
+            AsnReader whole = reader.ReadSequence();
+            reader.ThrowIfNotEmpty();
+            ReadOnlyMemory<byte> tbs = whole.ReadEncodedValue();
+            AsnReader algorithm = whole.ReadSequence();
+            if (algorithm.ReadObjectIdentifier() != EcdsaWithSha256)
+            {
+                return false;
+            }
+
+            byte[] signature = whole.ReadBitString(out int unused);
+            whole.ThrowIfNotEmpty();
+            if (unused != 0)
+            {
+                return false;
+            }
+
+            using ECDsa key = ECDsa.Create();
+            key.ImportSubjectPublicKeyInfo(Base64Url.DecodeFromChars(publicKey), out _);
+            return key.VerifyData(tbs.Span, signature, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence);
+        }
+        catch (Exception exception) when (exception is AsnContentException or CryptographicException or FormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A device-signed JSON body is UTF-8 without a byte order mark: the bytes the signature covers are then exactly the text the
+    /// runtime binds, so nothing a check reads can differ from what the operation receives. A JSON body declared in another charset is
+    /// refused, and so is one that starts with a byte order mark; a body of any other type is not read as text, and passes as bytes.
+    /// </summary>
+    private static Problem? Encoded(HttpRequest request, byte[] body)
+    {
+        // Only a JSON body is read into a request; any other, such as an object's bytes, is taken as the bytes it is.
+        if (request.ContentType is not string type || !MediaTypeHeaderValue.TryParse(type, out MediaTypeHeaderValue? media)
+            || media.MediaType.Value?.Contains("json", StringComparison.OrdinalIgnoreCase) != true)
+        {
+            return null;
+        }
+
+        if (media.Charset.HasValue && media.Charset.Length > 0)
+        {
+            string charset = HeaderUtilities.RemoveQuotes(media.Charset).ToString();
+            bool utf8;
+            try
+            {
+                utf8 = System.Text.Encoding.GetEncoding(charset).CodePage == System.Text.Encoding.UTF8.CodePage;
+            }
+            catch (ArgumentException)
+            {
+                utf8 = false;
+            }
+
+            if (!utf8)
+            {
+                return Denied($"A device-signed request carries its body in UTF-8; the runtime refuses the charset '{charset}'.");
+            }
+        }
+
+        if (body.Length >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF)
+        {
+            return Denied("A device-signed request carries its JSON body in UTF-8 without a byte order mark; this one starts with one.");
+        }
+
+        return null;
+    }
+
+    private Problem? Freshness(string signedAt)
+    {
+        DateTimeOffset now = time.GetUtcNow();
+        if (!RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) || (now - at).Duration() > RequestSigning.MaxSkew)
+        {
+            return Denied(Stale);
+        }
+
+        if (at < acceptingSince)
+        {
+            return Denied("The signing time is earlier than this runtime instance began accepting requests; sign the request afresh.");
+        }
+
+        // A signature dated ahead could be replayed after a restart before its signed time, so the lead for a fast client clock stays a few seconds.
+        return at > now + RequestSigning.MaxLead
+            ? Denied("The signing time is more than five seconds ahead of the runtime's clock; synchronize the client clock and sign the request afresh.")
+            : null;
+    }
+
+    /// <summary>
+    /// The digest a request's signature covers: version 1 on loopback, version 2 for the estate and runtime identity bound in on the
+    /// local network. Null when the body does not arrive before the signature is stale: the pending pipe read is cancelled then.
+    /// The host completes the refusal before bounded cleanup of the unread body; none of those bytes can reach an operation.
+    /// </summary>
+    private async Task<(byte[] Digest, byte[] Body)?> DigestAsync(HttpContext context, string signedAt, (string Estate, string Identity)? binding)
+    {
+        HttpRequest request = context.Request;
+        TimeSpan left = (RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) ? at : time.GetUtcNow()) + RequestSigning.MaxSkew - time.GetUtcNow();
+        if (left <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        byte[] body;
+        PipeReader reader = request.BodyReader;
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        deadline.CancelAfter(left);
+        try
+        {
+            using var buffer = new MemoryStream();
+            // Cancelling a stream read can cancel the transport (notably TLS on Windows), losing the 401 as well.
+            // Cancel only the pipe's pending read; the request and its response remain live until the refusal is written.
+            using CancellationTokenRegistration pending = deadline.Token.Register(reader.CancelPendingRead);
+            while (true)
+            {
+                ReadResult read = await reader.ReadAsync(context.RequestAborted).ConfigureAwait(false);
+                ReadOnlySequence<byte> bytes = read.Buffer;
+                if (read.IsCanceled || deadline.IsCancellationRequested)
+                {
+                    reader.AdvanceTo(bytes.Start, bytes.End);
+                    return null;
+                }
+
+                foreach (ReadOnlyMemory<byte> segment in bytes)
+                {
+                    buffer.Write(segment.Span);
+                }
+
+                reader.AdvanceTo(bytes.End);
+                if (read.IsCompleted)
+                {
+                    break;
+                }
+            }
+
+            body = buffer.ToArray();
+        }
+        catch (OperationCanceledException) when (!context.RequestAborted.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        request.Body = new MemoryStream(body, writable: false);
+        // Binding must read the verified replay, not the limited transport reader now at EOF. The host retains the original
+        // reader separately for cleanup; the default body-pipe feature will follow this replacement stream.
+        if (context.Features.Get<IRequestBodyPipeFeature>() is LimitedBodyReader)
+        {
+            context.Features.Set<IRequestBodyPipeFeature>(null);
+        }
+
+        context.Response.RegisterForDispose(request.Body);
+        string target = context.Features.Get<IHttpRequestFeature>()?.RawTarget ?? request.Path.ToString() + request.QueryString;
+        byte[] digest = binding is { } bound
+            ? RequestSigning.LocalNetworkDigest(bound.Estate, bound.Identity, request.Method, target, signedAt, body)
+            : RequestSigning.Digest(request.Method, target, signedAt, body);
+        return (digest, body);
+    }
+
+    /// <summary>Verifies a request signature and accepts it once, remembered for its device until it is stale.</summary>
+    private Problem? Signed(DeviceStanding standing, string signedAt, byte[] digest, string signature)
+    {
+        if (!RecordSigning.Verify(standing.PublicKey, digest, signature))
         {
             return Denied("The request signature does not verify against the device's key.");
         }
 
-        string key = ReplayKey(signature);
-        lock (gate)
+        // The time was found fresh once the body was in, so it parses; a signature is remembered until it is stale.
+        DateTimeOffset now = time.GetUtcNow();
+        DateTimeOffset expires = (RequestSigning.TryParseTime(signedAt, out DateTimeOffset at) ? at : now) + RequestSigning.MaxSkew;
+        return replays.Accept(standing.Identity, ReplayKey(signature), expires, now) switch
         {
-            if (!seen.Add(key))
-            {
-                return Denied("The request signature was already used; sign each request afresh.");
-            }
-
-            order.Enqueue(key);
-            if (order.Count > Remembered)
-            {
-                seen.Remove(order.Dequeue());
-            }
-        }
-
-        return null;
+            ReplayCache.Outcome.Stale => Denied(Stale),
+            ReplayCache.Outcome.Repeated => Denied("The request signature was already used; sign each request afresh."),
+            ReplayCache.Outcome.Full => Denied($"Device {standing.Identity} has signed more requests in the last five minutes than the runtime remembers for one device; it refuses more until older ones expire."),
+            _ => null,
+        };
     }
 
     /// <summary>

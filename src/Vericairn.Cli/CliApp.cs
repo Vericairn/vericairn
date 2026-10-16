@@ -8,7 +8,7 @@ namespace Vericairn.Cli;
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
+    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
     public static RootCommand Build()
     {
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
@@ -33,6 +33,7 @@ internal static class CliApp
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(ConnectionsFamily(jsonOption));
         root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
         root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
         root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
@@ -287,7 +288,7 @@ internal static class CliApp
 
     private static Command RuntimeFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
-        var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall.");
+        var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall, configure (the local-network profile) and rotate (its certificate).");
         var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Serve the local socket only, without the pinned loopback TLS endpoint." };
         var serve = new Command("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.");
         var detachedOption = new Option<bool>("--detached") { Description = "Write the daemon's output to its log beside the estate's live store instead of the standard streams; 'runtime start' serves this way." };
@@ -312,6 +313,22 @@ internal static class CliApp
         var uninstall = new Command("uninstall", "Remove the per-user service installed by 'runtime install'.");
         uninstall.SetAction(parseResult => Commands.RuntimeUninstall(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         runtime.Subcommands.Add(uninstall);
+        var localNetworkOption = new Option<string?>("--local-network") { Description = "The address and port the local-network profile listens on from the runtime's next start, an IP address of this machine such as 192.168.1.20:7443; 'off' turns it off. Off unless set." };
+        var configure = new Command("configure", "Configure the runtime of this estate on this machine; without options, show the configuration. Nothing listens beyond the local socket and loopback unless an address is set.");
+        var allowPublicOption = new Option<bool>("--allow-public") { Description = "With --local-network, allow a wildcard address (every interface) or one other networks can reach; such an address is refused without it." };
+        configure.Options.Add(localNetworkOption);
+        configure.Options.Add(allowPublicOption);
+        configure.SetAction(parseResult => Commands.RuntimeConfigure(parseResult.GetValue(estateOption)!, parseResult.GetValue(localNetworkOption), parseResult.GetValue(allowPublicOption), parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(configure);
+        var compromisedOption = new Option<bool>("--compromised") { Description = "The certificate's key may be known to someone else: also close every open connection, so nothing continues under it." };
+        var identityOption = new Option<bool>("--identity") { Description = "The runtime identity's key may be known to someone else: replace the identity too; every paired device then pairs again." };
+        var reasonOption = new Option<string?>("--reason") { Description = "Why, for the runtime's log." };
+        var rotate = new Command("rotate", "Replace the runtime certificate now (it is also replaced on a schedule before it expires). Paired devices keep working, since they pin the runtime identity, which signs the certificate in use; loopback clients read the new one from the endpoint file.");
+        rotate.Options.Add(compromisedOption);
+        rotate.Options.Add(identityOption);
+        rotate.Options.Add(reasonOption);
+        rotate.SetAction(parseResult => Commands.RuntimeRotate(parseResult.GetValue(estateOption)!, parseResult.GetValue(compromisedOption), parseResult.GetValue(identityOption), parseResult.GetValue(reasonOption), parseResult.GetValue(jsonOption)));
+        runtime.Subcommands.Add(rotate);
         return runtime;
     }
 
@@ -523,9 +540,39 @@ internal static class CliApp
         return objects;
     }
 
+    private static Command ConnectionsFamily(Option<bool> jsonOption)
+    {
+        var connections = new Command("connections", "The runtimes this machine reaches over the local network: add one by pairing with a code, list them with their state, and remove one. Kept for this user on this machine, never in a repository.");
+
+        var addressArgument = new Argument<string>("address") { Description = "Where the runtime listens: its address and port, as the pairing code's administrator gave them, for example 192.168.1.20:7443." };
+        var codeOption = new Option<string>("--code") { Description = "The pairing code, as shown: five groups of four characters.", Required = true };
+        var nameOption = new Option<string>("--name") { Description = "This device's descriptive name, never a machine path.", Required = true };
+        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default, the strongest this machine offers, or file, cng, secure-enclave or secret-service." };
+        var presenceOption = new Option<bool?>("--presence") { Description = "Every signature needs its owner's presence (Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines." };
+        var add = new Command("add", "Pair this machine with the runtime at an address using a code an administrator issued: the runtime proves it knows the code and who it is, this machine makes its device key and presents it, and the runtime records and admits the device. The connection pins the runtime's identity.");
+        add.Arguments.Add(addressArgument);
+        add.Options.Add(codeOption);
+        add.Options.Add(nameOption);
+        add.Options.Add(custodyOption);
+        add.Options.Add(presenceOption);
+        add.SetAction(parseResult => Commands.ConnectionsAdd(parseResult.GetValue(addressArgument)!, parseResult.GetValue(codeOption)!, parseResult.GetValue(nameOption)!, parseResult.GetValue(custodyOption), parseResult.GetValue(presenceOption), parseResult.GetValue(jsonOption)));
+        connections.Subcommands.Add(add);
+
+        var list = new Command("list", "Check every connection now and show its state: current, partial, denied, cached (with when it was last current) or unavailable.");
+        list.SetAction(parseResult => Commands.ConnectionsList(parseResult.GetValue(jsonOption)));
+        connections.Subcommands.Add(list);
+
+        var idArgument = new Argument<string>("id") { Description = "The connection's id, as listed." };
+        var remove = new Command("remove", "Forget a connection on this machine. The device stays admitted until an administrator revokes it, since disconnection is never revocation, and its key stays in this machine's custody.");
+        remove.Arguments.Add(idArgument);
+        remove.SetAction(parseResult => Commands.ConnectionsRemove(parseResult.GetValue(idArgument)!, parseResult.GetValue(jsonOption)));
+        connections.Subcommands.Add(remove);
+        return connections;
+    }
+
     private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
-        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, list, admit, revoke, rename and rotate, and the operator's recovery device.");
+        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, pair one on another machine, list, admit, revoke, rename and rotate, and the operator's recovery device.");
         var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
 
         var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
@@ -586,6 +633,22 @@ internal static class CliApp
         recovery.Options.Add(passphraseStdinOption);
         recovery.SetAction(parseResult => Commands.DevicesRecovery(parseResult.GetValue(estateOption)!, parseResult.GetValue(recoveryPrincipalOption)!, parseResult.GetValue(recoveryNameOption)!, parseResult.GetValue(outputOption)!, parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
         devices.Subcommands.Add(recovery);
+
+        var pairPrincipalOption = new Option<string>("--principal") { Description = "The principal the new device will act for.", Required = true };
+        var pairByOption = new Option<string>("--by") { Description = "The administrator: the operator, or a principal holding the 'administer' scope, whose admitted device on this machine signs the admission.", Required = true };
+        var pairProfilesOption = new Option<string[]>("--profile") { Description = "A connectivity profile the device will be permitted; repeatable (default: local-network).", AllowMultipleArgumentsPerToken = true };
+        var pair = new Command("pair", "Issue a pairing code for a new device on another machine: 20 characters, valid ten minutes, for one device and five attempts. Entered there with 'vericairn connections add', it records the device with the key it presents and admits it under your authority (needs the runtime serving the local-network profile).");
+        pair.Options.Add(pairPrincipalOption);
+        pair.Options.Add(pairByOption);
+        pair.Options.Add(pairProfilesOption);
+        pair.SetAction(parseResult => Commands.DevicesPair(parseResult.GetValue(estateOption)!, parseResult.GetValue(pairPrincipalOption)!, parseResult.GetValue(pairByOption)!, parseResult.GetValue(pairProfilesOption) ?? [], parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(pair);
+
+        var writesDeviceArgument = new Argument<string?>("device") { Description = "A paired device's id, to list its writes only.", Arity = ArgumentArity.ZeroOrOne };
+        var writes = new Command("writes", "List what paired devices wrote over the local network through this machine's runtime: when, which device, for which principal, the operation and the record it produced. A record a paired device asks for is signed by a device of the same principal held here, so this is where the paired device behind it is kept.");
+        writes.Arguments.Add(writesDeviceArgument);
+        writes.SetAction(parseResult => Commands.DevicesWrites(parseResult.GetValue(estateOption)!, parseResult.GetValue(writesDeviceArgument), parseResult.GetValue(jsonOption)));
+        devices.Subcommands.Add(writes);
 
         var newNameOption = new Option<string>("--name") { Description = "The device's new descriptive name, never a machine path.", Required = true };
         var rename = new Command("rename", "Rename a device whose key is held here; it keeps its identity, key and admission (record format 2).");

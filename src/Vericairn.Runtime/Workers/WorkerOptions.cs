@@ -25,6 +25,12 @@ public sealed record WorkerOptions
     /// <summary>How long a harness has to stop once a stop is transmitted before its process tree is killed, unless the stop names another.</summary>
     public TimeSpan Grace { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>
+    /// The longest a stop request waits for what the worker observes before it answers with what it has, whatever grace the stop
+    /// names: a request holds nothing for a grace, and what is observed later the run's settlement records.
+    /// </summary>
+    public TimeSpan StopWait { get; init; } = TimeSpan.FromSeconds(30);
+
     /// <summary>The length of one of a cap's wall minutes; a minute, and shorter only where a test paces a run.</summary>
     public TimeSpan Minute { get; init; } = TimeSpan.FromMinutes(1);
 

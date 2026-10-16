@@ -140,6 +140,7 @@ public class DaemonTests
         Assert.NotEmpty(mapped);
         Assert.Empty(contract.Except(mapped));
         Assert.Empty(mapped.Except(contract));
+        Assert.All(host.MappedRoutes(), route => Assert.True(RequestScope.Covers(route.Method + " " + route.Path), route.Method + " " + route.Path));
 
         // The document itself is well formed: one operation id per operation, a request schema for every body.
         using JsonDocument document = JsonDocument.Parse(OpenApiDocument.Json);

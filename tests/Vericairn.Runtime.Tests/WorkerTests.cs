@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -19,6 +20,88 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class WorkerTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AStopRechecksTheRequestingDeviceEvenWhenItsPrincipalStillHasAnotherAdmittedDevice(bool rotate)
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        string backup = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(run.Estate.OperatorId, "Other operator device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(backup, run.Estate.OperatorId, "The operator still has authority.")));
+        Except(run, DateTimeOffset.UtcNow.AddHours(1), "Exercise a device-signed stop with a stand-in.");
+        string report = run.Report("device-stop");
+        RunResponse started = run.Start("generic", "ack-stop", report);
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(report));
+        var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        try
+        {
+            DeviceStanding device = run.Service.Standing(run.OperatorDevice)!;
+            using EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey);
+            RunEstate.Ok(rotate
+                ? run.Service.DeviceRotate(new DeviceRotateRequest(device.Identity))
+                : run.Service.DeviceRevoke(new RevokeRequest(device.Identity, run.Estate.OperatorId, "Revoked after authentication.")));
+            RunStopResponse refused = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The old request must not queue this stop.", 0));
+            Assert.False(refused.Ok);
+            Assert.Equal("denied", refused.Problem!.Code);
+            Assert.Equal(request.Refusal!.Message, refused.Problem.Message);
+            Assert.Null(directory.ReadStop());
+            Assert.False(File.Exists(directory.StopFile));
+            Assert.Equal("dispatched", run.Row(started.Run).Status);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        }
+        finally
+        {
+            DeviceStanding device = run.Service.Standing(backup)!;
+            using EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey);
+            Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop with the other admitted device.", 0)).Ok);
+            Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
+        }
+
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void DispatchAndStallWritesRecheckAnActiveRequestWithoutLosingTheWorkersReservationOrOwnership()
+    {
+        var clock = new WorkerClock();
+        using var run = new RunEstate(keepOperatorKey: true, options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        string backup = RunEstate.Ok(run.Service.DeviceCreate(new DeviceCreateRequest(run.Estate.OperatorId, "Other operator device", "file"))).Id;
+        RunEstate.Ok(run.Service.DeviceAdmit(new AdmitRequest(backup, run.Estate.OperatorId, "The runtime can still record its observations.")));
+        Except(run, DateTimeOffset.UtcNow.AddHours(1), "Exercise guarded worker writes with a stand-in.");
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            BeforeDispatchRecord = () => RunEstate.Ok(run.Service.DeviceRevoke(new RevokeRequest(run.OperatorDevice, run.Estate.OperatorId, "Revoked after launch and before dispatch storage."))),
+        };
+        DeviceStanding device = run.Service.Standing(run.OperatorDevice)!;
+        RunResponse started;
+        using (EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey))
+        {
+            started = run.Start("generic", "silent-ignore", run.Report("guarded-writes"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
+            Assert.True(started.Ok, started.Message); // A live launch stays owned and reserved even when its record write is denied.
+            Assert.Equal("not-started", started.Status);
+            Assert.Equal("denied", request.Refusal!.Code);
+            WaitUntil(() => File.Exists(run.Report("guarded-writes")));
+            clock.Advance(TimeSpan.FromSeconds(60));
+            WaitUntil(() => run.Row(started.Run).Liveness?.AttentionAt is not null);
+            Assert.Empty(run.Service.Records("ask"));
+            Assert.Single(AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions);
+            Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
+        }
+
+        // Once the request ends, continuing supervision is the runtime's work, not another use of the revoked credential.
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        RunRow settled = run.Settled(started.Run);
+        Assert.NotNull(settled.Stop!.ContainedAt);
+        AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
+        Assert.Equal(["not-started", "dispatched", "known-failure"], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
+        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     [Theory]
     [InlineData("codex", "codex-incomplete")]
     [InlineData("codex", "codex-overflow")]

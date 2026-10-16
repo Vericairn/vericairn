@@ -920,12 +920,18 @@ internal static class Commands
                 stop.Cancel();
             };
             using PosixSignalRegistration? hangup = IgnoreHangup();
-            DaemonHost host = DaemonHost.StartAsync(root, loopback: loopback).GetAwaiter().GetResult();
+            var options = new DaemonOptions { Log = line => Console.Out.WriteLine($"{RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)} {line}") };
+            DaemonHost host = DaemonHost.StartAsync(root, loopback: loopback, options: options).GetAwaiter().GetResult();
             Console.Out.WriteLine($"vericairnd {VersionText()} serving {host.Service.Root}");
             Console.Out.WriteLine($"  {host.Endpoint.Kind}  {host.Endpoint.Address}");
             if (host.Endpoint.Loopback is LoopbackEndpoint published)
             {
                 Console.Out.WriteLine($"  loopback  https://{published.Host}:{published.Port} pinned to {published.Certificate}");
+            }
+
+            if (host.Endpoint.LocalNetwork is LocalNetworkEndpoint network)
+            {
+                Console.Out.WriteLine($"  local network  {LocalNetworkAddress(network)}, mutual TLS with paired devices; runtime identity {network.Identity}");
             }
 
             Console.Out.WriteLine($"  process {host.Endpoint.ProcessId}; stop with Ctrl+C or 'vericairn runtime stop'");
@@ -1095,9 +1101,19 @@ internal static class Commands
 
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
         bool alive = endpoint is not null && VericairnClient.IsAlive(endpoint);
+        string? configured = null;
+        try
+        {
+            configured = RuntimeSettings.Load(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!).LocalNetwork;
+        }
+        catch (InvalidOperationException exception)
+        {
+            Console.Error.WriteLine("warning: " + exception.Message);
+        }
+
         if (json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(new { mode = alive ? "daemon" : "embedded", daemon = alive ? endpoint : null }, ProtocolJson.Options));
+            Console.Out.WriteLine(JsonSerializer.Serialize(new { mode = alive ? "daemon" : "embedded", daemon = alive ? endpoint : null, localNetwork = configured }, ProtocolJson.Options));
         }
         else if (alive)
         {
@@ -1107,10 +1123,19 @@ internal static class Commands
             {
                 Console.Out.WriteLine($"  loopback  https://{published.Host}:{published.Port} pinned to {published.Certificate}");
             }
+
+            if (endpoint.LocalNetwork is LocalNetworkEndpoint network)
+            {
+                Console.Out.WriteLine($"  local network  {LocalNetworkAddress(network)}, mutual TLS with paired devices; runtime identity {network.Identity}");
+            }
         }
         else
         {
             Console.Out.WriteLine("no daemon is serving this estate; commands run the embedded runtime");
+            if (configured is not null)
+            {
+                Console.Out.WriteLine($"  the local-network profile is configured at {configured} and served from the runtime's next start");
+            }
         }
 
         return Clean;
@@ -1406,7 +1431,7 @@ internal static class Commands
         IReadOnlyList<DeviceRow> rows = api.Devices();
         if (json)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => new { id = r.Id, principal = r.Principal, principalName = r.PrincipalName, name = r.Name, platform = r.Platform, custody = r.Custody, presence = r.Presence, purpose = r.Purpose, admission = r.Admission, heldHere = r.HeldHere })));
+            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => new { id = r.Id, principal = r.Principal, principalName = r.PrincipalName, name = r.Name, platform = r.Platform, custody = r.Custody, presence = r.Presence, purpose = r.Purpose, admission = r.Admission, heldHere = r.HeldHere, profiles = r.Profiles })));
         }
         else
         {
@@ -1414,7 +1439,8 @@ internal static class Commands
             {
                 string presence = row.Presence is null ? string.Empty : row.Presence == "required" ? "  presence required" : "  no presence";
                 string purpose = row.Purpose == "recovery" ? "  recovery" : string.Empty;
-                Console.Out.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}{presence}{purpose}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}");
+                string profiles = row.Profiles is { Count: > 0 } ? "  profiles " + string.Join(", ", row.Profiles) : string.Empty;
+                Console.Out.WriteLine($"{row.Id}  {row.PrincipalName}  {row.Name}  {row.Platform}  {row.Custody}{presence}{purpose}  {row.Admission}{(row.HeldHere ? "  key held on this machine" : string.Empty)}{profiles}");
             }
         }
 
@@ -1657,6 +1683,366 @@ internal static class Commands
 
     public static int DevicesRotate(string root, string deviceId, string? custody, bool? presence, bool json) =>
         WithApi(root, api => ReportOutcome(api.DeviceRotate(new DeviceRotateRequest(deviceId, custody, presence)), json));
+
+    /// <summary>Issues a pairing code through the daemon serving the estate, which holds pending codes in its memory and serves the exchange.</summary>
+    public static int DevicesPair(string root, string principal, string by, string[] profiles, bool json) => WithDaemon(root, "pairing", client =>
+    {
+        (PairingIssued? issued, Problem? problem) = client.IssuePairing(new PairingIssueRequest(principal, by, profiles.Length == 0 ? null : profiles));
+        if (issued is null)
+        {
+            return Fail(problem?.Message ?? "No pairing code was issued.");
+        }
+
+        if (json)
+        {
+            Console.Out.WriteLine(JsonSerializer.Serialize(issued, ProtocolJson.Options));
+            return Clean;
+        }
+
+        // A runtime listening on every interface has no one address to give: the person pairing names this machine's.
+        string address = System.Net.IPEndPoint.TryParse(issued.Address, out System.Net.IPEndPoint? at) && (at.Address.Equals(System.Net.IPAddress.Any) || at.Address.Equals(System.Net.IPAddress.IPv6Any))
+            ? $"<this machine's address>:{at.Port}"
+            : issued.Address;
+        Console.Out.WriteLine($"pairing code  {issued.Code}");
+        Console.Out.WriteLine($"  for {issued.PrincipalName ?? issued.Principal} ({issued.Principal}), permitted {string.Join(", ", issued.Profiles)}");
+        Console.Out.WriteLine($"  valid until {issued.ExpiresAt}, for one device and {issued.Attempts} attempts; show it only to the person pairing");
+        Console.Out.WriteLine($"  runtime identity {issued.Identity}");
+        Console.Out.WriteLine($"on the new device: vericairn connections add {address} --code {issued.Code} --name <device name>");
+        return Clean;
+    });
+
+    /// <summary>Lists the writes paired devices made over the local network, from the ledger beside the live store; no daemon is needed.</summary>
+    public static int DevicesWrites(string root, string? device, bool json)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            List<LocalNetworkWrite> writes = [.. LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!).Where(w => device is null || w.Device == device)];
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(writes, ProtocolJson.Options));
+                return Clean;
+            }
+
+            if (writes.Count == 0)
+            {
+                Console.Out.WriteLine(device is null ? "no paired device has written over the local network through this machine's runtime" : $"device {device} has written nothing over the local network through this machine's runtime");
+            }
+
+            foreach (LocalNetworkWrite write in writes)
+            {
+                string outcome = write.State switch
+                {
+                    "interrupted" => write.Candidates is { Count: > 0 } candidates ? $"interrupted, the runtime stopped before its outcome was kept; it may have written {string.Join(", ", candidates)}" : "interrupted, the runtime stopped before its outcome was kept; its principal wrote nothing since",
+                    "pending" => "pending, no outcome kept yet",
+                    "failed" => "failed, nothing written",
+                    _ => "written",
+                };
+                Console.Out.WriteLine($"{write.At}  device {write.Device} for {write.Principal}  {write.Operation}  {outcome}{(write.Record is null ? string.Empty : $"  {write.Record}{(write.Hash is null ? string.Empty : "  " + write.Hash)}")}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int RuntimeConfigure(string root, string? localNetwork, bool allowPublic, bool json)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            if (allowPublic && localNetwork is null)
+            {
+                return Fail("--allow-public allows the address --local-network gives; give both.");
+            }
+
+            string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
+            RuntimeSettings settings;
+            string? exposure = null;
+            if (localNetwork is null)
+            {
+                settings = RuntimeSettings.Load(directory);
+            }
+            else
+            {
+                string? address = null;
+                if (!localNetwork.Equals("off", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!RuntimeSettings.TryParseAddress(localNetwork, out System.Net.IPEndPoint? endpoint, out string? problem))
+                    {
+                        return Fail(problem!);
+                    }
+
+                    // The profile is for a private network: a wildcard or public address is the operator's explicit choice.
+                    exposure = RuntimeSettings.Exposure(endpoint!.Address);
+                    if (exposure is not null && !allowPublic)
+                    {
+                        return Fail($"{endpoint} is {exposure}, and the local-network profile is for a private network: give this machine's address on it (in 10/8, 172.16/12, 192.168/16, link-local or fc00::/7), or add --allow-public to listen there anyway. Nothing was changed.");
+                    }
+
+                    address = endpoint.ToString();
+                }
+
+                settings = new RuntimeSettings(address, AllowPublic: exposure is not null);
+                settings.Save(directory);
+            }
+
+            DaemonEndpoint? running = DaemonHost.Discover(root);
+            bool alive = running is not null && VericairnClient.IsAlive(running);
+            string? served = running?.LocalNetwork is LocalNetworkEndpoint lan ? new System.Net.IPEndPoint(System.Net.IPAddress.Parse(lan.Host), lan.Port).ToString() : null;
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { localNetwork = settings.LocalNetwork, allowPublic = settings.AllowPublic, served = alive ? served : null, restart = alive && localNetwork is not null }, ProtocolJson.Options));
+                return Clean;
+            }
+
+            Console.Out.WriteLine(settings.LocalNetwork is null
+                ? "the local-network profile is off: the runtime listens on its local socket and loopback only"
+                : $"the runtime serves the local-network profile at {settings.LocalNetwork}, to devices that pair with it, from its next start");
+            if (settings.AllowPublic)
+            {
+                Console.Out.WriteLine("  allowed with --allow-public: a wildcard or public address, where every device that reaches it may try to pair");
+            }
+            if (alive)
+            {
+                Console.Out.WriteLine(served is null ? $"  daemon {running!.ProcessId} serves no local-network profile now" : $"  daemon {running!.ProcessId} serves it now at {served}");
+                if (localNetwork is not null)
+                {
+                    Console.Out.WriteLine("  the running daemon keeps its listeners until it restarts: 'vericairn runtime stop', then 'vericairn runtime start'");
+                }
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int RuntimeRotate(string root, bool compromised, bool identity, string? reason, bool json)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
+            {
+                using var client = new VericairnClient(endpoint);
+                (CertificateRotated? rotated, Problem? problem) = client.RotateCertificate(new CertificateRotateRequest(compromised, reason, identity));
+                if (rotated is null)
+                {
+                    return Fail(problem?.Message ?? "The certificate was not rotated.");
+                }
+
+                if (json)
+                {
+                    Console.Out.WriteLine(JsonSerializer.Serialize(rotated, ProtocolJson.Options));
+                    return Clean;
+                }
+
+                Console.Out.WriteLine($"runtime certificate {rotated.Certificate}, until {rotated.NotAfter}, replaced {rotated.Previous}");
+                Console.Out.WriteLine(rotated.Identity is null
+                    ? "  paired devices keep working: they pin the runtime identity, which signs the certificate in use"
+                    : $"  runtime identity replaced by {rotated.Identity}: every paired device pairs again");
+                if (rotated.Compromised)
+                {
+                    Console.Out.WriteLine($"  after a compromise: {rotated.Closed} open connections were closed, and the old certificate is refused by every client");
+                }
+
+                return Clean;
+            }
+
+            // No daemon: the files are replaced now and the next start serves them; nothing is open to close.
+            string directory = Path.GetDirectoryName(DaemonHost.EndpointFilePath(root))!;
+            string? replacedIdentity = null;
+            if (identity)
+            {
+                if (!File.Exists(Path.Combine(directory, RuntimeIdentity.FileName)))
+                {
+                    return Fail("This runtime has no identity to replace: it is made when the local-network profile is first served.");
+                }
+
+                replacedIdentity = RuntimeIdentity.LoadOrCreate(directory).Replace(directory).Fingerprint;
+            }
+
+            using System.Security.Cryptography.X509Certificates.X509Certificate2 next = RuntimeCertificate.Replace(directory);
+            string fingerprint = RuntimeCertificate.Fingerprint(next);
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { certificate = fingerprint, identity = replacedIdentity, served = false }, ProtocolJson.Options));
+                return Clean;
+            }
+
+            Console.Out.WriteLine($"no daemon is serving this estate: the runtime certificate is now {fingerprint}, served from the next start");
+            if (replacedIdentity is not null)
+            {
+                Console.Out.WriteLine($"  runtime identity replaced by {replacedIdentity}: every paired device pairs again");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException or System.Security.Cryptography.CryptographicException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ConnectionsAdd(string address, string code, string name, string? custody, bool? presence, bool json)
+    {
+        try
+        {
+            var connections = new RuntimeConnections();
+            IReadOnlyList<RuntimeConnection> before = connections.List();
+            RuntimeConnection connection = connections.Add(address, code, new PairingOptions(name) { Custody = custody, Presence = presence });
+            List<RuntimeConnection> replaced = [.. before.Where(earlier => connections.Find(earlier.Id) is null)];
+            ConnectionStatus status = connections.Probe(connection);
+            if (json)
+            {
+                Json.JsonObject added = Json.JsonNode.Parse(JsonSerializer.Serialize(ConnectionJson(status), ProtocolJson.Options))!.AsObject();
+                added["replaced"] = Json.JsonNode.Parse(JsonSerializer.Serialize(replaced.Select(r => new { id = r.Id, device = r.Device, principal = r.Principal }), ProtocolJson.Options));
+                Console.Out.WriteLine(added.ToJsonString());
+                return Clean;
+            }
+
+            Console.Out.WriteLine($"paired as device {connection.Device} of {connection.PrincipalName ?? connection.Principal} ({connection.Principal}) with {connection.EstateName ?? connection.Estate} at {connection.Address}, permitted {string.Join(", ", connection.Profiles)}");
+            Console.Out.WriteLine($"  runtime identity {RuntimeIdentityScheme.Fingerprint(connection.Identity)}, pinned on this machine");
+            foreach (RuntimeConnection earlier in replaced)
+            {
+                Console.Out.WriteLine($"  replaced connection {earlier.Id}: device {earlier.Device} stays admitted until an administrator revokes it");
+            }
+
+            Console.Out.WriteLine($"connection {connection.Id}  {status.State}: {status.Message}");
+            return Clean;
+        }
+        catch (PairingException exception)
+        {
+            return Fail(exception.Message);
+        }
+        catch (ArgumentException exception)
+        {
+            return Fail(exception.ParamName is { } parameter ? exception.Message.Replace($" (Parameter '{parameter}')", string.Empty, StringComparison.Ordinal) : exception.Message);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.Security.Cryptography.CryptographicException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ConnectionsList(bool json)
+    {
+        try
+        {
+            var connections = new RuntimeConnections();
+            List<ConnectionStatus> statuses = connections.List().Select(c => connections.Probe(c)).ToList();
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(statuses.Select(ConnectionJson), ProtocolJson.Options));
+                return Clean;
+            }
+
+            if (statuses.Count == 0)
+            {
+                Console.Out.WriteLine("no connections on this machine; add one with 'vericairn connections add <address> --code <code> --name <device name>'");
+            }
+
+            foreach (ConnectionStatus status in statuses)
+            {
+                RuntimeConnection connection = status.Connection;
+                Console.Out.WriteLine($"{connection.Id}  {connection.EstateName ?? connection.Estate}  {connection.Address}  {status.State}  device {connection.Device} ({connection.PrincipalName ?? connection.Principal})");
+                Console.Out.WriteLine($"  {status.Message}");
+            }
+
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    public static int ConnectionsRemove(string id, bool json)
+    {
+        try
+        {
+            RuntimeConnection? removed = new RuntimeConnections().Remove(id);
+            if (removed is null)
+            {
+                return Fail($"No connection {id} on this machine; 'vericairn connections list' shows them.");
+            }
+
+            if (json)
+            {
+                Console.Out.WriteLine(JsonSerializer.Serialize(new { removed = removed.Id, address = removed.Address, device = removed.Device, principal = removed.Principal }, ProtocolJson.Options));
+                return Clean;
+            }
+
+            Console.Out.WriteLine($"removed connection {removed.Id} to {removed.Address}");
+            Console.Out.WriteLine($"  device {removed.Device} stays admitted until an administrator revokes it ('vericairn devices revoke {removed.Device} --by <administrator> --reason <why>'): disconnection is not revocation; its key stays in this machine's custody");
+            return Clean;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
+    private static object ConnectionJson(ConnectionStatus status) => new
+    {
+        id = status.Connection.Id,
+        address = status.Connection.Address,
+        estate = status.Connection.Estate,
+        estateName = status.Connection.EstateName,
+        identity = RuntimeIdentityScheme.Fingerprint(status.Connection.Identity),
+        device = status.Connection.Device,
+        principal = status.Connection.Principal,
+        principalName = status.Connection.PrincipalName,
+        profiles = status.Connection.Profiles,
+        pairedAt = status.Connection.PairedAt,
+        state = status.State,
+        message = status.Message,
+        lastCurrent = status.Connection.LastCurrent?.At,
+    };
+
+    /// <summary>Runs an operation that only a running daemon serves, such as pairing; refused, with the way on, when none answers.</summary>
+    private static int WithDaemon(string root, string purpose, Func<VericairnClient, int> operation)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+            if (endpoint is null || !VericairnClient.IsAlive(endpoint))
+            {
+                return Fail($"No daemon is serving this estate, and {purpose} needs one: configure the local-network profile with 'vericairn runtime configure --local-network <address:port>' and start the runtime with 'vericairn runtime start'.");
+            }
+
+            using var client = new VericairnClient(endpoint);
+            return operation(client);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
+        {
+            return Fail(exception.Message);
+        }
+    }
 
     /// <summary>The git adapter behind sources and check; tests substitute a recorded one.</summary>
     /// <summary>Serves the estate over the Model Context Protocol on standard input and output; diagnostics go to standard error.</summary>
@@ -2178,6 +2564,9 @@ internal static class Commands
             return Fail(exception.Message);
         }
     }
+
+    private static string LocalNetworkAddress(LocalNetworkEndpoint network) =>
+        "https://" + new System.Net.IPEndPoint(System.Net.IPAddress.Parse(network.Host), network.Port);
 
     /// <summary>A bare records directory without a manifest is still validated from its files; no live state is involved.</summary>
     private static int WithFiles(string root, Func<EstateModel, int> operation)

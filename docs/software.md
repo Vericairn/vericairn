@@ -252,15 +252,24 @@ file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to its proc
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
 named) has passed, the worker terminates its containment boundary; containment requires observing the whole boundary exited. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
-and the run stays in flight. The stop command's bounded wait can return before containment; poll `worker runs` for the
-later facts. On Windows the stop file is the transmission; there is no graceful process signal.
+and the run stays in flight. Only an operator, whoever decides for the run's goal (its sponsor, or an operator for a goal
+an agent sponsors) and the principal who started the run may stop it, on every profile; anyone else is refused before
+anything is asked of the run. For a device-signed request, the runtime rechecks the requesting device's admission and
+authenticated key (and its local-network permission on that profile) under the estate's write lock before storing the
+stop for the worker; revocation after authentication cannot queue a new stop. The command's observation wait is capped
+at 30 seconds, whatever grace it names, with a bounded wait for settlement after exit. It can return before containment;
+poll `worker runs` for the later facts. On Windows the stop file is the transmission; there is no graceful process signal.
 
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
 ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
 none is available, whether the goal's budget allows it, and for an agent the custody guard here. It records and starts
 nothing. `vericairn goal step [<goal>] --by <principal> [--repository <resource>] [--setting name=value]...
 [--wall-minutes <n>] [--branch <name>] [--base <ref>] [--detach]` takes the goal's next step, the smallest form of
-Community's conductor, one step in sequence; Pro's program plans and schedules many. The goal must be active, and the
+Community's conductor, one step in sequence; Pro's program plans and schedules many. Like `worker run`,
+it runs on the runtime's machine and is refused through the local-network listener. On loopback, its `by`
+is the signing device's principal, and its admission and authenticated key are rechecked under the estate's
+write lock before its records are stored, including a grouped assignment and run intent or ask. The local
+socket uses its caller's operating-system identity. The goal must be active, and the
 principal an operator, the goal's sponsor when the sponsor is a person, or a principal holding `local-engineering`, which
 is how the builder dispatches agents under the operator's authority; an agent that sponsors a goal takes its steps only
 under `local-engineering`, like any agent, since an operator decides for that goal. A person who sponsors a goal assigns

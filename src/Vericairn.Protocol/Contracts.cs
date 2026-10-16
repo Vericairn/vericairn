@@ -24,7 +24,7 @@ public static class ApiVersion
 public sealed record FindingDto(string Severity, string Code, string Location, string Message);
 
 /// <summary>Why a request was not carried out: a reason and, for rejected records, the findings.</summary>
-/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback request not signed by a device admitted now) or provider (a release provider's refusal, inside a release response); conflict is reserved and nothing answers with it yet.</param>
+/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict is reserved and nothing answers with it yet.</param>
 /// <param name="Message">Explanation with the permitted next action.</param>
 /// <param name="Findings">Findings behind a rejection; may be empty.</param>
 public sealed record Problem(string Code, string Message, IReadOnlyList<FindingDto> Findings);
@@ -153,7 +153,8 @@ public sealed record AmendRequest(string Assignment, string By, JsonElement Body
 /// <param name="HeldHere">Whether this machine holds its key.</param>
 /// <param name="Presence">required or none: whether each signature needs the owner's presence (record format 2).</param>
 /// <param name="Purpose">signing or recovery (record format 2).</param>
-public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null);
+/// <param name="Profiles">The connectivity profiles the device is permitted, from 0.6.0.</param>
+public sealed record DeviceRow(string Id, string Principal, string? PrincipalName, string? Name, string? Platform, string? Custody, string Admission, bool HeldHere, string? Presence = null, string? Purpose = null, IReadOnlyList<string>? Profiles = null);
 
 /// <summary>Create a device for a principal on the runtime's machine.</summary>
 /// <param name="Principal">Principal id.</param>
@@ -256,9 +257,10 @@ public sealed record NextResponse(string Text, JsonElement Json);
 /// Take a goal's next step, one at a time (the smallest form of Community's conductor): the first eligible step whose route acts, routed
 /// from the runtime's machine. An agent's step is assigned to the agent when no assignment holds it and its run starts through the
 /// worker, within the custody precondition; a person's step is assigned to the person and asked of them; a step no principal is
-/// available for is asked of the sponsor. Nothing else is dispatched, and nothing is accepted.
+/// available for is asked of the sponsor. Nothing else is dispatched, and nothing is accepted. Refused over the local network,
+/// since the worker runs on this machine. A device-signed request acts only for its device's principal.
 /// </summary>
-/// <param name="By">The principal recording the assignment, the ask and the run: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="By">The principal recording the assignment, the ask and the run: an operator, the person sponsoring the goal, or a principal with local-engineering. A device-signed request names its device's principal.</param>
 /// <param name="Repository">For an agent's step, the repository resource whose registered clone its workspace is made from.</param>
 /// <param name="Settings">For an agent's step, the settings of the launcher routing chose, for example command.</param>
 /// <param name="WallMinutes">For an agent's step, the run's cap in wall minutes; what remains of the goal's budget when omitted, and never more.</param>
@@ -282,7 +284,7 @@ public sealed record GoalStepResponse(string Goal, string Outcome, string Messag
 
 /// <summary>Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming its assignment.</summary>
 /// <param name="Assignment">The agent's assignment, which holds the step.</param>
-/// <param name="By">The principal recording the hand-over: the operator, or a principal with the local-engineering scope.</param>
+/// <param name="By">The person recording the hand-over: the one taking over, the goal's sponsor or an operator; never an agent. A device-signed request names its device's principal.</param>
 /// <param name="Contributor">The person who takes the step over; the recording principal when omitted.</param>
 /// <param name="Note">Why; a sentence naming the hand-over when omitted.</param>
 public sealed record TakeoverRequest(string Assignment, string By, string? Contributor = null, string? Note = null);

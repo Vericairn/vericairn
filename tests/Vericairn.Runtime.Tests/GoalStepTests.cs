@@ -20,6 +20,35 @@ namespace Vericairn.Runtime.Tests;
 public class GoalStepTests
 {
     [Fact]
+    public void ARevokedRequestCannotStoreARoutedAssignmentAndAsk()
+    {
+        using var run = new RunEstate(keepOperatorKey: true);
+        RoutingServiceTests.Routed(run);
+        Order(run, "W-0", ""","role":"publisher" """);
+        DeviceStanding device = run.Service.Standing(run.OperatorDevice)!;
+        using (EstateService.RequestDeviceScope request = run.Service.ForDeviceRequest(device.Identity, device.PublicKey))
+        {
+            RunEstate.Ok(run.Service.DeviceRevoke(new RevokeRequest(device.Identity, run.Estate.OperatorId, "Revoked after authentication.")));
+            GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId));
+            Assert.False(refused.Ok);
+            Assert.Equal("W-0", refused.Step);
+            Assert.Equal("denied", refused.Problem!.Code);
+            Assert.Equal(refused.Problem, request.Refusal);
+            Assert.Null(refused.Assignment);
+            Assert.Null(refused.Ask);
+            Assert.Single(run.Service.Records("assignment"));
+            Assert.Empty(run.Service.Records("ask"));
+        }
+
+        // The embedded caller has no device-authenticated request; ending the scope restores that caller.
+        GoalStepResponse asked = run.Service.GoalStep(run.Goal, new GoalStepRequest(run.Estate.OperatorId));
+        Assert.True(asked.Ok, asked.Message);
+        Assert.NotNull(asked.Assignment);
+        Assert.NotNull(asked.Ask);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
     public void OneStepAtATimeRunsAnAgentAndAsksAPersonOrTheSponsor()
     {
         using var run = new RunEstate();

@@ -443,6 +443,10 @@ public sealed partial class EstateService
 
             found = AgentRuns.Find(model, run);
             estate = session.Manifest.Estate;
+            if (found is not null && StopRefusal(model, found, request.By) is string refused)
+            {
+                return StopProblem(run, "refused", refused);
+            }
         }
 
         if (found is null)
@@ -456,14 +460,26 @@ public sealed partial class EstateService
         }
 
         var directory = new RunDirectory(estate, found.Id);
-        StopRequest asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+        StopRequest asked;
+        lock (gate)
+        {
+            if (RequestDeviceRefusal(session.Load()) is Problem denied)
+            {
+                return StopProblem(run, denied.Code, denied.Message);
+            }
+
+            asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+        }
         RunObservedState? observed = ReadSteadily(directory);
         bool supervised = Fresh(observed);
         if (supervised)
         {
-            // The supervising worker transmits the stop at its next heartbeat and escalates it after the grace period; this waits for what it observes.
+            // The supervising worker transmits the stop at its next heartbeat and escalates it after the grace period; this waits for
+            // what it observes, never longer than the stop wait, whatever grace the stop names.
             TimeSpan grace = asked.GraceSeconds is int seconds ? TimeSpan.FromSeconds(seconds) : WorkerOptions.Grace;
-            DateTimeOffset until = DateTimeOffset.UtcNow + grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
+            TimeSpan wait = grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
+            DateTimeOffset deadline = DateTimeOffset.UtcNow + (wait < WorkerOptions.StopWait ? wait : WorkerOptions.StopWait);
+            DateTimeOffset until = deadline;
             // A state being replaced as it is read reads as nothing for a moment, which is no news: the last state read stands.
             while (DateTimeOffset.UtcNow < until)
             {
@@ -477,8 +493,9 @@ public sealed partial class EstateService
                 Thread.Sleep(100);
             }
 
-            // Once the exit is observed, the settlement follows; it records the stop's facts as observed.
+            // Once the exit is observed, the settlement follows; it records the stop's facts as observed. Within the same deadline.
             DateTimeOffset settling = DateTimeOffset.UtcNow + (WorkerOptions.Heartbeat * 2) + TimeSpan.FromSeconds(10);
+            settling = settling < deadline + (WorkerOptions.Heartbeat * 2) ? settling : deadline + (WorkerOptions.Heartbeat * 2);
             while (observed?.ExitedAt is not null && observed.Settled is null && observed.Problem is null && DateTimeOffset.UtcNow < settling)
             {
                 Thread.Sleep(100);
@@ -502,6 +519,25 @@ public sealed partial class EstateService
             _ => $"Run {found.Id}: the stop requested at {stop.RequestedAt} is {stop.State}{(stop.TransmittedAt is null ? string.Empty : $" (transmitted at {stop.TransmittedAt}: {stop.Transmission})")}; its containment was not observed in time, so it is reported as {stop.State}, never as stopped.",
         };
         return new RunStopResponse(found.Id, stop.State, message, true, stop);
+    }
+
+    /// <summary>
+    /// Who may stop a run, on every profile: an operator; who decides for its goal, its sponsor or, for a goal an agent sponsors, an
+    /// operator; and the principal who started it, who recorded its intent. Anyone else is refused before anything is asked of the run.
+    /// </summary>
+    private static string? StopRefusal(EstateModel model, AgentRuns.Run run, string by)
+    {
+        if (model.HasRole(by, Roles.Operator) || string.Equals(run.Intent.By, by, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        if (run.Goal is string goal && model.ById.TryGetValue(goal, out RecordEnvelope? revision) && GoalRules.MayEnd(model, model.Latest(revision), by))
+        {
+            return null;
+        }
+
+        return $"Principal {by} may not stop run {run.Id}: an operator stops a run, as do whoever decides for its goal and {run.Intent.By}, who started it.";
     }
 
     /// <summary>
