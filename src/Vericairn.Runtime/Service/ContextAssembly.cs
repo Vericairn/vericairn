@@ -99,6 +99,9 @@ internal static class ContextAssembly
                     ["loss"] = source.Original is null ? "irreversible reduction; original unavailable" : source.ExcerptBytes is not null
                         ? "irreversible reduction of this representation; original retained" : "selection only; original retained",
                     ["cause"] = source.Original is null ? "The pinned original is not available in this copy; no retention disposition is inferred." : "Deterministic package selection; no original was deleted.",
+                    ["lostBy"] = source.Original is null ? "unknown" : null,
+                    ["disposition"] = source.Original is null ? "unknown; absence observed in this copy, not permission to delete" : "retained in existing object custody",
+                    ["unsupportedClaims"] = "The omitted original cannot support a dependent claim until retrieved and verified.",
                 };
                 if (source.ExcerptBytes is int length)
                 {
@@ -109,6 +112,7 @@ internal static class ContextAssembly
                         ["source"] = key, ["originalByteHash"] = source.Identity["byteHash"]!.DeepClone(),
                         ["extent"] = extentNode, ["encoding"] = "base64", ["content"] = Convert.ToBase64String(source.Original!, 0, length),
                         ["method"] = "byte excerpt", ["review"] = "derived, not accepted",
+                        ["generator"] = Format,
                         ["loss"] = "irreversible reduction of this representation; original retained",
                     });
                 }
@@ -139,7 +143,7 @@ internal static class ContextAssembly
             ["review"] = "derived, not accepted",
             ["loss"] = "irreversible reduction of this representation; original retained",
             ["limitations"] = "The view does not reproduce every original field; it cannot replace required originals.",
-            ["basis"] = entries.DeepClone(),
+            ["basis"] = new JsonArray(entries.Where(e => e!["kind"]!.GetValue<string>() == "record").Select(e => e!.DeepClone()).ToArray()),
             ["text"] = presentation,
         };
         string derivativeHash = ContentHash.Sha256(Bytes(derivative));
@@ -179,7 +183,7 @@ internal static class ContextAssembly
             return new ContextResponse(Serialize(full), full, null);
         }
 
-        // Use the manifest's order for every optional selection, independent of the enumeration supplied by a caller.
+        // Use a deterministic order for optional selection, independent of the enumeration supplied by a caller.
         List<Source> candidates = selected.OrderByDescending(s => s.Mandatory)
             .ThenBy(s => Encoding.UTF8.GetString(Bytes(s.Identity)), StringComparer.Ordinal)
             .ThenBy(s => s.Dependency, StringComparer.Ordinal).ToList();

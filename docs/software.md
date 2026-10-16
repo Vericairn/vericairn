@@ -36,6 +36,17 @@ this build has no qualified local tokenizer and adds no package or network
 tokenization call. A worker must establish its model's input bound, existing
 context, framing and reserves before relying on a fit claim.
 
+`work brief` keeps the existing lead and adds the package's content, complete
+withheld list, and readable originals. Markdown and the full machine brief each
+have an exact measurement and content identity; their accounting is included in
+the count. The worker exports this same content contract and pins the exported
+text in the existing run-intent evidence. A routed run's preflight can include
+its signed pending assignment, explicitly labeled as requiring admission with
+the run intent before launch. This does not grant authority or resolve a partial
+record batch; the existing grouped-write checks still own that boundary.
+Model-specific context allocation and qualified autonomous fit remain a launcher
+integration responsibility, separate from the existing run spending cap.
+
 The foundation (`Vericairn.Records`, `Vericairn.Runtime`, `Vericairn.Protocol`, the daemon, the SDK, the
 command line and Workbench) holds the record types, the release operations as intent then observed effect,
 the provider and adapter contracts, and a registry of the implementations a host makes available. It knows
@@ -641,6 +652,14 @@ provider state are outside that selection. The sidecar measures and hashes the
 canonical payload; token counts and model-context fit are not claimed. A copy
 with the same records and pin produces the same package. Records remain originals,
 apart from the deterministic presentation, with synthesis off.
+
+Hand-over uses the same context manifest, source retention, loss labels and
+accounting as work briefs. The `vericairn.handoff/1` marker and resume fields stay
+as an API v1 compatibility view; `contextFormat` names `vericairn.context/1`.
+The original `records show` link is kept for older clients, while
+`originalRetrieve` is the pinned, verified `context read` route. New and earlier
+retained hand-overs can be compared; changed source identities never rewrite
+the old basis. Its human rendering has a separate exact byte count and hash.
 
 `vericairn resume handoff.json` compares that retained basis to the current copy.
 Use `--json` for the full machine comparison or `resume -` to read the package

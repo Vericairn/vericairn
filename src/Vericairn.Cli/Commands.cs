@@ -191,7 +191,7 @@ internal static class Commands
         }
 
         Console.Out.Write(json ? CanonicalJson.SerializePretty(brief.Json) : brief.Markdown);
-        return Clean;
+        return brief.Problem is null ? Clean : Failed;
     });
 
     public static int WorkObserve(string root, string key, bool json) => WithApi(root, api =>

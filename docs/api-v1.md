@@ -19,6 +19,12 @@ records, its canonical record hash as well. Missing or corrupted bytes never
 fall back to a new revision. The SDK exposes the same operations. These are
 additive API v1 routes and introduce no record type. Remote is not built.
 
+The existing 8 MiB per-object custody limit still applies. A package whose
+originals, manifest or final payload cannot be retained under that limit is
+refused (`context-retention-limit`), never written as an invalid oversized
+object. A bounded context selection can omit optional bodies while retaining
+each original separately; it cannot truncate a required original.
+
 The optional `maxBytes` query on context preparation is the admitted **context
 input allocation**, separate from any run spending cap. With no cap, all
 available selected sources are included and accounting says `limit not set`.
@@ -38,6 +44,16 @@ framing, model limits and reserves before budget-dependent dispatch. Transport
 framing and provider-billed usage are separate unknowns, not zero. The MCP
 `context_prepare` text and ordinary `context prepare` stdout are exactly this
 measured payload; API/SDK JSON envelopes and `--json` sidecars are transport.
+
+`GET /v1/work/{key}/brief` keeps its existing machine fields and human lead and
+adds the package under `json.context`, including its withheld list and measured
+payload. The complete machine brief has its own `json.accounting`; the additive
+`jsonMeasurement` sidecar hashes and measures that entire canonical JSON. The
+complete Markdown includes readable originals, the manifest and withheld list;
+`markdownMeasurement` pins its exact UTF-8 bytes, including the accounting line
+in the text. Neither human depth nor a change to the lead can silently reduce
+the context contract. A context refusal appears as the additive `problem` and
+does not yield a complete brief. Existing JSON fields retain their meaning.
 
 This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
 appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
@@ -732,16 +748,25 @@ Watching observes the process boundary on the worker's machine. Remote execution
 ## Hand-over (HANDOFF-01)
 
 `GET /v1/handoff[?maxBytes=<positive integer>]` is additive to API v1. The SDK's
-`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`, and
-`problem`. A refusal returns HTTP 200 with `package: null` and a problem naming
+`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`,
+`problem` and the additive `textMeasurement`. A refusal returns HTTP 200 with `package: null` and a problem naming
 all missing or invalid sources; clients must inspect `problem`. This read authors
 no record and dispatches no work.
 
 The package is a `vericairn.handoff/1` payload with a sidecar `hash` and `bytes`.
-Both measure the payload's canonical pretty UTF-8 serialization, including all
+That discriminator and the original resume fields remain for API v1 compatibility;
+`contextFormat: vericairn.context/1` identifies the shared context content contract.
+Its manifest, source custody, derivative identities, withheld list and accounting
+are assembled by the same implementation as work context. New resumes validate
+the shared manifest and accounting as well as the retained originals; earlier
+`vericairn.handoff/1` baselines remain readable.
+The hash and byte count measure the payload's canonical pretty UTF-8 serialization, including all
 originals, source identities, derived presentation, accounting and framing;
-they exclude the sidecar and the separately rendered response text. The pin,
-record format, latest recorded timestamp and observed state come from the same
+they exclude the sidecar and the separately rendered response text.
+The human text is independently measured and hashed by `textMeasurement`,
+including its accounting line. `maxBytes` governs the canonical payload; it is
+not a fit claim for the alternate human rendering or a model's hidden framing.
+The pin, record format, latest recorded timestamp and observed state come from the same
 record snapshot. No wall-clock timestamp is mistaken for a human observation.
 Selection is deterministic: all records held by this copy, including superseded
 records, sorted by id. Every original has its exact record hash, retained byte
@@ -759,7 +784,8 @@ does not fit, including mandatory originals and manifest overhead. It never
 silently truncates, substitutes a summary or claims fit to a model context.
 Malformed, missing or conflicting records and incomplete local record batches
 refuse a package with every finding. A self-contained package can be retained
-by the caller; the read does not store another status ledger or grant authority.
+by the caller; its originals, manifest and payload are also retained as verified
+objects. This authors no record and stores no editable status ledger or authority.
 Remote is not built.
 
 `POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,

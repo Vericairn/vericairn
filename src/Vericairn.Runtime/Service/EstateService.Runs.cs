@@ -93,8 +93,9 @@ public sealed partial class EstateService
         RunPlan plan;
         lock (gate)
         {
-            EstateModel model = LoadWith(carried);
-            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, request, launcher);
+            List<RecordFile> files = session.Files().Concat(carried.Select(r => new RecordFile(r.RelativePath, r.Bytes))).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+            EstateModel model = EstateLoader.Load(session.Root, files);
+            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, files, request, launcher);
             if (planned is null)
             {
                 if (limited is not null)
@@ -595,7 +596,7 @@ public sealed partial class EstateService
         && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
-    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, RunStartRequest request, IAgentLauncher launcher)
+    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, IReadOnlyList<RecordFile> files, RunStartRequest request, IAgentLauncher launcher)
     {
         RecordEnvelope? assignment = Latest(model, request.Assignment, "assignment");
         if (assignment is null)
@@ -713,7 +714,16 @@ public sealed partial class EstateService
             return (null, watchRefusal, null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        // This snapshot includes the signed pending assignment. The run's existing grouped-write preflight
+        // must admit it with the intent before launch. A stranded older batch is reconciled by that write;
+        // ordinary briefs and hand-overs still refuse while the batch remains incomplete.
+        BriefResponse contextBrief = BriefLocked(model, files, order, checkBatches: false);
+        if (contextBrief.Problem is not null)
+        {
+            return (null, contextBrief.Problem.Message, null);
+        }
+
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, contextBrief.Markdown, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
     }
 
     private static int StallSeconds(EstateModel model, RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)

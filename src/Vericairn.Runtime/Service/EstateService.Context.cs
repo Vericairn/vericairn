@@ -34,11 +34,14 @@ public sealed partial class EstateService
         }
     }
 
-    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null)
+    private ContextResponse ContextLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, long? maxBytes = null, bool checkBatches = true)
     {
         List<FindingDto> errors = model.Findings.Where(f => f.Severity == Severity.Error)
             .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)).ToList();
-        errors.AddRange(InterruptedBatches(model).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
+        if (checkBatches)
+        {
+            errors.AddRange(InterruptedBatches(model).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
+        }
         if (errors.Count > 0)
         {
             const string message = "Context refused: restore or reconcile the missing or invalid records before continuing.";
@@ -54,6 +57,14 @@ public sealed partial class EstateService
         {
             return ContextRefusal("incomplete-context", "A retained original failed hash verification; restore its exact bytes before continuing.");
         }
+        catch (UnauthorizedAccessException)
+        {
+            return ContextRefusal("denied", ContextDenied);
+        }
+        catch (IOException)
+        {
+            return ContextRefusal("incomplete-context", "A selected original could not be read from this copy; no complete package was produced.");
+        }
 
         List<ContextAssembly.Source> missing = sources.Where(s => s.Mandatory && s.Original is null).ToList();
         if (missing.Count > 0)
@@ -64,26 +75,71 @@ public sealed partial class EstateService
         }
 
         JsonObject basis = ContextSelection.Basis(model, "The work order's record dependency closure and current document catalogue; document originals are optional unless referenced by the work. Unrelated records, output objects and unrecorded conversation are outside this selection.", order);
+        if (!checkBatches)
+        {
+            basis["preflight"] = "May include a signed pending assignment. The worker must admit it together with its run intent before dispatch; this artifact grants no authority and does not resolve an interrupted batch.";
+        }
         ContextResponse response = ContextAssembly.Select(basis, sources, WorkView.RenderBrief(model, order), maxBytes);
         if (response.Package is { } package)
         {
-            RetainContext(package, sources);
+            try
+            {
+                if (RetainContext(package, sources) is Problem retention)
+                {
+                    return new ContextResponse(retention.Message + "\n", null, retention);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return ContextRefusal("denied", ContextDenied);
+            }
+            catch (Exception exception) when (exception is ObjectCorruptedException or IOException)
+            {
+                return ContextRefusal("incomplete-context", "Context refused: the exact originals and manifest could not be retained and verified in this copy.");
+            }
         }
 
         return response;
     }
 
-    private void RetainContext(ContextPackage package, IEnumerable<ContextAssembly.Source> sources)
+    private BriefResponse BriefLocked(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, bool checkBatches = true)
     {
-        foreach (ContextAssembly.Source source in sources.Where(s => s.Original is not null))
+        ContextResponse context = ContextLocked(model, files, order, checkBatches: checkBatches);
+        if (context.Package is not { } package)
+        {
+            return new BriefResponse(context.Text, Element(new JsonObject { ["problem"] = JsonSerializer.SerializeToNode(context.Problem, ProtocolJson.Options) }), Problem: context.Problem);
+        }
+
+        JsonObject json = JsonNode.Parse(WorkView.RenderBriefJson(model, order))!.AsObject();
+        json["context"] = JsonSerializer.SerializeToNode(package, ProtocolJson.Options);
+        ContextPackage machine = ContextAccounting.Measure(json, null);
+        (string text, ContextTextMeasurement measurement) = ContextRendering.Render(WorkView.RenderBrief(model, order), package);
+        return new BriefResponse(text, machine.Payload, measurement, JsonMeasurement: new ContextTextMeasurement(machine.Hash, machine.Bytes, "exact canonical pretty UTF-8 of the complete machine brief, including its context package and accounting"));
+    }
+
+    private Problem? RetainContext(ContextPackage package, IEnumerable<ContextAssembly.Source> sources)
+    {
+        List<ContextAssembly.Source> retainedSources = sources.Where(s => s.Original is not null).ToList();
+        byte[] manifestBytes = CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content"));
+        byte[] payloadBytes = CanonicalJson.SerializePrettyUtf8(package.Payload);
+        if (payloadBytes.LongLength > EstateLayout.MaxObjectBytes || manifestBytes.LongLength > EstateLayout.MaxObjectBytes ||
+            retainedSources.Any(s => s.Original!.LongLength > EstateLayout.MaxObjectBytes))
+        {
+            return new Problem("context-retention-limit", "Context refused: retaining a selected original, manifest or payload would exceed the estate's 8 MiB per-object limit. Use a smaller admitted selection or bounded original reads; nothing was truncated.", []);
+        }
+
+        foreach (ContextAssembly.Source source in retainedSources)
         {
             string hash = session.Objects.Put(source.Original!);
             // Put is idempotent; verify an already held object as well as a newly retained one.
             _ = session.Objects.Read(hash);
         }
 
-        _ = session.Objects.Put(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content")));
-        _ = session.Objects.Put(CanonicalJson.SerializePrettyUtf8(package.Payload));
+        string manifest = session.Objects.Put(manifestBytes);
+        _ = session.Objects.Read(manifest);
+        string retained = session.Objects.Put(payloadBytes);
+        _ = session.Objects.Read(retained);
+        return null;
     }
 
     /// <inheritdoc />
@@ -156,7 +212,11 @@ public sealed partial class EstateService
 
                 return new ContextReadResponse(identity, original, null);
             }
-            catch (Exception exception) when (exception is ObjectCorruptedException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+            catch (UnauthorizedAccessException)
+            {
+                return new ContextReadResponse(null, null, new Problem("denied", ContextDenied, []));
+            }
+            catch (Exception exception) when (exception is ObjectCorruptedException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException or IOException)
             {
                 return new ContextReadResponse(identity, null, new Problem("invalid-context", "The pinned manifest or original failed verification; no bytes were returned.", []));
             }

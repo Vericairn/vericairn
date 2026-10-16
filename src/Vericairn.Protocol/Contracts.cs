@@ -107,7 +107,10 @@ public sealed record NewRecordRequest(string Type, string By, JsonElement Body, 
 /// <summary>A brief: everything a contributor needs, from the records alone.</summary>
 /// <param name="Markdown">Human form.</param>
 /// <param name="Json">Machine form.</param>
-public sealed record BriefResponse(string Markdown, JsonElement Json);
+/// <param name="MarkdownMeasurement">Exact measurement and identity of the complete Markdown, when supplied by a context-aware runtime.</param>
+/// <param name="Problem">A context refusal; null on a complete brief.</param>
+/// <param name="JsonMeasurement">Identity and measurement of the complete canonical machine brief, including its context package and accounting.</param>
+public sealed record BriefResponse(string Markdown, JsonElement Json, ContextTextMeasurement? MarkdownMeasurement = null, Problem? Problem = null, ContextTextMeasurement? JsonMeasurement = null);
 
 /// <summary>What an observer sees of a work order.</summary>
 /// <param name="Text">Human form.</param>

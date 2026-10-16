@@ -106,7 +106,7 @@ public sealed class ToolRegistry
                     string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                 }),
             Read("work_brief", "The brief of a work order, by key or record id: everything a contributor needs, from the records alone, as Markdown; includes the latest result's next step when one exists.", Arguments(("workOrder", "Work-order key, for example M2-API, or its record id.")), "workOrder",
-                (api, a) => { BriefResponse? b = api.Brief(Arg(a, "workOrder")); return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, false); }),
+                (api, a) => { BriefResponse? b = api.Brief(Arg(a, "workOrder")); return b is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(b.Markdown, b.Problem is not null); }),
             Read("work_observe", "What an observer sees of a work order: its assignments, attempts, results, amendments, reviews and acceptances.", Arguments(("workOrder", "Work-order key or record id.")), "workOrder",
                 (api, a) => { ObserveResponse? o = api.Observe(Arg(a, "workOrder")); return o is null ? NotFound("work order", Arg(a, "workOrder")) : new ToolCallResult(o.Text, false); }),
             Read("context_prepare", "Retain a measured deterministic context package for a work order, with exact original identities and a complete withheld list. Optional maxBytes is a context allocation, separate from a run spending cap; mandatory overflow refuses. Tokens remain unknown. No record or authority is authored.", Arguments(("workOrder", "Work-order key or record id."), ("maxBytes", "Optional positive context byte allocation, as a decimal string.")), "workOrder",

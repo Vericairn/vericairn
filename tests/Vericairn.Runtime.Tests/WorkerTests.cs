@@ -626,6 +626,7 @@ public class WorkerTests
         };
         run.Service.WorkerOptions = run.Service.WorkerOptions with { Environment = environment, Vericairn = ["vericairn-under-test"] };
         string report = run.Report("claude");
+        string preparedBrief = run.Service.Brief("W-1")!.Markdown;
 
         RunResponse started = run.Start("claude-code", "claude", report);
         Assert.True(started.Ok, started.Message);
@@ -662,7 +663,11 @@ public class WorkerTests
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
-        Assert.Equal(run.Service.Brief("W-1")!.Markdown, File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md")));
+        string exportedBrief = File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md"));
+        Assert.StartsWith(preparedBrief[..preparedBrief.IndexOf("\n\n## Context package", StringComparison.Ordinal)], exportedBrief, StringComparison.Ordinal);
+        Assert.Contains("## Context package", exportedBrief, StringComparison.Ordinal);
+        Assert.Contains("The worker must admit it together with its run intent before dispatch", exportedBrief, StringComparison.Ordinal);
+        Assert.Equal(Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(exportedBrief)), recorded.Intent.Body.GetProperty("evidence")[0].GetProperty("hash").GetString());
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(workspace, ".vericairn", ".gitignore")));
         Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
         JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();

@@ -11,6 +11,15 @@ The package's content hash and serialized byte count are a sidecar over the
 canonical pretty UTF-8 payload. Changing the payload invalidates that identity.
 This contract needs no estate upgrade and introduces no record format 3.
 
+Context manifests, original byte objects and payloads use existing object
+custody, in both repository-synced and local-only estates. Preparation and
+retrieval author no records. The work brief carries this contract; hand-over
+keeps its API v1 discriminator and comparison fields as a compatibility view
+of the same manifest, source and accounting implementation. Run-intent evidence
+continues to pin the exported brief's byte hash through its existing field.
+Neither the context artifact nor a pending assignment it describes admits work,
+accepts a result, clears an uncertain effect or changes any existing record.
+
 Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written from
 now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
 it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2

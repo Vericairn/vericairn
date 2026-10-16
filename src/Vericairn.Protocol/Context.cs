@@ -22,3 +22,9 @@ public sealed record ContextResponse(string Text, ContextPackage? Package, Probl
 /// <param name="Content">Original bytes (base64 in JSON), never the latest revision or a derivative.</param>
 /// <param name="Problem">Why bytes cannot be returned.</param>
 public sealed record ContextReadResponse(JsonElement? Identity, byte[]? Content, Problem? Problem);
+
+/// <summary>Identity and exact byte measurement of a complete human rendering, including its accounting line.</summary>
+/// <param name="Hash">SHA-256 of the UTF-8 text, independent of the serialized package identity.</param>
+/// <param name="Bytes">Actual UTF-8 bytes of the final text.</param>
+/// <param name="Method">Counting method and scope.</param>
+public sealed record ContextTextMeasurement(string Hash, long Bytes, string Method);

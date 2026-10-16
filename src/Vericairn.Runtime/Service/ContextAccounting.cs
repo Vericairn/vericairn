@@ -29,7 +29,7 @@ internal static class ContextAccounting
             ["model"] = null,
             ["modelFit"] = "not claimed",
             ["dispatch"] = "not qualified by a standalone byte measurement; the launcher must establish the model input bound and overhead",
-            ["asOf"] = payload["manifest"]?["content"]?["basis"]?["asOf"]?.DeepClone(),
+            ["asOf"] = (payload["manifest"]?["content"]?["basis"]?["asOf"] ?? payload["context"]?["payload"]?["manifest"]?["content"]?["basis"]?["asOf"])?.DeepClone(),
             ["scope"] = "the final serialized payload: instructions, originals, derivatives, wrappers, context manifest, withheld list and accounting",
             ["exclusions"] = new JsonArray("The hash/bytes sidecar and transport envelope are not part of this payload.", "Human renderings have their own byte measurement; they are not this serialization."),
             ["unknowns"] = new JsonArray("model-specific tokens", "existing conversation and mandatory harness/tool framing", "output and safety reserves", "provider hidden framing and billed usage"),

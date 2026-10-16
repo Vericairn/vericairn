@@ -9,6 +9,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Objects;
 
 namespace Vericairn.Runtime.Service;
 
@@ -64,6 +65,11 @@ public sealed partial class EstateService
         {
             IReadOnlyList<RecordFile> files = session.Files();
             EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return new ResumeResponse(ContextDenied + "\n", null, true, new Problem("denied", ContextDenied, []));
+            }
+
             foreach (var finding in InterruptedBatches(model))
             {
                 model.Findings.Error(finding.Code, finding.Location, finding.Message);
@@ -81,12 +87,35 @@ public sealed partial class EstateService
             // Load and retain precisely one file set: a concurrent sync cannot mix two revisions of the copy.
             IReadOnlyList<RecordFile> files = session.Files();
             EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return HandoffAssembly.Refuse("denied", ContextDenied, []);
+            }
+
             foreach (var finding in InterruptedBatches(model))
             {
                 model.Findings.Error(finding.Code, finding.Location, finding.Message);
             }
 
-            return HandoffAssembly.Build(model, files, maxBytes);
+            HandoffResponse response = HandoffAssembly.Build(model, files, maxBytes);
+            if (response.Package is { } package)
+            {
+                Dictionary<string, RecordFile> byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
+                try
+                {
+                    if (RetainContext(new ContextPackage(package.Hash, package.Bytes, package.Payload), model.Records.Select(r =>
+                        ContextAssembly.Record(r, byPath[r.ExpectedPath], true, "Review before continuing from this hand-over."))) is Problem retention)
+                    {
+                        return HandoffAssembly.Refuse("incomplete-handoff", retention.Message, []);
+                    }
+                }
+                catch (Exception exception) when (exception is ObjectCorruptedException or IOException or UnauthorizedAccessException)
+                {
+                    return HandoffAssembly.Refuse("incomplete-handoff", "Hand-over refused: the exact originals and context manifest could not be retained and verified in this copy.", []);
+                }
+            }
+
+            return response;
         }
     }
 }

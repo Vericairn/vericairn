@@ -45,7 +45,7 @@ public class ContextJourneyTests
             ["kind"] = "document", ["path"] = path, ["byteHash"] = bytes is null ? "sha256:" + new string('b', 64) : ContentHash.Sha256(bytes), ["bytes"] = bytes?.LongLength,
         }, bytes, false, "optional for this step", Inline: false, ExcerptBytes: excerpt);
         ContextPackage package = ContextAssembly.Build(new JsonObject { ["estate"] = estate.Load().Manifest!.Estate },
-            [Source("docs/whole.md", full), Source("docs/excerpt.md", partial, 7), Source("docs/missing.md", null)], "Derived lead.");
+            [Source("docs/quoted 'name; ignored.md", full), Source("docs/excerpt.md", partial, 7), Source("docs/missing.md", null)], "Derived lead.");
         api.ObjectPut(full);
         api.ObjectPut(partial);
         string manifest = api.ObjectPut(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content"))).Stored!.Hash;
@@ -56,6 +56,7 @@ public class ContextJourneyTests
             foreach (JsonElement entry in package.Payload.GetProperty("withheld").EnumerateArray())
             {
                 string command = entry.GetProperty("retrieve").GetString()!;
+                Assert.Matches("^vericairn context read sha256:[0-9a-f]{64} --source s[0-9]{6} --original$", command);
                 Assert.Equal(ContextAssembly.Retrieval(manifest, entry.GetProperty("key").GetString()!), command);
                 string[] args = ["--estate", estate.Root, "--json", .. command.Split(' ').Skip(1)];
                 CliHarness.Outcome cli = CliHarness.Run(args);

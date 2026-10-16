@@ -224,15 +224,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            EstateModel model = session.Load();
+            IReadOnlyList<RecordFile> files = session.Files();
+            EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
+                    Problem: new Problem("denied", ContextDenied, []));
+            }
+
             RecordEnvelope? order = WorkView.FindOrder(model, workOrder);
             if (order is null)
             {
                 return null;
             }
 
-            using JsonDocument json = JsonDocument.Parse(WorkView.RenderBriefJson(model, order));
-            return new BriefResponse(WorkView.RenderBrief(model, order), json.RootElement.Clone());
+            return BriefLocked(model, files, order);
         }
     }
 
