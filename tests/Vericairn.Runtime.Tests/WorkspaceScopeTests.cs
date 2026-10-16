@@ -9,6 +9,94 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class WorkspaceScopeTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CommittedChangesRemainVisibleAfterRestorationInTheWorktreeOrALaterCommit(bool commitRestoration)
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/committed", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        Assert.Null(before.Problem);
+        File.WriteAllText(Path.Combine(workspace.Path, "README.md"), "outside the permitted paths\n");
+        File.WriteAllText(Path.Combine(workspace.Path, "transient.txt"), "committed and then deleted\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "An outside change");
+        RunEstate.Git(workspace.Path, "restore", "--source=" + workspace.Commit, "--staged", "--worktree", ".");
+        if (commitRestoration)
+        {
+            RunEstate.Git(workspace.Path, "commit", "-q", "-m", "Restore the baseline");
+        }
+
+        // Neither a redirected worktree nor a hostile diff driver can hide committed paths or execute a command.
+        string marker = Path.Combine(run.Scratch, "diff-driver-ran");
+        RunEstate.Git(run.Clone, "config", "core.worktree", run.Clone);
+        RunEstate.Git(run.Clone, "config", "diff.external", "touch " + marker);
+        RunEstate.Git(run.Clone, "config", "core.repositoryformatversion", "999");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Null(scope.Problem);
+        Assert.Equal(["README.md", "transient.txt"], scope.Outside);
+        Assert.Equal(2, scope.Changed);
+        Assert.False(File.Exists(marker));
+    }
+
+    [Fact]
+    public void TheRunBranchIsAuditedEvenWhenTheWorktreeChecksOutTheBaselineDetached()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/detached", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, "README.md"), "outside\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "An outside change");
+        RunEstate.Git(workspace.Path, "checkout", "-q", "--detach", workspace.Commit);
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Null(scope.Problem);
+        Assert.Equal(["README.md"], scope.Outside);
+    }
+
+    [Fact]
+    public void PackedBranchHeadsAreAuditedAndMissingHistoryIsIncomplete()
+    {
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/packed", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        File.WriteAllText(Path.Combine(workspace.Path, "README.md"), "outside\n");
+        RunEstate.Git(workspace.Path, "add", ".");
+        RunEstate.Git(workspace.Path, "commit", "-q", "-m", "An outside change");
+        RunEstate.Git(workspace.Path, "restore", "--source=" + workspace.Commit, "--worktree", ".");
+        RunEstate.Git(run.Clone, "pack-refs", "--all");
+        Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
+        Assert.Null(scope.Problem);
+        Assert.Equal(["README.md"], scope.Outside);
+        Assert.NotNull(provider.CheckScope(workspace with { Commit = new string('0', 40) }, before, ["**"]).Problem);
+    }
+
+    [Fact]
+    public async Task ASpecialFileInTheBranchReferenceCannotBlockHistoryInspection()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "FIFO acquisition is POSIX-specific.");
+        using var run = new RunEstate();
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/ref-fifo", null, Path.Combine(run.Scratch, "worktree"));
+        WorkspaceSnapshot before = provider.Capture(workspace);
+        string reference = Path.Combine(run.Clone, ".git", "refs", "heads", "work", "ref-fifo");
+        File.Delete(reference);
+        Assert.Equal(0, mkfifo(reference, 384));
+        try
+        {
+            Task<Protocol.RunScope> audit = Task.Run(() => provider.CheckScope(workspace, before, ["**"]), TestContext.Current.CancellationToken);
+            Assert.NotNull((await audit.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken)).Problem);
+        }
+        finally
+        {
+            File.Delete(reference);
+        }
+    }
+
     [Fact]
     public void ScopeComparisonAlsoHasADeadlineAndCannotReportACleanResultAfterItExpires()
     {

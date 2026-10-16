@@ -475,12 +475,18 @@ charged at its cap.
 - `scope`: `changed`, `outsideCount`, `outside`
   and optional `problem`. Settlement compares file inventories before launch and after boundary exit against
   repository-relative paths/globs in `brief.permittedChanges`. The inventory reads the physical workspace independently
-  of Git configuration and verifies its root identity against the launch baseline. Committed, renamed, deleted,
-  untracked and ignored changes count. Non-regular files, an unavailable helper or a deadline mark the audit incomplete;
+  of Git configuration and verifies its root identity against the launch baseline. From 0.6.1 it also compares the run
+  branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
+  including merged side branches. All changed paths count, including changes restored in the worktree or a later
+  commit. The pinned original object/reference directory is read through isolated Git metadata that loads no
+  agent-writable configuration, replacement refs, grafts, attributes or external diff drivers. Renamed, deleted,
+  untracked and ignored changes count. Missing history, non-regular files or references, an unavailable helper or a deadline mark the audit incomplete;
   each inventory and the pattern comparison have a 30-second deadline, with bounded helper cleanup. Outside changes or
   incomplete audit are flagged in the observed summary. At most 1000 outside names are listed; unsafe names are hashed.
-  With `problem` present, counts can be partial and zero outside paths does not mean clean. Git administration,
-  changes outside the workspace and changes reverted before settlement are excluded. This is a net observation, not
+  Committed history shares the settlement inventory's deadline, with at most 10,000 new commits and 100,000 distinct
+  committed paths and bounded metadata and Git output reads. With `problem` present, counts can be partial and zero
+  outside paths does not mean clean. Git administration itself, changes outside the workspace, uncommitted changes
+  reverted before settlement and commits no longer reachable from the run branch are excluded. This is an observation, not
   attribution, acceptance or a filesystem sandbox.
 
 A stop's acknowledgment and escalation follow transmission; containment follows all prior facts and does not follow

@@ -556,7 +556,13 @@ At settlement the worker compares a physical file inventory captured after brief
 workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or
 Git environment variables, and the physical root must retain the baseline's identity. Content, symlink targets
 (without reading through the link), and Unix modes
-are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
+are compared, including deletions, renames, untracked files and ignored files. From 0.6.1 the audit also compares the
+run branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
+including side branches of merges. Their changed paths are unioned with the physical comparison, so restoring a path
+in the worktree or a later commit does not hide it, nor does checking out a different head. The original Git
+object/reference directory is pinned before launch; isolated Git metadata excludes agent-writable configuration,
+replacement refs, grafts, attributes and external diff drivers. Missing history or an unreadable branch makes the
+audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
 `path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
@@ -566,10 +572,13 @@ the audit is unavailable or incomplete, including submodules needing a separate 
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
 as clean. Non-regular files are rejected without reading their contents, and handle checks reject leaf replacement
 races. Each inventory runs in a helper process under a 30-second deadline and work limits, with bounded cleanup after
-timeout; pattern comparison has its own 30-second deadline. Missing helper support, timeouts and special files mark
+timeout. Committed history shares the settlement inventory's deadline, with at most 10,000 new commits and 100,000
+distinct committed paths and bounded metadata and Git output reads. Non-regular reference files are refused without
+blocking. Pattern comparison has its own 30-second deadline. Missing helper support, timeouts and special files mark
 the result incomplete. With `problem` present, counts can be partial and zero outside paths does not mean clean.
-This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent change.
-Git administration, changes outside the workspace and changes reverted before settlement are not inventoried.
+This observes the workspace and reachable history, not filesystem isolation or which actor made a concurrent change.
+Git administration itself, changes outside the workspace, uncommitted changes reverted before settlement and commits
+no longer reachable from the run branch are not inventoried as changed paths.
 
 ## A device keeps its identity
 

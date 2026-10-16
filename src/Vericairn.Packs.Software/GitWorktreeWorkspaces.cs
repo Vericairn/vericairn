@@ -82,7 +82,8 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
     public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand);
 
     /// <inheritdoc />
-    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline, Capture(workspace), permitted);
+    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline,
+        WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory), permitted);
 
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
 

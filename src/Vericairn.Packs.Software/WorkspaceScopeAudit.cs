@@ -21,12 +21,13 @@ internal static class WorkspaceScopeAudit
 
     public static WorkspaceSnapshot Capture(string workspace) => WorkspaceScopeProbe.Capture(workspace, Deadline);
 
-    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline)
+    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
         string? identity = null;
         var watch = Stopwatch.StartNew();
+        var committed = new HashSet<string>(StringComparer.Ordinal);
         long bytes = 0;
         try
         {
@@ -39,6 +40,14 @@ internal static class WorkspaceScopeAudit
             // Inventory the physical tree, including ignored and untracked files. Agent-modifiable Git configuration and
             // GIT_DIR/GIT_WORK_TREE never decide which ordinary workspace files the audit can see.
             Visit(workspace, "");
+            if (branch is null)
+            {
+                gitDirectory = WorkspaceGitScope.DirectoryOf(workspace);
+            }
+            else
+            {
+                WorkspaceGitScope.Changes(gitDirectory, branch, baseline, deadline - watch.Elapsed, committed);
+            }
             if (identity != DirectoryIdentity(workspace))
             {
                 throw new IOException("The workspace changed identity during its inventory.");
@@ -49,7 +58,7 @@ internal static class WorkspaceScopeAudit
             problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
         }
 
-        return new WorkspaceSnapshot(files, problem, identity);
+        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray());
 
         void CheckDeadline()
         {
@@ -165,7 +174,7 @@ internal static class WorkspaceScopeAudit
         };
     }
 
-    private static SafeFileHandle OpenRegular(string path)
+    internal static SafeFileHandle OpenRegular(string path)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -216,7 +225,8 @@ internal static class WorkspaceScopeAudit
     {
         var watch = Stopwatch.StartNew();
         string[] changes = before.Files.Keys.Union(after.Files.Keys, StringComparer.Ordinal)
-            .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path)).Order(StringComparer.Ordinal).ToArray();
+            .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path))
+            .Union(after.CommittedPaths ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string[] patterns = permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
             .Where(Relative).ToArray();
         var outside = new List<string>();
@@ -281,7 +291,7 @@ internal static class WorkspaceScopeAudit
         return Regex.IsMatch(path, "\\A" + expression + "\\z", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100));
     }
 
-    private static bool Relative(string path) => !string.IsNullOrWhiteSpace(path) && path.Length <= 2000
+    internal static bool Relative(string path) => !string.IsNullOrWhiteSpace(path) && path.Length <= 2000
         && !Path.IsPathRooted(path) && !path.Contains(':', StringComparison.Ordinal) && !path.Contains('\\', StringComparison.Ordinal)
         && !path.Any(char.IsControl) && path.Split('/').All(part => part is not ("." or ".."));
 

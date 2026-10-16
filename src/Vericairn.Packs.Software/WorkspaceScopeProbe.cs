@@ -17,16 +17,18 @@ public static class WorkspaceScopeProbe
     public static int? TryRun(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        if (arguments.Count != 2 || arguments[0] != Marker)
+        if (arguments.Count is not (2 or 5) || arguments[0] != Marker)
         {
             return null;
         }
 
-        Console.Out.Write(JsonSerializer.Serialize(WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline)));
+        Console.Out.Write(JsonSerializer.Serialize(arguments.Count == 2
+            ? WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline)
+            : WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, arguments[2], arguments[3], arguments[4])));
         return 0;
     }
 
-    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null)
+    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null)
     {
         if (deadline <= TimeSpan.Zero)
         {
@@ -42,6 +44,14 @@ public static class WorkspaceScopeProbe
         foreach (string argument in command.Skip(1).Concat([Marker, workspace]))
         {
             info.ArgumentList.Add(argument);
+        }
+
+        if (branch is not null)
+        {
+            foreach (string argument in new[] { branch, baseline ?? string.Empty, gitDirectory ?? string.Empty })
+            {
+                info.ArgumentList.Add(argument);
+            }
         }
 
         info.Environment.Clear();
@@ -63,7 +73,7 @@ public static class WorkspaceScopeProbe
                 return Incomplete();
             }
 
-            // The observer starts no children; still bound pipe reads if a replacement host does not obey that contract.
+            // Bound pipe reads even if an observer or one of its Git children does not close them.
             string json = output.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
             _ = error.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
             return process.ExitCode == 0 ? JsonSerializer.Deserialize<WorkspaceSnapshot>(json) ?? Incomplete() : Incomplete();
