@@ -39,8 +39,9 @@ without changing content or hash.
 
 ## Where records live
 
-`records/<type>/<yyyy-MM of at>/<id>.json`. Because file names are ULIDs, two people on two machines never
-write the same file; merges are always clean file additions, and conflicts are semantic, surfaced as findings.
+`records/<type>/<yyyy-MM of at>/<id>.json`. Independently authored records normally use distinct ULID file names, so ordinary
+merges add files. Reusing an identifier or changing existing record bytes is not a supported merge; divergent revisions
+of a shared predecessor are semantic conflicts surfaced as findings.
 
 ## Types
 
@@ -62,7 +63,9 @@ sources, permitted changes, prohibited effects, workspace, limits, expected outp
 recovery) and pins the exact work-order revision. An **attempt** is one contribution, authored by the
 contributor and pinned to the exact assignment. A **result** is what an attempt submits (outcome, summary,
 outputs by hash, evidence, checks, limitations, unresolved effects, next step), pinned to the exact attempt;
-it is a claim to inspect. An **amendment** asks to change the brief and authorizes nothing. Acceptance of a
+it is a claim to inspect. Its outcomes are `completed`, `partial`, `blocked` and `abandoned`; a failed check belongs
+in `checks` with outcome `failed`, not in the result's outcome. An **amendment** asks to change the brief and authorizes
+nothing. Acceptance of a
 result pins the result's hash and follows the work order's policy: results toward milestones need the
 operator; results of ordinary work may be self-accepted under `self-accept-ordinary-work`.
 `vericairn work brief <key>` renders everything a contributor needs from the records alone;

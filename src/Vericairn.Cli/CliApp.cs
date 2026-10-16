@@ -289,7 +289,7 @@ internal static class CliApp
     private static Command RuntimeFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
         var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall, configure (the local-network profile) and rotate (its certificate).");
-        var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Serve the local socket only, without the pinned loopback TLS endpoint." };
+        var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Disable the pinned loopback TLS endpoint. The local socket and any configured local-network listener remain available." };
         var serve = new Command("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.");
         var detachedOption = new Option<bool>("--detached") { Description = "Write the daemon's output to its log beside the estate's live store instead of the standard streams; 'runtime start' serves this way." };
         serve.Options.Add(noLoopbackOption);
@@ -637,7 +637,7 @@ internal static class CliApp
         var pairPrincipalOption = new Option<string>("--principal") { Description = "The principal the new device will act for.", Required = true };
         var pairByOption = new Option<string>("--by") { Description = "The administrator: the operator, or a principal holding the 'administer' scope, whose admitted device on this machine signs the admission.", Required = true };
         var pairProfilesOption = new Option<string[]>("--profile") { Description = "A connectivity profile the device will be permitted; repeatable (default: local-network).", AllowMultipleArgumentsPerToken = true };
-        var pair = new Command("pair", "Issue a pairing code for a new device on another machine: 20 characters, valid ten minutes, for one device and five attempts. Entered there with 'vericairn connections add', it records the device with the key it presents and admits it under your authority (needs the runtime serving the local-network profile).");
+        var pair = new Command("pair", "Issue a pairing code for a new device on another machine: 16 characters, valid ten minutes, for one device and five attempts. Entered there with 'vericairn connections add', it records the device with the key it presents and admits it under your authority (needs the runtime serving the local-network profile).");
         pair.Options.Add(pairPrincipalOption);
         pair.Options.Add(pairByOption);
         pair.Options.Add(pairProfilesOption);
@@ -696,7 +696,7 @@ internal static class CliApp
         var kindOption = new Option<string>("--kind") { Description = "finite (ends when done) or stewardship (holds a standing condition).", DefaultValueFactory = _ => "finite" };
         var workOrderOption = new Option<string[]>("--work-order") { Description = "A work order the sponsor gives as its plan; repeatable. Without one a planner proposes its work, as work orders that name the goal among their inputs." };
         var inputOption = new Option<string[]>("--input") { Description = "A record it builds on, as type:id; repeatable." };
-        var deadlineOption = new Option<string?>("--deadline") { Description = "A stop condition: when it stops, for example 2026-12-01T00:00:00Z." };
+        var deadlineOption = new Option<string?>("--deadline") { Description = "The goal's deadline, for example 2026-12-01T00:00:00Z; validated and recorded but not yet enforced." };
         var supersedesOption = new Option<string?>("--supersedes") { Description = "The goal this proposal revises, by its current revision's id; a revision needs a fresh activation, and only its sponsor, a person, or an operator for a goal an agent sponsors records it." };
         var propose = new Command("propose", "Propose a goal, or a revision of one: what done looks like, its constraints, its budget and its sponsor. A proposal authorizes and funds nothing. Anyone may propose a goal; a revision is its sponsor's when the sponsor is a person, and an operator's when an agent sponsors it, and anyone else proposes the change as an ask.");
         propose.Options.Add(byOption);
@@ -737,9 +737,9 @@ internal static class CliApp
         foreach ((string name, string description) in new[]
         {
             ("activate", "Activate a proposed goal, which grants its budget: by its sponsor, a person who holds the operator role or a grant of the spending scope, or by an operator when an agent sponsors it. An agent never activates a goal."),
-            ("pause", "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors."),
+            ("pause", "Pause an active goal; its sponsor's, or an operator's for a goal an agent sponsors. Prevents new runs but does not stop runs already in flight; use 'vericairn worker stop' for each run that must stop."),
             ("resume", "Resume a paused, budget-limited or blocked goal, which grants its budget again; by whoever may activate it."),
-            ("stop", "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned, and nothing follows. No step runs before the worker contract exists, so there is nothing to contain yet."),
+            ("stop", "Stop a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned and prevents new runs. Runs already in flight are not stopped; use 'vericairn worker stop' for each run that must stop."),
         })
         {
             var command = new Command(name, description);
@@ -822,7 +822,7 @@ internal static class CliApp
         var assignmentArgument = new Argument<string>("assignment") { Description = "The assignment the agent carries, whose contributor it is." };
         var launcherOption = new Option<string>("--launcher") { Description = "The launcher: claude-code, codex or generic (generic process launch is not complete agent support).", Required = true };
         var agentOption = new Option<string>("--agent") { Description = "The agent principal the harness acts for: the assignment's contributor, with an admitted device whose key this machine holds.", Required = true };
-        var byOption = new Option<string>("--by") { Description = "The principal recording the run: the operator, or a principal with the local-engineering scope.", Required = true };
+        var byOption = new Option<string>("--by") { Description = "The principal recording the run: the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope.", Required = true };
         var repositoryOption = new Option<string>("--repository") { Description = "The repository resource whose clone, registered on this machine (vericairn sources clone), the workspace is made from.", Required = true };
         var goalOption = new Option<string?>("--goal") { Description = "The goal the run is charged to, when the work belongs to more than one active goal." };
         var branchOption = new Option<string?>("--branch") { Description = "The work branch; work/ and the work order's key when omitted. A later run of the branch continues in its workspace." };

@@ -4,7 +4,9 @@ Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) 
 now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
 it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2
 carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
-0.5.1 wrote it and were withdrawn before publication; release 0.5.2 writes it.
+0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it, and 0.6.0
+continues to read formats 1 and 2 and write at most format 2. Release 0.6.0 implements goal evaluation and execution,
+routing and asks, and pairing; these additions do not require another format change.
 
 ## Why a new format number
 
@@ -227,8 +229,9 @@ operator who activated it), or, for a reserved action that principal does not ho
 never falls back to a principal the roster does not name, and a principal who answered an ask about the step is not
 asked again while the answer holds. Each eligible step's route is one of `agent`, `person`, `reserved` or `unavailable`,
 which the one-step operation acts on, or a state that holds it: `running`, `assigned`, `review`, `asked` or `answered`.
-The view also says whether the goal's budget allows each step now. It reads the machine's launchers and keys, so unlike
-the progress report it is not the same on every machine; it is a read-only query, and it records and starts nothing.
+The view also says whether the goal's budget allows each step now. It reads the machine's launchers and keys, so it is a view of that machine's ability to carry the work; it is a
+read-only query, and it records and starts nothing. The progress report's eligibility section uses records alone,
+though its repository-check findings also depend on local files.
 
 The one-step operation (`vericairn goal step`) records what a route produces: for a step routed to a principal it chose,
 an `assignment` to that principal, whose brief names the work order and the goal among its sources, prohibits every
@@ -332,7 +335,7 @@ predicate names holds:
   while a trigger is newer than its latest clearance, and `current` otherwise. No other type has a derived state; its
   own fields are compared with `fields`.
 
-So "release 0.5.0 of product P is published" is `{"type": "release", "subject": "<P>", "fields": {"version": "0.5.0",
+For example, the condition "release 1.0.0 of product P is published" is `{"type": "release", "subject": "<P>", "fields": {"version": "1.0.0",
 "status": "published"}}`; "work order K is accepted" is `{"type": "work-order", "fields": {"key": "K"}, "state":
 "accepted"}`; "no ask is open" is `{"type": "ask", "state": "open", "max": 0}`, where `"fields": {"state": "open"}`
 would also count the asks a decision answered, whose recorded state stays open; and "no living document of product P
@@ -358,7 +361,8 @@ the `reason`, and the records the verdict `read`, each at the hash it pins, whic
 impossible, and `findings` otherwise (`review.outcome`).
 
 The evaluator is a principal other than any step's author (`review.evaluator`). A goal's work is the work orders its
-plan gives and the current ones that name the goal, by any revision, among their `inputs`; the authors of its steps
+plan gives and those of which any revision names the goal, by any revision, among its `inputs`, each represented by
+its current revision; the authors of its steps
 are the contributor of every assignment of that work and every principal that recorded an attempt or a result under
 one. Reviewing a result is not authoring a step, so the principal that reviews the work may evaluate the goal. Who
 authored a step is judged from the records before the evaluation, so work assigned afterwards leaves it standing. The
@@ -420,6 +424,12 @@ change after an evaluation, so the runtime also refuses an acceptance while a re
 anything is written; `vericairn goal show <goal>` says whether the goal is ready and, when it is not, why.
 
 ## An agent run and its goal's ledger
+
+A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
+flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
+observed containment. In 0.6.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
+`stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
 A coding agent's run is an operation of action `agent-run` (the estate's `design/goals.md` §§ 7 and 9, decision
 01M4YBR5PGCPQD94BVNC547EBA). The worker, `vericairn worker run` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)),
@@ -527,8 +537,9 @@ The worker observes stdout event-stream liveness with a monotonic clock; stderr 
 certify progress. Each launcher defaults to a 600-second silence limit; its `stall-seconds` setting (1–86400) changes
 that default, and the goal's `limits.stallSeconds` takes precedence. The intent pins the effective limit from the goal current when it is recorded
 in `target.stallSeconds`. At one limit of silence the worker records an open attention `ask` to the goal's accountable
-principal, about the run (no notification is sent). At twice the limit it transmits a stop and contains the whole
-launch boundary. New stdout events reset the silence timer but never erase an earlier attention fact. A failed
+principal, about the run (no notification is sent). At twice the limit it requests a stop and attempts to contain the whole
+launch boundary; containment is recorded only after exit is observed. New stdout events reset the silence timer but
+never erase an earlier attention fact. A failed
 attention write is retried and does not prevent containment. Settlement records `liveness`: `stallSeconds`,
 `lastEventAt`, optional `attentionAt`, `attention` (the ask id), and `stoppedAt`; run-list responses expose the same
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
@@ -595,7 +606,10 @@ own format, and adds no type and no field:
   administrator's admitted device on the runtime's machine like every admission in format 2. Its note says
   that the device's descriptive fields are its own statement.
 
-The runtime writes both or neither. The key a paired device proves on the local network, on every connection
+On a normal completion the runtime writes both records; if admission validation refuses, it removes the newly
+written device record. The writes are sequential, not a crash-atomic transaction: an interruption between them can
+leave a device record without admission. A lost final reply can leave both recorded even though the client removes
+its new key; inspect the devices and revoke an unwanted admission. The key a paired device proves on the local network, on every connection
 and every request, is the one its device record names, and `profiles` decides where it connects: the local
 network admits only a device whose current record permits `local-network`. A paired device's key stays on its
 own machine, so `vericairn devices list` on the runtime's machine does not show it as held there.

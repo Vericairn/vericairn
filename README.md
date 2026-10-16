@@ -5,7 +5,12 @@ intention into an understood, authorized, produced, reviewed, delivered and main
 decisions, sources, relationships and history intact.
 
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
-`vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client follows in milestone M3.
+`vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
+
+The 0.6.0 code adds Community goals with record predicates and independent evaluations, the worker with Claude Code,
+Codex and generic launchers, roster routing and asks, the progress report, and pairing with a runtime over the local
+network. Workbench has a Goals workspace and shows asks and progress on Home. The [0.6.0 documentation set](docs/releases/0.6.0/README.md)
+describes these features and their limits; its preparation does not establish release acceptance or publication.
 
 ## Releases
 
@@ -28,7 +33,7 @@ release and pins the one it runs on.
   [docs/record-format-v1.md](docs/record-format-v1.md) and, for what format 2 changes,
   [docs/record-format-v2.md](docs/record-format-v2.md). Device keys are held in the strongest custody the machine
   offers: CNG on Windows, the Secure Enclave on a Mac through the `vericairn-enclave` helper
-  (`src/Vericairn.Enclave`, in Swift), the secret service on Linux, otherwise an owner-only file.
+  (`src/Vericairn.Enclave`, in Swift), the secret service on Linux, otherwise a file in per-user state (owner-only permissions on Unix; inherited directory ACLs on Windows).
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
@@ -46,12 +51,13 @@ release and pins the one it runs on.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
   `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `doctor`, `version`; a
   client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
-  report from the records alone, the same on every machine: where the estate stands, the work orders by state, each
+  report from the records, with repository-check findings: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
   operator, every line naming the records it rests on; the API, an MCP tool, Workbench's home and a generated region
-  of a document carry the same report. `vericairn goal` carries an objective: a
+  of a document expose this report; the generated region omits repository checks to avoid reading itself. `vericairn goal` carries an objective: a
   goal is proposed and activated, record predicates and an evaluator who did none of its work judge it condition
-  by condition, and its sponsor accepts it, or an operator when an agent sponsors it; no tool a coding agent is
+  by condition, and its sponsor accepts it (or a delegate holding `accept-work` for an ordinary goal), or an operator
+  when an agent sponsors it; no tool a coding agent is
   given can activate, fund or accept one, and only its sponsor, or an operator for a goal an agent sponsors,
   revises it. `vericairn worker` carries one of a goal's assignments with a coding agent (the worker contract
   `vericairn.worker/1`): through Claude Code's or Codex's own `/goal`, or a generic launch, in a git worktree on
@@ -65,11 +71,10 @@ release and pins the one it runs on.
   asked, never another contributor. `vericairn ask` shows what waits on a principal: its open asks, at most three
   at a time with the recommendation first and the consequence of leaving each unanswered, which a decision of the
   principal asked answers and waiting never does. `vericairn goal step` takes a goal's next step, one at a time, the
-  smallest form of Community's conductor, for an operator, the goal's sponsor or a principal holding
+  smallest form of Community's conductor, for an operator, the goal's sponsor when a person, or a principal holding
   `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
   a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
-  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Pro's
-  program plans and schedules many steps.
+  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Multi-step planning and scheduling are outside this Community implementation.
   `vericairn devices pair` issues a short-lived pairing
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
@@ -80,6 +85,9 @@ release and pins the one it runs on.
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over
   the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
   `Vericairn.Mcp` is the library behind it.
+- Worker spending limits are soft, and unknown usage is charged at the reserved cap. The launchers are tested with
+  stand-in processes; live coding-agent sessions and sign-in are not qualified by those tests. Process containment
+  and the workspace audit have platform limits, detailed in [docs/software.md](docs/software.md#launch-accounting-and-containment).
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
   the runtime: home with attention, the asks waiting among it, and the progress report, products, work orders, assignments,
   results, review and decisions, goals, releases, living documents and the runtime, documented in
@@ -98,8 +106,8 @@ Development is supported on all three. Requires the .NET SDK pinned in `global.j
 Files are LF in every working tree (`.gitattributes`), console output is UTF-8 with LF line endings on
 every platform, and continuous integration builds and tests on all three operating systems and scans the
 commits of every pushed branch and pull request for secrets with a pinned, checksum-verified gitleaks.
-Building the iOS client and signing for Apple platforms will require macOS, which is Apple's constraint,
-not ours; everything else, including the Android client, builds anywhere.
+The release workflow builds the Secure Enclave helper on macOS. This repository's solution contains no iOS or Android
+client, so its build and tests make no mobile-platform qualification claim.
 
 ## Build
 

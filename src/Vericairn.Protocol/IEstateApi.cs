@@ -110,19 +110,19 @@ public interface IEstateApi
     /// <summary>Hands a step an agent holds over to a person: a new assignment carrying the agent's brief and naming its assignment, and a stop asked of the agent's runs in flight.</summary>
     TakeoverResponse WorkTakeover(TakeoverRequest request);
 
-    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it.</summary>
+    /// <summary>Proposes a goal, or a revision of one; it authorizes and funds nothing. Anyone may propose a goal; a revision is recorded by its sponsor, a person, or an operator when an agent sponsors it. The body's limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.</summary>
     WriteOutcome GoalPropose(GoalProposeRequest request);
 
     /// <summary>Activates a proposed goal, which grants its budget: its sponsor, a person with the authority to spend, or an operator when an agent sponsors it.</summary>
     WriteOutcome GoalActivate(string goal, GoalActionRequest request);
 
-    /// <summary>Pauses an active goal; its sponsor's, or an operator's for a goal an agent sponsors.</summary>
+    /// <summary>Pauses an active goal; its sponsor's, or an operator's for a goal an agent sponsors. Prevents new runs but does not stop runs already in flight; request each run's stop separately.</summary>
     WriteOutcome GoalPause(string goal, GoalActionRequest request);
 
     /// <summary>Resumes a paused, budget-limited or blocked goal, which grants its budget again; by whoever may activate it.</summary>
     WriteOutcome GoalResume(string goal, GoalActionRequest request);
 
-    /// <summary>Stops a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned, and nothing follows.</summary>
+    /// <summary>Stops a goal: its sponsor, or an operator for a goal an agent sponsors, ends it as abandoned and prevents new runs. Runs already in flight are not stopped; request each run's stop separately.</summary>
     WriteOutcome GoalStop(string goal, GoalActionRequest request);
 
     /// <summary>Records the evaluation of a goal's current revision, condition by condition, by a principal other than any step's author.</summary>
