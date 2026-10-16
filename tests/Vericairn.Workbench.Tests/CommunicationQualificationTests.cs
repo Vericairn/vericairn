@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 
 namespace Vericairn.Workbench.Tests;
 
@@ -86,5 +87,56 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
 
         Assert.Empty(api.Records("acceptance"));
         Assert.Equal("open", api.Record(ask.Written.Id)!.Envelope.GetProperty("body").GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task D08E_ASavedHandoffKeepsOriginalDecisionsFailuresAndEffectsWhenTheSourceChanges()
+    {
+        string root = Seed.Temp("wb-comms-continuity");
+        string person = Seed.Init(root);
+        using var connection = new ServiceConnection(root);
+        IEstateApi api = connection.Api!;
+        string orderBody = """{"key":"COMMS-J","kind":"ordinary","title":"Interrupted work","intent":"Reconcile before retrying.","scope":["tests"],"exitQuestion":"Reconciled?","inputs":[],"deliverables":["result"]}""";
+        WriteOutcome order = api.NewRecord(new("work-order", person, Seed.Json(orderBody)));
+        Assert.True(order.Ok, order.Problem?.Message);
+        WriteOutcome decision = api.NewRecord(new("decision", person, Seed.Json($$"""{"title":"Keep the original identity","statement":"Do not retry the uncertain effect.","summary":"Inspect first.","synthesis":"The interruption did not settle the effect.","effects":["Reconcile before retrying."],"affects":["{{order.Written!.Id}}"],"decidedBy":"{{person}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["No second dispatch."]}""")));
+        Assert.True(decision.Ok, decision.Problem?.Message);
+        string assignment = api.Assign(new("COMMS-J", person, person, Seed.Json("""{"outcome":"Reconcile the operation.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no retry"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["effect reconciled"],"recovery":"Read the original operation."}"""))).Written!.Id;
+        string attempt = api.Attempt(new(assignment, person, "local clone", "Inspect.")).Written!.Id;
+        JsonObject effect = JsonNode.Parse("""{"provider":"fixture","action":"write-widget","identity":"wb-original-effect","intent":"Write the widget.","target":{"repository":"Example/widget"},"status":"not-started","evidence":[]}""")!.AsObject();
+        WriteOutcome operation = api.NewRecord(new("operation", person, Seed.Json(effect.ToJsonString())));
+        Assert.True(operation.Ok, operation.Problem?.Message);
+        effect["dispatchedAt"] = api.Record(operation.Written!.Id)!.Envelope.GetProperty("at").GetString();
+        effect["status"] = "dispatched";
+        operation = api.NewRecord(new("operation", person, Seed.Json(effect.ToJsonString()), Supersedes: operation.Written.Id));
+        Assert.True(operation.Ok, operation.Problem?.Message);
+        effect["status"] = "uncertain";
+        operation = api.NewRecord(new("operation", person, Seed.Json(effect.ToJsonString()), Supersedes: operation.Written!.Id));
+        Assert.True(operation.Ok, operation.Problem?.Message);
+        WriteOutcome result = api.Result(new(attempt, person, Seed.Json($$"""{"outcome":"partial","summary":"Interrupted.","outputs":[],"evidence":[],"checks":[{"name":"reply","outcome":"failed","summary":"The reply was lost."},{"name":"external state","outcome":"not-performed","summary":"No external observation."}],"limitations":[],"unresolvedEffects":["Operation {{operation.Written!.Id}} remains uncertain under wb-original-effect."],"nextStep":"Inspect before retrying."}""")));
+        Assert.True(result.Ok, result.Problem?.Message);
+        Assert.True(api.CommunicationSet(new(person, "person", new(Progress: "none", Handoff: "short"), person)).Ok);
+        var previous = new HandoffDocument(() => api, () => api.Communication(person));
+        await fixture.Ui(previous.Prepare);
+        string saved = previous.PackageJson;
+        var successor = new HandoffDocument(() => api, () => api.Communication(person));
+        await fixture.Ui(() => Assert.True(successor.Load(saved)));
+        Assert.Equal(saved, successor.PackageJson);
+        Assert.Contains("handoff (short)", successor.Text, StringComparison.Ordinal);
+        foreach (string required in new[] { decision.Written!.Hash, result.Written!.Hash, operation.Written.Hash, "Do not retry the uncertain effect.", "The reply was lost.", "No external observation.", "wb-original-effect" })
+        {
+            Assert.Contains(required, successor.Text, StringComparison.Ordinal);
+        }
+
+        WriteOutcome revised = api.NewRecord(new("work-order", person, Seed.Json(orderBody.Replace("Reconcile before retrying.", "Inspect the changed source.", StringComparison.Ordinal)), Supersedes: order.Written.Id));
+        Assert.True(revised.Ok, revised.Problem?.Message);
+        await fixture.Ui(successor.Compare);
+        Assert.Contains(revised.Written!.Id, successor.ResumeText, StringComparison.Ordinal);
+        Assert.Contains("Inspect the changed source.", successor.ResumeText, StringComparison.Ordinal);
+        Assert.Contains("Nothing is restarted or accepted", successor.ResumeText, StringComparison.Ordinal);
+        Assert.Equal(saved, successor.PackageJson);
+        Assert.Equal(CanonicalJson.SerializePrettyUtf8(JsonSerializer.Deserialize<HandoffPackage>(saved, ProtocolJson.Options)!.Payload), CanonicalJson.SerializePrettyUtf8(successor.Package!.Payload));
+        Assert.Equal(operation.Written.Id, Assert.Single(api.Records("operation")).Id);
+        Assert.Empty(api.Records("acceptance"));
     }
 }

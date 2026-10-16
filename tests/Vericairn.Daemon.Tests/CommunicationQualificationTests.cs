@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Buffers.Text;
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using Vericairn.Protocol;
@@ -121,5 +124,75 @@ public class CommunicationQualificationTests
         Assert.Null(client.ContextRead(pin).Content);
         Assert.NotEqual(package.Hash, client.Context("COMMS-J", 100_000).Package!.Hash);
         Assert.Empty(client.Records("operation"));
+    }
+
+    [Fact]
+    public async Task D08E_RestartedApiResumesTheSavedBasisAndKeepsUnavailableSizesUnknown()
+    {
+        using var estate = new TestEstate(2);
+        byte[] lost = Encoding.UTF8.GetBytes("An original absent from the successor's copy.\n");
+        estate.Add("document-revision", estate.OperatorId, $$"""{"path":"docs/lost.md","title":"Missing original","hash":"{{ContentHash.Sha256(lost)}}","bytes":{{lost.Length}},"mediaType":"text/markdown","revision":1,"summary":"The original is required for any dependent step."}""");
+        var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Continuation","intent":"Inspect docs/lost.md if available.","scope":["tests"],"exitQuestion":"Honest limits?","inputs":[],"deliverables":["result"]}""");
+        string saved;
+        string pin;
+        await using (DaemonHost previous = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken))
+        {
+            using var client = new VericairnClient(previous.Endpoint);
+            ContextPackage context = client.Context("COMMS-J").Package!;
+            JsonElement source = context.Payload.GetProperty("withheld").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+            Assert.Equal(JsonValueKind.Null, source.GetProperty("originalBytes").ValueKind);
+            Assert.Equal(JsonValueKind.Null, source.GetProperty("withheldBytes").ValueKind);
+            Assert.Equal(JsonValueKind.Null, context.Payload.GetProperty("accounting").GetProperty("tokens").ValueKind);
+            pin = source.GetProperty("pin").GetString()!;
+            saved = JsonSerializer.Serialize(client.Handoff().Package!, ProtocolJson.Options);
+        }
+
+        var changed = estate.Add("work-order", estate.OperatorId, order.Body.GetRawText().Replace("if available", "only after restoring its exact bytes", StringComparison.Ordinal), supersedes: order.Id);
+        await using DaemonHost current = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        using var successor = new VericairnClient(current.Endpoint);
+        HandoffPackage package = JsonSerializer.Deserialize<HandoffPackage>(saved, ProtocolJson.Options)!;
+        int count = estate.Load().Records.Count;
+        ResumeResponse resume = successor.ResumeHandoff(package);
+        Assert.Null(resume.Problem);
+        Assert.True(resume.Json!.Value.GetProperty("changed").GetBoolean());
+        Assert.Contains(resume.Json.Value.GetProperty("superseded").EnumerateArray(), r => r.GetProperty("previous").GetString() == order.Id && r.GetProperty("successor").GetString() == changed.Id);
+        Assert.Equal("original-unavailable", successor.ContextRead(pin).Problem!.Code);
+        Assert.Null(successor.ContextRead(pin).Content);
+        Assert.Equal(ContentHash.Sha256(CanonicalJson.SerializePrettyUtf8(package.Payload)), package.Hash);
+        Assert.Equal(count, estate.Load().Records.Count);
+    }
+
+    [Fact]
+    public async Task D08E_RevokedApiReadersReceiveNoOmissionMetadataForKnownOrUnknownPins()
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        byte[] original = Encoding.UTF8.GetBytes("Private optional original.\n");
+        harness.Estate.WriteFile("docs/private.md", Encoding.UTF8.GetString(original));
+        harness.Estate.Add("document-revision", harness.Estate.OperatorId, $$"""{"path":"docs/private.md","title":"Private original","hash":"{{ContentHash.Sha256(original)}}","bytes":{{original.Length}},"mediaType":"text/markdown","revision":1,"summary":"Private content."}""");
+        harness.Estate.Add("work-order", harness.Estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Private continuation","intent":"Inspect docs/private.md if useful.","scope":["tests"],"exitQuestion":"Authorized?","inputs":[],"deliverables":["result"]}""");
+        RuntimeConnection paired = harness.Pair(harness.Estate.BuilderId, "Context reader");
+        var signer = harness.Signer(paired);
+        using VericairnClient client = VericairnClient.LocalNetwork(paired, signer);
+        JsonElement source = client.Context("COMMS-J").Package!.Payload.GetProperty("withheld").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+        string pin = source.GetProperty("pin").GetString()!;
+        Assert.Equal(original, client.ContextRead(pin).Content);
+        string publicKey = harness.Host.Service.Standing(paired.Device)!.PublicKey;
+        using X509Certificate2 certificate = LocalNetworkCredential.Issue(signer, Base64Url.DecodeFromChars(publicKey), DateTimeOffset.UtcNow);
+        using var raw = new MutualTls(harness, certificate, harness.Host.Endpoint.Loopback!.Certificate);
+        Assert.True(harness.Socket.DeviceRevoke(new(paired.Device, harness.Estate.OperatorId, "Withdraw access after preparation.")).Ok);
+        string? refusal = null;
+        foreach (string target in new[] { "/v1/context/original/" + pin, "/v1/context/original/unknown", "/v1/context/work/COMMS-J", "/v1/context/work/COMMS-J/brief" })
+        {
+            (HttpStatusCode status, string body) = await raw.SendSignedAsync(signer, HttpMethod.Get, target);
+            Assert.Equal(HttpStatusCode.Unauthorized, status);
+            refusal ??= body;
+            Assert.Equal(refusal, body);
+            foreach (string metadata in new[] { pin, "docs/private.md", ContentHash.Sha256(original), "originalBytes", "withheld", "manifest" })
+            {
+                Assert.DoesNotContain(metadata, body, StringComparison.Ordinal);
+            }
+        }
+
+        Assert.Throws<HttpRequestException>(() => client.ContextRead(pin));
     }
 }
