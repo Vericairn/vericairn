@@ -12,6 +12,7 @@
       <MenuItem Header="_Estate">
         <MenuItem Header="_Open or connect" InputGesture="Ctrl+O" Click="OnFocusOpen" />
         <MenuItem Header="_Refresh" InputGesture="F5" Click="OnRefresh" />
+        <MenuItem Header="Record my _observation of the estate" Click="OnObserveEstate" />
       </MenuItem>
       <MenuItem Header="_Runtime" Name="RuntimeMenu">
         <MenuItem Header="_Start the daemon" Click="OnStartRuntime" />
@@ -25,6 +26,7 @@
         <MenuItem Header="_Products" Click="OnOpenProducts" />
         <MenuItem Header="Living _documents" InputGesture="Ctrl+Shift+D" Click="OnOpenLivingDocuments" />
         <MenuItem Header="Progress _report" InputGesture="Ctrl+Shift+P" Click="OnOpenProgress" />
+        <MenuItem Header="_Hand-over and resume" InputGesture="Ctrl+Shift+H" Click="OnOpenHandoff" />
         <MenuItem Header="_Goals workspace" InputGesture="Ctrl+Shift+G" Click="OnOpenGoals" />
         <MenuItem Header="_Assign the open work order" InputGesture="Ctrl+Shift+A" Click="OnOpenComposer" />
         <MenuItem Header="_Compare the open record with its earlier revision" Click="OnCompareOpen" />
@@ -134,6 +136,11 @@
                 </ListBox.ItemTemplate>
               </ListBox>
               <Button Name="ProgressButton" Content="Open the progress report" MinHeight="28" HorizontalAlignment="Left" Click="OnOpenProgress" />
+              <SelectableTextBlock MinHeight="24" Text="{Binding LastPersonObservation}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.Name="Last human observation" />
+              <WrapPanel>
+                <Button Name="HandoffButton" Content="Hand-over and resume" MinHeight="28" Margin="0,0,8,0" Click="OnOpenHandoff" />
+                <Button Name="ObserveEstateButton" Content="Record my observation" MinHeight="28" Click="OnObserveEstate" />
+              </WrapPanel>
             </StackPanel>
           </Border>
           <TabControl Grid.Row="1" Name="DocumentTabs" Focusable="True" ItemsSource="{Binding Documents}" SelectedItem="{Binding SelectedDocument}" AutomationProperties.Name="Documents">
@@ -143,6 +150,38 @@
               </DataTemplate>
             </TabControl.ItemTemplate>
             <TabControl.DataTemplates>
+              <DataTemplate x:DataType="local:HandoffDocument">
+                <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="8">
+                  <TextBlock Text="Hand-over and resume" FontSize="18" FontWeight="SemiBold" />
+                  <StackPanel Grid.Row="1" Spacing="4" Margin="0,6">
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Identity}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" />
+                    <SelectableTextBlock MinHeight="24" Text="{Binding Note}" TextWrapping="Wrap" AutomationProperties.Name="Hand-over outcome" />
+                  </StackPanel>
+                  <WrapPanel Grid.Row="2" Margin="0,0,0,6">
+                    <Button MinHeight="28" Name="PrepareHandoffButton" Content="Prepare new hand-over" Margin="0,0,6,0" Click="OnPrepareHandoff" />
+                    <Button MinHeight="28" Name="SaveHandoffButton" Content="Save package…" IsEnabled="{Binding HasPackage}" Margin="0,0,6,0" Click="OnSaveHandoff" />
+                    <Button MinHeight="28" Name="LoadHandoffButton" Content="Open package…" Margin="0,0,6,0" Click="OnLoadHandoff" />
+                    <Button MinHeight="28" Name="ResumeHandoffButton" Content="Resume: show changes" IsEnabled="{Binding HasPackage}" Click="OnResumeHandoff" />
+                  </WrapPanel>
+                  <TabControl Name="HandoffViews" Grid.Row="3" AutomationProperties.Name="Hand-over and changes">
+                    <TabItem Header="Hand-over">
+                      <ScrollViewer>
+                        <SelectableTextBlock MinHeight="24" Text="{Binding Text}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" AutomationProperties.Name="Complete hand-over and originals" />
+                      </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="Changes since hand-over">
+                      <ScrollViewer>
+                        <SelectableTextBlock MinHeight="24" Text="{Binding ResumeText}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" AutomationProperties.Name="Complete resume comparison" />
+                      </ScrollViewer>
+                    </TabItem>
+                    <TabItem Header="Portable package">
+                      <ScrollViewer>
+                        <SelectableTextBlock MinHeight="24" Text="{Binding PackageJson}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" AutomationProperties.Name="Portable hand-over JSON" />
+                      </ScrollViewer>
+                    </TabItem>
+                  </TabControl>
+                </Grid>
+              </DataTemplate>
               <DataTemplate x:DataType="local:ProductsDocument">
                 <ScrollViewer>
                   <StackPanel Margin="8" Spacing="8">

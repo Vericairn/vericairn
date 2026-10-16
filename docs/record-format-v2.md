@@ -668,7 +668,7 @@ that device's every signature needs its owner's presence. So a record's signatur
 runtime's machine, never the paired device that asked for it. The runtime keeps the paired device behind each
 such write outside the records, in `local-network-writes.jsonl` beside its live store, which `vericairn devices
 writes` lists ([api-v1.md](api-v1.md#the-local-network-profile)). Records signed by the paired device itself,
-on its own machine, are the design to come: the Remote profile, planned for 0.7.0, needs them.
+on its own machine, remain a future design. Remote is not built; HANDOFF-01 adds no Remote signing or transport.
 
 ## Emergency access
 
@@ -694,3 +694,30 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said
   as such, never a silent self-admission.
+
+## Estate observations (HANDOFF-01)
+
+Record format 2 adds `estate` to the existing `observation.kind` values. This
+kind requires a human author and an exact, hash-pinned `estate` subject. `asOf`
+is no later than the observation record's authoring time. Its flat `facts` object
+requires `records` (a nonnegative count), `recordSetHash`, `pinHash`, and
+`statusHash` (SHA-256 hashes); the existing `summary` and `limitations` remain
+required. Other observation kinds keep their existing rules, and record
+format 1 does not admit the estate kind. Earlier builds that do not know this
+kind refuse it; they must not silently treat it as an observation by automation.
+No existing record is rewritten and the estate record format is not renumbered.
+
+The runtime's explicit status-observation operation supplies all these facts
+from the state before writing the observation: the record-set hash covers a
+canonical compact JSON array of `{id, hash}` for every record, sorted by id;
+the pin hash covers the canonical compact JSON serialization of `EstateManifest`
+(including artifacts and storage profile); the status hash covers the canonical
+compact status document with its checks. These are snapshot identities, not
+claims of live external health. The write observes and accepts nothing else.
+
+Status derives `lastObservedByPerson` from current valid estate observations
+about this charter or a predecessor, ordered by `asOf`, authoring time and id.
+It includes source identities and facts and is null when unknown. A newer
+record reporting an older observation does not advance freshness. Ordinary
+reads and automation never manufacture a human observation. Hand-over and
+resume are derived artifacts, not new record types or editable status records.

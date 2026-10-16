@@ -43,7 +43,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             }
         }
 
-        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method);
+        // Resume carries its retained baseline in a POST body but is a read, with no signing key or write ledger needed.
+        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) && !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
             return await next(context).ConfigureAwait(false);
@@ -132,7 +133,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     {
         ["GET /v1/health"] = null,
         ["GET /v1/status"] = null,
+        ["POST /v1/status/observations"] = typeof(EstateObserveRequest),
         ["GET /v1/progress"] = null,
+        ["GET /v1/handoff"] = null,
+        ["POST /v1/resume"] = typeof(HandoffPackage),
         ["GET /v1/validate"] = null,
         ["GET /v1/check"] = null,
         ["GET /v1/records/{id}"] = null,
@@ -213,6 +217,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
+        [typeof(HandoffPackage)] = (_, _, _) => null,
+        [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
         [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
         [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),

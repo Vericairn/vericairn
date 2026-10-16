@@ -42,8 +42,29 @@ internal static class Commands
     public static int Check(string root, bool json) =>
         IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
 
-    public static int Status(string root, bool json)
+    public static int Status(string root, bool json, bool observe = false, string? by = null)
     {
+        if (observe || by is not null)
+        {
+            if (!observe || string.IsNullOrWhiteSpace(by))
+            {
+                return Fail("Recording an observation requires both --observe and --by with a human principal id.");
+            }
+
+            return WithApi(root, api =>
+            {
+                WriteOutcome written = api.ObserveEstate(new EstateObserveRequest(by));
+                if (!written.Ok)
+                {
+                    return ReportOutcome(written, json);
+                }
+
+                StatusResponse observed = api.Status();
+                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : observed.Text);
+                return observed.HasErrors ? HasErrors : Clean;
+            });
+        }
+
         if (!IsEstate(root))
         {
             return WithFiles(root, model =>
@@ -68,6 +89,39 @@ internal static class Commands
         ProgressResponse progress = api.Progress();
         Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : progress.Text);
         return progress.HasErrors ? HasErrors : Clean;
+    });
+
+    public static int Resume(string root, string input, bool json) => WithBody(input, body => WithApi(root, api =>
+    {
+        HandoffPackage? package = body.Deserialize<HandoffPackage>(ProtocolJson.Options);
+        if (package is null)
+        {
+            return Fail("A retained hand-over package is required.");
+        }
+
+        ResumeResponse response = api.ResumeHandoff(package);
+        Console.Out.Write(json ? response.Json is JsonElement view ? CanonicalJson.SerializePretty(view) : JsonSerializer.Serialize(response.Problem, ProtocolJson.Options) : response.Text);
+        return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
+    }));
+
+    public static int Handoff(string root, string? output, long? maxBytes, bool json) => WithApi(root, api =>
+    {
+        HandoffResponse response = api.Handoff(maxBytes);
+        if (response.Package is null)
+        {
+            Console.Out.Write(json ? JsonSerializer.Serialize(response.Problem, ProtocolJson.Options) : response.Text);
+            return Failed;
+        }
+
+        string package = CanonicalJson.SerializePretty(JsonSerializer.SerializeToElement(response.Package, ProtocolJson.Options));
+        if (output is not null)
+        {
+            using var file = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            file.Write(Encoding.UTF8.GetBytes(package));
+        }
+
+        Console.Out.Write(json ? package : response.Text);
+        return Clean;
     });
 
     /// <summary>What waits on a principal, or on every principal, through the API: at most three asks in one delivery to each, the recommendation first.</summary>

@@ -539,3 +539,48 @@ upgrade path is proven by a synthetic migration in the tests: a step from format
 file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
 once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+
+## Handing work over
+
+`vericairn handoff` prepares the same hand-over as `GET /v1/handoff`: a generated
+view of goals, work orders, assignments, attempts and results, runs, decisions,
+asks, next steps, the estate's pin and recorded observations, followed by complete
+original records. No actor supplies the recap. Missing decisions or open work
+referenced by the records refuse the hand-over and are named together.
+
+Use `vericairn handoff --out handoff.json` to retain its portable package in a
+new file. Existing files are never overwritten. `--json` prints that same package;
+`--max-bytes <n>` sets a payload byte cap and refuses overflow without dropping
+required material. A refused command exits 2 and creates no package file.
+Without a cap, the full selected scope is retained and the limit is not set.
+The package includes every record held by this copy and its history; its
+`withheld` list is empty. Referenced source files, output objects and unrecorded
+provider state are outside that selection. The sidecar measures and hashes the
+canonical payload; token counts and model-context fit are not claimed. A copy
+with the same records and pin produces the same package. Records remain originals,
+apart from the deterministic presentation, with synthesis off.
+
+`vericairn resume handoff.json` compares that retained basis to the current copy.
+Use `--json` for the full machine comparison or `resume -` to read the package
+from standard input. It includes added and superseded records, missing or
+changed originals, the full pin and observed-state differences. It compares
+identities rather than time windows, so an older timestamp on an imported record
+cannot hide it. Unchanged records do not prove an unchanged external world.
+Resume exits 0 for a valid comparison, 1 when the current view has errors or
+missing/changed originals, and 2 for an invalid baseline. It submits nothing and
+never rewrites the retained package. Review changes and current authority before
+continuing under the existing assignment and original operation identities.
+
+`vericairn status` shows when a person last explicitly observed the estate,
+including the observation record and hash, or says unknown. To record an
+observation, a person runs `vericairn status --observe --by <principal-id>`.
+The runtime supplies the timestamp and snapshot identities; ordinary status
+reads, agent reads and repository probes do not update them. Both flags are
+required, and an agent cannot author an estate observation. Format-1 estates
+must be explicitly upgraded before this write is available.
+
+Remote is not built. HANDOFF-01 provides the runtime, API, CLI and local desktop
+Workbench journey only. Moving a saved package between copies is an explicit
+file transfer; this work adds no relay, mobile client, Remote transport or
+remote-device record signing. It makes no qualification claim for those surfaces,
+live external health, or an agent harness's compaction and session recovery.

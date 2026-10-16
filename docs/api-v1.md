@@ -270,8 +270,8 @@ written; after the write, its outcome under the same id, written with the record
 stop, the run's id), or failed. When the runtime starts, it closes every intent left without an outcome as
 interrupted, naming the records its principal wrote since, one of which that write may have produced. `vericairn
 devices writes [<device>]` lists each write with its state. Records signed by the paired device itself, on its own
-machine, are the design to come: the Remote profile, planned for 0.7.0, needs them, since a remote device's
-writes cannot rest on a key of the runtime's machine. Loopback does not check `profiles` yet, so devices recorded
+machine, remain a future design. Remote is not built, and HANDOFF-01 does not implement or qualify its
+signing or transport. Loopback does not check `profiles` yet, so devices recorded
 before 0.6.0 with the default `embedded` keep their loopback access.
 
 ## Pairing
@@ -407,7 +407,7 @@ HMAC-SHA256, ECDSA P-256 with SHA-256, TLS.
 - A runtime listens beyond a private network only where the operator allowed it with `--allow-public`.
 
 Not covered here: discovery, since devices are given the address; the relay service; and records signed on a
-paired device by its own key, the design the Remote profile in 0.7.0 needs.
+paired device by its own key. Remote is not built; local-network pairing does not qualify a Remote client.
 
 ## Operations
 
@@ -663,3 +663,79 @@ whose principal is not the one the request names as acting is refused. Sign a de
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
+
+## Hand-over (HANDOFF-01)
+
+`GET /v1/handoff[?maxBytes=<positive integer>]` is additive to API v1. The SDK's
+`Handoff(long? maxBytes = null)` returns `HandoffResponse`: `text`, `package`, and
+`problem`. A refusal returns HTTP 200 with `package: null` and a problem naming
+all missing or invalid sources; clients must inspect `problem`. This read authors
+no record and dispatches no work.
+
+The package is a `vericairn.handoff/1` payload with a sidecar `hash` and `bytes`.
+Both measure the payload's canonical pretty UTF-8 serialization, including all
+originals, source identities, derived presentation, accounting and framing;
+they exclude the sidecar and the separately rendered response text. The pin,
+record format, latest recorded timestamp and observed state come from the same
+record snapshot. No wall-clock timestamp is mistaken for a human observation.
+Selection is deterministic: all records held by this copy, including superseded
+records, sorted by id. Every original has its exact record hash, retained byte
+hash and byte count, base64 content, repository-relative path, exact-id CLI
+retrieval command and API link. Record content hashes and retained byte hashes
+are different identities. Originals remain separate from the generated view;
+synthesis is off. Goals, work, assignments, results, runs, decisions, asks,
+recorded observations and next steps remain inspectable in full.
+
+`withheld` is empty for this full-record selection. Source-file contents and
+output objects are explicitly outside its scope; it does not certify their
+availability for a dependent action. Without a cap it reports **limit not set**;
+tokens and model fit are unknown. `maxBytes` refuses the entire hand-over if it
+does not fit, including mandatory originals and manifest overhead. It never
+silently truncates, substitutes a summary or claims fit to a model context.
+Malformed, missing or conflicting records and incomplete local record batches
+refuse a package with every finding. A self-contained package can be retained
+by the caller; the read does not store another status ledger or grant authority.
+Remote is not built.
+
+`POST /v1/resume` accepts the retained `HandoffPackage` itself (`hash`, `bytes`,
+`payload`). The SDK operation is `ResumeHandoff(package)`. Despite its POST body,
+this is a read: signed requests use their ordinary read access and create no
+write-ledger entry, signature or record. `ResumeResponse` contains `text`, `json`,
+`hasErrors` and `problem`. An invalid, truncated, changed or foreign baseline
+returns HTTP 200 with an `invalid-handoff` problem and no comparison. The hash is
+an integrity check, not a signature or proof of who generated the artifact.
+Existing request body limits still apply; large packages can be compared through
+the embedded runtime or local socket within that transport's limit.
+
+A successful `vericairn.resume/1` comparison lists every added record (including
+backdated arrivals and intermediate revisions), every new supersession edge,
+missing originals, records changed in place or moved (with their previous path), the complete pin before and after
+(including artifact hashes and record format), and every observed-state change
+with before/after values. Changed arrays are kept whole. Invalid current records
+remain visible through findings and source changes; their derived state is
+explicitly unavailable and `hasErrors` is true. Missing and replaced originals
+also set `hasErrors`. A missing record is not assumed to have been superseded.
+An already-open runtime can compare even when the current pin becomes unreadable:
+the pin's `after` is null and findings name the problem. An interrupted record
+batch is incomplete for both hand-over and resume, with every missing record named.
+Even an unchanged view says **the world may have moved**. Reading a resume never
+starts work, retries an effect, imports records or accepts a result; the old
+package grants nothing and current authority must be re-established.
+
+## A person's last observation
+
+`GET /v1/status` adds `json.lastObservedByPerson`: null when no explicit estate
+observation is recorded, otherwise `at` (the observation's `asOf`), `by`, `name`,
+`record`, `hash`, `subject`, `subjectHash` and the observation's `facts`. The text
+also names the timestamp and its source. This is derived from records on every
+copy; GET status, hand-over and resume never advance it. Repository observations
+by automation do not count as a person viewing the estate.
+
+`POST /v1/status/observations` accepts `EstateObserveRequest` (`by`) and returns a
+`WriteOutcome`. The SDK operation is `ObserveEstate(request)`. Only a human may
+observe, device-signed requests act for their own principal, and the usual
+signing and admission rules apply. The runtime generates the time, exact estate
+subject and hashes of the pre-write record set, full pin and status. It records
+an `observation` with kind `estate`, requiring record format 2; format 1 is
+refused with an explicit-upgrade instruction. This is an attributable observation
+of recorded status, not evidence of live external health or acceptance.

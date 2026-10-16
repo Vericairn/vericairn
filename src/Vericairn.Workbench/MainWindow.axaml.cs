@@ -7,6 +7,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Avalonia.VisualTree;
 using Vericairn.Presentation;
 
@@ -113,6 +114,11 @@ public partial class MainWindow : Window
         else if (command && shift && e.Key == Key.P)
         {
             shell.OpenProgress();
+            FocusDocument();
+        }
+        else if (command && shift && e.Key == Key.H)
+        {
+            shell.OpenHandoff();
             FocusDocument();
         }
         else if (command && shift && e.Key == Key.G)
@@ -418,6 +424,60 @@ public partial class MainWindow : Window
     {
         shell.OpenProgress();
         FocusDocument();
+    }
+
+    private void OnOpenHandoff(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenHandoff();
+        FocusDocument();
+    }
+
+    private void OnPrepareHandoff(object? sender, RoutedEventArgs e) => DocumentOf<HandoffDocument>(sender)?.Prepare();
+
+    private void OnResumeHandoff(object? sender, RoutedEventArgs e) => DocumentOf<HandoffDocument>(sender)?.Compare();
+
+    private void OnObserveEstate(object? sender, RoutedEventArgs e) => shell.ObserveEstate();
+
+    private async void OnSaveHandoff(object? sender, RoutedEventArgs e)
+    {
+        if (DocumentOf<HandoffDocument>(sender) is not { HasPackage: true } page)
+        {
+            return;
+        }
+
+        IStorageFile? file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+        {
+            Title = "Save hand-over package in a new file",
+            SuggestedFileName = "handoff.json",
+            DefaultExtension = "json",
+            FileTypeChoices = [new FilePickerFileType("Hand-over package") { Patterns = ["*.json"] }],
+        }).ConfigureAwait(true);
+        if (file?.TryGetLocalPath() is { } path)
+        {
+            page.Save(path);
+        }
+    }
+
+    private async void OnLoadHandoff(object? sender, RoutedEventArgs e)
+    {
+        HandoffDocument page = DocumentOf<HandoffDocument>(sender) ?? shell.OpenHandoff();
+        IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Open retained hand-over package",
+            AllowMultiple = false,
+            FileTypeFilter = [new FilePickerFileType("Hand-over package") { Patterns = ["*.json"] }],
+        }).ConfigureAwait(true);
+        if (files.Count > 0 && files[0].TryGetLocalPath() is { } path)
+        {
+            try
+            {
+                page.Load(await File.ReadAllTextAsync(path).ConfigureAwait(true));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                shell.Status = "The package could not be opened: " + exception.Message;
+            }
+        }
     }
 
     private void OnOpenGoals(object? sender, RoutedEventArgs e)

@@ -149,7 +149,16 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
 
     /// <inheritdoc />
+    public WriteOutcome ObserveEstate(EstateObserveRequest request) => Post<EstateObserveRequest, WriteOutcome>("/v1/status/observations", request)!;
+
+    /// <inheritdoc />
     public ProgressResponse Progress() => Get<ProgressResponse>("/v1/progress")!;
+
+    /// <inheritdoc />
+    public HandoffResponse Handoff(long? maxBytes = null) => Get<HandoffResponse>("/v1/handoff" + (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
+
+    /// <inheritdoc />
+    public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
 
     /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
