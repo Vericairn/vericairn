@@ -18,8 +18,23 @@ namespace Vericairn.Cli.Tests;
 /// harness is the tests' stand-in; no coding agent runs.
 /// </summary>
 [Collection("cli")]
-public class WorkerJourneyTests
+public sealed class WorkerJourneyTests : IDisposable
 {
+    private readonly IReadOnlyList<Vericairn.Runtime.Workers.IAgentLauncher> originalLaunchers;
+
+    public WorkerJourneyTests()
+    {
+        _ = CliHarness.Run("--help");
+        var registry = Vericairn.Runtime.Providers.ProviderRegistry.Current;
+        originalLaunchers = registry.Launchers.ToArray();
+        foreach (var launcher in originalLaunchers) registry.Register(new ReportedLauncher(launcher));
+    }
+
+    public void Dispose()
+    {
+        foreach (var launcher in originalLaunchers) Vericairn.Runtime.Providers.ProviderRegistry.Current.Register(launcher);
+    }
+
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];

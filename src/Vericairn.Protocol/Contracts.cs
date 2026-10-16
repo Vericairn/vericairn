@@ -294,7 +294,11 @@ public sealed record NextResponse(string Text, JsonElement Json);
 /// <param name="WallMinutes">For an agent's step, the run's cap in wall minutes; what remains of the goal's budget when omitted, and never more.</param>
 /// <param name="Branch">For an agent's step, the work branch; work/ and the work order's key when omitted.</param>
 /// <param name="Base">For an agent's step, what a new work branch starts from.</param>
-public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null);
+/// <param name="Configuration">Named local launcher configuration.</param>
+/// <param name="Execution">Explicit run choices.</param>
+/// <param name="Allocation">Input and output allocation.</param>
+/// <param name="ContextPackage">Exact package hash; omitted means unknown.</param>
+public sealed record GoalStepRequest(string By, string? Repository = null, IReadOnlyDictionary<string, string>? Settings = null, long? WallMinutes = null, string? Branch = null, string? Base = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
 
 /// <summary>What taking a goal's next step did: what was recorded and started, never more. A problem means nothing was dispatched.</summary>
 /// <param name="Goal">The goal's current revision.</param>
@@ -434,7 +438,8 @@ public sealed record ProviderSettingRow(string Name, string Summary, bool Requir
 /// <param name="Settings">The settings an operation through it takes.</param>
 /// <param name="Destination">The setting that names the destination, or null.</param>
 /// <param name="Locations">The resource location keys it serves.</param>
-public sealed record ProviderRow(string Provider, string Kind, string Implementation, string Contract, string Status, IReadOnlyList<string> Operations, IReadOnlyList<string> Limitations, IReadOnlyList<ProviderSettingRow> Settings, string? Destination, IReadOnlyList<string> Locations);
+/// <param name="Execution">Launcher execution capabilities; absent for other provider kinds.</param>
+public sealed record ProviderRow(string Provider, string Kind, string Implementation, string Contract, string Status, IReadOnlyList<string> Operations, IReadOnlyList<string> Limitations, IReadOnlyList<ProviderSettingRow> Settings, string? Destination, IReadOnlyList<string> Locations, JsonElement? Execution = null);
 
 /// <summary>
 /// The outcome of a release operation: what was recorded and what the provider showed, never more. Ok is true when the request
@@ -472,7 +477,11 @@ public sealed record ReleaseResponse(string Identity, string Status, string Mess
 /// <param name="Base">What a new work branch starts from; the clone's HEAD when omitted.</param>
 /// <param name="WallMinutes">The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more.</param>
 /// <param name="Settings">The launcher's settings by name, for example command.</param>
-public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null);
+/// <param name="Configuration">Named local launcher configuration; the launcher identity when omitted.</param>
+/// <param name="Execution">Explicit execution choices; never ambient defaults.</param>
+/// <param name="Allocation">Input tokens and output reserve, separate from measured usage.</param>
+/// <param name="ContextPackage">Exact context-package content hash; omitted means unknown.</param>
+public sealed record RunStartRequest(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal = null, string? Branch = null, string? Base = null, long? WallMinutes = null, IReadOnlyDictionary<string, string>? Settings = null, string? Configuration = null, JsonElement? Execution = null, JsonElement? Allocation = null, string? ContextPackage = null);
 
 /// <summary>Ask a run to stop.</summary>
 /// <param name="By">The principal asking.</param>
@@ -565,7 +574,9 @@ public sealed record RunSignal(string Code, string Severity, string At, string S
 /// <param name="Signals">Worker observations from the harness event stream, with no raw arguments.</param>
 /// <param name="Liveness">The worker's event-stream observation and any stall attention.</param>
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
-public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null);
+/// <param name="Execution">Immutable admitted execution snapshot, absent on older runs.</param>
+/// <param name="ExecutionObserved">Reported execution facts and unknowns at settlement.</param>
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null, JsonElement? Execution = null, JsonElement? ExecutionObserved = null);
 
 /// <summary>One unit of a goal's ledger.</summary>
 /// <param name="Unit">wallMinutes, tokens or currency.</param>

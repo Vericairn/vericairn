@@ -20,6 +20,9 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true);
 
     /// <inheritdoc />
+    public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "system", "init");
+
+    /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
 
     /// <inheritdoc />
@@ -159,13 +162,16 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        (string model, string effort) = HarnessSelection.Requested(context);
+        var selection = new List<string> { "--model", model };
+        if (effort != "provider-default") selection.AddRange(["--effort", effort]);
         var limits = new List<string>();
         if (context.Limits is { Currency: long amount, CurrencyUnit: "USD" })
         {
             limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
         }
 
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", .. limits];
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", .. selection, .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>

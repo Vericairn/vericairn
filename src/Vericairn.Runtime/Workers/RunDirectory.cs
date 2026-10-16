@@ -47,6 +47,9 @@ public sealed class RunObservedState
     /// <summary>The worker's bounded command, loop and spending observations; never raw invocation inputs.</summary>
     public List<RunSignal> Signals { get; set; } = [];
 
+    /// <summary>Reported execution facts and unknowns, kept without raw event values.</summary>
+    public JsonElement? Execution { get; set; }
+
     /// <summary>The tokens the harness reported so far, when it reported any.</summary>
     public long? Tokens { get; set; }
 

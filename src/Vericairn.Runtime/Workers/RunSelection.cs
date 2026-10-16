@@ -18,7 +18,8 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Policy">Explicit choices and restrictions, in the recorded execution-policy form.</param>
 /// <param name="Models">The model selectors this configuration admits; no ambient model is admitted.</param>
 /// <param name="Settings">Local launcher settings.</param>
-public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null);
+/// <param name="EnvironmentPolicy">The closed inventory admitted for this configuration.</param>
+public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null);
 
 /// <summary>The scopes and values a launcher implements, independently of a configuration's narrower restrictions.</summary>
 /// <param name="Scopes">Supported choice scopes, in precedence order.</param>

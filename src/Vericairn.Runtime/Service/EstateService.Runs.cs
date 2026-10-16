@@ -76,7 +76,14 @@ public sealed partial class EstateService
             return RunProblem(pending, "not-started", "refused", "No workspace provider for git repositories is available on the runtime's machine, so no isolated workspace can be prepared; nothing was recorded.");
         }
 
-        var settings = new Dictionary<string, string>(request.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal);
+        RunConfiguration? configuration = WorkerOptions.Configurations.GetValueOrDefault(request.Configuration ?? launcher.Launcher) ?? launcher.Configuration;
+        if (configuration is null || configuration.Launcher != launcher.Launcher || (request.Configuration is not null && request.Configuration != configuration.Name))
+        {
+            return RunProblem(pending, "not-started", "refused", "No matching explicit launcher configuration is available; ambient model and effort choices are not permitted. Nothing was recorded.");
+        }
+
+        var settings = new Dictionary<string, string>(configuration.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal);
+        foreach ((string key, string value) in request.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal)) settings[key] = value;
         List<string> unknown = settings.Keys.Where(k => launcher.Descriptor.DeclaredSettings.All(s => s.Name != k)).Order(StringComparer.Ordinal).ToList();
         List<string> missing = launcher.Descriptor.DeclaredSettings.Where(s => s.Required && !settings.ContainsKey(s.Name)).Select(s => s.Name).ToList();
         if (unknown.Count > 0 || missing.Count > 0)
@@ -94,7 +101,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = LoadWith(carried);
-            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, request, launcher);
+            (RunPlan? planned, string? refusal, RecordEnvelope? limited) = Plan(model, request, launcher, configuration);
             if (planned is null)
             {
                 if (limited is not null)
@@ -152,10 +159,48 @@ public sealed partial class EstateService
 
         string where = $"{plan.Repository}, branch {workspace.Branch}";
 
+        string run = Ulid.NewUlid().Value;
+        var directory = new RunDirectory(plan.Estate, run);
+        IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent];
+        var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
+        environment["VERICAIRN_RUN"] = run;
+        environment["VERICAIRN_STOP_FILE"] = directory.StopFile;
+        environment["VERICAIRN_BRIEF"] = brief;
+        environment["VERICAIRN_MCP_CONFIG"] = directory.McpConfiguration;
+        environment["VERICAIRN_CONDITION"] = plan.Condition;
+        LaunchContext launch;
+        try
+        {
+            directory.Create();
+            var mcp = new JsonObject
+            {
+                ["mcpServers"] = new JsonObject
+                {
+                    ["vericairn"] = new JsonObject
+                    {
+                        ["command"] = server[0],
+                        ["args"] = new JsonArray(server.Skip(1).Select(a => (JsonNode)a).ToArray()),
+                        ["env"] = new JsonObject(serverEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => KeyValuePair.Create(e.Key, (JsonNode?)e.Value))),
+                    },
+                },
+            };
+            File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
+            launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits, Element(plan.Selection)));
+            environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
+            RunPreflight preflight = launcher.Preflight(launch);
+            RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
+            plan.Selection["harnessVersion"] = preflight.HarnessVersion;
+            plan.Selection["environment"] = RunEnvironment.Admit(configuration.EnvironmentPolicy, preflight, environment);
+            launch = launch with { Execution = Element(plan.Selection) };
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
+        {
+            return RunProblem(pending, "not-started", "refused", $"Execution preflight refused: {exception.Message} Nothing was recorded or dispatched.");
+        }
+
         // Record the intent before anything starts, judged again against the records as they are now, after the preparation: the
         // step still unassigned when routing's assignment comes with the run, the goal at its current revision, the custody guard
         // over the keys held here and the exception in force now, which the intent names, and the cap. The run is its intent.
-        string run;
         RecordWritten intent;
         Excepted? excepted = null;
         lock (gate)
@@ -185,6 +230,11 @@ public sealed partial class EstateService
             if (refusals.Count > 0)
             {
                 return RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded.");
+            }
+
+            if (!SelectionStillCurrent(model, goal!, plan, configuration, launcher, request))
+            {
+                return RunProblem(pending, "not-started", "refused", "Execution defaults or restrictions changed during preparation; start a newly admitted run. Nothing was recorded.");
             }
 
             RunWatchSettings watch = RunWatchSettings.Resolve(model, goal!, launcher);
@@ -229,6 +279,7 @@ public sealed partial class EstateService
                 ["status"] = "not-started",
                 ["evidence"] = new JsonArray(new JsonObject { ["summary"] = $"The brief of work order {plan.Key}, exported into the workspace as .vericairn/brief.md.", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(plan.Brief)) }),
                 ["cap"] = plan.Cap.DeepClone(),
+                ["execution"] = plan.Selection.DeepClone(),
             };
             ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = limits.Describe(Element(plan.Cap)) });
             ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = launcher.Limitations });
@@ -237,7 +288,6 @@ public sealed partial class EstateService
                 ((JsonArray)body["evidence"]!).Add(new JsonObject { ["summary"] = $"Launched unattended under the sponsor's custody exception {excepted.Id}, in force until {excepted.Expires}, while {(excepted.Exposed.Count == 1 ? "device" : "devices")} {string.Join(", ", excepted.Exposed.Select(e => e.Device))} of an operator or of the goal's sponsor {(excepted.Exposed.Count == 1 ? "signs" : "sign")} without {(excepted.Exposed.Count == 1 ? "its" : "their")} owner's presence on the machine that ran the worker." });
             }
 
-            run = Ulid.NewUlid(now).Value;
             body["identity"] = "agent-run:" + run;
             var draft = new RecordDraft("operation", request.By, Element(body), plan.Assignment.Reference, At: now, Id: run);
             if (routed is null)
@@ -276,44 +326,26 @@ public sealed partial class EstateService
 
         // The MCP server configured for the agent's principal, and the run's own files, outside the workspace; then the launch, and the
         // dispatch recorded. A harness that cannot start is a known failure that spent nothing.
-        var directory = new RunDirectory(plan.Estate, run);
-        IReadOnlyList<string> server = [.. WorkerOptions.VericairnCommand(), "--estate", session.Root, "mcp", "serve", "--as", plan.Agent];
-        var serverEnvironment = WorkerEnvironment.McpServer.Where(environment.ContainsKey).ToDictionary(n => n, n => environment[n], StringComparer.Ordinal);
-        environment["VERICAIRN_RUN"] = run;
-        environment["VERICAIRN_STOP_FILE"] = directory.StopFile;
-        environment["VERICAIRN_BRIEF"] = brief;
-        environment["VERICAIRN_MCP_CONFIG"] = directory.McpConfiguration;
-        environment["VERICAIRN_CONDITION"] = plan.Condition;
         RunSupervisor? supervisor = null;
         IReadOnlyList<(string Device, string Reason)> lapsed = [];
         try
         {
-            directory.Create();
-            var mcp = new JsonObject
-            {
-                ["mcpServers"] = new JsonObject
-                {
-                    ["vericairn"] = new JsonObject
-                    {
-                        ["command"] = server[0],
-                        ["args"] = new JsonArray(server.Skip(1).Select(a => (JsonNode)a).ToArray()),
-                        ["env"] = new JsonObject(serverEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => KeyValuePair.Create(e.Key, (JsonNode?)e.Value))),
-                    },
-                },
-            };
-            File.WriteAllText(directory.McpConfiguration, mcp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
-            LaunchContext launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits));
-            environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
             IReadOnlyList<string> command = launcher.Command(launch);
 
             // The custody precondition once more, immediately before the launch and under the gate, so that no exception is revised
             // or expires between this judgment and the start: one that lapsed since the intent, or a key that arrived, launches nothing.
             lock (gate)
             {
-                lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
+                EstateModel dispatchModel = session.Load();
+                RecordEnvelope? dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
+                if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
+                {
+                    throw new ProviderRefusedException("Execution defaults or restrictions changed after the intent; no harness was dispatched.");
+                }
+                lapsed = Lapsed(dispatchModel, plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal));
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection));
                 }
             }
         }
@@ -334,6 +366,7 @@ public sealed partial class EstateService
                 previous["status"] = "known-failure";
                 previous["observed"] = new JsonObject { ["summary"] = $"The {launcher.Launcher} harness could not be started on the machine that ran the worker, so nothing ran and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
                 previous["usage"] = ZeroUsage(plan.Cap);
+                previous["executionObserved"] = new RunExecutionObservation(Element(plan.Selection)).Snapshot();
             });
             return new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, []));
         }
@@ -408,7 +441,9 @@ public sealed partial class EstateService
                     run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
                     run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
                     run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
-                    run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals));
+                    run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals,
+                    run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
+                    run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : null));
             }
 
             var ledgers = new List<LedgerRow>();
@@ -595,7 +630,7 @@ public sealed partial class EstateService
         && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
-    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, RunStartRequest request, IAgentLauncher launcher)
+    private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
     {
         RecordEnvelope? assignment = Latest(model, request.Assignment, "assignment");
         if (assignment is null)
@@ -713,9 +748,42 @@ public sealed partial class EstateService
             return (null, watchRefusal, null);
         }
 
+        JsonObject selection;
+        try
+        {
+            selection = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, assignment), request.Execution, Element(cap));
+            selection["role"] = Routing.RoleOf(order);
+            selection["allocation"] = RunExecutionObservation.Allocation(request.Allocation, Element(cap));
+            if (request.ContextPackage is not null && !ContentHash.IsValid(request.ContextPackage))
+            {
+                return (null, "A context-package identity must be its exact content hash.", null);
+            }
+            selection["contextPackage"] = request.ContextPackage ?? "unknown";
+            selection["adapter"] = "disabled";
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return (null, exception.Message, null);
+        }
+
         string? recipient = CommunicationRecipient(model, goal);
         string brief = CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), Communication(recipient, recipient is null ? null : assignment.Id));
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, brief, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, brief, Condition(order, assignment, goal), selection, StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+    }
+
+    private static bool SelectionStillCurrent(EstateModel model, RecordEnvelope goal, RunPlan plan, RunConfiguration configuration, IAgentLauncher launcher, RunStartRequest request)
+    {
+        try
+        {
+            JsonObject current = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, RunSelection.Sources(model, goal, model.Latest(plan.Assignment)), request.Execution, Element(plan.Cap));
+            return JsonNode.DeepEquals(current["requested"], plan.Selection["requested"])
+                && JsonNode.DeepEquals(current["provenance"], plan.Selection["provenance"])
+                && JsonNode.DeepEquals(current["configurationHash"], plan.Selection["configurationHash"]);
+        }
+        catch (ProviderRefusedException)
+        {
+            return false;
+        }
     }
 
     private static string? CommunicationRecipient(EstateModel model, RecordEnvelope goal)
@@ -1027,6 +1095,10 @@ public sealed partial class EstateService
             summary += $" Scope attention: {scope.OutsideCount.ToString(CultureInfo.InvariantCulture)} changed paths outside the assignment's permitted paths. " + scope.Problem;
         }
 
+        if (body["execution"] is JsonObject execution)
+        {
+            body["executionObserved"] = outcome.Execution is JsonElement facts ? JsonNode.Parse(facts.GetRawText()) : new RunExecutionObservation(Element(execution)).Snapshot();
+        }
         body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
         body["signals"] = JsonSerializer.SerializeToNode(outcome.Signals ?? [], RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
@@ -1162,7 +1234,7 @@ public sealed partial class EstateService
         new(run, "none", message, false, Problem: new Problem(code, message, []));
 
     /// <summary>What the preflight found: everything a run needs that the records give.</summary>
-    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
+    private sealed record RunPlan(string Estate, RecordEnvelope Assignment, string Key, string Goal, string Agent, string AgentName, JsonObject Cap, string ClonePath, string Resource, string Repository, string Branch, string Brief, string Condition, JsonObject Selection, int StallSeconds, RunWatchSettings? Watch = null, decimal? HistoryRate = null);
 
     /// <summary>The sponsor's custody exception a run is launched under, in force when its intent is recorded, and the devices that would otherwise refuse it here.</summary>
     private sealed record Excepted(string Id, string Description, string Expires, IReadOnlyList<(string Device, string Reason)> Exposed);

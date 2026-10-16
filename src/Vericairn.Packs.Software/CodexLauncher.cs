@@ -21,6 +21,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true);
 
     /// <inheritdoc />
+    public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "thread.started");
+
+    /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
 
     /// <inheritdoc />
@@ -137,6 +140,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public IReadOnlyList<string> Command(LaunchContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        (string model, string effort) = HarnessSelection.Requested(context);
+        var selection = new List<string> { "--model", model };
+        if (effort != "provider-default") selection.AddRange(["-c", "model_reasoning_effort=" + Toml(effort)]);
         var limits = new List<string>();
         if (context.Limits?.Tokens is long tokens)
         {
@@ -146,7 +152,7 @@ public sealed class CodexLauncher : IAgentLauncher
         return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
             "-c", "mcp_servers=" + Mcp(context),
             "-c", "projects=" + Projects(context),
-            .. limits, "/goal " + context.Condition];
+            .. selection, .. limits, "/goal " + context.Condition];
     }
 
     // Override one whole projects value: CLI dotted-key parsing does not interpret TOML quotes in a path segment.

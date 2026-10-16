@@ -17,6 +17,11 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
 {
     public string Launcher => inner.Launcher;
 
+    public RunCapabilities ExecutionCapabilities => inner.ExecutionCapabilities;
+    public RunConfiguration? Configuration => inner.Configuration;
+    public RunPreflight Preflight(LaunchContext context) => inner.Preflight(context);
+    public HarnessExecution? ReadExecution(string line) => inner.ReadExecution(line);
+
     public ProviderDescriptor Descriptor => inner.Descriptor;
 
     public TimeSpan StallLimit => inner.StallLimit;
@@ -35,9 +40,9 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public static void Install(RunEstate run, Func<string?>? verify = null, Action? command = null)
     {
         var registry = new ProviderRegistry();
-        registry.Register(new HookedLauncher(new ClaudeCodeLauncher(), verify, command));
-        registry.Register(new CodexLauncher());
-        registry.Register(new GenericLauncher());
+        registry.Register(new HookedLauncher(new ReportedLauncher(new ClaudeCodeLauncher()), verify, command));
+        registry.Register(new ReportedLauncher(new CodexLauncher()));
+        registry.Register(new ReportedLauncher(new GenericLauncher()));
         registry.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         run.Service.Providers = registry;
     }

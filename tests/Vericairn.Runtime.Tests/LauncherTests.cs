@@ -231,7 +231,7 @@ public class LauncherTests
     {
         var launcher = new ClaudeCodeLauncher();
         LaunchContext context = Context(NoSettings);
-        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}"], launcher.Command(context));
+        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", "--model", "model-a", "--effort", "high"], launcher.Command(context));
         Assert.Equal(["/opt/claude/bin/claude", "--debug", "-p"], launcher.Command(Context(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = """["/opt/claude/bin/claude","--debug"]""" })).Take(3));
         Assert.Null(launcher.Verify(NoSettings, NoSettings));
         Assert.Contains("JSON array of one or more non-empty strings", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = "[]" }, NoSettings), StringComparison.Ordinal);
@@ -386,5 +386,5 @@ public class LauncherTests
     }
 
     private static LaunchContext Context(IReadOnlyDictionary<string, string> settings) =>
-        new("/work/widget", "Is it done? Checks: it builds.", "/work/widget/.vericairn/brief.md", "/runs/r/mcp.json", ["vericairn", "--estate", "/estate", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], new Dictionary<string, string>(StringComparer.Ordinal), settings, new Dictionary<string, string>(StringComparer.Ordinal));
+        new("/work/widget", "Is it done? Checks: it builds.", "/work/widget/.vericairn/brief.md", "/runs/r/mcp.json", ["vericairn", "--estate", "/estate", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], new Dictionary<string, string>(StringComparer.Ordinal), settings, new Dictionary<string, string>(StringComparer.Ordinal), Execution: RunEstate.Json("""{"requested":{"model":"model-a","effort":"high"}}"""));
 }

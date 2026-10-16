@@ -34,7 +34,7 @@ public class RunApiTests
         Directory.CreateDirectory(scratch);
         await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         var registry = new ProviderRegistry();
-        registry.Register(new StandInLauncher());
+        registry.Register(new ReportedLauncher(new StandInLauncher()));
         registry.Register(new DirectoryWorkspaces());
         host.Service.Providers = registry;
         host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };

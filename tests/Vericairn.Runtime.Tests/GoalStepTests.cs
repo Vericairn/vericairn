@@ -243,7 +243,8 @@ public class GoalStepTests
         // A harness that cannot start once the intent is recorded: W-3's assignment and its run's intent were recorded together, and the
         // run is recorded as the known failure it is, which spent nothing.
         Order(run, "W-3", string.Empty);
-        GoalStepResponse failed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(run.Scratch, "no-such-harness") }));
+        HookedLauncher.Install(run, command: () => throw new Vericairn.Runtime.Providers.ProviderRefusedException("The synthetic executable disappeared after preflight."));
+        GoalStepResponse failed = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "not-started")));
         Assert.False(failed.Ok);
         Assert.Equal(("none", "W-3"), (failed.Outcome, failed.Step));
         Assert.StartsWith($"Routing assigned W-3 to its agent (assignment {failed.Assignment!.Id}), recorded with the run's intent.", failed.Message, StringComparison.Ordinal);
