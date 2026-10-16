@@ -95,6 +95,14 @@ public static class RunSelection
             provenance.Add(entry);
         }
 
+        Require("model", configuration.Models);
+        Require("provider", capabilities.Providers);
+        Require("destination", capabilities.Destinations);
+        Require("dataBoundary", capabilities.DataBoundaries);
+        IReadOnlyList<string> efforts = capabilities.Efforts.Count == 0 ? ["not-supported"]
+            : capabilities.ProviderDefault ? [.. capabilities.Efforts, "provider-default"] : capabilities.Efforts;
+        Require("effort", efforts);
+
         foreach (RunPolicySource source in layers)
         {
             if (source.Policy.TryGetProperty("restrictions", out JsonElement restrictions))
@@ -109,7 +117,37 @@ public static class RunSelection
             ["configurationHash"] = ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(configuration)))),
             ["requested"] = requested,
             ["provenance"] = provenance,
+            ["resolvedRevision"] = "unknown",
         };
+
+        void Require(string field, IReadOnlyList<string> allowed)
+        {
+            if (requested[field]?.GetValue<string>() is not string value || !allowed.Contains(value, StringComparer.Ordinal))
+            {
+                throw new ProviderRefusedException($"The required {field} is unresolved or unsupported by the launcher configuration; ambient fallback is not permitted.");
+            }
+        }
+    }
+
+    /// <summary>Retains an observable alias resolution; unknown never satisfies an exact revision restriction.</summary>
+    public static void ResolveRevision(JsonObject selection, string? revision)
+    {
+        ArgumentNullException.ThrowIfNull(selection);
+        if (revision is not null && !ExecutionPolicy.IsIdentity(revision))
+        {
+            throw new ProviderRefusedException("The reported model revision is not a portable identity.");
+        }
+
+        foreach (JsonNode? source in selection["provenance"]!.AsArray())
+        {
+            if (source?["policy"]?["restrictions"]?["exactRevision"]?.GetValue<string>() is string exact
+                && (revision is null or "unknown" || exact != revision))
+            {
+                throw new ProviderRefusedException("The observable model revision does not satisfy an inherited exact pin; unknown is not a match.");
+            }
+        }
+
+        selection["resolvedRevision"] = revision ?? "unknown";
     }
 
     /// <summary>The recorded default and role policies, without discarding the roster's restrictions when a goal supplies its own role.</summary>

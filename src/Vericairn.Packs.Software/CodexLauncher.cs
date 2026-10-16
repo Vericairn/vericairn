@@ -18,6 +18,9 @@ namespace Vericairn.Packs.Software;
 public sealed class CodexLauncher : IAgentLauncher
 {
     /// <inheritdoc />
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true);
+
+    /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
 
     /// <inheritdoc />

@@ -17,6 +17,9 @@ namespace Vericairn.Packs.Software;
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
     /// <inheritdoc />
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true);
+
+    /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
 
     /// <inheritdoc />

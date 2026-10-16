@@ -67,6 +67,12 @@ public interface IAgentLauncher
     /// </summary>
     string? Harness => null;
 
+    /// <summary>Scopes and execution values supported by this implementation; no declaration means no dispatch.</summary>
+    RunCapabilities ExecutionCapabilities => RunCapabilities.Unsupported;
+
+    /// <summary>An explicitly configured default, if the implementation supplies one; never the ambient harness configuration.</summary>
+    RunConfiguration? Configuration => null;
+
     /// <summary>The harness's own configuration variables that pass to it beside the worker's allowlist; never a credential, which never passes.</summary>
     IReadOnlyList<string> EnvironmentNames => [];
 
