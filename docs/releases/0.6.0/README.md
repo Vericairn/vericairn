@@ -12,9 +12,9 @@ The release workflow builds and tests the candidate on Ubuntu, macOS and Windows
 
 ## This documentation set
 
-Prepared on October 16, 2026 UTC, before the release build, following `docs/releases/README.md`. The generated CLI, API and record references and `manifest.json` came from the 0.6.0 Release build at version commit `1e56068c666d3310e13209d752bb57ae64ff36f0`, using the same docs-tool generation command as the 0.5.2 set. They list 97 commands, 60 API operations and 35 record types. That commit is their provenance, not the eventual release commit.
+Prepared on October 16, 2026 UTC, before the release build, following `docs/releases/README.md`. The generated CLI, API and record references and `manifest.json` came from the 0.6.0 Release build at commit `e251b9642be39def864c8ec8ea052d3a80016b1b`, which corrects the source descriptions, using the same docs-tool generation command as the 0.5.2 set. They list 97 commands, 60 API operations and 35 record types. That commit is their provenance, not the eventual release commit.
 
-The maintained API, format, software, Workbench and MCP drafts were checked against code and tests at this head, corrected in place, then copied byte for byte into this set as for 0.5.2. `api.md` is the frozen `docs/api-v1.md`; the identical `api-v1.md` is also included so links in the frozen drafts resolve without editing their bytes. The installation, operator and limitations guides were revised from 0.5.2 for the behavior now implemented. Generated-help discrepancies remain visible in the references and are corrected explicitly in the limitations guide.
+The maintained API, format, software, Workbench and MCP drafts were checked against code and tests at this head, corrected in place, then copied byte for byte into this set as for 0.5.2. `api.md` is the frozen `docs/api-v1.md`; the identical `api-v1.md` is also included so links in the frozen drafts resolve without editing their bytes. The installation, operator and limitations guides were revised from 0.5.2 for the behavior now implemented. The references include the corrected CLI, API and record descriptions; the operator and limitations guides state the remaining implementation limits.
 
 `release-notes.md` deliberately contains only its heading and the comment `<!-- The builder writes these notes from the estate's records. -->`. The builder supplies those notes. A successful structural docs check does not establish that release notes or release acceptance are complete. The release's own record will name its build commit, workflow and artifact hashes; this pre-build set cannot supply them. The set is frozen with the release, and later corrections belong in the next release's set.
 
@@ -33,7 +33,7 @@ The maintained API, format, software, Workbench and MCP drafts were checked agai
 | `workbench.md` | Desktop surfaces, keyboard routes, Goals and progress, probing and limitations, frozen |
 | `mcp.md` | Protocol subset, read tools and narrow write tools, running and qualification, frozen |
 | `release-notes.md` | Placeholder for the builder's notes from estate records |
-| `limitations-and-platforms.md` | Automation versus platform qualification, signing, custody, worker/network limits and known source discrepancies |
+| `limitations-and-platforms.md` | Automation versus platform qualification, signing, custody and worker/network implementation limits |
 | `manifest.json` | Version and generation commit, required documents, commands, operations, types and record-format compatibility |
 
 ## Checking the version and set
