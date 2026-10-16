@@ -107,10 +107,18 @@ from its files and live store, even while a daemon serves it.
 ## Worker run observations
 
 `RunStart` authors the run as its supplied recording caller. Every physical launch needs a new `agent-run` intent and
-fresh budget admission; an old run identity cannot be redispatched. Before admission the worker refuses linked
-`.vericairn` metadata and exports files without following links. Codex receives isolated per-run configuration with
-only `vericairn`; Claude Code uses strict MCP configuration. These configuration controls do not isolate the worker
-user's files or keychain; see [software.md](software.md#coding-agents-the-worker-and-its-launchers).
+fresh budget admission. A settled identity cannot reopen, change status or acquire another dispatch timestamp; its
+target and cap stay pinned to the intent. Every record newly reserving allowance is checked for budget admission.
+Before admission the worker refuses linked `.vericairn` metadata and exports files without following links.
+
+Codex and Claude Code receive fresh configuration directories containing only their approved harness login. Codex
+uses the canonical workspace path for project trust and verifies the effective MCP list: merged ambient servers or
+changed transport settings refuse launch. Claude Code excludes user, project and local setting sources, disables hooks
+and enables no plugins, alongside strict MCP configuration. Detected managed settings and known organization logins
+refuse launch; remote or undetected managed policy is not qualified and managed accounts are unsupported. A
+configuration refusal after intent but before process launch settles as an uncharged known failure. These controls
+do not isolate same-user files or keychains, and no live coding agent or live sign-in has been qualified; see
+[software.md](software.md#harness-configuration-and-workspace-exports).
 
 A state or dispatch write failure after launch keeps the allowance reserved. The worker retries state writes and
 recovers an observed dispatch before recording settlement; an unavailable recovery leaves the intent in flight. An
@@ -120,7 +128,8 @@ this case.
 
 New intents state `target.capMode: "soft"` and record their native controls and thresholds in evidence. The full cap
 is reserved, while operational thresholds leave grace plus a heartbeat of wall headroom and ten percent of
-token/currency headroom for usage in flight. Native controls can overshoot and unsupported units are explicitly soft.
+token/currency headroom for usage in flight. Native controls can overshoot and unsupported units are explicitly soft;
+the ledger's remainder can therefore become negative. Elapsed wall usage and stop grace use a monotonic clock.
 Malformed, incomplete or overflowing token usage, including an unfinished turn, leaves the token unit unreported and
 charged at its cap.
 
@@ -134,15 +143,25 @@ charged at its cap.
 
 - `scope`: `changed`, `outsideCount`, `outside`
   and optional `problem`. Settlement compares file inventories before launch and after boundary exit against
-  repository-relative paths/globs in `brief.permittedChanges`. Committed, renamed, deleted, untracked and ignored
-  changes count. Outside changes or incomplete audit are flagged in the observed summary. At most 1000 outside names are
-  listed; unsafe names are hashed. This is an observation, not acceptance or a filesystem sandbox.
+  repository-relative paths/globs in `brief.permittedChanges`. The inventory reads the physical workspace independently
+  of Git configuration and verifies its root identity against the launch baseline. Committed, renamed, deleted,
+  untracked and ignored changes count. Non-regular files, an unavailable helper or a deadline mark the audit incomplete;
+  each inventory and the pattern comparison have a 30-second deadline, with bounded helper cleanup. Outside changes or
+  incomplete audit are flagged in the observed summary. At most 1000 outside names are listed; unsafe names are hashed.
+  With `problem` present, counts can be partial and zero outside paths does not mean clean. Git administration,
+  changes outside the workspace and changes reverted before settlement are excluded. This is a net observation, not
+  attribution, acceptance or a filesystem sandbox.
 
 A stop's acknowledgment and escalation follow transmission; containment follows all prior facts and does not follow
 `observed.at`. Stop facts remain unchanged across revisions. Transmission is timestamped after delivery attempts
-finish, rather than at an earlier heartbeat. Containment requires observing the whole Windows Job
-Object or POSIX process group exited, not just the root process. Failed escalations remain evidence and are retried
-without claiming a kill. A lost observer leaves the reservation in flight.
+finish, rather than at an earlier heartbeat. Windows transmission creates the stop file; POSIX also attempts SIGTERM
+to the owned process group. The stop endpoint's bounded wait can return before containment; clients poll
+`GET /v1/runs` for later observations. Containment requires a successful inventory showing the whole Windows Job
+Object or POSIX process group exited, not just the root process. Failed inventories and escalations are retried without
+claiming containment or a kill. POSIX group signals require the unreaped leader's ownership. A lost observer leaves
+the reservation in flight while a detached lifecycle owner retains native cleanup responsibility. POSIX group/session
+escape and worker crash are not contained; PID 1 and auto-reaping hosts refuse launch. Windows job assignment has a
+creation gap before the job owns the suspended child. See [platform limits](software.md#launch-accounting-and-containment).
 
 ## Outcomes and problems
 

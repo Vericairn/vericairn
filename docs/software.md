@@ -178,8 +178,8 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 
 | Launcher | Runs |
 |---|---|
-| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config`, in the workspace: Claude Code's own `/goal`, in auto permission mode, with the vericairn MCP server as its only MCP server. It reads the tokens of the stream's final result. |
-| `codex` | `codex exec --json --cd <workspace> --sandbox workspace-write -c mcp_servers.vericairn.command=<vericairn> -c mcp_servers.vericairn.args=[...] [-c mcp_servers.vericairn.env.<name>=<value>]... "/goal <condition>"`: Codex's own `/goal`. Before a run is recorded it reads `codex features list`, with the run's environment, and refuses, saying why, unless the `goals` feature shows `true`. It adds up the input and output tokens of each completed turn. |
+| `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"disableAllHooks":true,"enabledPlugins":{}}'`, in the workspace, with a fresh configuration directory and only its approved login imported. It reads the tokens of the stream's final result. |
+| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | The command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Generic process launch is not complete agent support: it knows nothing of the harness's goal, sign-in, usage or stop, and it is listed and run with that label. |
 
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
@@ -209,11 +209,14 @@ its leading arguments. No launcher reads a price, so a cap in currency is charge
    home and temporary directories, the locale and the platform's own variables, what the MCP server needs to find the
    agent's key (`VERICAIRN_HOME`), and the harness's own configuration (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). No variable
    whose name marks a credential passes, whatever the worker's environment holds: no GitHub, cloud, package-registry or
-   model-provider token, since a brief grants none. The harness signs in with its own login under the user's home. It is
-   told `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
-5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and its exit. Only
-   the exit ends a run: output that closes, or a worker that stops observing, is no stop, and the run stays in flight,
-   charged at its cap. A run approaching its wall or reported-token allowance is stopped by the worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
+   model-provider token, since a brief grants none. Codex and Claude Code receive fresh configuration directories with
+   only their approved harness login imported, as described below. Configuration verification can refuse after the
+   intent; a refusal before any process launch settles as an uncharged known failure. The harness is told
+   `VERICAIRN_RUN`, `VERICAIRN_BRIEF`, `VERICAIRN_MCP_CONFIG`, `VERICAIRN_CONDITION` and `VERICAIRN_STOP_FILE`.
+5. Observes the harness: a heartbeat every two seconds, the usage its launcher reads from its output, and the whole
+   containment boundary's exit. Root exit or closed output alone does not end a run. A worker that stops observing
+   leaves the run in flight, charged at its cap. A run approaching its wall or reported-token allowance is stopped by
+   the worker, leaving headroom for usage and shutdown in flight; spending caps remain soft.
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
@@ -245,11 +248,12 @@ nothing, and the run is recorded `canceled` before dispatch, naming the devices 
 **Stop.** `vericairn worker stop <run> --by <principal> [--reason <text>] [--grace <seconds>]` asks the run to stop, and
 prints what was observed. The request, its transmission, the harness's acknowledgment, an escalation and the observed
 containment are separate facts: the worker that observes the run transmits the stop at its next heartbeat, by creating the
-file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to the harness; a harness acknowledges it by printing
+file `VERICAIRN_STOP_FILE` names and, on Linux and macOS, by SIGTERM to its process group; a harness acknowledges it by printing
 `{"vericairn":"stop-acknowledged"}` on its output; if the harness has not exited when the grace period (ten seconds unless
 named) has passed, the worker terminates its containment boundary; containment requires observing the whole boundary exited. The settlement records the facts
 in the operation's `stop`. A stop that is not observed, because no worker here observes the run, is reported as requested,
-and the run stays in flight.
+and the run stays in flight. The stop command's bounded wait can return before containment; poll `worker runs` for the
+later facts. On Windows the stop file is the transmission; there is no graceful process signal.
 
 **One routed step at a time.** `vericairn goal next [<goal>]` shows a goal's steps routed from this machine by its roster
 ([record-format-v2.md](record-format-v2.md#routing-a-goals-steps)): for each eligible step the principal it reaches, or why
@@ -293,27 +297,40 @@ the ledger of every goal with a run or active now: each unit's budget, spend and
 new run would be fenced. The runs' own files, their state, output and MCP configuration, stay under the Vericairn home on
 the machine that ran them, never in a record or a repository.
 
-Limitations: the launchers are implemented against the harnesses' `--help` and tested with a stand-in process that speaks
-their streams, and none is yet qualified against a live harness. Windows has no signal a windowless process receives, so a
-harness that does not watch the stop file is contained by escalation. Files of the operating-system user stay readable to
-the harness, which only running the worker as another user changes. A process that deliberately leaves its POSIX process
-group is outside that boundary; the worker is not an OS security sandbox. Codex replaces user configuration with its
-per-run configuration and vericairn-only MCP table. No MCP tool launches or stops a run.
+Limitations: the launchers are tested with stand-in processes; no live coding agent or live sign-in has been qualified.
+Configuration checks use synthetic Codex `mcp list` probes (observed with 0.159.0-alpha.12.1) and Claude Code `--help`
+(2.1.296), without starting MCP servers. Windows has no graceful signal for a windowless process, so a harness that
+does not watch the stop file needs escalation. Files and keychains accessible to the worker's operating-system user
+remain accessible to the harness; use a dedicated user for credential isolation. The process boundaries and managed
+configuration limitations below apply. No MCP tool launches or stops a run.
 
 ### Launch accounting and containment
 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state
 writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
 
-Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run
-revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. A settled
+identity (`observed-success`, `known-failure` or `canceled`) cannot reopen or change to another status. Its target and
+cap remain those of its intent, and a dispatch timestamp cannot change or be added after settlement. Every record that
+newly reserves allowance is checked for admission, including a revision; an existing reservation is recognized only
+for the same in-flight target. Generic operations retain their reconciliation and retry rules.
 
-Harnesses enter a containment boundary before executing: a Windows Job Object (no breakaway), or a new POSIX process
-group on Linux and macOS. Stops signal the group; escalation terminates the whole boundary. Root exit alone does not
-establish containment. The worker observes every remaining member exited (including kernel zombie exit state) before
-settling. A failed escalation is retained in local state and settlement evidence and retried, without claiming a kill.
-Failure to observe the boundary leaves the allowance reserved. A POSIX process that deliberately creates another
-session can escape this same-user boundary; use OS isolation for hostile code.
+Harnesses enter a containment boundary before executing: a Windows Job Object with no breakaway, or a new POSIX process
+group on Linux and macOS. Escalation terminates that boundary. Root exit alone does not establish containment: a
+successful inventory must show every remaining member exited, including kernel zombie exit state. Failed job or
+process queries, unavailable or filtered Linux procfs, and macOS inventory errors leave the run uncontained and
+reserved, and are retried. A failed escalation is retained as evidence and retried without claiming a kill.
+
+On POSIX the worker observes its leader without reaping it, holding its process-group identity through the last
+inventory and signal. It refuses a numeric group signal after losing child ownership or closing that owner. Native
+cleanup reaps the leader once. A detached lifecycle owner retains this responsibility after supervision is abandoned,
+without claiming settlement or releasing the reservation. Windows process and job handles have SafeHandle ownership;
+the detached owner holds them until boundary exit.
+
+These guarantees have platform limits. POSIX processes can escape by leaving the group or session, and a worker crash
+has no independent POSIX guardian. Hosts running the worker as PID 1, ignoring SIGCHLD or using `SA_NOCLDWAIT` are
+refused; an embedding host with a separate child reaper is unsupported. Windows kills an assigned job when its last
+handle closes, but a crash between suspended process creation and job assignment can leave that process behind.
 
 Stop chronology is validated as observed facts: acknowledgment and escalation are at or after transmission (either may
 precede the other), containment is at or after every earlier fact and no later than `observed.at`. Every previously
@@ -327,12 +344,26 @@ the run remains in flight at its full reservation; it is never settled as an uns
 ### Harness configuration and workspace exports
 
 Codex runs with a fresh per-run `CODEX_HOME`: only its provisioned harness `auth.json` login is imported, with
-owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The run
-configuration and a complete `mcp_servers` command-line override name only `vericairn`; project configuration is
-untrusted. Claude Code continues to use `--strict-mcp-config`. These are configuration boundaries, not filesystem
-isolation: the harness still runs as the worker user and can read that user's files or keychain. Use a dedicated OS
-identity with only the approved harness login for credential isolation. See the [Codex configuration
+owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The workspace is
+canonicalized, including filesystem aliases, before writing its project-trust key. A whole `projects` value encodes
+the path as a TOML key, so dots or quotes in it are not interpreted as CLI key separators.
+
+Codex merges configuration tables across layers; a complete `mcp_servers` override alone cannot remove ambient
+servers. The launcher therefore probes the effective configuration with `mcp list --json` and refuses unless it
+contains exactly the enabled `vericairn` stdio server with the approved command, arguments and environment, no inherited
+environment-variable list and no changed working directory. Extra entries, even disabled ones, merged transport
+settings, and incompatible managed policy refuse launch. Project trust is set to untrusted using the canonical
+workspace key. The probe does not start a coding agent or an MCP server. See the [Codex configuration
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
+
+Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only the provisioned `claudeAiOauth` login from its
+credentials file. `--setting-sources ""` excludes ordinary user, project and local settings; the explicit settings
+disable hooks and enable no plugins, alongside `--strict-mcp-config`. Detected managed files, macOS managed
+preferences, Windows policy registry keys and known team/enterprise logins refuse launch because mandatory policy
+cannot be isolated by these flags. Remote or otherwise undetected managed policy is not qualified: managed accounts
+are unsupported. The flags were checked against help output only, not a live Claude Code session. These controls do
+not prevent deliberate same-user filesystem or keychain access, and live sign-in from the isolated login has not been
+qualified. See [Claude Code settings](https://code.claude.com/docs/en/settings).
 
 Workspace export refuses symbolic links and Windows reparse points anywhere in `.vericairn`, including dangling links
 and nested entries, before recording a run. Unix writes use directory-relative no-follow opens and exclusive temporary
@@ -356,7 +387,9 @@ USD at the reduced currency threshold; other currencies and total tokens have no
 `features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this
 is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain
 explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation.
-Unknown units are still charged at their full cap.
+Unknown units are still charged at their full cap. Reservation admission prevents allocating the same available
+allowance twice; it does not guarantee actual spend stays within the budget. A soft overrun can make the remainder
+negative. Elapsed wall usage and stop grace use a monotonic clock; recorded observation times remain UTC facts.
 
 ### Observed stalls and assignment scope
 
@@ -371,8 +404,10 @@ attention write is retried and does not prevent containment. Settlement records 
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
 nor containment.
 
-At settlement the worker compares a file inventory captured after brief export and before launch with the workspace
-after the whole process boundary exits. Content, symlink targets (without reading through the link), and Unix modes
+At settlement the worker compares a physical file inventory captured after brief export and before launch with the
+workspace after the whole process boundary exits. It enumerates the workspace itself, independent of `core.worktree`,
+`GIT_DIR`, replaced Git administration files or other agent-writable Git configuration. The physical root's identity
+must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
 are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
@@ -381,8 +416,13 @@ and directory matching respects path boundaries. The settling operation and run-
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
-as clean. This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent
-change. Git administration and changes outside the workspace are not inventoried.
+as clean. Non-regular files are rejected before content reads; no-follow acquisition and handle checks reject leaf
+replacement races. Each inventory runs in a helper process with a 30-second deadline, at most 100,000 files and 1 GiB
+of content. Timeout terminates the helper, with bounded cleanup and stream-drain waits; missing helper support also
+marks the audit incomplete. Pattern comparison has its own 30-second deadline and bounded non-backtracking matching.
+With `problem` present, counts can be partial and zero outside paths does not establish a clean scope. This is a net
+workspace observation, not filesystem isolation or proof of which actor made a concurrent change; changes reverted
+before settlement are invisible. Git administration and changes outside the workspace are not inventoried.
 
 ## The synthetic migration
 

@@ -444,12 +444,12 @@ A run is charged to its goal, unit by unit:
 - a settled run, what its usage reports, and its cap in every unit its usage lists as `unreported`: unknown usage is
   never zero;
 - a run in flight (not started, dispatched or uncertain), its whole cap, so that a run holds its allowance until it
-  settles and two runs never spend the same allowance;
+  settles and admission cannot allocate that reserved allowance again; actual soft-limit overruns can exceed it;
 - a run that ended before anything was dispatched (no revision records `dispatchedAt`), nothing.
 
 A goal's spend is the sum of the charges of every run that names any revision of the goal, against the budget of its
-current revision. An intent that names its goal is refused unless, judged from the records written before it (so a
-later record never unmakes it):
+current revision. Every record newly reserving allowance, including a revision, is refused unless, judged from the
+records written before it (so a later record never unmakes it):
 
 - the goal's revision then current is `active` (`operation.fenced`);
 - the cap states `wallMinutes` and `attemptsPerStep` and, exactly where the budget states them, `tokens` and `currency`
@@ -477,8 +477,14 @@ before the request, and containment only in a settled revision; a stop that was 
 A worker state-file write failure after launch leaves the run dispatched and reserved; supervision retries local state
 writes and settles only after observing exit. `RunStart` authors the intent as its supplied recording caller.
 
-Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. Agent-run
-revisions cannot redispatch an existing identity; generic operations retain their reconciliation and retry rules.
+Every physical agent launch requires a new `agent-run` intent, with fresh budget and concurrency admission. A settled
+agent-run identity (`observed-success`, `known-failure` or `canceled`) cannot return to an in-flight state or change to
+another status, including through reconciliation (`operation.agent-run-relaunch`). A dispatch timestamp is immutable
+once assigned and cannot be introduced after settlement (`operation.agent-run-dispatch-kept`). The target and cap stay
+those of the original intent (`operation.agent-run-target-kept`, `operation.cap`); changing the goal cannot move a
+reservation. Admission recognizes an already
+reserved revision only when its predecessor was in flight with the identical target. Generic operations retain their
+reconciliation and retry rules.
 
 Token usage is accepted only as complete nonnegative integer counts with checked sums (including sums across turns).
 Claude results require input, output, cache-creation and cache-read counts; Codex completed turns require input and
@@ -500,12 +506,20 @@ USD at the reduced currency threshold; other currencies and total tokens have no
 `features.rollout_budget.enabled=true` and `features.rollout_budget.limit_tokens` at the reduced token threshold; this
 is native tracking, not a guaranteed hard stop. Generic launchers supply no native spending control. All units remain
 explicitly soft: a turn, provider cost estimate or failed shutdown can exceed the headroom and the reservation.
-Unknown units are still charged at their full cap.
+Unknown units are still charged at their full cap. A soft overrun can make the goal's remainder negative; reservations
+prevent double allocation, not all overspend. Elapsed wall usage and stop grace use a monotonic clock, while the
+record's observation timestamps remain UTC facts.
 
-Containment means the worker observed the whole launch boundary exited, including descendants after root exit. Failed
-escalation attempts remain evidence and are retried, never described as a successful kill. A dispatch write lost after
-launch must be recovered before settlement; until then the intent holds its full reservation. See [the
-worker](software.md#coding-agents-the-worker-and-its-launchers) for platform boundaries and configuration isolation.
+Containment means a successful inventory showed the whole launch boundary exited, including descendants after root
+exit. An unavailable or failed process inventory cannot establish containment and is retried with the reservation
+held. Failed escalation attempts likewise remain evidence and are retried. On Windows transmission is the stop file;
+on POSIX it also attempts SIGTERM to the owned process group. A POSIX leader stays unreaped through the last inventory
+and signal so its numeric group identity cannot be reused, and signaling refuses lost child ownership. Abandoning
+supervision retains a native lifecycle owner to reap the child or close Windows SafeHandles after exit; that cleanup
+does not author settlement. A dispatch write lost after launch must be recovered before settlement; until then the
+intent holds its full reservation. These are process boundaries, not an OS security sandbox: POSIX group/session
+escape and worker crash are not contained, and unsupported child-reaping hosts refuse launch. See [the
+worker](software.md#launch-accounting-and-containment) for the Windows creation gap and other platform limits.
 
 ### Worker liveness and assignment scope
 
@@ -520,8 +534,10 @@ attention write is retried and does not prevent containment. Settlement records 
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
 nor containment.
 
-At settlement the worker compares a file inventory captured after brief export and before launch with the workspace
-after the whole process boundary exits. Content, symlink targets (without reading through the link), and Unix modes
+At settlement the worker compares a physical file inventory captured after brief export and before launch with the
+workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or
+Git environment variables, and the physical root must retain the baseline's identity. Content, symlink targets
+(without reading through the link), and Unix modes
 are compared, including committed changes, deletions, renames, untracked files and ignored files. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
@@ -530,8 +546,12 @@ and directory matching respects path boundaries. The settling operation and run-
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
-as clean. This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent
-change. Git administration and changes outside the workspace are not inventoried.
+as clean. Non-regular files are rejected without reading their contents, and handle checks reject leaf replacement
+races. Each inventory runs in a helper process under a 30-second deadline and work limits, with bounded cleanup after
+timeout; pattern comparison has its own 30-second deadline. Missing helper support, timeouts and special files mark
+the result incomplete. With `problem` present, counts can be partial and zero outside paths does not mean clean.
+This is a net workspace observation, not filesystem isolation or proof of which actor made a concurrent change.
+Git administration, changes outside the workspace and changes reverted before settlement are not inventoried.
 
 ## A device keeps its identity
 
