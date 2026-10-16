@@ -153,7 +153,12 @@ internal sealed class NativeProbe : IDisposable
     public IAgentLauncher Launcher { get; }
     public LaunchContext Context { get; }
     public LaunchContext Prepare() => Launcher.Prepare(Context);
-    public void Behavior(string key, string value) => File.WriteAllText(Report + ".behavior", new JsonObject { [key] = value }.ToJsonString());
+    public void Behavior(string key, string value)
+    {
+        JsonObject behavior = File.Exists(Report + ".behavior") ? JsonNode.Parse(File.ReadAllText(Report + ".behavior"))!.AsObject() : [];
+        behavior[key] = value;
+        File.WriteAllText(Report + ".behavior", behavior.ToJsonString());
+    }
     public void Dispose() => Directory.Delete(Root, recursive: true);
 
     [ModuleInitializer]
@@ -178,6 +183,7 @@ internal sealed class NativeProbe : IDisposable
     internal static int? Run(string scenario, string report, string[] arguments)
     {
         if (!scenario.StartsWith("native-", StringComparison.Ordinal)) return null;
+        File.WriteAllText(report + ".probed", "probed");
         JsonObject behavior = File.Exists(report + ".behavior") ? JsonNode.Parse(File.ReadAllText(report + ".behavior"))!.AsObject() : [];
         if (behavior["probeFailure"]?.GetValue<string>() is string failure && arguments.Contains(failure)) return 2;
         bool codex = scenario == "native-codex";
@@ -204,6 +210,7 @@ internal sealed class NativeProbe : IDisposable
             if (goals == "duplicate") Console.WriteLine("goals stable true");
             Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true");
             foreach (string name in DisabledCodexFeatures) Console.WriteLine(name + " stable false");
+            if (behavior["featuresSuffix"]?.GetValue<string>() is string featuresSuffix) Console.WriteLine(featuresSuffix);
             return 0;
         }
         if (arguments.Contains("mcp") && arguments.Contains("list"))
@@ -218,6 +225,7 @@ internal sealed class NativeProbe : IDisposable
             if (defect is "args" or "env_vars") transport[defect] = new JsonArray("unexpected");
             if (defect == "env") transport["env"] = new JsonObject { ["EXTRA"] = "unexpected" };
             var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport });
+            if (behavior["mcpAuth"]?.GetValue<string>() is string auth) list[0]!["auth_status"] = auth;
             if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
             if (defect == "transport-control") transport["unapproved"] = true;
             if (defect == "duplicate-env")

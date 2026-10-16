@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -98,12 +99,13 @@ public class NativeAdmissionTests
         Assert.Equal(0, fixture.Run.Service.Check().Errors);
     }
 
-    private sealed class NativeRun : IDisposable
+    internal sealed class NativeRun : IDisposable
     {
-        public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null)
+        public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, bool newer = false, bool qualify = false)
         {
             Probe = new(harness);
-            Run = new();
+            Run = new(keepOperatorKey: qualify);
+            if (newer) Probe.Behavior("version", harness == "codex" ? "codex-cli 0.160.0" : "2.1.297 (Claude Code)");
             var environment = new Dictionary<string, string>(Probe.Context.Environment, WorkerEnvironment.Names) { ["LANG"] = "C" };
             string[] variables = ["VERICAIRN_RUN", "VERICAIRN_STOP_FILE", "VERICAIRN_BRIEF", "VERICAIRN_CONDITION"];
             foreach (string name in variables) environment[name] = "synthetic-binding";
@@ -111,7 +113,14 @@ public class NativeAdmissionTests
             IReadOnlyList<string> server = [.. Probe.Context.McpServer, "--estate", Run.Estate.Root, "mcp", "serve", "--as", Run.Estate.BuilderId];
             LaunchContext inspection = Probe.Context with { Environment = environment, McpServer = server, McpEnvironment = serverEnvironment };
             File.WriteAllText(inspection.McpConfiguration, JsonSerializer.Serialize(new { mcpServers = new { vericairn = new { command = server[0], args = server.Skip(1), env = serverEnvironment } } }));
-            RunPreflight inventory = Probe.Launcher.Preflight(Probe.Launcher.Prepare(inspection));
+            Run.Service.Providers.Register(Probe.Launcher);
+            Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer };
+            if (qualify)
+            {
+                Qualification = RunEstate.Ok(Run.Service.QualifyHarness(new(Probe.Launcher.Launcher, Run.Estate.OperatorId, Probe.Context.Settings)));
+                new FileKeyStore(VericairnHome.Path()).Remove(Run.OperatorDevice);
+            }
+            RunPreflight inventory = Probe.Launcher.Probe(Probe.Launcher.Prepare(inspection));
             var configuration = new ReportedLauncher(Probe.Launcher).Configuration with { EnvironmentPolicy = new("native-test-policy", inventory.Components) };
             Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer,
                 Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal) { [Probe.Launcher.Launcher] = configuration } };
@@ -121,6 +130,7 @@ public class NativeAdmissionTests
 
         public NativeProbe Probe { get; }
         public RunEstate Run { get; }
+        public RecordWritten? Qualification { get; }
         public RunResponse Start() => Run.Start(Probe.Launcher.Launcher, Probe.Launcher.Launcher == "codex" ? "native-codex" : "native-claude", Probe.Report);
         public void Dispose() { Run.Dispose(); Probe.Dispose(); }
     }

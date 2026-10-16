@@ -46,7 +46,7 @@ internal static class ClaudeCodeInventory
         {
             ["version"] = HarnessInventory.Digest(version + " (Claude Code)"),
             ["flags"] = HarnessInventory.Digest(help),
-            ["tools"] = HarnessInventory.Digest(new { tools = ToolList, goal = "built-in-evaluator", binary = HarnessInventory.Binary(context, command) }),
+            ["tools"] = HarnessInventory.Digest(new { tools = ToolList, goal = "built-in-evaluator", binary = HarnessInventory.Binary(context, HarnessProcess.Command(context.Settings, "claude")) }),
             ["configuration"] = HarnessInventory.Digest(new { configuration, platform = HarnessInventory.Platform }),
             ["login"] = HarnessInventory.Digest(new { boundary = "provisioned-unmanaged-oauth-only", subscription = login }),
             ["mcp"] = HarnessInventory.McpEvidence(context, "strict-explicit-config-help-confirmed"),

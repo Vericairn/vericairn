@@ -20,6 +20,7 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
     public RunCapabilities ExecutionCapabilities => inner.ExecutionCapabilities;
     public RunConfiguration? Configuration => inner.Configuration;
     public RunPreflight Preflight(LaunchContext context) => inner.Preflight(context);
+    public RunPreflight Probe(LaunchContext context) => inner.Probe(context);
     public HarnessExecution? ReadExecution(string line) => inner.ReadExecution(line);
 
     public ProviderDescriptor Descriptor => inner.Descriptor;
