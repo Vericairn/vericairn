@@ -289,6 +289,7 @@ public class GoalStepTests
         RoutingServiceTests.Routed(run);
         string op = run.Estate.OperatorId;
         Done(run, run.Assignment);
+        HandoffPackage beforeBatch = run.Service.Handoff().Package!;
 
         // The store fails after routing's assignment of W-2, before the run's intent: the assignment stays, holding nothing.
         run.Service.BeforeStoringTogether = record =>
@@ -318,6 +319,12 @@ public class GoalStepTests
         run.Reopen();
         Assert.Equal("batch.incomplete", Assert.Single(run.Service.Reconcile()).Code);
         Assert.Contains("batch.incomplete", run.Service.Status().Text, StringComparison.Ordinal);
+        Assert.Equal("incomplete-handoff", run.Service.Handoff().Problem!.Code);
+        Assert.Contains(task.Message, run.Service.Handoff().Text, StringComparison.Ordinal);
+        ResumeResponse resumed = run.Service.ResumeHandoff(beforeBatch);
+        Assert.True(resumed.HasErrors);
+        Assert.Contains("batch.incomplete", resumed.Text, StringComparison.Ordinal);
+        Assert.Contains(task.Message, resumed.Text, StringComparison.Ordinal);
 
         // Taking the step again assigns W-2 afresh with its run's intent; the task ends, and the stranded assignment stays a record.
         GoalStepResponse taken = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "taken")));
@@ -326,6 +333,11 @@ public class GoalStepTests
         Assert.Equal("observed-success", run.Settled(taken.Run!.Run).Status);
         Assert.Empty(run.Service.Reconcile());
         Assert.True(run.Estate.Load().ById.ContainsKey(stranded));
+        HandoffPackage afterRun = run.Service.Handoff().Package!;
+        Assert.Contains(afterRun.Payload.GetProperty("originals").EnumerateArray(), source => source.GetProperty("id").GetString() == run.Goal);
+        Assert.Contains(afterRun.Payload.GetProperty("originals").EnumerateArray(), source => source.GetProperty("id").GetString() == taken.Run.Run);
+        Assert.NotEmpty(afterRun.Payload.GetProperty("observedState").GetProperty("goals").EnumerateArray());
+        Assert.Contains(afterRun.Payload.GetProperty("observedState").GetProperty("operations").EnumerateArray(), operation => operation.GetProperty("body").GetProperty("status").GetString() == "observed-success");
 
         // A person's step likewise: an ask that could not be stored leaves the operator's assignment of W-3 holding nothing.
         Order(run, "W-3", ""","role":"publisher" """);

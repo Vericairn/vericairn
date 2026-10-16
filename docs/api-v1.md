@@ -683,12 +683,15 @@ the embedded runtime or local socket within that transport's limit.
 
 A successful `vericairn.resume/1` comparison lists every added record (including
 backdated arrivals and intermediate revisions), every new supersession edge,
-missing originals, records changed in place, the complete pin before and after
+missing originals, records changed in place or moved (with their previous path), the complete pin before and after
 (including artifact hashes and record format), and every observed-state change
 with before/after values. Changed arrays are kept whole. Invalid current records
 remain visible through findings and source changes; their derived state is
 explicitly unavailable and `hasErrors` is true. Missing and replaced originals
 also set `hasErrors`. A missing record is not assumed to have been superseded.
+An already-open runtime can compare even when the current pin becomes unreadable:
+the pin's `after` is null and findings name the problem. An interrupted record
+batch is incomplete for both hand-over and resume, with every missing record named.
 Even an unchanged view says **the world may have moved**. Reading a resume never
 starts work, retries an effect, imports records or accepts a result; the old
 package grants nothing and current authority must be re-established.

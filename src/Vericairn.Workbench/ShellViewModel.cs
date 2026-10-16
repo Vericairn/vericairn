@@ -330,6 +330,10 @@ public sealed class ShellViewModel : Observable
         {
             Status = "The runtime did not answer: " + exception.Message;
             Freshness = "cached";
+            foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
+            {
+                page.Unavailable();
+            }
         }
     }
 

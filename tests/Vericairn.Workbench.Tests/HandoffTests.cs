@@ -56,6 +56,13 @@ public class HandoffTests(HeadlessFixture fixture)
             await fixture.Ui(shell.ObserveEstate);
             Assert.Equal(op, shell.Api.Status().Json.GetProperty("lastObservedByPerson").GetProperty("by").GetString());
             Assert.Contains("observation", shell.LastPersonObservation, StringComparison.Ordinal);
+
+            // Losing the read after discovery must mark the document's comparison cached too.
+            using var locked = new FileStream(Path.Combine(root, "estate", "manifest.json"), FileMode.Open, FileAccess.Read, FileShare.None);
+            await fixture.Ui(shell.Refresh);
+            Assert.Equal("cached", shell.Freshness);
+            Assert.Contains("cached", page.Note, StringComparison.Ordinal);
+            Assert.Equal(basis, page.PackageJson);
         }
         finally
         {

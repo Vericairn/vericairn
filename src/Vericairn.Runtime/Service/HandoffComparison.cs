@@ -16,12 +16,13 @@ internal static class HandoffComparison
 {
     private const string Caution = "The world may have moved. This compares this copy's records, pin and recorded observations; it does not establish live external state. Recheck current authority and required originals before acting. Nothing is restarted or accepted.";
 
-    internal static ResumeResponse Compare(HandoffPackage package, EstateModel current, IReadOnlyList<RecordFile> files)
+    internal static ResumeResponse Compare(HandoffPackage package, EstateModel current, IReadOnlyList<RecordFile> files, string estate)
     {
         Dictionary<string, JsonElement> before;
         try
         {
-            before = Validate(package, current.Manifest?.Estate);
+            // The opened session supplies identity even if the current manifest has become unreadable.
+            before = Validate(package, estate);
         }
         catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or JsonException or KeyNotFoundException or FormatException or CanonicalJsonException or OverflowException)
         {
@@ -29,21 +30,31 @@ internal static class HandoffComparison
             return new ResumeResponse(message + "\n", null, true, new Problem("invalid-handoff", message, []));
         }
 
-        Dictionary<string, RecordFile> byPath = files.ToDictionary(f => f.Path, StringComparer.Ordinal);
+        // Match the loader's first occurrence of each id, including a record at an invalid location.
+        // A resume reports damaged current state; it must not assume the source's expected path exists.
+        var byId = new Dictionary<string, RecordFile>(StringComparer.Ordinal);
+        foreach (RecordFile file in files.Where(f => f.Path.EndsWith(".json", StringComparison.Ordinal)).OrderBy(f => f.Path, StringComparer.Ordinal))
+        {
+            if (RecordParser.Parse(file.Bytes, file.Path, new FindingList()) is { } record)
+            {
+                byId.TryAdd(record.Id, file);
+            }
+        }
+
         var added = new JsonArray();
         var replaced = new JsonArray();
         var missing = new JsonArray();
         var superseded = new JsonArray();
         foreach (RecordEnvelope record in current.Records.OrderBy(r => r.Id, StringComparer.Ordinal))
         {
-            RecordFile file = byPath[record.ExpectedPath];
+            RecordFile file = byId[record.Id];
             var identity = new JsonObject
             {
                 ["id"] = record.Id,
                 ["type"] = record.Type,
                 ["hash"] = record.ComputedHash,
                 ["byteHash"] = ContentHash.Sha256(file.Bytes),
-                ["path"] = record.ExpectedPath,
+                ["path"] = file.Path,
                 ["original"] = JsonNode.Parse(file.Bytes),
             };
             if (!before.TryGetValue(record.Id, out JsonElement previous))
@@ -54,10 +65,11 @@ internal static class HandoffComparison
                     superseded.Add(new JsonObject { ["previous"] = predecessor, ["successor"] = record.Id, ["hash"] = record.ComputedHash });
                 }
             }
-            else if (previous.GetProperty("hash").GetString() != record.ComputedHash || previous.GetProperty("byteHash").GetString() != ContentHash.Sha256(file.Bytes))
+            else if (previous.GetProperty("hash").GetString() != record.ComputedHash || previous.GetProperty("byteHash").GetString() != ContentHash.Sha256(file.Bytes) || previous.GetProperty("path").GetString() != file.Path)
             {
                 identity["previousHash"] = previous.GetProperty("hash").GetString();
                 identity["previousByteHash"] = previous.GetProperty("byteHash").GetString();
+                identity["previousPath"] = previous.GetProperty("path").GetString();
                 replaced.Add(identity);
             }
         }
@@ -84,7 +96,7 @@ internal static class HandoffComparison
         {
             ["format"] = "vericairn.resume/1",
             ["basis"] = package.Hash,
-            ["estate"] = current.Manifest?.Estate,
+            ["estate"] = estate,
             ["caution"] = Caution,
             ["changed"] = added.Count > 0 || replaced.Count > 0 || missing.Count > 0 || pinChanged || observedChanges.Count > 0,
             ["hasErrors"] = hasErrors,

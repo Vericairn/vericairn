@@ -16,6 +16,42 @@ namespace Vericairn.Runtime.Tests;
 public class ResumeTests
 {
     [Fact]
+    public void AnUnreadableCurrentPinIsReportedWithoutRejectingTheRetainedPackage()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        using EstateService service = EstateService.Open(estate.Root);
+        HandoffPackage package = service.Handoff().Package!;
+        File.WriteAllText(Path.Combine(estate.Root, EstateLayout.ManifestPath), "{");
+
+        ResumeResponse resume = service.ResumeHandoff(package);
+        Assert.Null(resume.Problem);
+        Assert.True(resume.HasErrors);
+        Assert.True(resume.Json!.Value.GetProperty("pin").GetProperty("changed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, resume.Json.Value.GetProperty("pin").GetProperty("after").ValueKind);
+        Assert.Contains("manifest.json", resume.Text, StringComparison.Ordinal);
+        Assert.Contains(package.Hash, resume.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACurrentRecordAtTheWrongPathIsComparedAndItsActualLocationIsNamed()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order);
+        using EstateService service = EstateService.Open(estate.Root);
+        HandoffPackage package = service.Handoff().Package!;
+        string misplaced = "records/work-order/2026-10/misplaced.json";
+        File.Move(Path.Combine(estate.Root, order.ExpectedPath), Path.Combine(estate.Root, misplaced));
+
+        ResumeResponse resume = service.ResumeHandoff(package);
+        Assert.Null(resume.Problem);
+        Assert.True(resume.HasErrors);
+        JsonElement changed = Assert.Single(resume.Json!.Value.GetProperty("replaced").EnumerateArray());
+        Assert.Equal(misplaced, changed.GetProperty("path").GetString());
+        Assert.Equal(order.ExpectedPath, changed.GetProperty("previousPath").GetString());
+        Assert.Contains("record.path", resume.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ResumeFindsBackdatedAdditionsEverySupersessionPinAndObservationChanges()
     {
         using var estate = new TestEstate(recordFormat: 2);

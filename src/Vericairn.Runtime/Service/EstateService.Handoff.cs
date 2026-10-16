@@ -64,7 +64,12 @@ public sealed partial class EstateService
         {
             IReadOnlyList<RecordFile> files = session.Files();
             EstateModel model = EstateLoader.Load(session.Root, files);
-            return HandoffComparison.Compare(package, model, files);
+            foreach (var finding in InterruptedBatches(model))
+            {
+                model.Findings.Error(finding.Code, finding.Location, finding.Message);
+            }
+
+            return HandoffComparison.Compare(package, model, files, session.Manifest.Estate);
         }
     }
 
