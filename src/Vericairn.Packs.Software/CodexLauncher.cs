@@ -18,7 +18,14 @@ namespace Vericairn.Packs.Software;
 public sealed class CodexLauncher : IAgentLauncher
 {
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+
+    /// <inheritdoc />
+    public RunPreflight Preflight(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return CodexInventory.Establish(context);
+    }
 
     /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "thread.started");
@@ -64,7 +71,10 @@ public sealed class CodexLauncher : IAgentLauncher
     public IReadOnlyList<string> EnvironmentNames => ["CODEX_HOME"];
 
     /// <summary>Verifies, before anything is recorded, that Codex's goals feature is enabled: what codex features list says it is, with the run's own environment.</summary>
-    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
+    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => HarnessProcess.Problem(settings, "codex");
+
+    // Protocol tests retain this parser; native admission probes features only in the prepared run environment.
+    internal static string? VerifyGoals(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(environment);
@@ -106,13 +116,14 @@ public sealed class CodexLauncher : IAgentLauncher
         ArgumentNullException.ThrowIfNull(context);
         context = context with { Workspace = HarnessWorkspace.Canonical(context.Workspace) };
         string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "codex");
+        HarnessInventory.FreshHome(home);
         Directory.CreateDirectory(home);
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(home, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        File.WriteAllText(Path.Combine(home, "config.toml"), "mcp_servers=" + Mcp(context) + "\nprojects=" + Projects(context) + "\n[features]\ngoals = true\n");
+        File.WriteAllText(Path.Combine(home, "config.toml"), CodexInventory.Configuration(context));
         string? original = context.Environment.GetValueOrDefault("CODEX_HOME");
         if (original is null && (context.Environment.GetValueOrDefault("HOME") ?? context.Environment.GetValueOrDefault("USERPROFILE")) is string user)
         {
@@ -132,7 +143,6 @@ public sealed class CodexLauncher : IAgentLauncher
 
         var environment = new Dictionary<string, string>(context.Environment, WorkerEnvironment.Names) { ["CODEX_HOME"] = home };
         LaunchContext prepared = context with { Environment = environment };
-        VerifyMcp(prepared);
         return prepared;
     }
 
@@ -150,18 +160,20 @@ public sealed class CodexLauncher : IAgentLauncher
         }
 
         return [.. HarnessProcess.Command(context.Settings, "codex"), "exec", "--json", "--cd", context.Workspace, "--sandbox", "workspace-write",
-            "-c", "mcp_servers=" + Mcp(context),
-            "-c", "projects=" + Projects(context),
+            .. Overrides(context), "--ignore-rules",
             .. selection, .. limits, "/goal " + context.Condition];
     }
 
     // Override one whole projects value: CLI dotted-key parsing does not interpret TOML quotes in a path segment.
     internal static string Projects(LaunchContext context) => "{" + Toml(context.Workspace) + "={trust_level=\"untrusted\"}}";
 
+    internal static IReadOnlyList<string> Overrides(LaunchContext context) => ["-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context),
+        .. CodexInventory.Settings.SelectMany(s => new[] { "-c", s })];
+
     internal static void VerifyMcp(LaunchContext context)
     {
         (int code, string output, _) = HarnessProcess.Run([.. HarnessProcess.Command(context.Settings, "codex"),
-            "-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context), "mcp", "list", "--json"], context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
+            .. Overrides(context), "mcp", "list", "--json"], context.Environment, TimeSpan.FromSeconds(30), context.Workspace);
         try
         {
             using JsonDocument document = JsonDocument.Parse(output);
@@ -193,7 +205,7 @@ public sealed class CodexLauncher : IAgentLauncher
         }
     }
 
-    private static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";
+    internal static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";
 
     /// <summary>Each completed turn reports the tokens it spent, its input and output tokens, added to the run's tally.</summary>
     public HarnessSignal? Read(string line)

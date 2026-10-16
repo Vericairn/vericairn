@@ -83,6 +83,7 @@ internal static class FakeHarness
 
     private static int Run(string scenario, string report, string[] arguments)
     {
+        if (NativeProbe.Run(scenario, report, arguments) is int native) return native;
         var environment = new JsonObject();
         foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
@@ -510,8 +511,13 @@ internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher 
             destination = ExecutionCapabilities.Destinations[0], dataBoundary = "worker-user" } }), ["model-a", "model-b"],
         EnvironmentPolicy: new("stand-in-policy", Inventory));
 
-    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => inner.Verify(settings, environment);
-    public Vericairn.Runtime.Workers.LaunchContext Prepare(Vericairn.Runtime.Workers.LaunchContext context) => inner.Prepare(context);
+    public string? Verify(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment) => inner is Vericairn.Packs.Software.CodexLauncher ? Vericairn.Packs.Software.CodexLauncher.VerifyGoals(settings, environment) : inner.Verify(settings, environment);
+    public Vericairn.Runtime.Workers.LaunchContext Prepare(Vericairn.Runtime.Workers.LaunchContext context)
+    {
+        var prepared = inner.Prepare(context);
+        if (inner is Vericairn.Packs.Software.CodexLauncher) Vericairn.Packs.Software.CodexLauncher.VerifyMcp(prepared);
+        return prepared;
+    }
     public IReadOnlyList<string> Command(Vericairn.Runtime.Workers.LaunchContext context) => inner.Command(context);
     public Vericairn.Runtime.Workers.HarnessSignal? Read(string line) => inner.Read(line);
     public IReadOnlyList<Vericairn.Runtime.Workers.HarnessAction> ReadActions(string line) => inner.ReadActions(line);

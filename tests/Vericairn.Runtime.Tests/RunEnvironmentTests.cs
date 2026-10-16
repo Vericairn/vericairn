@@ -137,8 +137,8 @@ public class RunEnvironmentTests
         string report = run.Report("unqualified");
         RunResponse refused = run.Start(launcher, "codex", report);
         Assert.False(refused.Ok);
-        Assert.Contains("inventory; dispatch is unsupported", refused.Message, StringComparison.Ordinal);
-        Assert.False(File.Exists(report));
+        Assert.Contains(launcher == "codex" ? "version is not qualified" : "inventory; dispatch is unsupported", refused.Message, StringComparison.Ordinal);
+        if (launcher != "codex") Assert.False(File.Exists(report));
         Assert.Empty(run.Service.Runs().Runs);
     }
 }

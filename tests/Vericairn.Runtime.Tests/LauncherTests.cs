@@ -267,12 +267,12 @@ public class LauncherTests
         {
             var launcher = new CodexLauncher();
             Dictionary<string, string> environment = WorkerEnvironment.Build(WorkerEnvironment.Current(), launcher.EnvironmentNames);
-            string? Verify(string scenario) => launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, Path.Combine(scratch, scenario + ".jsonl")) }, environment);
+            string? Verify(string scenario) => CodexLauncher.VerifyGoals(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting(scenario, Path.Combine(scratch, scenario + ".jsonl")) }, environment);
             Assert.Null(Verify("codex"));
             Assert.Equal("Codex's goals feature is not enabled here (codex features list shows goals false); enable it with codex features enable goals, then start the run again.", Verify("codex-goals-off"));
             Assert.StartsWith("Codex lists no goals feature in codex features list", Verify("codex-no-goals"), StringComparison.Ordinal);
             Assert.Equal("Codex's goals feature could not be verified: codex features list exited 2: error: unrecognized subcommand 'features'", Verify("codex-broken"));
-            Assert.StartsWith("Codex's goals feature could not be verified: ", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(scratch, "no-such-codex") }, environment), StringComparison.Ordinal);
+            Assert.StartsWith("Codex's goals feature could not be verified: ", CodexLauncher.VerifyGoals(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = Path.Combine(scratch, "no-such-codex") }, environment), StringComparison.Ordinal);
             Assert.Equal(["features", "list"], FakeHarness.Reports(Path.Combine(scratch, "codex.jsonl"))[0]["arguments"]!.AsArray().Select(a => a!.GetValue<string>()));
         }
         finally
