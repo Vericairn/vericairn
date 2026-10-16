@@ -736,3 +736,33 @@ It includes source identities and facts and is null when unknown. A newer
 record reporting an older observation does not advance freshness. Ordinary
 reads and automation never manufacture a human observation. Hand-over and
 resume are derived artifacts, not new record types or editable status records.
+
+## Communication configuration (COMMS-01)
+
+`communication-setting` and `communication-delegation` are additive format-2
+record types. A pre-COMMS-01 loader reports `record.unknown-type` for either type;
+it does not silently interpret the setting as an observation or ignore it. An
+estate must use a COMMS-01-capable reader before authoring these records. This
+adds no format 3 and changes no older record's meaning.
+
+A setting has `scope` (`estate`, `person`, `assignment`), `values`, and a
+`recipient` except for estate defaults. Assignment scope also names the exact
+`assignment`. Values are independently optional: `progress` is `none`,
+`completion-and-need`, `milestones` or `verbose`; `status`, `decision`, `result`
+and `handoff` are `short`, `standard` or `comprehensive`. Omission inherits;
+`values: {}` resets the scope. Revisions supersede the previous record and keep
+the scope and recipient. Concurrent current profiles are explicit conflicts.
+
+A person authors their own settings. An administrator can set estate defaults,
+which cannot replace a person's explicit values. Another author must pin an
+active, unexpired `communication-delegation` with `authority` and
+`authorityHash`. That grant is authored by the recipient, names the `grantee`
+and exact personal or assignment scope, and has `status: active` or `revoked`.
+A revision revokes it without invalidating earlier authorized history. A
+setting's optional `basis` and `basisHash` preserve an exact decision of its
+recipient. The envelope always identifies and signs the actual author.
+
+Resolution uses shipped defaults, estate defaults, the recipient's estate
+values, their assignment values and a one-view override, in that order, for
+each field. One-view values are never records. Full records, evidence and
+canonical output remain unchanged by presentation depth.
