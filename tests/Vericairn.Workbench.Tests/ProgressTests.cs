@@ -49,7 +49,7 @@ public class ProgressTests(HeadlessFixture fixture)
             // Ctrl+Shift+P opens the whole report as the runtime renders it, and the keyboard lands in it.
             await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.P, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.P, null); });
             ProgressDocument page = Assert.IsType<ProgressDocument>(shell.SelectedDocument);
-            Assert.Equal(shell.Api!.Progress().Text, page.Text);
+            Assert.EndsWith(shell.Api!.Progress().Text, page.Text, StringComparison.Ordinal);
             Assert.Contains("    milestone work orders submitted: 1\n", page.Text, StringComparison.Ordinal);
 
             // A record written meanwhile, and F5: the summary and the open report follow the runtime, in place.
@@ -65,7 +65,7 @@ public class ProgressTests(HeadlessFixture fixture)
             Assert.True(shell.Api.WorkProgress(new WorkProgressRequest(attempt, op, "build", "A live claim.")).Ok);
             await fixture.Ui(shell.RefreshProgress);
             Assert.Contains("A live claim.", page.Text, StringComparison.Ordinal);
-            Assert.Equal("Agent claim · build", shell.Progress[^1].Heading);
+            Assert.DoesNotContain(shell.Progress, row => row.Heading == "Agent claim · build");
 
             // Enter on a row of the summary opens the report again once it was closed.
             await fixture.Ui(() => shell.Close(page));

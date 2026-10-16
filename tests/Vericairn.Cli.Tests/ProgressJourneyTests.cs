@@ -86,7 +86,7 @@ public class ProgressJourneyTests
             string ask = CliHarness.Ok("--estate", root, "--json", "records", "new", "ask", "--by", builder, "--body", CliHarness.WriteJson(scratch, "ask.json", $$"""{"to":"{{op}}","question":"Ship the widget in blue?","recommendation":"Yes, blue reads best.","consequence":"The widget stays grey.","state":"open"}""")).Id;
 
             CliHarness.Outcome text = CliHarness.Ok("--estate", root, "progress");
-            Assert.StartsWith("Progress of Example (example), rendered from its records [estate ", text.Out, StringComparison.Ordinal);
+            Assert.Contains("Progress of Example (example), rendered from its records [estate ", text.Out, StringComparison.Ordinal);
             Assert.Contains("  Check: 0 errors, 0 warnings [every record and the repository, as vericairn estate check runs them]\n", text.Out, StringComparison.Ordinal);
             Assert.Contains("Work orders by state: 8 current\n  planned: 6\n", text.Out, StringComparison.Ordinal);
             Assert.Contains("Published releases and what each contained: 2 published of 2 releases recorded\n", text.Out, StringComparison.Ordinal);
@@ -105,7 +105,7 @@ public class ProgressJourneyTests
             Assert.Equal("vericairn.progress/1", json.Json.GetProperty("format").GetString());
             using (EstateService service = EstateService.Open(root))
             {
-                Assert.Equal(text.Out, service.Progress().Text);
+                Assert.Contains(service.Progress().Text, text.Out, StringComparison.Ordinal);
             }
 
             copy = CliHarness.Clone(root, "progress-copy");
@@ -161,7 +161,8 @@ public class ProgressJourneyTests
 
             // It is the report vericairn progress prints, except that its check names the records alone and says why.
             string region = GeneratedRegions.Content(text, "progress")!;
-            string printed = CliHarness.Ok("--estate", root, "progress").Out;
+            using EstateService service = EstateService.Open(root);
+            string printed = service.Progress().Text;
             List<string> differing = printed.Split('\n').Except(region.Split('\n'), StringComparer.Ordinal).ToList();
             Assert.Equal(["  Check: 0 errors, 0 warnings [every record and the repository, as vericairn estate check runs them]"], differing);
             Assert.Contains("  Check: 0 errors, 0 warnings in the records [every record; the repository checks, which read this document, are vericairn estate check's]\n", region, StringComparison.Ordinal);

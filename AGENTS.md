@@ -32,6 +32,7 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 | Tool | Access | What it returns |
 |---|---|---|
 | `estate_health` | read | The runtime's identity and what it serves: API version, Vericairn version, estate, profile and record format. |
+| `communication_get` | read | The recipient's effective communication values, every contributing revision, conflicts and freshness; shipped and estate defaults when no recipient is named. Read-only; no permission or preference is inferred. |
 | `estate_status` | read | The estate's current state derived from its records, as the canonical status document: work orders, releases, assignments, operations and findings. Identical on every machine for the same records. |
 | `estate_check` | read | Validation of every record plus the repository cleanliness and portability checks: the findings with their counts. |
 | `estate_progress` | read | The progress report, with record-derived sections and separately labelled latest local agent claims: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator, each line naming the records it rests on. As text, or as the canonical JSON when form is json. Reading it changes nothing. |

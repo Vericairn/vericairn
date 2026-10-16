@@ -47,3 +47,21 @@ From 0.7.0, `estate_progress` also shows worker-observed command, rate and loop 
 Watching thresholds are recorded in goal and roster `limits.watch`, with bounded integer fields and goal-over-roster-over-launcher precedence. MCP progress notes cannot change those thresholds or the worker's observations. The run intent pins the settings and roster revision current at launch; [the software guide](software.md#recorded-watching-settings-070) gives defaults, ranges and examples.
 
 Remote is not built. These tools expose claims and observations available to this estate runtime; WATCH-01 adds no Remote execution, observation or signing support.
+
+## Communication read (COMMS-01)
+
+The additive `communication_get` tool takes optional `recipient` and
+`assignment` ids. It returns the effective progress frequency and four depths,
+all contributing revisions and authors, conflicts and freshness. No recipient
+means estate defaults, without inventing a personal choice. It is visible on
+read-only connections and writes nothing. There is no MCP setting-write or
+delegation tool. Unsupported runtimes return an explicitly unavailable profile.
+
+`work_brief` accepts optional `recipient` and `assignment` ids. Its complete
+original brief remains present, with the effective communication values and
+their sources in a separate section. A worker's exported brief captures the
+same values and asks it to refresh them at the next settled boundary.
+
+This changes the MCP tool list. The builder must regenerate `AGENTS.md` with
+`vericairn mcp orientation` from the updated runtime; pointer files retain their
+usual role. Remote is not built and is not qualified by this tool.

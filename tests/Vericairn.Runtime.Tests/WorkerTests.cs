@@ -662,7 +662,11 @@ public class WorkerTests
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));
-        Assert.Equal(run.Service.Brief("W-1")!.Markdown, File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md")));
+        string capturedBrief = File.ReadAllText(Path.Combine(workspace, ".vericairn", "brief.md"));
+        Assert.Contains(WorkView.RenderBrief(model, WorkView.FindOrder(model, "W-1")!), capturedBrief, StringComparison.Ordinal);
+        Assert.Contains("assignment " + run.Assignment, capturedBrief, StringComparison.Ordinal);
+        Assert.Contains("Communication for " + run.Estate.OperatorId, capturedBrief, StringComparison.Ordinal);
+        Assert.Contains("Freshness:", capturedBrief, StringComparison.Ordinal);
         Assert.Equal("*\n", File.ReadAllText(Path.Combine(workspace, ".vericairn", ".gitignore")));
         Assert.Empty(RunEstate.Git(workspace, "status", "--porcelain"));
         JsonObject server = JsonNode.Parse(File.ReadAllText(mcp))!["mcpServers"]!["vericairn"]!.AsObject();

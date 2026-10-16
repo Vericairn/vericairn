@@ -425,6 +425,16 @@ public partial class MainWindow : Window
         }
     }
 
+    private void OnOpenCommunication(object? sender, RoutedEventArgs e)
+    {
+        shell.OpenCommunication();
+        FocusDocument();
+    }
+
+    private void OnRefreshCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Refresh();
+    private void OnSaveCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Save();
+    private void OnResetCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Reset();
+
     private void OnOpenProgress(object? sender, RoutedEventArgs e)
     {
         shell.OpenProgress();

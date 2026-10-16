@@ -713,7 +713,15 @@ public sealed partial class EstateService
             return (null, watchRefusal, null);
         }
 
-        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, WorkView.RenderBrief(model, order), Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+        string? recipient = CommunicationRecipient(model, goal);
+        string brief = CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), Communication(recipient, recipient is null ? null : assignment.Id));
+        return (new RunPlan(estate, assignment, key, goal.Id, request.Agent, PrincipalName(model, request.Agent), cap, clone, resource.Id, repository, branch, brief, Condition(order, assignment, goal), StallSeconds(model, goal, request.Settings, launcher), watch), null, null);
+    }
+
+    private static string? CommunicationRecipient(EstateModel model, RecordEnvelope goal)
+    {
+        string? sponsor = EstateModel.BodyString(goal, "sponsor");
+        return model.CurrentPrincipal(sponsor) is { } person && EstateModel.BodyString(person, "kind") == "human" ? sponsor : null;
     }
 
     private static int StallSeconds(EstateModel model, RecordEnvelope goal, IReadOnlyDictionary<string, string>? settings, IAgentLauncher launcher)
