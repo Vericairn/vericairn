@@ -1,5 +1,20 @@
 # API version 1
 
+This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 and CONTEXT-01 additions for 0.7.0. Features marked "from 0.6.0" first
+appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
+The release documentation index records that history.
+The NuGet installation described below is prepared for 0.7.0 and becomes available after its publication.
+
+One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
+(`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
+(`OpenApiDocument.Json`, served at `/openapi/v1.json`). The problem codes are those listed under Outcomes
+and problems. The state language that clients present is the table in `Vericairn.Presentation`, which
+tests hold to `docs/state-language.json` and to the runtime's own strings. `Vericairn.Runtime` implements
+it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implementation; the SDK
+(`Vericairn.Sdk`) calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime
+otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
+the runtime decides, and every response is what the runtime observed.
+
 ## Context artifacts (0.7.0 addition)
 
 `GET /v1/context/work/{key}` (`Context`) prepares and retains a
@@ -45,6 +60,16 @@ framing and provider-billed usage are separate unknowns, not zero. The MCP
 `context_prepare` text and ordinary `context prepare` stdout are exactly this
 measured payload; API/SDK JSON envelopes and `--json` sidecars are transport.
 
+Context preparation and retrieval answer handled requests with HTTP 200 and a
+`ContextResponse` or `ContextReadResponse`; callers must inspect `problem`.
+`incomplete-context` means required source material is missing or invalid,
+`context-over-budget` means the complete mandatory payload cannot fit, and
+`context-retention-limit` means the existing object limit would be exceeded.
+Retrieval uses `original-unavailable` for a missing pinned original and
+`invalid-context` for failed verification, always without returned bytes.
+`invalid`, `not-found` and `denied` also appear in these response bodies;
+transport authentication may instead reject the request with HTTP 401.
+
 `GET /v1/work/{key}/brief` keeps its existing machine fields and human lead and
 adds the package under `json.context`, including its withheld list and measured
 payload. The complete machine brief has its own `json.accounting`; the additive
@@ -54,21 +79,6 @@ complete Markdown includes readable originals, the manifest and withheld list;
 in the text. Neither human depth nor a change to the lead can silently reduce
 the context contract. A context refusal appears as the additive `problem` and
 does not yield a complete brief. Existing JSON fields retain their meaning.
-
-This draft describes the 0.6.1 code with FIX-09 and the unreleased WATCH-01 additions for 0.7.0. Features marked "from 0.6.0" first
-appeared in that candidate, which was withdrawn before publication; 0.6.1 carries them with FIX-08's corrections.
-The release documentation index records that history.
-The NuGet installation described below is prepared for 0.7.0 and becomes available after its publication.
-
-One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
-(`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
-(`OpenApiDocument.Json`, served at `/openapi/v1.json`). The problem codes are those listed under Outcomes
-and problems. The state language that clients present is the table in `Vericairn.Presentation`, which
-tests hold to `docs/state-language.json` and to the runtime's own strings. `Vericairn.Runtime` implements
-it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implementation; the SDK
-(`Vericairn.Sdk`) calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime
-otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
-the runtime decides, and every response is what the runtime observed.
 
 ## One owner
 
@@ -620,10 +630,9 @@ is nothing to record yet, and a refusal is its `problem`, not an HTTP status. Th
 /v1/runs` and `POST /v1/runs/{id}/stop`, from 0.6.0) answer the same way, with a `RunResponse` or a
 `RunStopResponse`; a run that is not found is a `problem` with code `not-found` inside. So do the step and the
 hand-over (`POST /v1/goals/{id}/step` and `POST /v1/work/takeover`, from 0.6.0), with a `GoalStepResponse` or a
-`TakeoverResponse`. A read of a missing subject answers 404 with an empty body.
+`TakeoverResponse`. Other reads of a missing subject answer 404 with an empty body; the context responses above carry their own problem.
 
-Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step and
-takeover routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step, takeover, context and hand-over/resume routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
 in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family

@@ -115,7 +115,7 @@ public static class OpenApiDocument
 
             if (method == "GET" && path is "/v1/handoff" or "/v1/context/work/{key}")
             {
-                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional canonical payload byte limit. Overflow refuses the whole hand-over." });
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "maxBytes", ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1 }, ["description"] = "Optional context allocation in canonical payload bytes, separate from a run spending cap. Mandatory originals, manifest and accounting must fit or the package is refused." });
             }
 
             if (method == "GET" && path == "/v1/asks")

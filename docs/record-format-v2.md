@@ -1,5 +1,15 @@
 # Record format 2
 
+Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written from
+now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
+it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2
+carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
+0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
+candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
+publication. This draft describes 0.6.1 with the unreleased FIX-09 corrections; 0.6.1 carries those additions with
+FIX-08's corrections and continues to read formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
+validation and the run ledger nevertheless need a build that understands their rules.
+
 ## Derived context artifacts (0.7.0)
 
 `vericairn.context/1` is a versioned derived artifact, not a record type or an
@@ -19,16 +29,6 @@ of the same manifest, source and accounting implementation. Run-intent evidence
 continues to pin the exported brief's byte hash through its existing field.
 Neither the context artifact nor a pending assignment it describes admits work,
 accepts a result, clears an uncertain effect or changes any existing record.
-
-Record format 2 is record format 1 ([record-format-v1.md](record-format-v1.md)) with rules for the records written from
-now on. Nothing already written changes: every format-1 record keeps its bytes, its hash, its signatures and the rules
-it was written under. A record states the format it was written in, and an estate at format 2 holds both. Format 2
-carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
-0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
-candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
-publication. This draft describes 0.6.1 with the unreleased FIX-09 corrections; 0.6.1 carries those additions with
-FIX-08's corrections and continues to read formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
-validation and the run ledger nevertheless need a build that understands their rules.
 
 ## Why a new format number
 

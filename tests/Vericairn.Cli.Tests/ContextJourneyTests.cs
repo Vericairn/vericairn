@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Mcp;
@@ -15,6 +16,43 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public class ContextJourneyTests
 {
+    [Fact]
+    public async Task OriginalStdoutPreservesArbitraryBytesWithoutTextEncodingOrFraming()
+    {
+        using var estate = new HandoffEstate();
+        byte[] original = [0, 255, 254, 13, 10, 128, 65];
+        var source = new ContextAssembly.Source(new JsonObject
+        {
+            ["kind"] = "document", ["path"] = "docs/binary.dat", ["byteHash"] = ContentHash.Sha256(original), ["bytes"] = original.LongLength,
+        }, original, false, "optional for this step", Inline: false);
+        ContextPackage package = ContextAssembly.Build(new JsonObject { ["estate"] = estate.Load().Manifest!.Estate }, [source], "lead");
+        using (EstateService api = EstateService.Open(estate.Root))
+        {
+            api.ObjectPut(original);
+            api.ObjectPut(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("manifest").GetProperty("content")));
+        }
+
+        string command = package.Payload.GetProperty("withheld")[0].GetProperty("retrieve").GetString()!;
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"))
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        foreach (string argument in new[] { "--estate", estate.Root }.Concat(command.Split(' ').Skip(1)))
+        {
+            info.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(info)!;
+        using var output = new MemoryStream();
+        Task copied = process.StandardOutput.BaseStream.CopyToAsync(output, TestContext.Current.CancellationToken);
+        Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
+        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+        await copied;
+        Assert.Equal(string.Empty, await error);
+        Assert.Equal(0, process.ExitCode);
+        Assert.Equal(original, output.ToArray());
+    }
+
     [Fact]
     public void PrepareUsesTheSameMeasuredPayloadThroughCliAndMcpAndRejectsOverflow()
     {

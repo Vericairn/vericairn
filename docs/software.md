@@ -8,16 +8,22 @@ in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled ru
 the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
 path below is prepared for 0.7.0.
 
-## Where each part lives
+## Context packages (0.7.0)
 
 For 0.7.0, the foundation's context package preserves exact originals apart from
-derived presentation. `vericairn context prepare <work-order>` retains the work
-dependency closure and the brief's current document catalogue. Required record
-and document originals come first. Optional originals not fully included have
+derived presentation. `vericairn context prepare <work-order>` retains the step's
+working instructions, effects, pinned inputs and current document catalogue.
+Required record and document originals come first. Optional originals not fully included have
 a withheld entry with their identity, reason, availability, measured or unknown
 size, dependency, reduction and generated retrieval route. Excerpts carry byte
 extents and say `irreversible reduction of this representation; original retained`;
 unavailable originals say `irreversible reduction; original unavailable`.
+
+The selection follows this work's assignments, results, decisions and effects.
+A prerequisite work record is a pinned input; sharing a decision does not import
+another assignment or its historical file inputs. Required document references
+remain exact, including an older revision explicitly needed by this step. The
+package states this scope; nothing withheld never means the whole estate was read.
 
 `vericairn context read <manifest> --source <key> --original` returns verified
 original bytes on standard output; `--out <file>` creates a new file without
@@ -46,6 +52,17 @@ the run intent before launch. This does not grant authority or resolve a partial
 record batch; the existing grouped-write checks still own that boundary.
 Model-specific context allocation and qualified autonomous fit remain a launcher
 integration responsibility, separate from the existing run spending cap.
+
+The local contract is exercised through CLI, MCP, API/SDK and both object-store
+implementations. Those fixtures do not qualify a live model or harness. Provider
+billed usage, model fit, compaction recovery and any later adapter transformation
+need their own measurements and qualification. There is no new Remote reader,
+transport, signing capability or user interface: Remote is not built.
+Communication depth remains the caller's concern; COMMS-01 owns its presentation
+resolution. API v1 additions preserve the legacy hand-over discriminator and
+resume input, and the artifacts introduce no record type or format upgrade.
+
+## Where each part lives
 
 The foundation (`Vericairn.Records`, `Vericairn.Runtime`, `Vericairn.Protocol`, the daemon, the SDK, the
 command line and Workbench) holds the record types, the release operations as intent then observed effect,
