@@ -231,7 +231,7 @@ public class LauncherTests
     {
         var launcher = new ClaudeCodeLauncher();
         LaunchContext context = Context(NoSettings);
-        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", "--model", "model-a", "--effort", "high"], launcher.Command(context));
+        Assert.Equal(["claude", "-p", "/goal Is it done? Checks: it builds.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", "/runs/r/mcp.json", "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"hooks\":{},\"enabledPlugins\":{}}", "--tools", "Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation", "--model", "model-a", "--effort", "high"], launcher.Command(context));
         Assert.Equal(["/opt/claude/bin/claude", "--debug", "-p"], launcher.Command(Context(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = """["/opt/claude/bin/claude","--debug"]""" })).Take(3));
         Assert.Null(launcher.Verify(NoSettings, NoSettings));
         Assert.Contains("JSON array of one or more non-empty strings", launcher.Verify(new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = "[]" }, NoSettings), StringComparison.Ordinal);

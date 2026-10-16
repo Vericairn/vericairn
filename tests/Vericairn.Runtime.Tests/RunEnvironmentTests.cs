@@ -127,7 +127,7 @@ public class RunEnvironmentTests
     [Theory]
     [InlineData("codex")]
     [InlineData("claude-code")]
-    public void UnqualifiedNativeInventoriesRefuseEvenFeatureProbes(string launcher)
+    public void UnqualifiedNativeVersionsRefuseBeforeIntent(string launcher)
     {
         using var run = new RunEstate();
         IAgentLauncher native = launcher == "codex" ? new CodexLauncher() : new ClaudeCodeLauncher();
@@ -137,8 +137,7 @@ public class RunEnvironmentTests
         string report = run.Report("unqualified");
         RunResponse refused = run.Start(launcher, "codex", report);
         Assert.False(refused.Ok);
-        Assert.Contains(launcher == "codex" ? "version is not qualified" : "inventory; dispatch is unsupported", refused.Message, StringComparison.Ordinal);
-        if (launcher != "codex") Assert.False(File.Exists(report));
+        Assert.Contains("version is not qualified", refused.Message, StringComparison.Ordinal);
         Assert.Empty(run.Service.Runs().Runs);
     }
 }

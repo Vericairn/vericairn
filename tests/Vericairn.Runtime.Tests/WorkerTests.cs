@@ -469,7 +469,7 @@ public class WorkerTests
         Assert.Null(given["environment"]!["ANTHROPIC_API_KEY"]);
         List<string> args = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         Assert.Equal("", args[args.IndexOf("--setting-sources") + 1]);
-        Assert.Equal("{\"disableAllHooks\":true,\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
+        Assert.Equal("{\"hooks\":{},\"enabledPlugins\":{}}", args[args.IndexOf("--settings") + 1]);
     }
 
     [Fact]
@@ -658,7 +658,7 @@ public class WorkerTests
         List<string> arguments = given["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         string workspace = given["directory"]!.GetValue<string>();
         string mcp = arguments[arguments.IndexOf("--mcp-config") + 1];
-        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", "--model", "model-a", "--effort", "high"], arguments);
+        Assert.Equal(["-p", "/goal Does the widget build and pass its tests? Checks: the tests pass; an attempt and its result recorded with the vericairn MCP server's work_attempt and work_result tools. Constraints: no publication; no change outside the widget; only the changes the brief in .vericairn/brief.md permits.", "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", mcp, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"hooks\":{},\"enabledPlugins\":{}}", "--tools", "Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation", "--model", "model-a", "--effort", "high"], arguments);
         Assert.Equal("work/w-1", RunEstate.Git(workspace, "symbolic-ref", "--short", "HEAD"));
         Assert.Equal("main", RunEstate.Git(run.Clone, "symbolic-ref", "--short", "HEAD"));
         Assert.NotEqual(Path.GetFullPath(run.Clone), Path.GetFullPath(workspace));

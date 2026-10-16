@@ -17,7 +17,15 @@ namespace Vericairn.Packs.Software;
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["low", "medium", "high", "max"], ["anthropic"], ["anthropic-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+
+    /// <inheritdoc />
+    public RunPreflight Preflight(LaunchContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        RefuseManagedSettings();
+        return ClaudeCodeInventory.Establish(context);
+    }
 
     /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "system", "init");
@@ -67,6 +75,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
         ArgumentNullException.ThrowIfNull(context);
         RefuseManagedSettings();
         string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "claude");
+        HarnessInventory.FreshHome(home);
         Directory.CreateDirectory(home);
         if (!OperatingSystem.IsWindows())
         {
@@ -171,7 +180,7 @@ public sealed class ClaudeCodeLauncher : IAgentLauncher
             limits.AddRange(["--max-budget-usd", (amount / 100m).ToString("0.00", CultureInfo.InvariantCulture)]);
         }
 
-        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", "{\"disableAllHooks\":true,\"enabledPlugins\":{}}", .. selection, .. limits];
+        return [.. HarnessProcess.Command(context.Settings, "claude"), "-p", "/goal " + context.Condition, "--output-format", "stream-json", "--verbose", "--permission-mode", "auto", "--mcp-config", context.McpConfiguration, "--strict-mcp-config", "--setting-sources", "", "--settings", ClaudeCodeInventory.Settings, "--tools", ClaudeCodeInventory.ToolList, .. selection, .. limits];
     }
 
     /// <summary>The stream's final result reports the run's usage: its input, cache and output tokens, read as one total.</summary>
