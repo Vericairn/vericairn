@@ -5,7 +5,10 @@
     <AssemblyName>vericairn</AssemblyName>
     <RootNamespace>Vericairn.Cli</RootNamespace>
     <Description>The vericairn command-line interface.</Description>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <PackageId>dotnet-vc</PackageId>
+    <ToolCommandName>dotnet-vc</ToolCommandName>
     <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
