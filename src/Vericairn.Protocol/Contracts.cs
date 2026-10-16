@@ -69,11 +69,11 @@ public sealed record HealthResponse(string Api, string Vericairn, string Estate,
 public sealed record StatusResponse(string Text, JsonElement Json, bool HasErrors);
 
 /// <summary>
-/// The progress report, rendered from the records alone: where the estate stands, its work orders by state, each published release and
+/// The progress report: where the estate stands, its work orders by state, each published release and
 /// what it contained, what comes next by release, the next eligible work and what waits on the operator. The same on every machine for
-/// the same records.
+/// the same records in its record-derived sections; agentClaims adds the latest local contributor claims.
 /// </summary>
-/// <param name="Text">The report as text; every line names the records it rests on.</param>
+/// <param name="Text">The report as text, with agent claims labelled separately.</param>
 /// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>
 /// <param name="HasErrors">Whether the check the report shows found errors.</param>
 public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErrors);
@@ -129,6 +129,34 @@ public sealed record AssignRequest(string WorkOrder, string Contributor, string 
 /// <param name="Note">Intent.</param>
 /// <param name="At">Start time.</param>
 public sealed record AttemptRequest(string Assignment, string By, string Workspace, string Note, string? At = null);
+
+/// <summary>A contributor's latest progress claim; only a completed phase is a record.</summary>
+/// <param name="Attempt">The contributor's attempt.</param>
+/// <param name="By">The contributing principal.</param>
+/// <param name="Phase">A stable lower-case phase name.</param>
+/// <param name="Note">The progress claim.</param>
+/// <param name="Completed">Whether to record the phase's completion, at most once.</param>
+public sealed record WorkProgressRequest(string Attempt, string By, string Phase, string Note, bool Completed = false);
+
+/// <summary>A progress claim, explicitly separate from the worker's observations.</summary>
+/// <param name="Attempt">The attempt.</param>
+/// <param name="By">The contributor.</param>
+/// <param name="Phase">The named phase.</param>
+/// <param name="Note">What the contributor claims.</param>
+/// <param name="At">When it was submitted.</param>
+/// <param name="Completed">Whether the phase was claimed complete.</param>
+/// <param name="Record">The completion record, if any.</param>
+public sealed record WorkProgressClaim(string Attempt, string By, string Phase, string Note, string At, bool Completed, string? Record = null);
+
+/// <summary>A progress submission; a successful interim note has no written record.</summary>
+/// <param name="Claim">The claim now shown.</param>
+/// <param name="Written">The single phase completion record, if requested.</param>
+/// <param name="Problem">Why nothing was submitted, if refused.</param>
+public sealed record WorkProgressResponse(WorkProgressClaim? Claim, RecordWritten? Written = null, Problem? Problem = null)
+{
+    /// <summary>Whether the claim was submitted.</summary>
+    public bool Ok => Claim is not null && Problem is null;
+}
 
 /// <summary>Submit the result of an attempt.</summary>
 /// <param name="Attempt">Attempt id.</param>

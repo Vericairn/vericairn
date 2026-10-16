@@ -59,6 +59,14 @@ public class ProgressTests(HeadlessFixture fixture)
             Assert.Contains("    W-2  ordinary   Ship the widget [work-order ", page.Text, StringComparison.Ordinal);
             Assert.Equal("3 current: 2 planned; 1 submitted, awaiting acceptance", shell.Progress[1].Detail);
 
+            using JsonDocument brief = JsonDocument.Parse("""{"outcome":"Widget","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["widget repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests"],"recovery":"Record a result."}""");
+            string assignment = shell.Api.Assign(new AssignRequest("W-1", op, op, brief.RootElement)).Written!.Id;
+            string attempt = shell.Api.Attempt(new AttemptRequest(assignment, op, "widget repository", "Build it.")).Written!.Id;
+            Assert.True(shell.Api.WorkProgress(new WorkProgressRequest(attempt, op, "build", "A live claim.")).Ok);
+            await fixture.Ui(shell.RefreshProgress);
+            Assert.Contains("A live claim.", page.Text, StringComparison.Ordinal);
+            Assert.Equal("Agent claim · build", shell.Progress[^1].Heading);
+
             // Enter on a row of the summary opens the report again once it was closed.
             await fixture.Ui(() => shell.Close(page));
             await fixture.Ui(() =>
@@ -100,5 +108,11 @@ public class ProgressTests(HeadlessFixture fixture)
                 new ProgressRow("Waits on the operator", "asks: 1 notified, delivery unknown; 2 open, awaiting an answer; acceptances only the operator gives: 2"),
             ],
             ProgressView.Summary(document.RootElement));
+
+        using JsonDocument claims = JsonDocument.Parse("""{"format":"vericairn.progress/1","agentClaims":[{"attempt":"attempt-id","phase":"build","note":"Compiling."}]}""");
+        ProgressRow row = ProgressView.Summary(claims.RootElement)[^1];
+        Assert.Equal("Agent claim · build", row.Heading);
+        Assert.Contains("Compiling.", row.Detail, StringComparison.Ordinal);
+        Assert.Contains("not a worker observation", row.Detail, StringComparison.Ordinal);
     }
 }

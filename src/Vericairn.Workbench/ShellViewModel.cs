@@ -516,11 +516,20 @@ public sealed class ShellViewModel : Observable
         ProgressDocument page = Documents.OfType<ProgressDocument>().FirstOrDefault() ?? new ProgressDocument();
         Open(page);
         FillProgress(connection?.Api is IEstateApi api ? Try(api.Progress) : null);
-        Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The progress report, rendered from the records alone; each line names the records it rests on. F5 refreshes it.";
+        Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The estate's recorded progress and latest local agent claims, labelled separately from worker observations. F5 refreshes it.";
         return page;
     }
 
     /// <summary>The summary rows of home and an open report from one response of the runtime; without one, both say it is unavailable.</summary>
+    /// <summary>Polls the live progress claims without replacing the user's open editing documents.</summary>
+    public void RefreshProgress()
+    {
+        if (connection?.Api is IEstateApi api && Try(api.Progress) is ProgressResponse progress)
+        {
+            FillProgress(progress);
+        }
+    }
+
     private void FillProgress(ProgressResponse? progress)
     {
         Replace(Progress, ProgressView.Summary(progress?.Json ?? default));

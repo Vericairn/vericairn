@@ -637,3 +637,9 @@ whose principal is not the one the request names as acting is refused. Sign a de
 `toFormat`, `migrations`, `release`, `artifacts`, `applied`, `migration`, `anchored`), the same shape the
 API returns. `anchored`, new in 0.5.2, lists the admissions recorded without a signature that the move to
 record format 2 anchors, and is `null` otherwise.
+
+## Agent progress claims (0.7.0, additive)
+
+`POST /v1/work/progress` accepts `{attempt, by, phase, note, completed?}`. The default `completed` is false. It returns `WorkProgressResponse` with `claim`, optional `written`, `problem`, and `ok`; refusals are in the response. Only the attempt's contributor may submit. A phase completion is idempotent for the same note and cannot be revised or reopened. Other submissions after the attempt's result are refused.
+
+`GET /v1/progress` adds `json.agentClaims`, the latest claim per attempt: `attempt`, `by`, `phase`, `note`, `at`, `completed`, and optional `record`. Its text and Workbench show the same labelled claims. Interim notes are local live state and are not worker observations; recorded completions provide the fallback on another machine. These additions do not change any existing field.

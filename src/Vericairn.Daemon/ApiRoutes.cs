@@ -32,6 +32,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/work/{{key}}", (string key) => service.Observe(key) is ObserveResponse observe ? Results.Json(observe, ProtocolJson.Options) : Results.NotFound());
         app.MapPost($"{v}/work/assign", (AssignRequest request) => Outcome(service.Assign(request)));
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
+        app.MapPost($"{v}/work/progress", (WorkProgressRequest request) => Results.Json(service.WorkProgress(request), ProtocolJson.Options));
         app.MapPost($"{v}/work/result", (ResultRequest request) => Outcome(service.Result(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));

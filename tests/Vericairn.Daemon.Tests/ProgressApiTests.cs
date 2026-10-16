@@ -43,5 +43,15 @@ public class ProgressApiTests
         Assert.Equal("getProgress", operation.GetProperty("operationId").GetString());
         Assert.False(operation.TryGetProperty("requestBody", out _));
         Assert.Equal(local.Text, client.Progress().Text);
+
+        using JsonDocument brief = JsonDocument.Parse("""{"outcome":"Widget","sources":[],"permittedChanges":["src/"],"prohibitedEffects":[],"workspace":["widget repository"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["tests"],"recovery":"Record a result."}""");
+        string assignment = client.Assign(new AssignRequest("W-1", estate.BuilderId, estate.OperatorId, brief.RootElement)).Written!.Id;
+        string attempt = client.Attempt(new AttemptRequest(assignment, estate.BuilderId, "widget repository", "Build it.")).Written!.Id;
+        WorkProgressResponse claim = client.WorkProgress(new WorkProgressRequest(attempt, estate.BuilderId, "build", "Compiling the widget."));
+        Assert.True(claim.Ok, claim.Problem?.Message);
+        Assert.Null(claim.Written);
+        Assert.Contains("Compiling the widget.", client.Progress().Text, StringComparison.Ordinal);
+        Assert.Equal("build", client.Progress().Json.GetProperty("agentClaims")[0].GetProperty("phase").GetString());
+        Assert.False(client.WorkProgress(new WorkProgressRequest(attempt, estate.OperatorId, "build", "Not mine.")).Ok);
     }
 }

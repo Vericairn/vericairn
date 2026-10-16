@@ -694,3 +694,7 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
   be admitted in it again, so nothing in it can be signed by an admitted device again; where the charter requires
   signatures, nothing can be authored in it at all. The way on is a new estate that adopts the old one's records, said
   as such, never a silent self-admission.
+
+## Work progress claims (0.7.0)
+
+`work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.

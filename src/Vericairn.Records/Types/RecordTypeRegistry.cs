@@ -22,6 +22,7 @@ public static class RecordTypeRegistry
         new RetirementType(),
         new AssignmentType(),
         new AttemptType(),
+        new WorkProgressType(),
         new ResultType(),
         new AmendmentType(),
         new DeviceType(),

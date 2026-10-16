@@ -99,8 +99,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             FindingList checks = EstateChecks.Run(model);
-            using JsonDocument json = JsonDocument.Parse(ProgressReport.RenderJson(model, checks));
-            return new ProgressResponse(ProgressReport.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
+            JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
+            List<WorkProgressClaim> claims = ProgressClaims(model);
+            json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
+            string text = ProgressReport.Render(model, checks);
+            if (claims.Count > 0)
+            {
+                text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
+                    + string.Join('\n', claims.Select(c => $"  attempt {c.Attempt}, {c.Phase} ({(c.Completed ? "claimed complete" : "in progress")}) by {c.By}: {c.Note}" + (c.Record is null ? " [live state]" : $" [work-progress {c.Record}]"))) + "\n";
+            }
+
+            return new ProgressResponse(text, Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 

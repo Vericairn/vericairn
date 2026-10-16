@@ -503,3 +503,7 @@ upgrade path is proven by a synthetic migration in the tests: a step from format
 file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
 once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
 knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+
+## Progress claims (0.7.0)
+
+An agent may submit `work_progress` through MCP while carrying its own attempt. `vericairn progress`, its API, and Workbench show its latest claim with the attempt and phase. Interim notes stay in the runtime's local live store; only a completed phase creates a signed record, at most once. Workbench polls these claims every five seconds while its window is open; F5 also refreshes them. Worker liveness continues to come from the harness event stream, independently of these claims.

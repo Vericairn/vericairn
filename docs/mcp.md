@@ -32,3 +32,9 @@ The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authen
 - The four write tools are limited to attempts, results, amendments and reviews of the estate's own living documents. Goals and asks are read views here; their lifecycle and decisions use the CLI or API under its authority rules.
 - The server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one.
 - Long outputs (a large status document, a long brief) are returned whole; no paging.
+
+## Agent progress claims (0.7.0)
+
+`work_progress` takes `attempt`, a stable lower-case `phase`, `note`, and `state` (`active` or `completed`). It is available to an admitted contributor and publishes only that contributor's own attempt. Active notes replace local live state; completion creates one signed `work-progress` record for the phase. Retrying the identical completion returns that record. A completed phase cannot be reopened or recorded twice. A result closes further progress submissions. Notes must pass the same portable-content checks as records.
+
+`estate_progress` includes the latest claim for each attempt, labelled as a claim. It is never evidence of liveness, permitted scope, or acceptance. Interim notes are local to this runtime and survive its restart; another machine sees recorded phase completions only.

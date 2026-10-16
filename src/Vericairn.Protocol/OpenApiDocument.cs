@@ -26,6 +26,7 @@ public static class OpenApiDocument
         ("GET", "/v1/work/{key}"),
         ("POST", "/v1/work/assign"),
         ("POST", "/v1/work/attempt"),
+        ("POST", "/v1/work/progress"),
         ("POST", "/v1/work/result"),
         ("POST", "/v1/work/amend"),
         ("POST", "/v1/work/takeover"),
@@ -190,6 +191,10 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
         }
+        else if (method == "POST" && path == "/v1/work/progress")
+        {
+            responses["200"] = new JsonObject { ["description"] = "WorkProgressResponse: the latest agent claim, a written record only for a completed phase, or a problem when refused." };
+        }
         else if (method == "POST" && path.StartsWith("/v1/runs", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = path == "/v1/runs" ? "RunResponse: what was recorded and launched; a problem inside when nothing was launched." : "RunStopResponse: the stop's facts as observed; a problem inside when no stop was asked." };
@@ -275,6 +280,7 @@ public static class OpenApiDocument
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
+            ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
             ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
@@ -319,6 +325,7 @@ public static class OpenApiDocument
         "/v1/records" => "NewRecordRequest",
         "/v1/work/assign" => "AssignRequest",
         "/v1/work/attempt" => "AttemptRequest",
+        "/v1/work/progress" => "WorkProgressRequest",
         "/v1/work/result" => "ResultRequest",
         "/v1/work/amend" => "AmendRequest",
         "/v1/work/takeover" => "TakeoverRequest",

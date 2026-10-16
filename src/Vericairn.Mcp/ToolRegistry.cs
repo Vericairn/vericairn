@@ -98,7 +98,7 @@ public sealed class ToolRegistry
                 (api, _) => new ToolCallResult(api.Status().Json.GetRawText(), false)),
             Read("estate_check", "Validation of every record plus the repository cleanliness and portability checks: the findings with their counts.", NoArguments(),
                 (api, _) => Json(api.Check())),
-            Read("estate_progress", "The progress report, rendered from the records alone and identical on every machine for the same records: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator, each line naming the records it rests on. As text, or as the canonical JSON when form is json. Reading it changes nothing.", Arguments(("form", "text (the default) or json.")),
+            Read("estate_progress", "The progress report, with record-derived sections and separately labelled latest local agent claims: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator, each line naming the records it rests on. As text, or as the canonical JSON when form is json. Reading it changes nothing.", Arguments(("form", "text (the default) or json.")),
                 (api, a) => OptionalArg(a, "form") switch
                 {
                     null or "text" => new ToolCallResult(api.Progress().Text, false),
@@ -137,6 +137,14 @@ public sealed class ToolRegistry
             Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 (api, a) => Outcome(api.Attempt(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note"))))),
+            Write("work_progress", "Publishes the contributor's latest progress claim on its own attempt. Active notes replace live state without records; a completed phase is recorded once. Claims never establish liveness, scope or acceptance.",
+                Arguments(("attempt", "Attempt record id."), ("phase", "Stable lower-case phase name."), ("note", "The contributor's progress claim, without secrets or machine paths."), ("state", "active or completed.")), ["attempt", "phase", "note", "state"],
+                (api, a) =>
+                {
+                    bool completed = Arg(a, "state") switch { "active" => false, "completed" => true, _ => throw new ArgumentException("state is active or completed.") };
+                    WorkProgressResponse response = api.WorkProgress(new WorkProgressRequest(Arg(a, "attempt"), by, Arg(a, "phase"), Arg(a, "note"), completed));
+                    return new ToolCallResult(JsonSerializer.Serialize(response, ProtocolJson.Options), !response.Ok);
+                }),
             Write("work_result", "Submits the result of an attempt: outcome (completed, partial, blocked, abandoned), summary, outputs by hash, evidence, checks, limitations, unresolved effects and the next step. A claim to inspect; acceptance is a separate record by someone with that authority.",
                 Arguments(("attempt", "Attempt record id."), ("body", "The result body as an object: outcome, summary, outputs, evidence, checks, limitations, unresolvedEffects, nextStep.")), ["attempt", "body"],
                 (api, a) => Outcome(api.Result(new ResultRequest(Arg(a, "attempt"), by, Body(a, "body")))), ["body"]),

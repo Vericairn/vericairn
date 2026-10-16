@@ -45,6 +45,9 @@ public interface IEstateApi
     /// <summary>Start an attempt.</summary>
     WriteOutcome Attempt(AttemptRequest request);
 
+    /// <summary>Publish the contributor's latest claim, recording only a completed phase.</summary>
+    WorkProgressResponse WorkProgress(WorkProgressRequest request);
+
     /// <summary>Submit a result.</summary>
     WriteOutcome Result(ResultRequest request);
 

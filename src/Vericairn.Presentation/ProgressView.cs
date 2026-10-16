@@ -26,7 +26,8 @@ public static class ProgressView
             return [new ProgressRow("Progress", "unavailable: the runtime gave no progress report")];
         }
 
-        return [Standing(report), WorkOrders(report), Releases(report), Next(report), Eligible(report), Operator(report)];
+        return [Standing(report), WorkOrders(report), Releases(report), Next(report), Eligible(report), Operator(report),
+            .. Items(report, "agentClaims").Select(c => new ProgressRow("Agent claim · " + Str(c, "phase"), $"{Str(c, "note")} (attempt {Str(c, "attempt")}; not a worker observation)"))];
     }
 
     private static ProgressRow Standing(JsonElement report)
