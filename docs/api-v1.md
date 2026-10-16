@@ -643,3 +643,5 @@ record format 2 anchors, and is `null` otherwise.
 `POST /v1/work/progress` accepts `{attempt, by, phase, note, completed?}`. The default `completed` is false. It returns `WorkProgressResponse` with `claim`, optional `written`, `problem`, and `ok`; refusals are in the response. Only the attempt's contributor may submit. A phase completion is idempotent for the same note and cannot be revised or reopened. Other submissions after the attempt's result are refused.
 
 `GET /v1/progress` adds `json.agentClaims`, the latest claim per attempt: `attempt`, `by`, `phase`, `note`, `at`, `completed`, and optional `record`. Its text and Workbench show the same labelled claims. Interim notes are local live state and are not worker observations; recorded completions provide the fallback on another machine. These additions do not change any existing field.
+
+`GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields.

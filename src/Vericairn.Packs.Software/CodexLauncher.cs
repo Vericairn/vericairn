@@ -17,6 +17,9 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class CodexLauncher : IAgentLauncher
 {
+    /// <inheritdoc />
+    public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
+
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
     public const string LauncherId = "codex";
 

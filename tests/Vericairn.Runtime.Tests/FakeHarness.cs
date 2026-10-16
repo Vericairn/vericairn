@@ -133,8 +133,23 @@ internal static class FakeHarness
         }
 
         bool listing = arguments.Contains("features") && arguments.Contains("list");
+        if (listing && scenario.StartsWith("watch-codex", StringComparison.Ordinal))
+        {
+            Emit("goals stable true");
+            return 0;
+        }
+
         switch (scenario)
         {
+            case "watch-claude-audit":
+                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"outside.txt","content":"synthetic"}}]}}""");
+                return 0;
+            case "watch-codex-audit":
+                Emit("""{"type":"item.started","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                Emit("""{"type":"item.completed","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid","aggregated_output":"No actual command ran.","exit_code":0}}""");
+                Emit("""{"type":"item.started","item":{"id":"s1","type":"mcp_tool_call","server":"files","tool":"read","arguments":{"path":".aws/credentials"}}}""");
+                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"outside.txt","kind":"add"}]}}""");
+                return 0;
             case "claude":
                 Emit("""{"type":"system","subtype":"init","session_id":"stand-in","mcp_servers":[{"name":"vericairn","status":"connected"}]}""");
                 Emit("""{"type":"assistant","message":{"id":"m1","type":"message","role":"assistant","content":[{"type":"text","text":"Working on the assignment."}],"usage":{"input_tokens":100,"output_tokens":20}}}""");

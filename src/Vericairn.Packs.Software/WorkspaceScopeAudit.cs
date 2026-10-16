@@ -278,22 +278,9 @@ internal static class WorkspaceScopeAudit
         }
     }
 
-    private static bool Matches(string path, string pattern)
-    {
-        string plain = pattern.TrimEnd('/');
-        if (!plain.Contains('*', StringComparison.Ordinal) && !plain.Contains('?', StringComparison.Ordinal))
-        {
-            return path == plain || path.StartsWith(plain + "/", StringComparison.Ordinal);
-        }
+    private static bool Matches(string path, string pattern) => PermittedPaths.Matches(path, pattern);
 
-        string expression = Regex.Escape(plain).Replace(@"\*\*/", "(?:.*/)?", StringComparison.Ordinal)
-            .Replace(@"\*\*", ".*", StringComparison.Ordinal).Replace(@"\*", "[^/]*", StringComparison.Ordinal).Replace(@"\?", "[^/]", StringComparison.Ordinal);
-        return Regex.IsMatch(path, "\\A" + expression + "\\z", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100));
-    }
-
-    internal static bool Relative(string path) => !string.IsNullOrWhiteSpace(path) && path.Length <= 2000
-        && !Path.IsPathRooted(path) && !path.Contains(':', StringComparison.Ordinal) && !path.Contains('\\', StringComparison.Ordinal)
-        && !path.Any(char.IsControl) && path.Split('/').All(part => part is not ("." or ".."));
+    internal static bool Relative(string path) => PermittedPaths.Relative(path);
 
     private static string Display(string path) => path.Length <= 500 && Regex.IsMatch(path, @"\A[A-Za-z0-9_./ @()+,=\-]+\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))
         && !EstateChecks.Content("scope.txt", Encoding.UTF8.GetBytes(path)).HasErrors

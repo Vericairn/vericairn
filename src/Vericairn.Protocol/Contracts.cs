@@ -536,6 +536,16 @@ public sealed record RunLiveness(int StallSeconds, string LastEventAt, string? A
 /// <param name="Problem">Why the audit could not establish the whole scope, when unavailable or incomplete.</param>
 public sealed record RunScope(int Changed, int OutsideCount, IReadOnlyList<string> Outside, string? Problem = null);
 
+/// <summary>A bounded worker observation of a run; raw commands, paths and credential values are never included.</summary>
+/// <param name="Code">The kind of observation.</param>
+/// <param name="Severity">warning needs attention; critical asks the existing stop path to contain the run.</param>
+/// <param name="At">When the worker first observed this signal.</param>
+/// <param name="Summary">A portable description of the observation.</param>
+/// <param name="Fingerprint">A hash of an action's identity and input, if relevant.</param>
+/// <param name="Count">How many occurrences triggered the signal.</param>
+/// <param name="Attention">The ask recording the attention item, once written.</param>
+public sealed record RunSignal(string Code, string Severity, string At, string Summary, string? Fingerprint = null, int Count = 1, string? Attention = null);
+
 /// <summary>One agent run as the records and this machine show it.</summary>
 /// <param name="Run">The run's id: its intent's record id.</param>
 /// <param name="Identity">Its operation's identity.</param>
@@ -552,9 +562,10 @@ public sealed record RunScope(int Changed, int OutsideCount, IReadOnlyList<strin
 /// <param name="Heartbeat">When the worker on this machine last observed it running.</param>
 /// <param name="Observed">Whether a worker on this machine observes it now.</param>
 /// <param name="Scope">The settlement's workspace scope audit.</param>
+/// <param name="Signals">Worker observations from the harness event stream, with no raw arguments.</param>
 /// <param name="Liveness">The worker's event-stream observation and any stall attention.</param>
 /// <param name="Generic">Whether it ran through a generic launcher, which is not complete agent support.</param>
-public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null);
+public sealed record RunRow(string Run, string Identity, string Launcher, string? Agent, string? Assignment, string? Goal, string? Workspace, string Status, JsonElement Cap, JsonElement? Usage, JsonElement Charged, RunStop? Stop, string? Heartbeat, bool Observed, bool Generic, RunLiveness? Liveness = null, RunScope? Scope = null, IReadOnlyList<RunSignal>? Signals = null);
 
 /// <summary>One unit of a goal's ledger.</summary>
 /// <param name="Unit">wallMinutes, tokens or currency.</param>

@@ -698,3 +698,5 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
 ## Work progress claims (0.7.0)
 
 `work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.
+
+Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded.

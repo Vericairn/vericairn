@@ -507,3 +507,11 @@ knows is refused rather than misread. Migrations never rewrite records; they sta
 ## Progress claims (0.7.0)
 
 An agent may submit `work_progress` through MCP while carrying its own attempt. `vericairn progress`, its API, and Workbench show its latest claim with the attempt and phase. Interim notes stay in the runtime's local live store; only a completed phase creates a signed record, at most once. Workbench polls these claims every five seconds while its window is open; F5 also refreshes them. Worker liveness continues to come from the harness event stream, independently of these claims.
+
+## Command observations (0.7.0)
+
+The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
+
+Recognizable network commands and web tools, credential paths and secret-store commands, and invocation paths outside the assignment's permitted paths produce worker signals. Path checks share the settlement audit's literal-directory and glob rules, normalize traversal and refuse workspace links. Reading the exported brief remains possible. Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
+
+This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.

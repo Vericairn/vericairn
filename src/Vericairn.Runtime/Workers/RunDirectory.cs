@@ -44,6 +44,9 @@ public sealed class RunObservedState
     /// <summary>The worker's event-stream observation.</summary>
     public RunLiveness? Liveness { get; set; }
 
+    /// <summary>The worker's bounded command, loop and spending observations; never raw invocation inputs.</summary>
+    public List<RunSignal> Signals { get; set; } = [];
+
     /// <summary>The tokens the harness reported so far, when it reported any.</summary>
     public long? Tokens { get; set; }
 

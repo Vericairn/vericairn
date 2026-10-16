@@ -299,7 +299,7 @@ public sealed partial class EstateService
                 lapsed = Lapsed(session.Load(), plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
-                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness));
+                    supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"));
                 }
             }
         }
@@ -393,7 +393,8 @@ public sealed partial class EstateService
                     run.InFlight && Fresh(observed),
                     run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
                     run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
-                    run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null));
+                    run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
+                    run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals));
             }
 
             var ledgers = new List<LedgerRow>();
@@ -941,6 +942,7 @@ public sealed partial class EstateService
         }
 
         body["scope"] = JsonSerializer.SerializeToNode(scope, RunRecordJson);
+        body["signals"] = JsonSerializer.SerializeToNode(outcome.Signals ?? [], RunRecordJson);
         body["observed"] = new JsonObject { ["summary"] = summary, ["at"] = RecordParser.FormatTimestamp(outcome.ExitedAt) };
         body["dispatchedAt"] ??= RecordParser.FormatTimestamp(outcome.LaunchedAt);
         body["usage"] = usage;

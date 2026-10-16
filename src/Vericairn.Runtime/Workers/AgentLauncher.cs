@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Runtime.Providers;
+using System.Text.Json;
 
 namespace Vericairn.Runtime.Workers;
 
@@ -27,6 +28,12 @@ public sealed record LaunchContext(string Workspace, string Condition, string Br
 /// <param name="UsageCompleted">A turn ended.</param>
 /// <param name="Acknowledged">The harness acknowledged a stop.</param>
 public sealed record HarnessSignal(long? Tokens = null, long? TokensAdded = null, long? Price = null, string? PriceUnit = null, bool Acknowledged = false, bool UsageIncomplete = false, bool UsageStarted = false, bool UsageCompleted = false);
+
+/// <summary>A tool invocation from a harness event, never from an assistant's narrative or a tool's output.</summary>
+/// <param name="Id">The harness's invocation identity, used to deduplicate lifecycle events.</param>
+/// <param name="Tool">The tool invoked.</param>
+/// <param name="Input">Its input, kept on this machine; raw arguments never enter a record.</param>
+public sealed record HarnessAction(string Id, string Tool, JsonElement Input);
 
 /// <summary>
 /// The coding-agent launcher contract, version 1 (vericairn.launcher.agent/1): how one harness is verified before a run is recorded,
@@ -81,4 +88,7 @@ public interface IAgentLauncher
 
     /// <summary>What one line of the harness's standard output reports; null when it reports nothing the worker reads.</summary>
     HarnessSignal? Read(string line) => null;
+
+    /// <summary>Tool invocations in a harness event; ordinary messages and tool results return no actions.</summary>
+    IReadOnlyList<HarnessAction> ReadActions(string line) => [];
 }

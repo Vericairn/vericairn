@@ -16,6 +16,9 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class ClaudeCodeLauncher : IAgentLauncher
 {
+    /// <inheritdoc />
+    public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Claude(line);
+
     /// <summary>The launcher id recorded as the provider of every run it launches.</summary>
     public const string LauncherId = "claude-code";
 
