@@ -40,6 +40,8 @@ internal static class CodexInventory
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: true);
         CheckHome();
         HarnessInventory.McpFile(context);
+        IReadOnlyList<string> command = new CodexLauncher().Command(context);
+        string binding = HarnessInventory.Binding(context, command);
         string version = HarnessInventory.Version(context, "codex", "codex-cli " + Version, Version);
         string help = HarnessInventory.Probe(context, "codex", "--help");
         HarnessInventory.Flags("codex", help, "--config", "--enable", "--disable");
@@ -56,8 +58,11 @@ internal static class CodexInventory
             qualification = "run-02-codex-v1", version, tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal),
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
             webSearch = "disabled", projectTrust = "untrusted",
+            loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
         });
-        return new([.. HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference"), .. instructions], true, true, version);
+        List<RunComponent> components = HarnessInventory.Components(context, "codex", "codex", version, configuration, Tools, "CODEX_HOME", "openai-inference");
+        HarnessInventory.Recheck(context, command, binding, instructions, codex: true);
+        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding);
 
         void CheckHome()
         {

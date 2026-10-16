@@ -34,7 +34,8 @@ public sealed record RunEnvironmentPolicy(string Id, IReadOnlyList<RunComponent>
 /// <param name="InheritsEnvironment">Whether every component uses only the worker's admitted environment.</param>
 /// <param name="HarnessVersion">Observable harness version, or unknown.</param>
 /// <param name="ModelRevision">Observable resolution of the requested model selector; null means unknown.</param>
-public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null);
+/// <param name="LocalBindingHash">Optional digest of local command, file and environment bindings for the dispatch recheck; never copied into a record.</param>
+public sealed record RunPreflight(IReadOnlyList<RunComponent> Components, bool Complete, bool InheritsEnvironment, string HarnessVersion = "unknown", string? ModelRevision = null, string? LocalBindingHash = null);
 
 /// <summary>Facts a harness event actually reports; null means the event supplies no such fact.</summary>
 /// <param name="Model">Reported model selector.</param>

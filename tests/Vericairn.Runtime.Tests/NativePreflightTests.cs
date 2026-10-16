@@ -151,6 +151,7 @@ internal sealed class NativeProbe : IDisposable
                 ? ["--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
                 : ["--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
             Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
+            if (behavior["helpSuffix"]?.GetValue<string>() is string suffix) Console.WriteLine(suffix);
             return 0;
         }
         if (arguments.Contains("features") && arguments.Contains("list"))

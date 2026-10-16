@@ -174,6 +174,7 @@ public sealed partial class EstateService
         environment["VERICAIRN_MCP_CONFIG"] = directory.McpConfiguration;
         environment["VERICAIRN_CONDITION"] = plan.Condition;
         LaunchContext launch;
+        string? admittedBinding;
         try
         {
             directory.Create();
@@ -193,6 +194,7 @@ public sealed partial class EstateService
             launch = launcher.Prepare(new LaunchContext(workspace.Path, plan.Condition, brief, directory.McpConfiguration, server, serverEnvironment, settings, environment, limits, Element(plan.Selection)));
             environment = new Dictionary<string, string>(launch.Environment, WorkerEnvironment.Names);
             RunPreflight preflight = launcher.Preflight(launch);
+            admittedBinding = preflight.LocalBindingHash;
             RunSelection.ResolveRevision(plan.Selection, preflight.ModelRevision);
             plan.Selection["harnessVersion"] = preflight.HarnessVersion;
             plan.Selection["environment"] = RunEnvironment.Admit(configuration.EnvironmentPolicy, preflight, environment, [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
@@ -352,7 +354,8 @@ public sealed partial class EstateService
                     [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);
                 if (!JsonNode.DeepEquals(dispatchEnvironment, plan.Selection["environment"])
                     || (dispatchPreflight.ModelRevision ?? "unknown") != plan.Selection["resolvedRevision"]!.GetValue<string>()
-                    || dispatchPreflight.HarnessVersion != plan.Selection["harnessVersion"]!.GetValue<string>())
+                    || dispatchPreflight.HarnessVersion != plan.Selection["harnessVersion"]!.GetValue<string>()
+                    || dispatchPreflight.LocalBindingHash != admittedBinding)
                 {
                     throw new ProviderRefusedException("The effective inventory or model resolution changed after admission; no harness was dispatched.");
                 }

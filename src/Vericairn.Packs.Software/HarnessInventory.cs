@@ -47,6 +47,25 @@ internal static class HarnessInventory
 
     public static string Digest<T>(T value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));
 
+    public static string Binding(LaunchContext context, IReadOnlyList<string> command) => Digest(new
+    {
+        command, workspace = context.Workspace, context.Brief, context.Condition, context.McpConfiguration,
+        mcp = context.McpServer, mcpFile = ContentHash.Sha256File(context.McpConfiguration),
+        environment = context.Environment.OrderBy(p => p.Key, StringComparer.Ordinal),
+        mcpEnvironment = context.McpEnvironment.OrderBy(p => p.Key, StringComparer.Ordinal),
+        executable = ContentHash.Sha256File(Executable(command, context.Environment)),
+        server = ContentHash.Sha256File(Executable(context.McpServer, context.Environment)),
+        entries = command.Skip(1).Concat(context.McpServer.Skip(1)).Where(a => Path.IsPathFullyQualified(a) && File.Exists(a)).Select(ContentHash.Sha256File).ToArray(),
+    });
+
+    public static void Recheck(LaunchContext context, IReadOnlyList<string> command, string binding, IReadOnlyList<RunComponent> instructions, bool codex)
+    {
+        if (Binding(context, command) != binding || Digest(HarnessConfiguration.Inspect(context, codex)) != Digest(instructions))
+        {
+            throw new ProviderRefusedException("The local launch bindings or instruction content changed during preflight; no run was dispatched.");
+        }
+    }
+
     public static string Executable(IReadOnlyList<string> command, IReadOnlyDictionary<string, string> environment)
     {
         string name = command[0];

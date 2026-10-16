@@ -133,7 +133,12 @@ public class RunEnvironmentTests
         IAgentLauncher native = launcher == "codex" ? new CodexLauncher() : new ClaudeCodeLauncher();
         RunConfiguration configuration = new ReportedLauncher(native).Configuration;
         run.Service.Providers.Register(native);
-        run.Service.WorkerOptions = run.Service.WorkerOptions with { Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal) { [launcher] = configuration } };
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal) { [launcher] = configuration },
+            Vericairn = FakeHarness.Command("native-server", run.Report("server")),
+            Environment = new Dictionary<string, string>(run.Service.WorkerOptions.Environment!, WorkerEnvironment.Names) { ["HOME"] = run.Scratch, ["USERPROFILE"] = run.Scratch },
+        };
         string report = run.Report("unqualified");
         RunResponse refused = run.Start(launcher, "codex", report);
         Assert.False(refused.Ok);

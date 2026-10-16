@@ -18,6 +18,8 @@ internal static class ClaudeCodeInventory
         IReadOnlyList<RunComponent> instructions = HarnessConfiguration.Inspect(context, codex: false);
         _ = HarnessInventory.Home(context, "CLAUDE_CONFIG_DIR", "claude", ".credentials.json");
         HarnessInventory.McpFile(context);
+        IReadOnlyList<string> command = new ClaudeCodeLauncher().Command(context);
+        string binding = HarnessInventory.Binding(context, command);
         string version = HarnessInventory.Version(context, "claude", Version + " (Claude Code)", Version);
         string help = HarnessInventory.Probe(context, "claude", "--help");
         HarnessInventory.Flags("claude", help, "--print", "--output-format", "--verbose", "--permission-mode", "--mcp-config",
@@ -27,11 +29,13 @@ internal static class ClaudeCodeInventory
         {
             qualification = "run-02-claude-code-v1", version, tools = ToolList, settings = Settings, settingSources = "none",
             strictMcp = true, home = "run-only-login", goal = "built-in-evaluator", help = HarnessInventory.Digest(help),
+            loginPresent = File.Exists(Path.Combine(context.Environment["CLAUDE_CONFIG_DIR"], ".credentials.json")),
         });
         List<RunComponent> components = HarnessInventory.Components(context, "claude", "claude-code", version, configuration, ToolList.Split(','), "CLAUDE_CONFIG_DIR", "anthropic-inference");
         components.Add(new("claude-code-setting-sources-none", "configuration", "none", HarnessInventory.Digest("none"), configuration, [], ["local"], ["claude-code-configuration"]));
         components.Add(new("claude-code-goal-evaluator", "hook", version, HarnessInventory.Digest(new { version, command = "goal", settings = Settings }), configuration,
             [], ["anthropic-inference"], ["claude-code"]));
-        return new([.. components, .. instructions], true, true, version);
+        HarnessInventory.Recheck(context, command, binding, instructions, codex: false);
+        return new([.. components, .. instructions], true, true, version, LocalBindingHash: binding);
     }
 }
