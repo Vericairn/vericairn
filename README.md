@@ -32,8 +32,10 @@ release and pins the one it runs on.
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
   the one implementation of the estate operations.
 - `Vericairn.Protocol`, `Vericairn.Daemon`, `Vericairn.Sdk`: the versioned API contract, the daemon that owns
-  an estate's live state and serves it over a local socket and pinned loopback TLS, and the typed client,
-  documented in [docs/api-v1.md](docs/api-v1.md).
+  an estate's live state and serves it over a local socket, pinned loopback TLS and, when the operator
+  configures a private address, the local network to paired devices with mutual TLS and requests signed for that
+  runtime, and the typed client with the device's side of pairing and its connections, documented in
+  [docs/api-v1.md](docs/api-v1.md) with the threat model of pairing.
 - The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
   verification evidence, and the coding-agent launchers and git worktree workspaces the worker uses),
   `Vericairn.Adapters.Git` (read-only observation of a repository) and
@@ -41,9 +43,9 @@ release and pins the one it runs on.
   recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
-- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `release`, `sources`, `check`,
-  `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `doctor`, `version`; a client of
-  the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
+- `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
+  `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `doctor`, `version`; a
+  client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records alone, the same on every machine: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
   operator, every line naming the records it rests on; the API, an MCP tool, Workbench's home and a generated region
@@ -68,6 +70,11 @@ release and pins the one it runs on.
   a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
   takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Pro's
   program plans and schedules many steps.
+  `vericairn devices pair` issues a short-lived pairing
+  code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
+  the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at
+  its next request, a device acts only for its own principal, and `vericairn devices writes` shows what paired
+  devices wrote through the runtime, whose own devices sign those records until paired devices sign their own.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
   and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
   regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over

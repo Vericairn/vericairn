@@ -4,13 +4,15 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Vericairn.Sdk;
 
 namespace Vericairn.Daemon;
 
 /// <summary>
-/// The runtime's own certificate for the loopback profile: self-signed, ECDSA P-256, kept owner-only beside the estate's live
-/// state on this machine, renewed before it expires. Clients pin its SHA-256 fingerprint from the endpoint file; no trust store is
-/// consulted and no other certificate is accepted.
+/// The runtime's own certificate for its TLS profiles: self-signed, ECDSA P-256, kept with its key in an owner-only PKCS#12 file
+/// in the owner-only directory of the estate's live state on this machine, replaced on a schedule before it expires and at once on
+/// demand. Loopback clients pin its SHA-256 fingerprint from the endpoint file; paired devices accept it when the runtime identity
+/// signs its fingerprint. No trust store is consulted. While a daemon presents it, its key is also where <see cref="KeyStorage"/> says.
 /// </summary>
 public static class RuntimeCertificate
 {
@@ -20,21 +22,27 @@ public static class RuntimeCertificate
     /// <summary>How long a certificate is valid.</summary>
     public static TimeSpan Validity { get; } = TimeSpan.FromDays(180);
 
-    /// <summary>A certificate with less than this left is replaced at the next start.</summary>
+    /// <summary>A certificate with less than this left is replaced: at the next start, and by a running daemon on its schedule.</summary>
     public static TimeSpan RenewBefore { get; } = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// How the key is loaded while a daemon presents the certificate, as for a client's credential (<see cref="LocalNetworkCredential.KeyStorage"/>):
+    /// in memory on Linux, in a temporary keychain on macOS, in the user's key store on Windows, until the daemon stops.
+    /// </summary>
+    public static X509KeyStorageFlags KeyStorage => LocalNetworkCredential.KeyStorage;
 
     /// <summary>Loads the certificate kept in a directory, creating or renewing it when absent, unreadable or close to expiry.</summary>
     public static X509Certificate2 Load(string directory, string subject = "vericairn runtime")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-        Directory.CreateDirectory(directory);
+        OwnerOnly(directory);
         string path = Path.Combine(directory, FileName);
         if (File.Exists(path))
         {
             try
             {
-                X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, X509KeyStorageFlags.DefaultKeySet);
-                if (existing.HasPrivateKey && existing.NotAfter.ToUniversalTime() - DateTime.UtcNow > RenewBefore)
+                X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, KeyStorage);
+                if (existing.HasPrivateKey && !IsDue(existing, DateTimeOffset.UtcNow))
                 {
                     return existing;
                 }
@@ -45,11 +53,35 @@ public static class RuntimeCertificate
             {
                 // Unreadable: replaced below.
             }
-
-            File.Delete(path);
         }
 
         return Create(path, subject);
+    }
+
+    /// <summary>Replaces the certificate kept in a directory with a new one now; the file is swapped whole, so a reader sees one or the other.</summary>
+    public static X509Certificate2 Replace(string directory, string subject = "vericairn runtime")
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        OwnerOnly(directory);
+        return Create(Path.Combine(directory, FileName), subject);
+    }
+
+    /// <summary>Creates a directory, or keeps the one there, readable and writable by its owner only on Linux and macOS.</summary>
+    public static void OwnerOnly(string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
+
+    /// <summary>Whether a certificate is due for replacement at a moment: it expires within <see cref="RenewBefore"/>.</summary>
+    public static bool IsDue(X509Certificate2 certificate, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        return new DateTimeOffset(certificate.NotAfter.ToUniversalTime()) - now <= RenewBefore;
     }
 
     /// <summary>The fingerprint clients pin: sha256:hex of the certificate bytes.</summary>
@@ -76,21 +108,75 @@ public static class RuntimeCertificate
         byte[] pkcs12 = created.Export(X509ContentType.Pkcs12);
         try
         {
-            using (var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            // Written beside the file, owner-only from the moment it exists (a file left from an interrupted write is removed, never
+            // reused with its mode), and moved over it, so the old certificate is gone the moment the new one is there.
+            string temporary = path + ".tmp";
+            File.Delete(temporary);
+            var create = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            if (!OperatingSystem.IsWindows())
+            {
+                create.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            using (var stream = new FileStream(temporary, create))
             {
                 stream.Write(pkcs12);
             }
 
-            if (!OperatingSystem.IsWindows())
-            {
-                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-            }
-
-            return X509CertificateLoader.LoadPkcs12(pkcs12, null, X509KeyStorageFlags.DefaultKeySet);
+            File.Move(temporary, path, overwrite: true);
+            return X509CertificateLoader.LoadPkcs12(pkcs12, null, KeyStorage);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(pkcs12);
+        }
+    }
+}
+
+/// <summary>The certificate a running daemon presents, swapped whole on rotation; replaced certificates are kept until the daemon stops, since connections that began with one may still use it.</summary>
+internal sealed class RuntimeCertificates : IDisposable
+{
+    private readonly string directory;
+    private readonly object gate = new();
+    private readonly List<X509Certificate2> replaced = [];
+    private X509Certificate2 current;
+
+    public RuntimeCertificates(string directory)
+    {
+        this.directory = directory;
+        current = RuntimeCertificate.Load(directory);
+    }
+
+    /// <summary>The certificate presented to new connections.</summary>
+    public X509Certificate2 Current => Volatile.Read(ref current);
+
+    /// <summary>Its fingerprint.</summary>
+    public string Fingerprint => RuntimeCertificate.Fingerprint(Current);
+
+    /// <summary>Replaces the certificate; returns the replaced one's fingerprint and the new certificate.</summary>
+    public (string Previous, X509Certificate2 Next) Rotate()
+    {
+        lock (gate)
+        {
+            X509Certificate2 next = RuntimeCertificate.Replace(directory);
+            X509Certificate2 previous = current;
+            Volatile.Write(ref current, next);
+            replaced.Add(previous);
+            return (RuntimeCertificate.Fingerprint(previous), next);
+        }
+    }
+
+    public void Dispose()
+    {
+        lock (gate)
+        {
+            current.Dispose();
+            foreach (X509Certificate2 certificate in replaced)
+            {
+                certificate.Dispose();
+            }
+
+            replaced.Clear();
         }
     }
 }

@@ -1,0 +1,311 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.Text;
+using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Vericairn.Protocol;
+using Vericairn.Runtime.Service;
+
+namespace Vericairn.Daemon;
+
+/// <summary>
+/// What a device-signed request may do once the runtime has bound it, from 0.6.0: it acts for its device's own principal only. The
+/// check reads the request object the operation will receive, after binding, never the body a second time, so no encoding, spelling
+/// or repetition in the body can make the check and the operation read different principals. A request of a type this does not know
+/// is refused, so a new operation is held to a principal before it can be reached by a device. Requests over the local socket carry
+/// no device, and the operating system's identity of their caller stands for them as before.
+/// </summary>
+internal sealed class RequestScope(EstateService service, LocalNetworkLedger ledger, Action<string>? log = null) : IEndpointFilter
+{
+    /// <inheritdoc />
+    public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(next);
+        if (!context.HttpContext.Items.TryGetValue(RequestAuthenticator.DeviceItem, out object? item) || item is not AuthenticatedDevice device)
+        {
+            return await next(context).ConfigureAwait(false);
+        }
+
+        string operation = RequestAuthenticator.Operation(context.HttpContext);
+        if (Refusal(operation, device) is string machine)
+        {
+            return Denied(context.HttpContext, device, machine);
+        }
+
+        foreach (object? argument in context.Arguments)
+        {
+            if (Refusal(argument, device) is string refusal)
+            {
+                return Denied(context.HttpContext, device, refusal);
+            }
+        }
+
+        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method);
+        if (!device.LocalNetwork || !write)
+        {
+            return await next(context).ConfigureAwait(false);
+        }
+
+        // A write a paired device asks for is signed by a device of its principal that this machine holds: never by one whose every
+        // signature needs its owner's presence here, which would ask the person at this machine to approve what someone else sent.
+        if (service.PresenceRefusal(device.Principal) is string presence)
+        {
+            return Denied(context.HttpContext, device, presence);
+        }
+
+        // Which paired device asked is kept before anything is written, flushed to disk; when it cannot be, nothing is written.
+        string at = Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        string id;
+        try
+        {
+            id = ledger.Intend(at, device.Identity, device.Principal, operation);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            log?.Invoke($"refused {operation} for device {device.Identity}: the local-network ledger cannot be written: {exception.Message}");
+            return Results.Content(JsonSerializer.Serialize(new Problem("refused", $"The runtime cannot keep which paired device asks for this write, so it writes nothing: {exception.Message}", []), ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status503ServiceUnavailable);
+        }
+
+        object? result;
+        try
+        {
+            result = await next(context).ConfigureAwait(false);
+        }
+        catch
+        {
+            Keep(id, at, device, operation, null, failed: true);
+            throw;
+        }
+
+        Keep(id, at, device, operation, result, failed: false);
+        return result;
+    }
+
+    /// <summary>
+    /// Keeps the outcome of a write a paired device asked for, under its intent's id: the record it produced, or for a run's stop the
+    /// run's id, or that it failed. An outcome that cannot be kept is logged; the start after closes its intent as interrupted.
+    /// </summary>
+    private void Keep(string id, string at, AuthenticatedDevice device, string operation, object? result, bool failed)
+    {
+        int status = result is IStatusCodeHttpResult { StatusCode: int code } ? code : StatusCodes.Status200OK;
+        object? value = result is IValueHttpResult { Value: object answered } ? answered : null;
+        RecordWritten? written = value switch
+        {
+            WriteOutcome { Written: RecordWritten record } => record,
+            TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
+            _ => null,
+        };
+        string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
+        try
+        {
+            ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            log?.Invoke($"the outcome of {operation} for device {device.Identity} ({id}) could not be kept in the local-network ledger: {exception.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Each served operation's scope: a bound request rule, or no principal named in its arguments (read views, raw bytes and
+    /// bodyless operations). This table is independent of the route registry: a newly added route is refused until its scope is declared.
+    /// </summary>
+    private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["GET /v1/health"] = null,
+        ["GET /v1/status"] = null,
+        ["GET /v1/progress"] = null,
+        ["GET /v1/validate"] = null,
+        ["GET /v1/check"] = null,
+        ["GET /v1/records/{id}"] = null,
+        ["GET /v1/records"] = null,
+        ["POST /v1/records"] = typeof(NewRecordRequest),
+        ["GET /v1/decisions"] = null,
+        ["GET /v1/decisions/{id}"] = null,
+        ["GET /v1/work/{key}/brief"] = null,
+        ["GET /v1/work/{key}"] = null,
+        ["POST /v1/work/assign"] = typeof(AssignRequest),
+        ["POST /v1/work/attempt"] = typeof(AttemptRequest),
+        ["POST /v1/work/result"] = typeof(ResultRequest),
+        ["POST /v1/work/amend"] = typeof(AmendRequest),
+        ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
+        ["GET /v1/devices"] = null,
+        ["POST /v1/devices"] = typeof(DeviceCreateRequest),
+        ["POST /v1/devices/admit"] = typeof(AdmitRequest),
+        ["POST /v1/devices/rename"] = typeof(DeviceRenameRequest),
+        ["POST /v1/devices/rotate"] = typeof(DeviceRotateRequest),
+        ["POST /v1/devices/revoke"] = typeof(RevokeRequest),
+        ["POST /v1/devices/recovery"] = typeof(DeviceRecoveryRequest),
+        ["GET /v1/releases"] = null,
+        ["GET /v1/documents"] = null,
+        ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
+        ["GET /v1/asks"] = null,
+        ["GET /v1/goals"] = null,
+        ["POST /v1/goals"] = typeof(GoalProposeRequest),
+        ["GET /v1/goals/{id}"] = null,
+        ["GET /v1/goals/{id}/next"] = null,
+        ["POST /v1/goals/{id}/step"] = typeof(GoalStepRequest),
+        ["POST /v1/goals/{id}/activate"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/pause"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/resume"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/stop"] = typeof(GoalActionRequest),
+        ["POST /v1/goals/{id}/evaluate"] = typeof(GoalEvaluateRequest),
+        ["POST /v1/goals/{id}/accept"] = typeof(GoalAcceptRequest),
+        ["GET /v1/providers"] = null,
+        ["GET /v1/launchers"] = null,
+        ["GET /v1/runs"] = null,
+        ["POST /v1/runs"] = typeof(RunStartRequest),
+        ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
+        ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
+        ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
+        ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
+        ["POST /v1/estate/export"] = typeof(ExportRequest),
+        ["GET /v1/reconcile"] = null,
+        ["GET /v1/recover/inspect"] = null,
+        ["GET /v1/objects"] = null,
+        ["POST /v1/objects"] = null,
+        ["GET /v1/objects/verify"] = null,
+        ["GET /v1/objects/{hash}"] = null,
+        ["POST /v1/shutdown"] = null,
+        ["POST /v1/pairings"] = typeof(PairingIssueRequest),
+        ["POST /v1/pairing/hello"] = typeof(PairingHello),
+        ["POST /v1/pairing/confirm"] = typeof(PairingConfirm),
+        ["GET /v1/runtime/identity"] = null,
+        ["POST /v1/runtime/certificate"] = typeof(CertificateRotateRequest),
+        ["GET " + OpenApiDocument.Path] = null,
+    };
+
+    /// <summary>Whether an operation has a scope rule, including the rule of its bound request type.</summary>
+    internal static bool Covers(string operation) => Operations.TryGetValue(operation, out Type? type) && (type is null || Covers(type));
+
+    /// <summary>
+    /// The operations a device-signed request may ask only for an administrator: stopping the runtime and replacing its certificate or
+    /// identity. Over the local network they are refused before this, as operations on the runtime's own machine.
+    /// </summary>
+    private string? Refusal(string operation, AuthenticatedDevice device) =>
+        !Covers(operation)
+            ? $"{operation} has no request scope rule and is refused."
+            : operation is "POST /v1/shutdown" or "POST /v1/runtime/certificate" && !service.Administers(device.Principal)
+            ? $"{operation} is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope. On the runtime's machine its operating-system user reaches it over the local socket."
+            : null;
+
+    /// <summary>
+    /// Each request type an operation binds, with how it names the principal acting. Every request type of the protocol is here: a
+    /// test holds the table to the protocol, and a device-signed request of a type that is not is refused.
+    /// </summary>
+    private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
+    {
+        [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
+        [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
+        [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),
+        [typeof(AssignRequest)] = (_, r, d) => Acting(((AssignRequest)r).By, d),
+        [typeof(AttemptRequest)] = (_, r, d) => Acting(((AttemptRequest)r).By, d),
+        [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
+        [typeof(AmendRequest)] = (_, r, d) => Acting(((AmendRequest)r).By, d),
+        [typeof(DeviceCreateRequest)] = (_, r, d) => Acting(((DeviceCreateRequest)r).Principal, d),
+        [typeof(AdmitRequest)] = (_, r, d) => Acting(((AdmitRequest)r).By, d) ?? Recovery(((AdmitRequest)r).Recovery, d),
+        [typeof(RevokeRequest)] = (_, r, d) => Acting(((RevokeRequest)r).By, d) ?? Recovery(((RevokeRequest)r).Recovery, d),
+        [typeof(DeviceRecoveryRequest)] = (_, r, d) => Acting(((DeviceRecoveryRequest)r).Principal, d),
+        [typeof(DeviceRenameRequest)] = (scope, r, d) => scope.OwnDevice(((DeviceRenameRequest)r).Device, d),
+        [typeof(DeviceRotateRequest)] = (scope, r, d) => scope.OwnDevice(((DeviceRotateRequest)r).Device, d),
+        [typeof(DocumentReviewRequest)] = (_, r, d) => Acting(((DocumentReviewRequest)r).By, d),
+        [typeof(GoalProposeRequest)] = (_, r, d) => Acting(((GoalProposeRequest)r).By, d),
+        [typeof(GoalActionRequest)] = (_, r, d) => Acting(((GoalActionRequest)r).By, d),
+        [typeof(GoalEvaluateRequest)] = (_, r, d) => Acting(((GoalEvaluateRequest)r).By, d),
+        [typeof(GoalAcceptRequest)] = (_, r, d) => Acting(((GoalAcceptRequest)r).By, d),
+        [typeof(ReleaseSubmitRequest)] = (_, r, d) => Acting(((ReleaseSubmitRequest)r).By, d),
+        [typeof(ReleaseObserveRequest)] = (_, r, d) => Acting(((ReleaseObserveRequest)r).By, d),
+        [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
+        [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
+        [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),
+        [typeof(RunStopRequest)] = (_, r, d) => Acting(((RunStopRequest)r).By, d),
+        [typeof(PairingIssueRequest)] = (_, r, d) => Acting(((PairingIssueRequest)r).By, d),
+
+        // No principal acts in these: the rotation's authority is the operation's, and the pairing exchange is the code's.
+        [typeof(CertificateRotateRequest)] = (_, _, _) => null,
+        [typeof(PairingHello)] = (_, _, _) => null,
+        [typeof(PairingConfirm)] = (_, _, _) => null,
+    };
+
+    /// <summary>Whether a request type is one this holds to a principal; a device-signed request of any other protocol type is refused.</summary>
+    internal static bool Covers(Type type) => Rules.ContainsKey(type);
+
+    /// <summary>
+    /// Why a bound argument may not proceed for the device, or null. A route's own values (text, numbers) and the request's context
+    /// pass; a request object is held by its rule, and one of any type the rules do not name, wherever it is declared, is refused.
+    /// </summary>
+    private string? Refusal(object? argument, AuthenticatedDevice device)
+    {
+        if (argument is null or string or HttpContext or HttpRequest or CancellationToken || argument.GetType().IsPrimitive || argument.GetType().IsEnum)
+        {
+            return null;
+        }
+
+        Type type = argument.GetType();
+        return Rules.TryGetValue(type, out Func<RequestScope, object, AuthenticatedDevice, string?>? rule)
+            ? rule(this, argument, device)
+            : $"A device-signed {type.Name} names no principal the runtime can hold it to, so it is refused.";
+    }
+
+    /// <summary>The principal a request names as acting must be the device's.</summary>
+    private static string? Acting(string? acting, AuthenticatedDevice device) =>
+        string.IsNullOrEmpty(acting)
+            ? $"This request names no principal acting; a request signed by device {device.Identity} acts for {device.Principal}."
+            : Optional(acting, device);
+
+    /// <summary>A principal the request may leave out, but when it names one it is the device's.</summary>
+    private static string? Optional(string? acting, AuthenticatedDevice device) =>
+        acting is null || string.Equals(acting, device.Principal, StringComparison.Ordinal)
+            ? null
+            : $"Device {device.Identity} acts for its own principal {device.Principal}; this request names {acting} as acting. A principal's requests are signed by its own device{(device.LocalNetwork ? string.Empty : ", or sent over the local socket by the runtime machine's user")}.";
+
+    /// <summary>What a device-signed request asks only of an administrator: the operator, or a principal holding the 'administer' scope.</summary>
+    private string? Administrator(string what, AuthenticatedDevice device) =>
+        service.Administers(device.Principal)
+            ? null
+            : $"{what}, and is an administrator's: device {device.Identity} acts for {device.Principal}, which is neither an operator nor holds the 'administer' scope.";
+
+    /// <summary>A device renames or rotates only devices of its own principal.</summary>
+    private string? OwnDevice(string? named, AuthenticatedDevice device)
+    {
+        if (string.IsNullOrEmpty(named) || service.Standing(named) is not DeviceStanding standing)
+        {
+            return null;
+        }
+
+        return string.Equals(standing.Principal, device.Principal, StringComparison.Ordinal)
+            ? null
+            : $"Device {standing.Identity} is a device of {standing.Principal}; a request signed by device {device.Identity} reaches only the devices of {device.Principal}.";
+    }
+
+    /// <summary>A device record is written on the machine that holds its key; over the local network it is refused, as /v1/devices and its renames are.</summary>
+    private static string? DeviceRecord(string? type, AuthenticatedDevice device) =>
+        device.LocalNetwork && string.Equals(type, "device", StringComparison.Ordinal)
+            ? "A device record is written on the machine that holds its key, and is refused over the local network."
+            : null;
+
+    /// <summary>Applying an upgrade rewrites the estate's pin and applies an irreversible migration on the runtime's machine; over the local network only its plan is given.</summary>
+    private static string? Upgrade(AuthenticatedDevice device) =>
+        device.LocalNetwork
+            ? "Applying an upgrade acts on the runtime's own machine and is refused over the local network; its plan (check) is not."
+            : null;
+
+    /// <summary>A recovery key is a file on the runtime's machine, used there only.</summary>
+    private static string? Recovery(string? recovery, AuthenticatedDevice device) =>
+        device.LocalNetwork && recovery is not null
+            ? "A recovery key is a file on the runtime's own machine and is used there only; it is refused over the local network."
+            : null;
+
+    private static IResult Denied(HttpContext context, AuthenticatedDevice device, string message)
+    {
+        if (device.LocalNetwork)
+        {
+            context.Response.Headers.Connection = "close";
+        }
+
+        return Results.Content(JsonSerializer.Serialize(new Problem("denied", message, []), ProtocolJson.Options), "application/json", Encoding.UTF8, StatusCodes.Status401Unauthorized);
+    }
+}
