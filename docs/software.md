@@ -179,6 +179,10 @@ missing nine records dated 04:29–04:34 UTC. For 0.7.0, run
 `vericairn docs notes --from 0.6.1 --to 0.7.0 --out docs/releases/0.7.0 --since 2026-10-16T04:29:43Z`
 against the estate that holds those records. This deliberately overlaps 0.6.1; its frozen set stays unchanged.
 
+Generated API parameter rows omit the description separator when there is no description and carry no trailing
+spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no
+legacy scope label.
+
 Only current results in that window are listed: a result superseded by a later result is omitted, even when the later
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
 that result's exact hash or its work order's current revision and hash. This includes another principal's results with

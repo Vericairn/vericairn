@@ -339,7 +339,7 @@ internal static partial class Docs
         Section(lines, "Identity and policy", window.Where(r => r.Type is "device" or "admission" or "principal" or "estate").Select(r => r.Type switch
         {
             "device" => $"Device \"{Str(r.Body, "name")}\" recorded ({r.Id}).",
-            "admission" => $"Device admitted to author records, scope {Str(r.Body, "scope")} ({r.Id}).",
+            "admission" => $"Device admitted to author records{(Str(r.Body, "scope") is { Length: > 0 } scope ? ", scope " + scope : string.Empty)} ({r.Id}).",
             "principal" => $"Principal {(r.Supersedes is null ? "recorded" : "revised")}: \"{Str(r.Body, "name")}\" ({r.Id}).",
             _ => $"Charter revised ({r.Id}).",
         }));

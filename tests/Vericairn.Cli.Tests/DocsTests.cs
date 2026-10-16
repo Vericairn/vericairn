@@ -59,7 +59,10 @@ public class DocsTests
             Assert.Contains("`--version <version>`", submit, StringComparison.Ordinal);
             Assert.DoesNotContain("`-?, -h, --help`", cli, StringComparison.Ordinal);
             Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
-            Assert.Contains("## `POST /v1/records`", File.ReadAllText(Path.Combine(output, "api-reference.md")), StringComparison.Ordinal);
+            string api = File.ReadAllText(Path.Combine(output, "api-reference.md"));
+            Assert.Contains("## `POST /v1/records`", api, StringComparison.Ordinal);
+            Assert.Contains("- `id` (path, required)\n", api, StringComparison.Ordinal);
+            Assert.All(api.Split('\n'), line => Assert.Equal(line.TrimEnd(), line));
             Assert.Contains("## `acceptance`", File.ReadAllText(Path.Combine(output, "record-reference.md")), StringComparison.Ordinal);
         }
         finally
@@ -180,6 +183,11 @@ public class DocsTests
             CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--supersedes", candidate.Id, "--at", "2026-09-01T01:02:00Z", "--body", CliHarness.WriteJson(scratch, "published.json", release.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-09-01T01:02:00Z\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal)));
             WorkOrder(root, scratch, op, "W-2", "2026-09-01T02:00:00Z");
 
+            // A format-2 admission has no legacy scope; its notes must not invent an empty scope label.
+            string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Notes device", "--custody", "file").Id;
+            string admission = CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Admission for the notes.").Id;
+            Thread.Sleep(1100); // Pre-publication notes end at the second before generation.
+
             // The previous set records the window of its notes: these begin at its end, so W-1 is in them, and they record their own.
             string sets = Path.Combine(scratch, "releases");
             Directory.CreateDirectory(Path.Combine(sets, "0.1.0"));
@@ -192,6 +200,8 @@ public class DocsTests
             Assert.DoesNotContain("**W-0**", notes, StringComparison.Ordinal);
             Assert.Contains("**W-1**", notes, StringComparison.Ordinal);
             Assert.Contains("**W-2**", notes, StringComparison.Ordinal);
+            Assert.Contains($"Device admitted to author records ({admission}).", notes, StringComparison.Ordinal);
+            Assert.DoesNotContain("scope  (", notes, StringComparison.Ordinal);
             Assert.Contains("## The release itself\n\nNone in this window.", notes, StringComparison.Ordinal);
             Assert.Contains("## Other releases recorded in this window\n\n- 0.1.0 candidate", notes, StringComparison.Ordinal);
             Assert.Contains("- 0.1.0 published", notes, StringComparison.Ordinal);
