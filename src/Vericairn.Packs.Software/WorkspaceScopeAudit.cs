@@ -212,13 +212,14 @@ internal static class WorkspaceScopeAudit
 #pragma warning restore SYSLIB1054
     [StructLayout(LayoutKind.Sequential)] private struct FileTag { public uint Attributes, Tag; }
 
-    public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted)
+    public static RunScope Compare(WorkspaceSnapshot before, WorkspaceSnapshot after, IReadOnlyList<string> permitted, TimeSpan? deadline = null)
     {
+        var watch = Stopwatch.StartNew();
         string[] changes = before.Files.Keys.Union(after.Files.Keys, StringComparer.Ordinal)
             .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path)).Order(StringComparer.Ordinal).ToArray();
         string[] patterns = permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
             .Where(Relative).ToArray();
-        string[] outside = changes.Where(path => !patterns.Any(pattern => Matches(path, pattern))).ToArray();
+        var outside = new List<string>();
         string? problem = before.Problem ?? after.Problem;
         if (before.Identity != after.Identity)
         {
@@ -229,7 +230,42 @@ internal static class WorkspaceScopeAudit
             problem ??= "The assignment declares no interpretable repository-relative permitted paths; no changed path is authorized by this audit.";
         }
 
-        return new RunScope(changes.Length, outside.Length, outside.Take(1000).Select(Display).ToArray(), problem);
+        try
+        {
+            foreach (string path in changes)
+            {
+                CheckDeadline();
+                bool allowed = false;
+                foreach (string pattern in patterns)
+                {
+                    CheckDeadline();
+                    if (Matches(path, pattern))
+                    {
+                        allowed = true;
+                        break;
+                    }
+                }
+
+                if (!allowed)
+                {
+                    outside.Add(path);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is TimeoutException or NotSupportedException)
+        {
+            problem ??= "The scope comparison reached its time or pattern-complexity limit; assignment scope is incomplete.";
+        }
+
+        return new RunScope(changes.Length, outside.Count, outside.Take(1000).Select(Display).ToArray(), problem);
+
+        void CheckDeadline()
+        {
+            if (watch.Elapsed >= (deadline ?? Deadline))
+            {
+                throw new TimeoutException("The scope comparison reached its deadline.");
+            }
+        }
     }
 
     private static bool Matches(string path, string pattern)
@@ -242,7 +278,7 @@ internal static class WorkspaceScopeAudit
 
         string expression = Regex.Escape(plain).Replace(@"\*\*/", "(?:.*/)?", StringComparison.Ordinal)
             .Replace(@"\*\*", ".*", StringComparison.Ordinal).Replace(@"\*", "[^/]*", StringComparison.Ordinal).Replace(@"\?", "[^/]", StringComparison.Ordinal);
-        return Regex.IsMatch(path, "\\A" + expression + "\\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+        return Regex.IsMatch(path, "\\A" + expression + "\\z", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100));
     }
 
     private static bool Relative(string path) => !string.IsNullOrWhiteSpace(path) && path.Length <= 2000

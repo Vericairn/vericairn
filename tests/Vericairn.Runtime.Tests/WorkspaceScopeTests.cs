@@ -10,6 +10,16 @@ namespace Vericairn.Runtime.Tests;
 public class WorkspaceScopeTests
 {
     [Fact]
+    public void ScopeComparisonAlsoHasADeadlineAndCannotReportACleanResultAfterItExpires()
+    {
+        var before = new WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal));
+        var after = new WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal) { ["outside.txt"] = "changed" });
+        Protocol.RunScope scope = WorkspaceScopeAudit.Compare(before, after, ["src/**"], TimeSpan.Zero);
+        Assert.NotNull(scope.Problem);
+        Assert.Contains("limit", scope.Problem, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReplacingThePhysicalWorkspaceCannotProduceACleanScopeAudit()
     {
         using var run = new RunEstate();
