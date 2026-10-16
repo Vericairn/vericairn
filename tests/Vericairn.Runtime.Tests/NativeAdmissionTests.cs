@@ -101,7 +101,7 @@ public class NativeAdmissionTests
 
     internal sealed class NativeRun : IDisposable
     {
-        public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, bool newer = false, bool qualify = false)
+        public NativeRun(string harness, Action<NativeProbe, LaunchContext>? beforeDispatch = null, bool newer = false, bool qualify = false, Action? afterProbe = null)
         {
             Probe = new(harness);
             Run = new(keepOperatorKey: qualify);
@@ -125,7 +125,7 @@ public class NativeAdmissionTests
             Run.Service.WorkerOptions = Run.Service.WorkerOptions with { Environment = environment, Vericairn = Probe.Context.McpServer,
                 Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal) { [Probe.Launcher.Launcher] = configuration } };
             LaunchContext? prepared = null;
-            Run.Service.Providers.Register(new HookedLauncher(Probe.Launcher, command: () => beforeDispatch?.Invoke(Probe, prepared!), prepared: c => prepared = c));
+            Run.Service.Providers.Register(new HookedLauncher(Probe.Launcher, command: () => beforeDispatch?.Invoke(Probe, prepared!), prepared: c => prepared = c, probed: _ => afterProbe?.Invoke()));
         }
 
         public NativeProbe Probe { get; }

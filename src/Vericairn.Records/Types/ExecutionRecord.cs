@@ -158,7 +158,7 @@ internal static class ExecutionRecord
         string? launcher = admission.Enum("launcher", true, "codex", "claude-code");
         string? version = admission.Text("version", true, 80);
         if (version is not null && (!HarnessQualificationType.ExactVersion(version)
-            || !execution.Element.TryGetProperty("harnessVersion", out JsonElement harnessVersion) || harnessVersion.GetString() != version))
+            || !execution.Element.TryGetProperty("harnessVersion", out JsonElement harnessVersion) || harnessVersion.ValueKind != JsonValueKind.String || harnessVersion.GetString() != version))
             context.Error("operation.harness-admission", "Harness admission names the execution's exact version.");
         if (launcher != EstateModel.BodyString(context.Record, "provider"))
             context.Error("operation.harness-admission", "Harness admission names the operation's launcher.");

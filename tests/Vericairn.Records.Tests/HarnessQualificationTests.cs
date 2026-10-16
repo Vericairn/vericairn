@@ -31,12 +31,12 @@ public class HarnessQualificationTests
             $$"""{"kind":"{{kind}}","name":"Qualifier","roles":["contributor"]}""").Id;
         if (grant)
         {
-            string decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Grant qualification","stake":"low","decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","statement":"Grant qualify.","summary":"Grant qualify.","synthesis":"Grant qualify."}""").Id;
+            string decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Grant qualification","stake":"low","decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","statement":"Grant qualify.","summary":"Grant qualify.","synthesis":"Grant qualify.","effects":["Qualify scope granted."],"affects":[],"notAuthorized":[]}""").Id;
             estate.Add("authority", estate.OperatorId, $$"""{"grantee":"{{author}}","scope":["qualify"],"reserved":[],"conditions":[],"basis":"{{decision}}"}""");
         }
         RecordEnvelope record = estate.Add("harness-qualification", author, Body());
         Finding[] errors = estate.Load().Findings.Where(f => f.Severity == Severity.Error && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal)).ToArray();
-        if (allowed) Assert.Empty(errors);
+        if (allowed) Assert.DoesNotContain(estate.Load().Findings, f => f.Severity == Severity.Error);
         else Assert.Contains(errors, f => f.Code == "harness-qualification.author");
     }
 
@@ -58,7 +58,8 @@ public class HarnessQualificationTests
             case "path": body["version"] = "/machine/harness"; break;
         }
         RecordEnvelope record = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), format: defect == "format-one" ? 1 : 2);
-        Assert.Contains(estate.Load().Findings, f => f.Severity == Severity.Error && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal));
+        string expected = defect switch { "missing-probe" => "body.missing", "raw-output" => "body.hash", "format-one" => "record.type-format", _ => "harness-qualification.version" };
+        Assert.Contains(estate.Load().Findings, f => f.Code == expected && f.Location.StartsWith(record.ExpectedPath, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -76,6 +77,24 @@ public class HarnessQualificationTests
         body["version"] = "0.161.0";
         RecordEnvelope changed = estate.Add("harness-qualification", estate.OperatorId, body.ToJsonString(), supersedes: revoked.Id);
         Assert.Contains(estate.Load().Findings, f => f.Code == "harness-qualification.revision" && f.Location == changed.ExpectedPath);
+    }
+
+    [Fact]
+    public void AGrantMustExistAtAuthorshipAndItsLaterWithdrawalPreservesHistory()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        string person = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Qualifier","roles":["contributor"]}""").Id;
+        string decision = estate.Add("decision", estate.OperatorId, $$"""{"title":"Grant scope","stake":"low","decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","statement":"Grant qualify.","summary":"Grant qualify.","effects":["Grant qualify."],"affects":[],"notAuthorized":[]}""").Id;
+        RecordEnvelope premature = estate.Add("harness-qualification", person, Body());
+        string grantBody = $$"""{"grantee":"{{person}}","scope":["qualify"],"reserved":[],"conditions":[],"basis":"{{decision}}"}""";
+        RecordEnvelope grant = estate.Add("authority", estate.OperatorId, grantBody);
+        Assert.Contains(estate.Load().Findings, f => f.Code == "harness-qualification.author" && f.Location == premature.ExpectedPath);
+        RecordEnvelope authorized = estate.Add("harness-qualification", person, Body());
+        estate.Add("authority", estate.OperatorId, grantBody.Replace("\"qualify\"", "\"local-engineering\"", StringComparison.Ordinal), supersedes: grant.Id);
+        RecordEnvelope withdrawn = estate.Add("harness-qualification", person, Body());
+        var findings = estate.Load().Findings;
+        Assert.DoesNotContain(findings, f => f.Severity == Severity.Error && f.Location.StartsWith(authorized.ExpectedPath, StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "harness-qualification.author" && f.Location == withdrawn.ExpectedPath);
     }
 
     internal static string Body() => new JsonObject

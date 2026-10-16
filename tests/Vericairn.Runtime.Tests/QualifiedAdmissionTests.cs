@@ -47,6 +47,7 @@ public class QualifiedAdmissionTests
     [InlineData("codex", "helpSuffix", "Changed help.")]
     [InlineData("claude", "helpSuffix", "Changed help.")]
     [InlineData("codex", "featuresSuffix", "new_disabled_tool stable false")]
+    [InlineData("codex", "featureStage", "experimental")]
     [InlineData("codex", "mcpAuth", "changed")]
     public void AnySuccessfulProbeDigestDriftRefusesBeforeIntent(string harness, string key, string value)
     {
@@ -100,5 +101,58 @@ public class QualifiedAdmissionTests
         body["status"] = "revoked";
         RunEstate.Ok(fixture.Run.Service.NewRecord(new("harness-qualification", fixture.Run.Estate.OperatorId,
             JsonSerializer.SerializeToElement(body), Supersedes: original.Id)));
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void RevocationDuringTheFinalProbeIsSeenBeforeDispatch(string harness)
+    {
+        NativeAdmissionTests.NativeRun? fixture = null;
+        int probes = 0;
+        using (fixture = new(harness, newer: true, qualify: true, afterProbe: () => { if (++probes == 2) Revoke(fixture!); }))
+        {
+            RunResponse refused = fixture.Start();
+            Assert.False(refused.Ok, refused.Message);
+            Assert.Equal("known-failure", refused.Status);
+            Assert.False(File.Exists(fixture.Probe.Report));
+            Assert.Empty(fixture.Run.Row(refused.Run).Charged.EnumerateObject());
+            Assert.Equal(0, fixture.Run.Service.Check().Errors);
+        }
+    }
+
+    [Theory]
+    [InlineData("codex", "codex-cli 0.160.1")]
+    [InlineData("claude", "2.1.298 (Claude Code)")]
+    public void QualificationNeverImpliesANeighboringVersion(string harness, string version)
+    {
+        using var fixture = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        fixture.Probe.Behavior("version", version);
+        RunResponse refused = fixture.Start();
+        Assert.False(refused.Ok);
+        Assert.Contains("not qualified", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Run.Service.Runs().Runs);
+        Assert.False(File.Exists(fixture.Probe.Report));
+    }
+
+    [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void AQualificationMadeElsewhereAppliesOnlyWhenEveryLocalProbeMatches(string harness)
+    {
+        using var source = new NativeAdmissionTests.NativeRun(harness, newer: true, qualify: true);
+        using var target = new NativeAdmissionTests.NativeRun(harness, newer: true);
+        // Copy the qualified probe facts into a second test estate, signed by that estate's operator. Neither local path is a fact.
+        JsonElement body = source.Run.Estate.Load().ById[source.Qualification!.Id].Body;
+        RecordWritten imported = RunEstate.Ok(target.Run.Service.NewRecord(new("harness-qualification", target.Run.Estate.OperatorId, body)));
+        RunResponse started = target.Start();
+        Assert.True(started.Ok, started.Message);
+        target.Run.Settled(started.Run);
+        Assert.Equal(imported.Id, AgentRuns.Find(target.Run.Estate.Load(), started.Run)!.Intent.Body.GetProperty("execution").GetProperty("harnessAdmission").GetProperty("record").GetString());
+        target.Probe.Behavior("helpSuffix", "The second installation changed.");
+        RunResponse refused = target.Start();
+        Assert.False(refused.Ok);
+        Assert.Contains("probe", refused.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(target.Run.Service.Runs().Runs);
     }
 }

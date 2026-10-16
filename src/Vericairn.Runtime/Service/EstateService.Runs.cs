@@ -363,6 +363,13 @@ public sealed partial class EstateService
                     throw new ProviderRefusedException("Execution defaults or restrictions changed after the intent; no harness was dispatched.");
                 }
                 RunPreflight dispatchPreflight = launcher.Probe(launch);
+                // Probes start subprocesses and can take time. Judge authority again from the records after they finish.
+                dispatchModel = session.Load();
+                dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
+                if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
+                {
+                    throw new ProviderRefusedException("Execution defaults or restrictions changed during the final probes; no harness was dispatched.");
+                }
                 JsonObject? dispatchAdmission = HarnessAdmission.Admit(dispatchModel, launcher.Launcher, dispatchPreflight);
                 JsonObject dispatchEnvironment = RunEnvironment.Admit(configuration.EnvironmentPolicy, dispatchPreflight, environment,
                     [plan.Selection["requested"]!["destination"]!.GetValue<string>(), "estate", "local"], launcher.EnvironmentNames);

@@ -65,6 +65,8 @@ internal static class FakeHarness
     {
         string[] arguments = Environment.GetCommandLineArgs();
         int at = Array.IndexOf(arguments, Marker);
+        bool native = at < 0;
+        if (native) at = Array.IndexOf(arguments, NativeMarker);
         if (at < 0 || at + 2 >= arguments.Length)
         {
             return;
@@ -73,7 +75,8 @@ internal static class FakeHarness
         int code;
         try
         {
-            code = Run(arguments[at + 1], arguments[at + 2], arguments[(at + 3)..]);
+            code = native ? RunNative(arguments[at + 1], arguments[at + 2], arguments[(at + 3)..]) ?? 70
+                : Run(arguments[at + 1], arguments[at + 2], arguments[(at + 3)..]);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -84,6 +87,96 @@ internal static class FakeHarness
         Console.Out.Flush();
         Environment.Exit(code);
     }
+
+    private static int? RunNative(string scenario, string report, string[] arguments)
+    {
+        if (!scenario.StartsWith("native-", StringComparison.Ordinal)) return null;
+        File.WriteAllText(report + ".probed", "probed");
+        JsonObject behavior = File.Exists(report + ".behavior") ? JsonNode.Parse(File.ReadAllText(report + ".behavior"))!.AsObject() : [];
+        if (behavior["probeFailure"]?.GetValue<string>() is string failure && arguments.Contains(failure)) return 2;
+        bool codex = scenario == "native-codex";
+        if (arguments.Contains("--version"))
+        {
+            Console.WriteLine(behavior["version"]?.GetValue<string>() ?? (codex ? "codex-cli 0.159.0-alpha.12.1" : "2.1.296 (Claude Code)"));
+            return 0;
+        }
+        if (arguments.Contains("--help"))
+        {
+            string[] flags = codex
+                ? ["-c", "--config <key=value>", "--enable <FEATURE>", "--disable <FEATURE>", "--json", "--cd <DIR>", "--sandbox <SANDBOX_MODE>", "--model <MODEL>", "--ignore-rules"]
+                : ["-p", "--print", "--output-format <format>", "--verbose", "--permission-mode <mode>", "--mcp-config <configs...>", "--strict-mcp-config", "--setting-sources <sources>", "--settings <file-or-json>", "--tools <tools...>", "--model <model>", "--effort <level>", "--max-budget-usd <amount>"];
+            Console.WriteLine(string.Join('\n', flags.Where(f => !f.StartsWith(behavior["missingFlag"]?.GetValue<string>() ?? behavior["proseFlag"]?.GetValue<string>() ?? behavior["descriptionFlag"]?.GetValue<string>() ?? "never", StringComparison.Ordinal)).Select(f => "  " + f)));
+            if (behavior["proseFlag"]?.GetValue<string>() is string prose) Console.WriteLine("This prose mentions " + prose + " but declares no flag.");
+            if (behavior["descriptionFlag"]?.GetValue<string>() is string description) Console.WriteLine("  --unrelated  Documentation mentioning " + description + " without declaring it.");
+            if (behavior["helpSuffix"]?.GetValue<string>() is string suffix) Console.WriteLine(suffix);
+            return 0;
+        }
+        if (arguments.Contains("features") && arguments.Contains("list"))
+        {
+            string? goals = behavior["goals"]?.GetValue<string>();
+            if (goals != "missing") Console.WriteLine("goals " + (behavior["featureStage"]?.GetValue<string>() ?? "stable") + " " + (goals == "false" ? "false" : "true"));
+            if (goals == "duplicate") Console.WriteLine("goals stable true");
+            Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true");
+            foreach (string name in DisabledCodexFeatures) Console.WriteLine(name + " stable false");
+            if (behavior["featuresSuffix"]?.GetValue<string>() is string featuresSuffix) Console.WriteLine(featuresSuffix);
+            return 0;
+        }
+        if (arguments.Contains("mcp") && arguments.Contains("list"))
+        {
+            string? defect = behavior["mcp"]?.GetValue<string>();
+            if (defect == "malformed") { Console.WriteLine("not JSON"); return 0; }
+            var config = JsonNode.Parse(File.ReadAllText(Environment.GetEnvironmentVariable("VERICAIRN_MCP_CONFIG")!))!;
+            JsonNode server = config["mcpServers"]!["vericairn"]!;
+            var transport = new JsonObject { ["type"] = "stdio", ["command"] = server["command"]!.DeepClone(), ["args"] = server["args"]!.DeepClone(),
+                ["env"] = server["env"]!.DeepClone(), ["env_vars"] = new JsonArray(), ["cwd"] = null };
+            if (defect is "command" or "cwd") transport[defect] = "unexpected";
+            if (defect is "args" or "env_vars") transport[defect] = new JsonArray("unexpected");
+            if (defect == "env") transport["env"] = new JsonObject { ["EXTRA"] = "unexpected" };
+            var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport });
+            if (behavior["mcpAuth"]?.GetValue<string>() is string auth) list[0]!["auth_status"] = auth;
+            if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
+            if (defect == "transport-control") transport["unapproved"] = true;
+            if (defect == "duplicate-env")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"env\":{}", "\"env\":{},\"env\":{}", StringComparison.Ordinal));
+                return 0;
+            }
+            if (defect == "duplicate-variable")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"SECOND\":\"two\"", "\"FIRST\":\"one\"", StringComparison.Ordinal));
+                return 0;
+            }
+            if (defect is "ambient" or "disabled-ambient") list.Add(new JsonObject { ["name"] = "ambient", ["enabled"] = defect == "ambient" });
+            Console.WriteLine(list.ToJsonString());
+            return 0;
+        }
+        File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["actions"]?.GetValue<string>() is string actions)
+        {
+            string server = actions == "ambient" ? "ambient" : "vericairn";
+            string tool = "mcp__" + server + "__work_brief";
+            Console.WriteLine(JsonSerializer.Serialize(new { type = codex ? "thread.started" : "system", subtype = "init", tools = new[] { codex ? "exec_command" : "Read", tool } }));
+            if (codex)
+            {
+                Console.WriteLine("""{"type":"item.started","item":{"type":"command_execution","id":"command","command":"echo ready"}}""");
+                Console.WriteLine(JsonSerializer.Serialize(new { type = "item.started", item = new { type = "mcp_tool_call", id = "mcp", server, tool = "work_brief", arguments = new { } } }));
+            }
+            else
+            {
+                Console.WriteLine("""{"type":"assistant","message":{"content":[{"type":"tool_use","id":"read","name":"Read","input":{"file_path":".vericairn/brief.md"}}]}}""");
+                Console.WriteLine(JsonSerializer.Serialize(new { type = "assistant", message = new { content = new[] { new { type = "tool_use", id = "mcp", name = tool, input = new { } } } } }));
+            }
+        }
+        Console.WriteLine("{\"type\":\"result\",\"usage\":{\"input_tokens\":0,\"output_tokens\":0,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0}}");
+        return 0;
+    }
+
+    private static readonly string[] DisabledCodexFeatures =
+    [
+        "apps", "plugins", "remote_plugin", "hooks", "multi_agent", "multi_agent_v2", "browser_use", "browser_use_external",
+        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_host", "code_mode_only",
+        "memories", "workspace_dependencies", "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "shell_snapshot",
+    ];
 
     // Older protocol stand-ins exercise goal parsing independently of native inventory qualification.
     internal static string? VerifyGoals(IReadOnlyDictionary<string, string> settings, IReadOnlyDictionary<string, string> environment)
