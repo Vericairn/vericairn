@@ -50,7 +50,7 @@ source hashes and freshness added. It instructs the worker to refresh through
 the read-only MCP tool `communication_get` at the next settled boundary.
 Enforcement covers stored authority, conflicts and first-party rendering;
 following the brief is an instruction to an external agent, not an observed
-guarantee of its prose. Run configuration and model selection are unchanged.
+guarantee of its prose. Communication settings do not select a run configuration or model; RUN-01 resolves those separately.
 Remote is not built; no Remote communication behavior is claimed.
 
 The [first-party adoption procedure](communication-adoption.md) preserves the
@@ -69,10 +69,11 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This draft describes the 0.6.1 code with the unreleased FIX-09 corrections and 0.7.0 additions described here, including COMMS-01. Its worker and launchers first appeared
-in the 0.6.0 candidate, withdrawn before publication. 0.6.1 preserves settled run facts, audits reachable committed paths as well as the worktree, and corrects
-the release-note and progress classification of accepted work, as the sections below describe. The NuGet distribution
-path below is prepared for 0.7.0.
+This draft describes 0.7.0, following published 0.6.1. It covers FIX-09, NuGet distribution, hand-over/resume,
+watching, communication, context, deterministic audits and explicit qualified run admission. The worker first
+appeared in the withdrawn 0.6.0 candidate and shipped in 0.6.1. NuGet installation becomes available only after
+the operator publishes 0.7.0 and its package publication workflow succeeds. The
+[communication qualification report](communication-qualification.md) separates tested behavior from deferred work.
 
 ## Context packages (0.7.0)
 
@@ -162,7 +163,8 @@ command line and Workbench) holds the record types, the release operations as in
 the provider and adapter contracts, and a registry of the implementations a host makes available. It knows
 no particular product, provider or source host; a test holds that the records, runtime and protocol
 assemblies reference none of the modules below. The command line, which hosts the modules, references all
-three. The modules ship inside the Community distributable until packages exist (milestone M4):
+three. These contribution modules ship inside the Community command line; they are not the separately packaged
+foundation libraries introduced in 0.7.0. Ecosystem contribution packaging remains later work:
 
 | Module | Assembly | What it is |
 |---|---|---|
@@ -296,7 +298,7 @@ The release as intent, then observed effect:
    (for GitHub, `gh release edit vX -R <owner/name> --draft=false --latest`). Nothing in Vericairn publishes.
 4. `vericairn release observe` again records the observed publication as the `published` revision of the
    candidate; without the operator's acceptance the runtime rejects it with `release.unaccepted`.
-5. `vericairn estate upgrade --to X` pins the estate to the published release (for Vericairn itself; the
+5. `vericairn estate upgrade --to X --by <principal>` pins the estate to the published release (for Vericairn itself; the
    bootstrap fetches `vericairn-<version>-<platform>` by the hash the published record names).
 
 `vericairn status` lists every current operation with its state; one that is not observed-success or
@@ -367,8 +369,9 @@ The workflow has `contents: read` and `id-token: write`. The pinned `NuGet/login
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
 returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the workflow never
 checks out or rebuilds the packages. It pushes the verified package files and then their verified symbol
-files. A failed or partly completed publication needs operator inspection before any retry; the workflow
-does not silently skip an existing version. See the [operator setup note](releases/README.md#nuget-publication-setup).
+files. Both pushes use `--skip-duplicate`, so an operator's rerun can finish a partly completed publication
+without replacing an existing version. A failed or partial publication still needs inspection: a skipped duplicate
+is not a new verification of the bytes already held by nuget.org. See the [operator setup note](https://github.com/Vericairn/vericairn/blob/4ac21bc/docs/releases/README.md#nuget-publication-setup).
 
 Once publication succeeds, a .NET 10 SDK installation uses:
 
@@ -539,7 +542,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.6.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -686,7 +689,9 @@ replacement races. Each inventory runs in a helper process with a 30-second dead
 of content. The settlement inventory's same deadline includes committed history, limited to 10,000 new commits and
 100,000 distinct committed paths, with bounded metadata and Git output reads. Non-regular reference files are refused
 without blocking. Timeout terminates the helper and its Git children, with bounded cleanup and stream-drain waits; missing helper support also
-marks the audit incomplete. Pattern comparison has its own 30-second deadline and bounded non-backtracking matching.
+marks the audit incomplete. Pattern comparison has its own 30-second deadline. FIX-10 uses deterministic dynamic programming, with
+work proportional to pattern length times path length and memory proportional to path length, rather than regex
+complexity timeouts. Matching remains ordinal and case-sensitive; `**/` may consume zero directories.
 With `problem` present, counts can be partial and zero outside paths does not establish a clean scope. This is a
 workspace and reachable-history observation, not filesystem isolation or proof of which actor made a concurrent
 change. Uncommitted changes reverted before settlement and commits no longer reachable from the run branch are
@@ -863,6 +868,14 @@ entries through `WorkerOptions.Configurations`, or a qualified launcher supplies
 Each has an explicit model catalog, choices/restrictions, local settings and an environment admission
 policy. Naming an unknown configuration is refused. There is no shipped ambient model configuration.
 
+**Stock CLI/daemon integration gap.** At this head `WorkerOptions.Configurations` defaults to empty,
+neither native launcher supplies `Configuration`, and the stock CLI and daemon have no configuration loader.
+Thus their `worker run` and agent `goal step` paths refuse with "No matching explicit launcher configuration
+is available", even with `--execution model=... --execution effort=...`. An embedding host must supply the
+configuration and admitted inventory through the runtime API. `worker qualify` records probe evidence but
+cannot supply that configuration. The CLI refusal was reproduced during the 0.7.0 documentation review;
+no code was changed here.
+
 The complete environment inventory covers the harness, tools, skills, plugins, hooks, MCP servers,
 shell helpers, dependencies, and effective user and repository configuration. Preflight must account for
 every loaded component and route and establish that its children inherit the same environment limits.
@@ -966,8 +979,15 @@ as historical evidence. Revoking a record does not remove the shipped compiled b
 Qualification establishes agreement with the launcher's checked protocol and isolation boundaries for that exact
 installation. It does not attest vendor provenance, execute the tools, prove a successful login or model call, certify
 model-dependent behavior, authorize work, accept results, or qualify an event format the launcher cannot observe.
-There is no inferred version range. The existing platform and containment limits below still apply. API v1 adds
+There is no inferred version range. The existing platform and containment limits still apply. API v1 adds
 `POST /v1/harness-qualifications`; the MCP tool list is unchanged. Remote is not built.
+
+**Qualification-route defect.** At this head that API route is absent from the daemon's machine-local
+local-network denylist, although it runs local probes and accepts a local `command` override. A paired device
+acting for an authorized human can reach it, subject to existing authentication, presence and qualification
+authority checks. The local-network refusal of `worker run` does not protect this route. This finding comes
+from code inspection of the route registry, authenticator and qualification service; a code correction and
+network regression test remain outside this documentation assignment.
 
 Codex's qualified built-in inventory is `exec_command`, `write_stdin`, `apply_patch`, `view_image`, `update_plan`,
 `request_user_input`, `request_user_input_async`, `send_message_to_user_async`, `clock.curr_time`, `tool_search`,
@@ -989,7 +1009,7 @@ in both the generated file and session overrides. This prevents a fresh home fro
 at startup. See the [Codex configuration schema](https://github.com/openai/codex/blob/main/codex-rs/core/config.schema.json).
 
 The effective feature listing must confirm each required state. The remaining non-tool feature allowlist is explicit
-in [CodexInventory](../src/Vericairn.Packs.Software/CodexInventory.cs). Effective feature states and help identity
+in [CodexInventory](https://github.com/Vericairn/vericairn/blob/4ac21bc/src/Vericairn.Packs.Software/CodexInventory.cs). Effective feature states and help identity
 contribute to the inventory hash; the qualification's tool probe also digests the complete feature listing.
 Only `auth.json` is imported into `CODEX_HOME`; the launcher generates
 `config.toml`. Preflight permits only those files and empty probe scratch directories. It compares the generated

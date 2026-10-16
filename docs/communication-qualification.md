@@ -50,18 +50,18 @@ Workbench CI follow-up added three, and round two adds 21.
 
 | Test file | Coverage | Cases |
 |---|---|---:|
-| [CLI communication qualification](../tests/Vericairn.Cli.Tests/CommunicationQualificationTests.cs) | D08-A, D08-B, D08-C; CLI, embedded API, MCP tool registry and briefs | 4 |
-| [Daemon communication qualification](../tests/Vericairn.Daemon.Tests/CommunicationQualificationTests.cs) | D08-A, B, C, E and F; real daemon API/SDK, signed requests, restart and raw unauthorized responses | 6 |
-| [Workbench communication qualification](../tests/Vericairn.Workbench.Tests/CommunicationQualificationTests.cs) | D08-A, B, E and watch presentation | 4 |
-| [CLI continuity journeys](../tests/Vericairn.Cli.Tests/CommunicationContinuityJourneyTests.cs) | D08-E; original preservation, loss and revoked MCP reads | 3 |
-| [Workbench context refusals](../tests/Vericairn.Workbench.Tests/ContextRefusalTests.cs) | Both existing work/assignment routes preserve missing-original refusals | 2 |
-| [Workbench review findings](../tests/Vericairn.Workbench.Tests/ReviewFindingsTests.cs) | Existing and newly submitted findings in actual headless controls, at all depths and two window sizes | 6 |
-| [CLI review observations](../tests/Vericairn.Cli.Tests/ReviewObservationTests.cs) | Complete findings/checks at all depths; canonical decision/review artifacts | 4 |
-| [Hand-over invariants](../tests/Vericairn.Cli.Tests/CommunicationHandoffInvariantTests.cs) | HANDOFF-01 across all profiles | 12 |
-| [Watcher invariants](../tests/Vericairn.Runtime.Tests/CommunicationWatchInvariantTests.cs) | WATCH-01 with the stand-in across all profiles | 12 |
-| [Bounded run journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunJourneyTests.cs) | D08-D; both native launcher adapters at all depths, measured intent before dispatch, requested/observed values, unknown usage and eight pre-dispatch refusals | 14 |
-| [Execution recovery journeys](../tests/Vericairn.Runtime.Tests/CommunicationRunRecoveryTests.cs) | D08-E; both interruption boundaries, both native inventory rechecks and reported model mismatches | 6 |
-| [Run admission regression](../tests/Vericairn.Records.Tests/AgentRunLedgerTests.cs) | Uncertain assignments cannot retry; later reconciliation does not rewrite earlier admission | 1 |
+| [CLI communication qualification](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Cli.Tests/CommunicationQualificationTests.cs) | D08-A, D08-B, D08-C; CLI, embedded API, MCP tool registry and briefs | 4 |
+| [Daemon communication qualification](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Daemon.Tests/CommunicationQualificationTests.cs) | D08-A, B, C, E and F; real daemon API/SDK, signed requests, restart and raw unauthorized responses | 6 |
+| [Workbench communication qualification](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Workbench.Tests/CommunicationQualificationTests.cs) | D08-A, B, E and watch presentation | 4 |
+| [CLI continuity journeys](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Cli.Tests/CommunicationContinuityJourneyTests.cs) | D08-E; original preservation, loss and revoked MCP reads | 3 |
+| [Workbench context refusals](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Workbench.Tests/ContextRefusalTests.cs) | Both existing work/assignment routes preserve missing-original refusals | 2 |
+| [Workbench review findings](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Workbench.Tests/ReviewFindingsTests.cs) | Existing and newly submitted findings in actual headless controls, at all depths and two window sizes | 6 |
+| [CLI review observations](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Cli.Tests/ReviewObservationTests.cs) | Complete findings/checks at all depths; canonical decision/review artifacts | 4 |
+| [Hand-over invariants](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Cli.Tests/CommunicationHandoffInvariantTests.cs) | HANDOFF-01 across all profiles | 12 |
+| [Watcher invariants](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Runtime.Tests/CommunicationWatchInvariantTests.cs) | WATCH-01 with the stand-in across all profiles | 12 |
+| [Bounded run journeys](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Runtime.Tests/CommunicationRunJourneyTests.cs) | D08-D; both native launcher adapters at all depths, measured intent before dispatch, requested/observed values, unknown usage and eight pre-dispatch refusals | 14 |
+| [Execution recovery journeys](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Runtime.Tests/CommunicationRunRecoveryTests.cs) | D08-E; both interruption boundaries, both native inventory rechecks and reported model mismatches | 6 |
+| [Run admission regression](https://github.com/Vericairn/vericairn/blob/4ac21bc/tests/Vericairn.Records.Tests/AgentRunLedgerTests.cs) | Uncertain assignments cannot retry; later reconciliation does not rewrite earlier admission | 1 |
 | **Total new cases** | | **74** |
 
 Existing suites also cover profile precedence/conflicts, protected kind/depth

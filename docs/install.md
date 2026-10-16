@@ -68,3 +68,20 @@ The macOS archives include `vericairn-enclave` beside the executable. The portab
 include that native helper; use the macOS archive when you need the bundled helper for Secure Enclave custody.
 Workbench continues to use its own archive, with the `vericairn` executable beside it; the tool package installs the command
 line only. See the [Workbench draft](workbench.md).
+
+## Worker prerequisites and holding limits
+
+The native inventory baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`.
+An authorized human may record a qualification for another exact version using `worker qualify`; all local
+probes and the separately admitted inventory must still match. Generic worker dispatch is refused.
+Qualification checks the launcher's protocol and isolation boundaries, not live inference or sign-in.
+
+At this head, the stock CLI/daemon has no loader for RUN-01's required run configurations. Its native
+launchers provide no default, so worker launch refuses until an embedding host supplies
+`WorkerOptions.Configurations`, explicit model/effort choices and the environment admission policy.
+Installing a harness or qualifying its version alone does not fill this gap. The
+[software guide](software.md#explicit-execution-and-environment-admission-run-01-070) describes it and the
+qualification-route defect that still needs a code correction.
+
+The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
+Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

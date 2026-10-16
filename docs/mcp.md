@@ -58,7 +58,7 @@ dotnet tool install --global dotnet-vc
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 
-Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp serve --as <principal id>`. Other harnesses use executable `dotnet` with `vc` as the first argument, followed by the arguments above. The self-contained archives still use executable `vericairn` with no `vc` argument. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`), and to a generic harness in `VERICAIRN_MCP_CONFIG`. Diagnostics go to standard error; the output stream carries only protocol messages. `dotnet vc mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `dotnet vc status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
+Claude Code: `claude mcp add vericairn -- dotnet vc --estate <estate root> mcp serve --as <principal id>`. Other harnesses use executable `dotnet` with `vc` as the first argument, followed by the arguments above. The self-contained archives still use executable `vericairn` with no `vc` argument. The worker writes that configuration for each run itself, outside the workspace: one server, `vericairn`, with the `--as` of the run's agent and the variables it needs to find the agent's key, given to Claude Code as its only MCP server (`--mcp-config` and `--strict-mcp-config`), to Codex on its command line (`-c mcp_servers.vericairn...`). Generic worker dispatch is refused because it cannot establish a complete inventory. Diagnostics go to standard error; the output stream carries only protocol messages. `dotnet vc mcp orientation --out <directory>` writes `AGENTS.md` (from the estate's identity, its qualifications of agent harnesses and the tool registry: what the estate is, the rules it enforces, how to connect, the tools and an honest agent matrix, and nothing that changes with each record, such as work orders or the pinned release, which `dotnet vc status` shows) with `CLAUDE.md` and `GEMINI.md` as pointer files that carry nothing of their own; regenerate them rather than editing, and `--check` names every copy that is missing or differs from a fresh generation. Vericairn's own repository holds its copies to the generator with a test.
 
 ## Qualification
 
@@ -66,13 +66,13 @@ The transport profile (stdio, JSON-RPC 2.0, the protocol revisions above, authen
 
 ## Limitations
 
-- The four write tools are limited to attempts, results, amendments and reviews of the estate's own living documents. Goals and asks are read views here; their lifecycle and decisions use the CLI or API under its authority rules.
+- The five write tools are limited to attempts, progress claims, results, amendments and reviews of the estate's own living documents. Goals and asks are read views here; their lifecycle and decisions use the CLI or API under its authority rules.
 - The server trusts the operating-system identity of whoever runs it, as the command line does; it is not a network service and must not be exposed as one.
 - Long outputs (a large status document, a long brief) are returned whole; no paging.
 
 ## Agent progress claims (0.7.0)
 
-`work_progress` takes `attempt`, a stable lower-case `phase`, `note`, and `state` (`active` or `completed`). It is available to an admitted contributor and publishes only that contributor's own attempt. Active notes replace local live state; completion creates one signed `work-progress` record for the phase. Retrying the identical completion returns that record. A completed phase cannot be reopened or recorded twice. A result closes further progress submissions. Notes must pass the same portable-content checks as records.
+`work_progress` takes `attempt`, a stable lower-case `phase`, `note`, and `state` (`active` or `completed`). It is available to an admitted contributor and publishes only that contributor's own attempt. Active notes replace local live state; completion creates one signed `work-progress` record for the phase. Retrying the identical completion returns that record. A completed phase cannot be reopened or recorded twice. A result closes further progress submissions, except an identical completion retry returning its existing record. Notes must pass the same portable-content checks as records.
 
 `estate_progress` includes the latest claim for each attempt, labelled as a claim. It is never evidence of liveness, permitted scope, or acceptance. Interim notes are local to this runtime and survive its restart; another machine sees recorded phase completions only.
 
@@ -112,5 +112,9 @@ MCP servers and their dependencies are themselves part of the launcher's complet
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
-The efficiency Adapter is disabled and unsupported here. Native worker dispatch without a qualified
-complete inventory is refused. Remote is not built or qualified by RUN-01.
+The efficiency Adapter is disabled and unsupported until the planned EFF-01 work in 0.8.0. Native worker
+dispatch requires a complete inventory and either the exact codex-cli `0.159.0-alpha.12.1` or Claude Code
+`2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
+the release-specific MCP matrix above; it establishes no live-agent or sign-in qualification. The stock
+CLI/daemon configuration gap is described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
+Remote is not built or qualified by these features.
