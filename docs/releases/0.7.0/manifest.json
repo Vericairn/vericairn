@@ -1,9 +1,9 @@
 {
   "format": "vericairn.docs/1",
   "version": "0.7.0",
-  "commit": "ef81bec83d1a31db7934d7d3b6d58e261ebca07c",
+  "commit": "5dbc5022ae4878bc53e7818d4d788cd1a739aeff",
   "generatedAt": "2026-10-16",
-  "generator": "vericairn-docs generate 0.7.0-dev\u002Bef81bec83d1a31db7934d7d3b6d58e261ebca07c",
+  "generator": "vericairn-docs generate 0.7.0-dev\u002B5dbc5022ae4878bc53e7818d4d788cd1a739aeff",
   "recordFormat": {
     "reads": [
       1,
@@ -72,6 +72,7 @@
     "goal accept",
     "worker",
     "worker launchers",
+    "worker configure",
     "worker qualify",
     "worker run",
     "worker stop",
