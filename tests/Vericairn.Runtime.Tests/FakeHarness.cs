@@ -97,8 +97,19 @@ internal static class FakeHarness
             ["process"] = Environment.ProcessId,
             ["group"] = OperatingSystem.IsWindows() ? 0 : getpgid(0),
         };
-        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "ignore-stop" or "ack-stop" ? HoldTerminate() : null;
-        File.AppendAllText(report, line.ToJsonString() + "\n");
+        using PosixSignalRegistration? terminate = scenario is "codex-spender" or "codex-headroom" or "ignore-stop" or "ack-stop" or "silent-ignore" or "child-survives-root" ? HoldTerminate() : null;
+        // Publish the complete report atomically, after installing the stop handler. Existence is a readiness barrier.
+        if (scenario != "child-survives-root")
+        {
+            PublishReport();
+        }
+
+        void PublishReport()
+        {
+            string prior = File.Exists(report) ? File.ReadAllText(report) : string.Empty;
+            File.WriteAllText(report + ".new", prior + line.ToJsonString() + "\n");
+            File.Move(report + ".new", report, overwrite: true);
+        }
         if (arguments.Contains("mcp") && arguments.Contains("list"))
         {
             var configuration = JsonNode.Parse(File.ReadAllText(Environment.GetEnvironmentVariable("VERICAIRN_MCP_CONFIG")!))!.AsObject();
@@ -207,18 +218,17 @@ internal static class FakeHarness
 
                 using (Process.Start(childInfo))
                 {
+                    WaitForFile(report + ".child");
+                    PublishReport();
                     return Linger(acknowledge: true);
                 }
             case "silent-ignore":
                 return Linger(acknowledge: false, output: false);
             case "silent-recovery":
-                Thread.Sleep(1200);
-                for (int i = 0; i < 6; i++)
-                {
-                    Emit("{\"event\":\"working\"}");
-                    Thread.Sleep(400);
-                }
-
+                WaitForFile(report + ".recover");
+                Emit("{\"event\":\"working\"}");
+                File.WriteAllText(report + ".recovered", "ready");
+                WaitForFile(report + ".finish");
                 return 0;
             case "ignore-stop":
                 return Linger(acknowledge: false);
@@ -227,11 +237,20 @@ internal static class FakeHarness
             case "scope-hang":
                 Thread.Sleep(TimeSpan.FromMinutes(2));
                 return 0;
-            case "close-output":
+            case "close-output" or "close-output-short":
                 Emit("Closing my output and working on.");
                 Console.Out.Close();
                 Console.Error.Close();
-                Thread.Sleep(TimeSpan.FromSeconds(3));
+                if (scenario == "close-output")
+                {
+                    File.WriteAllText(report + ".closed", "ready");
+                    WaitForFile(report + ".finish");
+                }
+                else
+                {
+                    Thread.Sleep(TimeSpan.FromSeconds(3)); // Native detached-owner test's eventual exit, not an observation window.
+                }
+
                 return 0;
             case not null when scenario.StartsWith("mcp:", StringComparison.Ordinal):
                 return Mcp(scenario["mcp:".Length..], arguments);
@@ -327,6 +346,14 @@ internal static class FakeHarness
         if (git.ExitCode != 0)
         {
             throw new IOException("The stand-in git command failed: " + error.Result + output.Result);
+        }
+    }
+
+    private static void WaitForFile(string path)
+    {
+        if (!SpinWait.SpinUntil(() => File.Exists(path), TimeSpan.FromMinutes(2)))
+        {
+            throw new IOException("The stand-in readiness barrier timed out.");
         }
     }
 

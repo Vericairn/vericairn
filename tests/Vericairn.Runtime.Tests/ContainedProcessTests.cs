@@ -125,7 +125,7 @@ public class ContainedProcessTests
         using var run = new RunEstate();
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, Vericairn.Records.Identity.Ulid.NewUlid().Value);
         directory.Create();
-        RunSupervisor supervisor = RunSupervisor.Start("detached", FakeHarness.Command("close-output", run.Report("detached")), run.Scratch,
+        RunSupervisor supervisor = RunSupervisor.Start("detached", FakeHarness.Command("close-output-short", run.Report("detached")), run.Scratch,
             WorkerEnvironment.Current(), new Vericairn.Packs.Software.GenericLauncher(), directory,
             new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(20) }, 60, null);
         Assert.Null(supervisor.Supervise(new CancellationToken(canceled: true)));

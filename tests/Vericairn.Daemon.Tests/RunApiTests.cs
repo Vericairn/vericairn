@@ -75,11 +75,11 @@ public class RunApiTests
 
             RunStopResponse stopped = api.RunStop(started.Run, new RunStopRequest(op, "Through the API.", 1));
             Assert.True(stopped.Ok, stopped.Message);
-            Assert.Equal("contained", stopped.State);
-            Assert.NotNull(stopped.Stop!.TransmittedAt);
-            Assert.Null(stopped.Stop.AcknowledgedAt);
-            Assert.NotNull(stopped.Stop.EscalatedAt);
             row = await Until(api, started.Run, r => r.Status == "known-failure");
+            Assert.NotNull(row.Stop!.ContainedAt);
+            Assert.NotNull(row.Stop.TransmittedAt);
+            Assert.Null(row.Stop.AcknowledgedAt);
+            Assert.NotNull(row.Stop.EscalatedAt);
             Assert.Equal("contained", row.Stop!.State);
             Assert.NotNull(row.Usage);
             Assert.Equal("not-found", api.RunStop("01M4TRNE1GYEK4P8MXQAB3C8Q4", new RunStopRequest(op)).Problem!.Code);

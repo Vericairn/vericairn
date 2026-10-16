@@ -860,7 +860,7 @@ public sealed partial class EstateService
     private JsonObject Settle(JsonObject body, RunOutcome outcome, RunScope scope)
     {
         JsonElement cap = body["cap"] is JsonNode node ? Element(node.AsObject()) : default;
-        TimeSpan elapsed = outcome.ExitedAt - outcome.LaunchedAt;
+        TimeSpan elapsed = outcome.Elapsed ?? (outcome.ExitedAt - outcome.LaunchedAt);
         long minutes = (long)Math.Ceiling(Math.Max(elapsed.Ticks, 0) / (double)WorkerOptions.Minute.Ticks);
         var usage = new JsonObject { ["wallMinutes"] = minutes };
         var unreported = new JsonArray();

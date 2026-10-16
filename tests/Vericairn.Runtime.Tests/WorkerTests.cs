@@ -109,20 +109,25 @@ public class WorkerTests
     [Fact]
     public void TheStallLimitIsPinnedFromTheGoalCurrentWhenTheIntentIsRecorded()
     {
-        using var run = new RunEstate();
+        var clock = new WorkerClock();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
         HookedLauncher.Install(run, verify: () =>
         {
             var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
-            goal["limits"] = new JsonObject { ["stallSeconds"] = 1 };
+            goal["limits"] = new JsonObject { ["stallSeconds"] = 60 };
             string revision = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
             RunEstate.Ok(run.Service.GoalActivate(revision, new GoalActionRequest(run.Estate.OperatorId)));
             return null;
         });
         RunResponse started = run.Start("claude-code", "silent-ignore", run.Report("revised-stall"));
         Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("revised-stall")));
+        clock.Advance(TimeSpan.FromSeconds(120));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
-        Assert.Equal(1, settled.Liveness!.StallSeconds);
-        Assert.Equal("1", AgentRuns.Find(run.Estate.Load(), started.Run)!.Target("stallSeconds"));
+        Assert.Equal(60, settled.Liveness!.StallSeconds);
+        Assert.Equal("60", AgentRuns.Find(run.Estate.Load(), started.Run)!.Target("stallSeconds"));
         Assert.NotNull(settled.Stop!.ContainedAt);
         Assert.Equal(0, run.Service.Check().Errors);
     }
@@ -150,28 +155,34 @@ public class WorkerTests
     [Fact]
     public void WorkerObservedSilenceRaisesAttentionThenStopsAndContainsAtTwiceTheGoalLimit()
     {
-        using var run = new RunEstate();
+        var clock = new WorkerClock();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
         var goal = JsonNode.Parse(run.Estate.Load().ById[run.Goal].Body.GetRawText())!.AsObject();
-        goal["limits"] = new JsonObject { ["stallSeconds"] = 1 };
+        goal["limits"] = new JsonObject { ["stallSeconds"] = 60 };
         string revised = RunEstate.Ok(run.Service.GoalPropose(new GoalProposeRequest(run.Estate.OperatorId, RunEstate.Json(goal.ToJsonString()), run.Goal))).Id;
         RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(run.Estate.OperatorId)));
         RunResponse started = run.Start("generic", "silent-ignore", run.Report("stalled"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "3" });
         Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("stalled")));
+        clock.Advance(TimeSpan.FromSeconds(60));
         WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
         RunRow attention = run.Row(started.Run);
         Assert.Equal("dispatched", attention.Status);
-        Assert.Equal(1, attention.Liveness!.StallSeconds);
+        Assert.Equal(60, attention.Liveness!.StallSeconds);
         Assert.Null(attention.Stop);
         Assert.Equal(60, attention.Charged.GetProperty("wallMinutes").GetInt64());
         RecordEnvelope ask = Assert.Single(run.Estate.Load().Current("ask"));
         Assert.Equal(started.Run, ask.Subject!.Id);
         Assert.Equal(run.Estate.OperatorId, EstateModel.BodyString(ask, "to"));
         Assert.Contains("worker observed", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
         Assert.Equal("known-failure", settled.Status);
         Assert.NotNull(settled.Liveness!.AttentionAt);
         Assert.NotNull(settled.Liveness.StoppedAt);
-        Assert.Contains("twice the stall limit of 1 seconds", settled.Stop!.Reason, StringComparison.Ordinal);
+        Assert.Contains("twice the stall limit of 60 seconds", settled.Stop!.Reason, StringComparison.Ordinal);
         Assert.NotNull(settled.Stop.EscalatedAt);
         Assert.NotNull(settled.Stop.ContainedAt);
         Assert.Equal(ask.Id, settled.Liveness.Attention);
@@ -181,9 +192,23 @@ public class WorkerTests
     [Fact]
     public void NewEventsResetSilenceWithoutErasingTheAttentionAlreadyObserved()
     {
-        using var run = new RunEstate();
-        RunResponse started = run.Start("generic", "silent-recovery", run.Report("recovered"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "1" });
+        var clock = new WorkerClock();
+        using var eventSeen = new ManualResetEventSlim();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, AfterEvent = eventSeen.Set, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
+        RunResponse started = run.Start("generic", "silent-recovery", run.Report("recovered"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
         Assert.True(started.Ok, started.Message);
+        WaitUntil(() => File.Exists(run.Report("recovered")));
+        clock.Advance(TimeSpan.FromSeconds(60));
+        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        File.WriteAllText(run.Report("recovered") + ".recover", "release");
+        WaitUntil(() => eventSeen.IsSet);
+        var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
+        long heartbeat = files.Read()!.Heartbeats;
+        clock.Advance(TimeSpan.FromSeconds(30)); // The old silence deadline; the new event reset it.
+        WaitUntil(() => files.Read()?.Heartbeats is long beats && beats > heartbeat);
+        Assert.Null(run.Row(started.Run).Stop);
+        File.WriteAllText(run.Report("recovered") + ".finish", "release");
         RunRow settled = run.Settled(started.Run);
         Assert.Equal("observed-success", settled.Status);
         Assert.Null(settled.Stop);
@@ -338,7 +363,8 @@ public class WorkerTests
         files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         WaitUntil(() => File.Exists(run.Report("retry-signal")));
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop.", 0));
-        Assert.Equal("contained", stopped.State);
+        Assert.True(stopped.Ok, stopped.Message);
+        _ = run.Settled(started.Run);
         Assert.True(escalations >= 2);
         Assert.True(failureObserved);
         Assert.Contains("failed", files.Read()!.EscalationFailure, StringComparison.Ordinal);
@@ -352,7 +378,7 @@ public class WorkerTests
         string report = run.Report("descendants");
         RunResponse started = run.Start("generic", "child-survives-root", report);
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(report + ".child"));
+        WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
         int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
         Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
         if (!OperatingSystem.IsWindows())
@@ -361,11 +387,12 @@ public class WorkerTests
         }
 
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop the whole boundary.", 1));
+        Assert.True(stopped.Ok, stopped.Message);
         RunRow settled = run.Settled(started.Run);
         Assert.NotNull(settled.Stop!.ContainedAt);
-        Assert.NotNull(stopped.Stop!.AcknowledgedAt);
-        Assert.NotNull(stopped.Stop.EscalatedAt);
-        Assert.NotNull(stopped.Stop.ContainedAt);
+        Assert.NotNull(settled.Stop!.AcknowledgedAt);
+        Assert.NotNull(settled.Stop.EscalatedAt);
+        Assert.NotNull(settled.Stop.ContainedAt);
         try
         {
             Assert.True(System.Diagnostics.Process.GetProcessById(child).HasExited);
@@ -396,8 +423,9 @@ public class WorkerTests
         Assert.Equal(run.Estate.OperatorId, AgentRuns.Find(run.Estate.Load(), started.Run)!.Intent.By);
         var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         Directory.Delete(files.StateFile);
-        WaitUntil(() => run.Row(started.Run).Observed);
-        Assert.Equal("contained", run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in.", 0)).State);
+        WaitUntil(() => File.Exists(run.Report("state-failure")) && run.Row(started.Run).Observed);
+        Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in.", 0)).Ok);
+        Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
     }
 
@@ -572,8 +600,7 @@ public class WorkerTests
 
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The widget is cancelled.", 1));
         Assert.True(stopped.Ok, stopped.Message);
-        Assert.Equal("contained", stopped.State);
-        RunStop stop = stopped.Stop!;
+        RunStop stop = run.Settled(started.Run).Stop!;
         Assert.Equal(run.Estate.OperatorId, stop.RequestedBy);
         Assert.NotNull(stop.TransmittedAt);
         Assert.Contains("VERICAIRN_STOP_FILE", stop.Transmission, StringComparison.Ordinal);
@@ -605,24 +632,26 @@ public class WorkerTests
         // A state file caught half written reads as nothing for a moment; the worker writes it whole again at its next heartbeat.
         File.WriteAllText(new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).StateFile, "{");
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Replaced.", 5));
-        Assert.Equal("contained", stopped.State);
-        Assert.NotNull(stopped.Stop!.TransmittedAt);
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
+        Assert.NotNull(stop.TransmittedAt);
     }
 
     [Fact]
     public void AStopTheHarnessAcknowledgesIsContainedWithoutEscalation()
     {
-        using var run = new RunEstate();
+        using var run = new RunEstate(options: new WorkerOptions { Clock = new WorkerClock(), Heartbeat = TimeSpan.FromMilliseconds(50) });
         RunResponse started = run.Start("generic", "ack-stop", run.Report("ack"));
         Assert.True(started.Ok, started.Message);
         WaitUntil(() => File.Exists(run.Report("ack")) && run.Row(started.Run).Observed);
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, null, 5));
-        Assert.Equal("contained", stopped.State);
-        Assert.NotNull(stopped.Stop!.TransmittedAt);
-        Assert.NotNull(stopped.Stop.AcknowledgedAt);
-        Assert.Contains("acknowledgment", stopped.Stop.Acknowledgment, StringComparison.Ordinal);
-        Assert.Null(stopped.Stop.EscalatedAt);
-        Assert.NotNull(stopped.Stop.ContainedAt);
+        Assert.True(stopped.Ok, stopped.Message);
+        RunStop stop = run.Settled(started.Run).Stop!;
+        Assert.NotNull(stop.TransmittedAt);
+        Assert.NotNull(stop.AcknowledgedAt);
+        Assert.Contains("acknowledgment", stop.Acknowledgment, StringComparison.Ordinal);
+        Assert.Null(stop.EscalatedAt);
+        Assert.NotNull(stop.ContainedAt);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
         RunStopResponse again = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId));
         Assert.False(again.Ok);
@@ -677,8 +706,9 @@ public class WorkerTests
         RunResponse started = run.Start("claude-code", "close-output", run.Report("closing"));
         Assert.True(started.Ok, started.Message);
         WaitUntil(() => File.Exists(run.Report("closing")));
-        Thread.Sleep(1000);
+        WaitUntil(() => File.Exists(run.Report("closing") + ".closed"));
         Assert.Equal("dispatched", run.Row(started.Run).Status);
+        File.WriteAllText(run.Report("closing") + ".finish", "release");
         RunRow row = run.Settled(started.Run);
         Assert.Equal("observed-success", row.Status);
         Assert.Empty(row.Usage!.Value.GetProperty("unreported").EnumerateArray());
@@ -688,17 +718,20 @@ public class WorkerTests
     [Fact]
     public void TheWorkerReservesShutdownHeadroomBeforeTheWallMinutesAllowanceEnds()
     {
-        var options = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
+        var clock = new WorkerClock();
+        var options = new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), Minute = TimeSpan.FromMilliseconds(400) };
         using var run = new RunEstate("""{"wallMinutes":3,"attemptsPerStep":3}""", options: options);
         RunResponse started = run.Start("generic", "ack-stop", run.Report("capped"));
         Assert.True(started.Ok, started.Message);
         Assert.Equal(3, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
+        WaitUntil(() => File.Exists(run.Report("capped")));
+        clock.Advance(TimeSpan.FromMilliseconds(100));
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
         Assert.Equal("worker", row.Stop!.RequestedBy);
         Assert.Contains("shutdown headroom", row.Stop.Reason, StringComparison.Ordinal);
         Assert.NotNull(row.Stop.ContainedAt);
-        Assert.True(row.Usage!.Value.GetProperty("wallMinutes").GetInt64() <= 3);
+        Assert.Equal(1, row.Usage!.Value.GetProperty("wallMinutes").GetInt64());
 
         Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
         Assert.True(Assert.Single(Assert.Single(run.Service.Runs().Goals).Units).Remaining > 0);
@@ -742,10 +775,11 @@ public class WorkerTests
         Assert.Contains("2 of the goal's runs are in flight, and its budget allows 2 at a time", third.Message, StringComparison.Ordinal);
         Assert.Equal("active", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
 
-        foreach (RunResponse started in new[] { first, second })
+        foreach ((RunResponse started, string report) in new[] { (first, "first"), (second, "second") })
         {
-            WaitUntil(() => run.Row(started.Run).Observed);
-            Assert.Equal("contained", run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).State);
+            WaitUntil(() => File.Exists(run.Report(report)) && run.Row(started.Run).Observed);
+            Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).Ok);
+            Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         }
 
         // Settled, each is charged what it used, and the allowance they held is free again.

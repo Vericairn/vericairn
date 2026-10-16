@@ -125,7 +125,7 @@ public class GoalStepTests
         GoalStepResponse step = Step(run, "lingering", "ack-stop");
         Assert.True(step.Ok, step.Message);
         DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (!run.Row(step.Run!.Run).Observed)
+        while (!run.Row(step.Run!.Run).Observed || !File.Exists(run.Report("lingering")))
         {
             Assert.True(DateTimeOffset.UtcNow < until, "The run was not observed in time.");
             Thread.Sleep(50);
@@ -135,9 +135,11 @@ public class GoalStepTests
         TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));
         Assert.True(taken.Ok, taken.Message);
         RunStopResponse stop = Assert.Single(taken.Stops!);
-        Assert.Equal("contained", stop.State);
-        Assert.Equal(op, stop.Stop!.RequestedBy);
-        Assert.Equal("the step was taken over by Test Operator", stop.Stop.Reason);
+        Assert.True(stop.Ok, stop.Message);
+        RunStop observedStop = run.Settled(step.Run!.Run).Stop!;
+        Assert.NotNull(observedStop.ContainedAt);
+        Assert.Equal(op, observedStop.RequestedBy);
+        Assert.Equal("the step was taken over by Test Operator", observedStop.Reason);
         RecordEnvelope handover = run.Estate.Load().ById[taken.Assignment!.Id];
         Assert.Equal(op, EstateModel.BodyString(handover, "contributor"));
         Assert.Contains(handover.Body.GetProperty("brief").GetProperty("sources").EnumerateArray(), s => s.GetProperty("type").GetString() == "assignment" && s.GetProperty("id").GetString() == run.Assignment);

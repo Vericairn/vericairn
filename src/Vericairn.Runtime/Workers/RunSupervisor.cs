@@ -22,8 +22,9 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="PriceUnit">The price's currency.</param>
 /// <param name="Liveness">Worker-observed silence and stall handling.</param>
 /// <param name="EscalationFailure">An escalation failure retained after retry.</param>
+/// <param name="Elapsed">Monotonic time observed from launch through containment, when available.</param>
 /// <param name="Stop">A stop's facts, when one was asked.</param>
-public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null);
+public sealed record RunOutcome(int ExitCode, DateTimeOffset LaunchedAt, DateTimeOffset ExitedAt, long Heartbeats, long? Tokens, long? Price, string? PriceUnit, RunStop? Stop, string? EscalationFailure = null, RunLiveness? Liveness = null, TimeSpan? Elapsed = null);
 
 /// <summary>
 /// The worker's supervision of one harness process (the estate's design/goals.md § 7, steps 4 and 6). It observes the process at
@@ -46,7 +47,9 @@ public sealed class RunSupervisor
     private readonly RunDirectory directory;
     private readonly WorkerOptions options;
     private readonly RunObservedState state;
-    private readonly DateTimeOffset? deadline;
+    private readonly TimeSpan wallTime;
+    private readonly long launchedTick;
+    private long transmittedTick;
     private readonly long wallMinutes;
     private readonly long? tokenCap;
     private readonly RunLimits? limits;
@@ -60,7 +63,7 @@ public sealed class RunSupervisor
     private DateTimeOffset? transmitted;
     private TimeSpan grace;
     private readonly Func<RunLiveness, string?>? attention;
-    private long lastEventTick = Stopwatch.GetTimestamp();
+    private long lastEventTick;
 
     private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention)
     {
@@ -75,7 +78,9 @@ public sealed class RunSupervisor
         this.attention = attention;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
         LaunchedAt = launchedAt;
-        deadline = launchedAt + (limits?.WallTime ?? (options.Minute * wallMinutes));
+        launchedTick = options.Clock.GetTimestamp();
+        lastEventTick = launchedTick;
+        wallTime = limits?.WallTime ?? (options.Minute * wallMinutes);
         grace = options.Grace;
         readers =
         [
@@ -210,7 +215,7 @@ public sealed class RunSupervisor
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
                 state.Heartbeats++;
                 state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
-                TimeSpan silence = Stopwatch.GetElapsedTime(lastEventTick);
+                TimeSpan silence = options.Clock.GetElapsedTime(lastEventTick);
                 RunLiveness liveness = state.Liveness!;
                 if (silence.TotalSeconds >= liveness.StallSeconds)
                 {
@@ -245,7 +250,7 @@ public sealed class RunSupervisor
                         state.Liveness = liveness with { StoppedAt = RecordParser.FormatTimestamp(now) };
                         Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the worker observed the event stream silent for twice the stall limit of {liveness.StallSeconds.ToString(CultureInfo.InvariantCulture)} seconds"));
                     }
-                    else if (now >= deadline)
+                    else if (options.Clock.GetElapsedTime(launchedTick) >= wallTime)
                     {
                         Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", $"the run reached its wall-time stop threshold below its allowance of {wallMinutes.ToString(CultureInfo.InvariantCulture)} wall minutes, reserving shutdown headroom"));
                     }
@@ -258,7 +263,7 @@ public sealed class RunSupervisor
                         Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the reported currency reached its operational threshold below the reserved cap"));
                     }
                 }
-                else if (transmitted is DateTimeOffset at && now - at >= grace)
+                else if (transmitted is not null && options.Clock.GetElapsedTime(transmittedTick) >= grace)
                 {
                     Escalate(now);
                 }
@@ -284,7 +289,7 @@ public sealed class RunSupervisor
             }
 
             Save();
-            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness);
+            var outcome = new RunOutcome(process.ExitCode, LaunchedAt, exited, state.Heartbeats, tokensIncomplete || usageInFlight ? null : tokens, price, priceUnit, state.Stop, state.EscalationFailure, state.Liveness, options.Clock.GetElapsedTime(launchedTick));
             process.Close();
             return outcome;
         }
@@ -340,6 +345,7 @@ public sealed class RunSupervisor
             transmission.Append(failure is null ? ", and SIGTERM to the whole process group" : $"; SIGTERM was not sent ({failure})");
         }
 
+        transmittedTick = options.Clock.GetTimestamp();
         transmitted = DateTimeOffset.UtcNow;
         state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
     }
@@ -387,8 +393,9 @@ public sealed class RunSupervisor
 
                 lock (gate)
                 {
-                    lastEventTick = Stopwatch.GetTimestamp();
+                    lastEventTick = options.Clock.GetTimestamp();
                     state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+                    options.AfterEvent?.Invoke();
                 }
 
                 if (IsAcknowledgment(line))
