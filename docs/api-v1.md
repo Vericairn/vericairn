@@ -942,6 +942,16 @@ an intent or routed assignment is stored. The same state is rechecked before dis
 fallback to the harness's environment. `provider-default` is explicitly requested and only allowed when
 declared; it never claims a known effort. `not-supported` requires a declared absence of effort control.
 
+The stock runtime reads native launcher defaults and optional model/effort allowlists from owner-only
+`worker/<launcher>.json` files under its user's `VericairnHome` for each run, including an agent goal step.
+Set or show them on that machine with `vericairn worker configure --launcher codex` (setting also requires
+`--model` and `--effort`; repeated `--allow-model` and `--allow-effort` narrow the allowed choices).
+This local CLI operation has no HTTP route and runs no probes. No restart is required. Missing
+configuration refuses before intent and names the setup command; API overrides cannot replace it or
+escape its allowlists. Native environment policy derives only from the inventory admitted by the shipped
+baseline or an exact current harness qualification; local configuration cannot add tools, servers,
+variables or routes. Files contain portable choice identities only, outside repositories and records.
+
 The intent records configuration identity, requested choices, provenance, resolved revision, harness
 version, role, disabled Adapter, environment policy and admitted inventory, allocation and package identity.
 `execution.contextPackage` identifies the CONTEXT-01 payload retained inside the run's local `context.json`.

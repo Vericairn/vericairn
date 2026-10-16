@@ -858,10 +858,34 @@ passes an explicit model and native effort flag. An explicit provider default om
 `model`, `effort`, `provider`, `destination`, `dataBoundary` and `adapter`. They also accept
 `--input-tokens`, `--output-tokens` and `--context-package <sha256:...>`. For example, the execution part
 of a run command can be `--execution model=model-alias --execution effort=high`. These are choices,
-not permission to change an inherited restriction. The runtime host supplies named `RunConfiguration`
-entries through `WorkerOptions.Configurations`, or a qualified launcher supplies its own configuration.
-Each has an explicit model catalog, choices/restrictions, local settings and an environment admission
-policy. Naming an unknown configuration is refused. There is no shipped ambient model configuration.
+not permission to change an inherited restriction. Configure a stock native worker on the machine that
+runs it before starting a run or an agent goal step:
+
+```sh
+vericairn worker configure --launcher codex --model model-alias --effort high
+vericairn worker configure --launcher codex
+```
+
+`--launcher` is `codex` or `claude-code` and is also the configuration name. Setting requires both
+`--model` and `--effort`; omitting choices shows the configuration, with `--json` available. Repeated
+`--allow-model` and `--allow-effort` options narrow the choices permitted in every scope and must include
+their defaults. Without a model allowlist only the default model is admitted; without an effort allowlist
+the launcher's supported efforts are admitted. Each set replaces that launcher's defaults and allowlists.
+Unsupported efforts, malformed files, unknown fields and duplicate keys refuse; they never cause ambient
+fallback. An unknown configuration name is refused, and a missing configuration names this setup command.
+
+The owner-only files are `worker/codex.json` and `worker/claude-code.json` under the user's `VericairnHome`,
+outside repositories and records. They hold only `model`, `effort`, optional `allowedModels` and optional
+`allowedEfforts`, all portable identities; never login material, secret values, machine paths or commands.
+The CLI and daemon read the file for each run and recheck it before intent and dispatch, including agent
+goal steps. A daemon restart is unnecessary. `worker configure` is a machine-local CLI operation with no
+HTTP or MCP write route and runs no probes. Hosts may still supply `WorkerOptions.Configurations`, or a
+launcher may supply its own configuration; those existing explicit configurations take precedence.
+
+The native environment policy derives from the inventory only after the shipped baseline or an exact
+RUN-03 qualification admits the native probes. Configuration cannot add tools, servers, variables or
+routes. A host's explicit environment policy must still match that qualified inventory; it can refuse
+more, never admit an extension the launcher did not qualify.
 
 The complete environment inventory covers the harness, tools, skills, plugins, hooks, MCP servers,
 shell helpers, dependencies, and effective user and repository configuration. Preflight must account for
@@ -869,7 +893,7 @@ every loaded component and route and establish that its children inherit the sam
 Each component has a portable id, kind, version (or `unknown`), content hash, effective-configuration hash,
 required environment-variable names, destinations and dependency ids. Every dependency must be present;
 every route must be the selected inference destination, `estate` or `local`. The observed inventory must
-match the configured admission policy exactly; an installed or discovered component grants no authority.
+match the admitted policy exactly; an installed or discovered component grants no authority.
 The worker filters inherited variables, including credentials and language/runtime loader directives,
 and refuses a launcher that reintroduces an unadmitted variable. Records contain identities, hashes and
 variable names only. Local settings, machine paths, login material and environment values stay local.

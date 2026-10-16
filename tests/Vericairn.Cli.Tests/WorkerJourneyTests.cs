@@ -216,7 +216,7 @@ public sealed class WorkerJourneyTests : IDisposable
     }
 
     /// <summary>An estate with the operator's key off this machine, the builder's admitted here, a goal activated, its work assigned to the builder, and the widget repository adopted with its clone registered.</summary>
-    private static (string Operator, string Builder, string Goal, string Assignment, string Resource) Estate(string root, string scratch)
+    internal static (string Operator, string Builder, string Goal, string Assignment, string Resource) Estate(string root, string scratch)
     {
         string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Workers.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
         string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;

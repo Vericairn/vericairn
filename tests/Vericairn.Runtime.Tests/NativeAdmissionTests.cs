@@ -6,6 +6,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -13,6 +14,74 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class NativeAdmissionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ChangingLocalConfigurationDuringPreparationRequiresFreshAdmission(bool afterIntent)
+    {
+        using var fixture = new NativeRun("codex");
+        var store = new WorkerConfigurationStore();
+        string path = Path.Combine(VericairnHome.Path(), "worker", "codex.json");
+        Assert.False(File.Exists(path));
+        try
+        {
+            store.Write(fixture.Probe.Launcher, new("model-a", "high"));
+            fixture.Run.Service.WorkerOptions = fixture.Run.Service.WorkerOptions with
+            {
+                Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal),
+            };
+            void Change(LaunchContext _) => store.Write(fixture.Probe.Launcher, new("model-b", "high"));
+            fixture.Run.Service.Providers.Register(new HookedLauncher(fixture.Probe.Launcher,
+                beforeCommand: afterIntent ? Change : null, probed: afterIntent ? null : Change));
+            RunResponse refused = fixture.Start();
+            Assert.False(refused.Ok);
+            Assert.Equal(afterIntent ? "known-failure" : "not-started", refused.Status);
+            Assert.False(File.Exists(fixture.Probe.Report));
+            if (afterIntent) Assert.Empty(fixture.Run.Row(refused.Run).Charged.EnumerateObject());
+            else Assert.Empty(fixture.Run.Service.Runs().Runs);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Theory]
+    [InlineData("codex", false, false)]
+    [InlineData("claude", false, false)]
+    [InlineData("codex", true, true)]
+    [InlineData("claude", true, true)]
+    [InlineData("codex", true, false)]
+    [InlineData("claude", true, false)]
+    public void OnlyAnAdmittedNativeInventorySuppliesTheDefaultEnvironmentPolicy(string harness, bool newer, bool qualified)
+    {
+        using var fixture = new NativeRun(harness, newer: newer, qualify: qualified);
+        string launcher = fixture.Probe.Launcher.Launcher;
+        WorkerOptions options = fixture.Run.Service.WorkerOptions;
+        fixture.Run.Service.WorkerOptions = options with
+        {
+            Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal)
+            {
+                [launcher] = options.Configurations[launcher] with { EnvironmentPolicy = null },
+            },
+        };
+        RunResponse started = fixture.Start();
+        if (newer && !qualified)
+        {
+            Assert.False(started.Ok);
+            Assert.Empty(fixture.Run.Service.Runs().Runs);
+            Assert.False(File.Exists(fixture.Probe.Report));
+            return;
+        }
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = fixture.Run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        JsonElement execution = settled.Execution!.Value;
+        Assert.Equal("qualified-" + launcher, execution.GetProperty("environment").GetProperty("policy").GetString());
+        Assert.Equal(qualified ? "qualification" : "baseline", execution.GetProperty("harnessAdmission").GetProperty("kind").GetString());
+        if (qualified) Assert.Equal(fixture.Qualification!.Hash, execution.GetProperty("harnessAdmission").GetProperty("hash").GetString());
+    }
+
     [Theory]
     [InlineData("codex", false)]
     [InlineData("claude", false)]
