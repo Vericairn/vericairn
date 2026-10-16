@@ -64,6 +64,11 @@ public sealed partial class EstateService
         {
             IReadOnlyList<RecordFile> files = session.Files();
             EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return new ResumeResponse(ContextDenied + "\n", null, true, new Problem("denied", ContextDenied, []));
+            }
+
             foreach (var finding in InterruptedBatches(model))
             {
                 model.Findings.Error(finding.Code, finding.Location, finding.Message);
@@ -81,6 +86,11 @@ public sealed partial class EstateService
             // Load and retain precisely one file set: a concurrent sync cannot mix two revisions of the copy.
             IReadOnlyList<RecordFile> files = session.Files();
             EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return HandoffAssembly.Refuse("denied", ContextDenied, []);
+            }
+
             foreach (var finding in InterruptedBatches(model))
             {
                 model.Findings.Error(finding.Code, finding.Location, finding.Message);

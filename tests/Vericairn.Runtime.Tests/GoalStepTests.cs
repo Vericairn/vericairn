@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
@@ -73,6 +74,12 @@ public class GoalStepTests
         Assert.True(second.Ok, second.Message);
         Assert.Equal(("run", "W-2"), (second.Outcome, second.Step));
         RecordEnvelope assigned = run.Estate.Load().ById[second.Assignment!.Id];
+        Assert.Equal("observed-success", run.Settled(second.Run!.Run).Status);
+        JsonObject given = Assert.Single(FakeHarness.Reports(run.Report("second")));
+        string exported = File.ReadAllText(Path.Combine(given["directory"]!.GetValue<string>(), ".vericairn", "brief.md"));
+        Assert.Contains("## Context package", exported, StringComparison.Ordinal);
+        Assert.Contains(assigned.ComputedHash, exported, StringComparison.Ordinal);
+        Assert.Contains("## Assignment " + assigned.Id, exported, StringComparison.Ordinal);
         Assert.Equal(builder, EstateModel.BodyString(assigned, "contributor"));
         Assert.StartsWith("Routed by roster (builder, from the estate's roster): the first available of the builder role's principals", EstateModel.BodyString(assigned, "note"), StringComparison.Ordinal);
         JsonElement brief = assigned.Body.GetProperty("brief");
@@ -81,7 +88,6 @@ public class GoalStepTests
         Assert.Equal("The exit question is answered yes: Does the guide describe the widget?", brief.GetProperty("reviewCriteria")[0].GetString());
         Assert.Contains(brief.GetProperty("prohibitedEffects").EnumerateArray(), p => p.GetString() == "no change outside the widget");
         Assert.Contains(brief.GetProperty("prohibitedEffects").EnumerateArray(), p => p.GetString() == ReservedEffects);
-        Assert.Equal("observed-success", run.Settled(second.Run!.Run).Status);
         Done(run, second.Assignment.Id);
 
         // W-3 is a reserved action: it is assigned to the operator, who holds publication, and asked of them, the recommendation first.

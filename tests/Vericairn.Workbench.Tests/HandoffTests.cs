@@ -30,6 +30,7 @@ public class HandoffTests(HeadlessFixture fixture)
             Assert.NotNull(page.Package);
             string basis = page.PackageJson;
             Assert.EndsWith(shell.Api!.Handoff().Text, page.Text, StringComparison.Ordinal);
+            Assert.StartsWith("Presentation measurement: " + System.Text.Encoding.UTF8.GetByteCount(page.Text).ToString(System.Globalization.CultureInfo.InvariantCulture) + " UTF-8 bytes", page.Text, StringComparison.Ordinal);
             Assert.Contains("Originals (complete)", page.Text, StringComparison.Ordinal);
             await fixture.Ui(() =>
             {

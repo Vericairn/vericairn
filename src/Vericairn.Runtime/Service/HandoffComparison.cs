@@ -14,6 +14,7 @@ namespace Vericairn.Runtime.Service;
 /// <summary>Compares identities, never timestamps: imported and backdated records count as additions too.</summary>
 internal static class HandoffComparison
 {
+    private static readonly string[] IdentityFields = ["key", "hash", "byteHash", "path", "bytes", "type"];
     private const string Caution = "The world may have moved. This compares this copy's records, pin and recorded observations; it does not establish live external state. Recheck current authority and required originals before acting. Nothing is restarted or accepted.";
 
     internal static ResumeResponse Compare(HandoffPackage package, EstateModel current, IReadOnlyList<RecordFile> files, string estate)
@@ -129,6 +130,12 @@ internal static class HandoffComparison
             throw new InvalidOperationException();
         }
 
+        bool context = package.Payload.TryGetProperty("contextFormat", out JsonElement contextFormat);
+        if (context && (contextFormat.GetString() != ContextAssembly.Format || !ContextAccounting.Verify(new ContextPackage(package.Hash, package.Bytes, package.Payload))))
+        {
+            throw new InvalidOperationException();
+        }
+
         var originals = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
         var findings = new FindingList();
         foreach (JsonElement source in package.Payload.GetProperty("originals").EnumerateArray())
@@ -153,6 +160,35 @@ internal static class HandoffComparison
             package.Payload.GetProperty("pin").GetProperty("estate").GetString() != estate)
         {
             throw new InvalidOperationException();
+        }
+
+        if (context)
+        {
+            JsonElement manifest = package.Payload.GetProperty("manifest");
+            JsonElement content = manifest.GetProperty("content");
+            JsonElement sources = content.GetProperty("sources");
+            if (content.GetProperty("format").GetString() != ContextAssembly.ManifestFormat || content.GetProperty("basis").GetProperty("estate").GetString() != estate ||
+                ContentHash.Sha256(CanonicalJson.SerializePrettyUtf8(content)) != manifest.GetProperty("hash").GetString() || sources.GetArrayLength() != originals.Count)
+            {
+                throw new InvalidOperationException();
+            }
+
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonElement source in sources.EnumerateArray())
+            {
+                if (!keys.Add(source.GetProperty("key").GetString()!) || !source.GetProperty("mandatory").GetBoolean() || source.GetProperty("kind").GetString() != "record" ||
+                    !originals.TryGetValue(source.GetProperty("id").GetString()!, out JsonElement original) ||
+                    IdentityFields.Any(field => !JsonElement.DeepEquals(source.GetProperty(field), original.GetProperty(field))))
+                {
+                    throw new InvalidOperationException();
+                }
+            }
+
+            JsonElement derivative = package.Payload.GetProperty("derivatives")[0];
+            if (ContentHash.Sha256(CanonicalJson.SerializePrettyUtf8(package.Payload.GetProperty("presentation"))) != derivative.GetProperty("hash").GetString())
+            {
+                throw new InvalidOperationException();
+            }
         }
 
         return originals;

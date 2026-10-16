@@ -15,7 +15,8 @@ public sealed record HandoffPackage(string Hash, long Bytes, JsonElement Payload
 /// <param name="Text">Complete human rendering, with originals apart from the derived presentation.</param>
 /// <param name="Package">The retained package on success; null on refusal.</param>
 /// <param name="Problem">Refusal with all missing or invalid sources; null on success.</param>
-public sealed record HandoffResponse(string Text, HandoffPackage? Package, Problem? Problem);
+/// <param name="TextMeasurement">Exact bytes and identity of the separate human rendering, including its accounting line.</param>
+public sealed record HandoffResponse(string Text, HandoffPackage? Package, Problem? Problem, ContextTextMeasurement? TextMeasurement = null);
 
 /// <summary>Every observed difference since a retained hand-over; it never restarts work or restores authority.</summary>
 /// <param name="Text">Complete human rendering.</param>

@@ -34,6 +34,9 @@ public class CommunicationApiTests
         BriefResponse brief = client.BriefFor("COMM-1", estate.OperatorId, view: new(Handoff: "short"))!;
         Assert.Contains("handoff (short)", brief.Markdown, StringComparison.Ordinal);
         Assert.Equal(client.Brief("COMM-1")!.Json.GetRawText(), brief.Json.GetRawText());
+        BriefResponse agent = client.BriefContext("COMM-1", 100000, estate.OperatorId, view: new(Handoff: "short"))!;
+        Assert.Contains("handoff (short)", agent.Markdown, StringComparison.Ordinal);
+        Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(agent.Markdown), agent.MarkdownMeasurement!.Bytes);
     }
 
     [Fact]

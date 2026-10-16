@@ -73,6 +73,13 @@ public class CommunicationPresentationTests
         Assert.Equal(originalJson, shortView.Json.GetRawText());
         Assert.Equal(originalJson, longView.Json.GetRawText());
         Assert.NotEqual(shortView.Markdown, longView.Markdown);
+        foreach (BriefResponse brief in new[] { shortView, longView, service.BriefContext("W-1", recipient: estate.OperatorId, view: new(Handoff: "short"))! })
+        {
+            Assert.NotNull(brief.MarkdownMeasurement);
+            Assert.Equal(System.Text.Encoding.UTF8.GetByteCount(brief.Markdown), brief.MarkdownMeasurement.Bytes);
+            Assert.Equal(Vericairn.Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes(brief.Markdown)), brief.MarkdownMeasurement.Hash);
+            Assert.Equal("vericairn.context/1", brief.Json.GetProperty("context").GetProperty("payload").GetProperty("format").GetString());
+        }
         Assert.Contains("Complete original intent.", shortView.Markdown, StringComparison.Ordinal);
         Assert.Contains(estate.OperatorId, shortView.Markdown, StringComparison.Ordinal);
         Assert.Contains("Communication", shortView.Markdown, StringComparison.Ordinal);

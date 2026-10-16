@@ -180,6 +180,28 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
 
     /// <inheritdoc />
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    {
+        string query = CommunicationQuery(recipient, assignment, view);
+        if (maxBytes is not null)
+        {
+            query += (query.Length == 0 ? "?" : "&") + "maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return Get<BriefResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) + "/brief" + query, allowNotFound: true);
+    }
+
+    /// <inheritdoc />
+    public ContextResponse Context(string workOrder, long? maxBytes = null) => Get<ContextResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) +
+        (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
+
+    /// <inheritdoc />
+    public ContextReadResponse ContextRead(string pin) => Get<ContextReadResponse>("/v1/context/original/" + Uri.EscapeDataString(pin))!;
+
+    /// <inheritdoc />
+    public ContextReadResponse ContextRead(string manifest, string source) => Get<ContextReadResponse>("/v1/context/" + Uri.EscapeDataString(manifest) + "/sources/" + Uri.EscapeDataString(source))!;
+
+    /// <inheritdoc />
     public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
 
     /// <inheritdoc />

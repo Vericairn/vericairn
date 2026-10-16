@@ -132,7 +132,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
     private void Keep(HandoffPackage retained, string human)
     {
         package = retained;
-        Text = profile is null ? human : CommunicationPresentation.Protected(profile(), "handoff", retained.Hash, "Complete hand-over; its package and originals remain unchanged.", human);
+        Text = ContextTextMeasurement.Presentation(profile is null ? human : CommunicationPresentation.Protected(profile(), "handoff", retained.Hash, "Complete hand-over; its package and originals remain unchanged.", human)).Text;
         Raise(nameof(Package));
         Raise(nameof(Identity));
         Raise(nameof(PackageJson));

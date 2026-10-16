@@ -222,19 +222,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public BriefResponse? Brief(string workOrder) => BriefFor(workOrder);
 
     /// <inheritdoc />
-    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        ReadBrief(workOrder, true, null, recipient, assignment, view);
+
+    /// <inheritdoc />
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        ReadBrief(workOrder, false, maxBytes, recipient, assignment, view);
+
+    private BriefResponse? ReadBrief(string workOrder, bool fullSelectedScope, long? maxBytes, string? recipient, string? assignment, CommunicationValues? view)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workOrder);
         lock (gate)
         {
-            EstateModel model = session.Load();
+            IReadOnlyList<RecordFile> files = session.Files();
+            EstateModel model = EstateLoader.Load(session.Root, files);
+            if (RequestDeviceRefusal(model) is not null)
+            {
+                return new BriefResponse(ContextDenied + "\n", Element(new JsonObject { ["completeness"] = ContextDenied }),
+                    Problem: new Problem("denied", ContextDenied, []));
+            }
+
             RecordEnvelope? order = WorkView.FindOrder(model, workOrder);
             if (order is null)
             {
                 return null;
             }
 
-            using JsonDocument json = JsonDocument.Parse(WorkView.RenderBriefJson(model, order));
             CommunicationProfile profile = Communication(recipient, assignment, view);
             if (assignment is not null && model.ById.TryGetValue(assignment, out RecordEnvelope? assigned) &&
                 (WorkView.OrderOfAssignment(model, assigned) is not { } assignedOrder || !model.Chain(order).Contains(assignedOrder.Id, StringComparer.Ordinal)))
@@ -242,7 +255,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 profile = profile with { Unavailable = "The selected assignment does not belong to this work brief; its communication override is not applied." };
             }
 
-            return new BriefResponse(CommunicationPresentation.Brief(WorkView.RenderBrief(model, order), profile), json.RootElement.Clone());
+            return BriefLocked(model, files, order, fullSelectedScope: fullSelectedScope, maxBytes: maxBytes, profile: profile);
         }
     }
 

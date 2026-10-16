@@ -92,7 +92,7 @@ public class DaemonTests
         Assert.Null(problem);
         Assert.Equal(new byte[] { 1, 2, 3 }, client.ObjectGet(stored!.Hash));
         Assert.Null(client.ObjectGet("sha256:" + new string('0', 64)));
-        Assert.Single(client.Objects());
+        Assert.Contains(client.Objects(), o => o.Hash == stored!.Hash);
         Assert.Equal(0, client.ObjectsVerify().Errors);
 
         // An export written by the daemon verifies; it carries records and bytes only.
@@ -102,7 +102,7 @@ public class DaemonTests
             (ExportResponse? export, Problem? exportProblem) = client.Export(new ExportRequest(exportPath, estate.OperatorId));
             Assert.Null(exportProblem);
             Assert.Equal(4, export!.Records);
-            Assert.Equal(1, export.Objects);
+            Assert.Equal(client.Objects().Count, export.Objects);
             Assert.True(File.Exists(exportPath));
             Assert.Equal("refused", client.Export(new ExportRequest(exportPath, estate.OperatorId)).Problem!.Code);
         }

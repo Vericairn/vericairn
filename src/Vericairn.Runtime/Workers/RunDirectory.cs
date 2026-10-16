@@ -107,6 +107,19 @@ public sealed class RunDirectory
     /// <summary>The MCP configuration the harness was given.</summary>
     public string McpConfiguration => System.IO.Path.Combine(Path, "mcp.json");
 
+    /// <summary>The exact dispatched machine brief, containing its context package and originals.</summary>
+    public string ContextFile => System.IO.Path.Combine(Path, "context.json");
+
+    /// <summary>The exact human rendering exported to the workspace for this run.</summary>
+    public string BriefFile => System.IO.Path.Combine(Path, "brief.md");
+
+    /// <summary>Retains dispatch context in this run's local custody, never in estate objects or records.</summary>
+    internal void RetainContext(JsonElement context, string brief)
+    {
+        File.WriteAllBytes(ContextFile, Records.Canonical.CanonicalJson.SerializePrettyUtf8(context));
+        File.WriteAllText(BriefFile, brief);
+    }
+
     /// <summary>True when this machine holds the run's directory.</summary>
     public bool Exists => Directory.Exists(Path);
 

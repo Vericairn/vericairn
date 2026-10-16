@@ -81,6 +81,10 @@ public class EstateSessionTests
                 HandoffPackage package = service.Handoff().Package!;
                 Assert.Equal(2, package.Payload.GetProperty("originals").GetArrayLength());
                 Assert.Equal("local-only", package.Payload.GetProperty("pin").GetProperty("profile").GetString());
+                foreach (JsonElement source in package.Payload.GetProperty("originals").EnumerateArray())
+                {
+                    Assert.Equal(Convert.FromBase64String(source.GetProperty("content").GetString()!), service.ContextRead(source.GetProperty("pin").GetString()!).Content);
+                }
                 Assert.False(service.ResumeHandoff(package).Json!.Value.GetProperty("changed").GetBoolean());
                 Assert.False(Directory.Exists(Path.Combine(root, EstateLayout.RecordsDirectory)));
             }
