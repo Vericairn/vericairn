@@ -37,7 +37,7 @@ internal static partial class Docs
     /// output; one that records no window (0.5.2 and earlier) gives the end its notes state; a time named with --since overrides
     /// either only when it is no later than that end; and with no previous set the notes begin at the earlier publication.
     /// </summary>
-    public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json)
+    public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null)
     {
         try
         {
@@ -48,7 +48,7 @@ internal static partial class Docs
 
             // The clock is read before the records: a record of the second the notes are made in can still be written after they read
             // the estate, so until the version's publication is recorded they end at the second before, and that record opens the next set.
-            DateTimeOffset reading = DateTimeOffset.UtcNow;
+            DateTimeOffset reading = at ?? DateTimeOffset.UtcNow;
             EstateModel model = Commands.LoadCopy(root);
             RecordEnvelope? from = Published(model, fromVersion);
             RecordEnvelope? to = Published(model, toVersion);
@@ -299,8 +299,8 @@ internal static partial class Docs
             lines.Add($"- Record format: reads {reads}, writes {writes}.");
         }
 
-        // Only current results are listed. An acceptance of the result's exact revision or its work order's current revision
-        // puts it under accepted work; the latter creates no acceptance of the result itself. The progress report reads the same.
+        // Accepted work has one entry per work order, naming its latest accepted current result. Earlier attempts remain reachable
+        // through the work's history. Acceptance of the order creates no acceptance of the result itself; progress reads the same.
         (IReadOnlyList<ReleaseContents.Accepted> acceptedResults, IReadOnlyList<RecordEnvelope> openResults) = ReleaseContents.Results(model, window);
         lines.Add(string.Empty);
         lines.Add("## Work accepted");
@@ -314,6 +314,13 @@ internal static partial class Docs
         foreach (ReleaseContents.Accepted result in acceptedResults)
         {
             Result(lines, result.Result, result.Order);
+            lines.Add($"Acceptance {result.Acceptance.Id} pins {(result.Acceptance.Subject?.Type == "result" ? "this result" : "the current work-order revision")}.");
+            if (result.Order is not null)
+            {
+                lines.Add($"Earlier results and attempts: `vericairn work observe {Str(result.Order.Body, "key")}` (work order {result.Order.Id}).");
+            }
+
+            lines.Add(string.Empty);
         }
 
         if (openResults.Count > 0)

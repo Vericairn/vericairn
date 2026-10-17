@@ -356,8 +356,10 @@ public class WorkerTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
-    [Fact]
-    public void WorkerObservedSilenceRaisesAttentionThenStopsAndContainsAtTwiceTheGoalLimit()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void WorkerObservedSilenceRaisesAttentionThenStopsAndContainsAtTwiceTheGoalLimit(bool answered)
     {
         var clock = new WorkerClock();
         using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
@@ -379,6 +381,13 @@ public class WorkerTests
         Assert.Equal(started.Run, ask.Subject!.Id);
         Assert.Equal(run.Estate.OperatorId, EstateModel.BodyString(ask, "to"));
         Assert.Contains("worker observed", EstateModel.BodyString(ask, "question"), StringComparison.Ordinal);
+        if (answered)
+        {
+            RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("decision", run.Estate.OperatorId, RunEstate.Json($$"""{"title":"Inspected the run","statement":"Let the worker contain it.","summary":"Inspected.","synthesis":"The worker will contain it.","effects":["wait for settlement"],"affects":[],"decidedBy":"{{run.Estate.OperatorId}}","decidedAt":"{{RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)}}","stake":"low","notAuthorized":[],"answers":["{{ask.Id}}"]}"""))));
+        }
+
+        RecordWritten unrelated = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", ask.By, RunEstate.Json($$"""{"to":"{{run.Estate.OperatorId}}","question":"Should we change the next assignment?","recommendation":"Review the assignment.","consequence":"The next assignment stays unchanged.","state":"open"}"""), $"operation:{ask.Subject.Id}:{ask.Subject.Hash}")));
+
         clock.Advance(TimeSpan.FromSeconds(60));
         WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
@@ -390,6 +399,26 @@ public class WorkerTests
         Assert.NotNull(settled.Stop.EscalatedAt);
         Assert.NotNull(settled.Stop.ContainedAt);
         Assert.Equal(ask.Id, settled.Liveness.Attention);
+        EstateModel model = run.Estate.Load();
+        RecordEnvelope currentAsk = model.Latest(ask);
+        Assert.Equal(answered ? "answered" : "withdrawn", Asks.State(model, currentAsk).State);
+        if (answered)
+        {
+            Assert.Equal(ask.Id, currentAsk.Id);
+            Assert.Single(Asks.State(model, currentAsk).Answers);
+        }
+        else
+        {
+            RecordEnvelope settlement = AgentRuns.Find(model, started.Run)!.Latest;
+            Assert.Equal(settlement.Reference, currentAsk.Subject);
+            Assert.Equal(ask.By, currentAsk.By);
+            Assert.Equal(ask.Id, currentAsk.Supersedes);
+            Assert.Contains("no longer needed", EstateModel.BodyString(currentAsk, "recommendation"), StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location == currentAsk.ExpectedPath);
+        Assert.DoesNotContain(Asks.Deliveries(model).SelectMany(d => d.Asks), a => model.Chain(a).Contains(ask.Id));
+        Assert.Equal("open", Asks.State(model, model.ById[unrelated.Id]).State);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -420,6 +449,16 @@ public class WorkerTests
         Assert.NotNull(settled.Liveness.Attention);
         Assert.Null(settled.Liveness.StoppedAt);
         Assert.Equal(2, run.Service.Records("ask").Count);
+        EstateModel model = run.Estate.Load();
+        Assert.Equal("withdrawn", Asks.State(model, model.ById[settled.Liveness.Attention!]).State);
+        RecordEnvelope settlement = AgentRuns.Find(model, started.Run)!.Latest;
+        RunSignal missing = Assert.Single(settled.Signals!, s => s.Code == "attempt-missing");
+        RecordEnvelope missingAsk = model.ById[missing.Attention!];
+        Assert.Equal("open", Asks.State(model, missingAsk).State);
+        Assert.True(model.IsCurrent(missingAsk));
+        Assert.Equal(settlement.Reference, missingAsk.Subject);
+        Assert.Contains(Asks.Deliveries(model).SelectMany(d => d.Asks), a => a.Id == missingAsk.Id);
+        Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location.StartsWith("records/ask/", StringComparison.Ordinal));
         Assert.Equal(0, run.Service.Check().Errors);
     }
 

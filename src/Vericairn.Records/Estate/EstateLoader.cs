@@ -39,7 +39,10 @@ public static class EstateLoader
     }
 
     /// <summary>Loads an estate whose records are supplied by the caller (from files, a live store or an export).</summary>
-    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files)
+    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files) => Load(root, files, null);
+
+    // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -68,7 +71,7 @@ public static class EstateLoader
                 continue;
             }
 
-            RecordEnvelope? record = RecordParser.Parse(file.Bytes, location, findings);
+            RecordEnvelope? record = cache is null ? RecordParser.Parse(file.Bytes, location, findings) : cache.Parse(file, findings);
             if (record is null)
             {
                 continue;
@@ -257,6 +260,11 @@ public static class EstateLoader
             if (ReleaseType.IsWithdrawalOf(target, latest))
             {
                 findings.Info("record.subject-withdrawn", record.ExpectedPath, $"The subject, release {EstateModel.BodyString(latest, "version")}, was withdrawn by {latest.Id}; this record refers to an earlier revision, and the withdrawal answers it.");
+            }
+            else if (record.Type == "ask" && target.Type == "operation" && EstateModel.BodyString(latest, "action") == "agent-run" &&
+                     EstateModel.BodyString(latest, "status") is "observed-success" or "known-failure" or "canceled" && !Asks.IsWaiting(Asks.State(model, record).State))
+            {
+                findings.Info("ask.run-settled", record.ExpectedPath, $"The run settled in operation {latest.Id}; this ask is already {Asks.State(model, record).State} and needs no reconsideration because of that settlement.");
             }
             else
             {

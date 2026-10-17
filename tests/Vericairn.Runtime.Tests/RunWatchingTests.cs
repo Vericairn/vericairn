@@ -54,6 +54,14 @@ public class RunWatchingTests
         else
         {
             Assert.Equal(settled.Signals!.Count, run.Service.Records("ask").Count);
+            EstateModel model = run.Estate.Load();
+            RunSignal missing = Assert.Single(settled.Signals!, s => s.Code == "attempt-missing");
+            Assert.All(model.Current("ask"), ask =>
+            {
+                Assert.Equal(ask.Id == missing.Attention ? "open" : "withdrawn", Asks.State(model, ask).State);
+                Assert.Equal(AgentRuns.Find(model, started.Run)!.Latest.Reference, ask.Subject);
+            });
+            Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location.StartsWith("records/ask/", StringComparison.Ordinal));
         }
 
         Assert.Equal(0, run.Service.Check().Errors);

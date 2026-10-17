@@ -13,6 +13,41 @@ public class ReleaseContentsTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void AcceptedWorkIsGroupedUnderItsLatestAcceptedResult(bool acceptOrder)
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        (RecordEnvelope order, RecordEnvelope first) = Worked(estate, "W-1");
+        RecordEnvelope firstAttempt = estate.Load().ById[first.Subject!.Id];
+        RecordEnvelope secondAttempt = estate.Add("attempt", estate.BuilderId, firstAttempt.Body.GetRawText(), firstAttempt.Subject);
+        RecordEnvelope second = estate.Add("result", estate.BuilderId, first.Body.GetRawText(), secondAttempt.Reference);
+        RecordEnvelope lastAttempt = estate.Add("attempt", estate.BuilderId, firstAttempt.Body.GetRawText(), firstAttempt.Subject);
+        RecordEnvelope latest = estate.Add("result", estate.BuilderId, first.Body.GetRawText().Replace("Done.", "Done and verified.", StringComparison.Ordinal), lastAttempt.Reference);
+        if (acceptOrder)
+        {
+            RecordEnvelope revised = estate.Add("work-order", estate.OperatorId, order.Body.GetRawText(), supersedes: order.Id);
+            Accept(estate, revised);
+        }
+        else
+        {
+            estate.Add("acceptance", estate.OperatorId, """{"statement":"Accepted.","basis":[],"self":false}""", second.Reference);
+            estate.Add("acceptance", estate.OperatorId, """{"statement":"Accepted.","basis":[],"self":false}""", latest.Reference);
+        }
+
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        var results = ReleaseContents.Results(model, ReleaseContents.Window(model, null, estate.Clock.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture)));
+        ReleaseContents.Accepted accepted = Assert.Single(results.Accepted);
+        Assert.Equal(latest.Id, accepted.Result.Id);
+        Assert.Equal(model.Latest(order).Id, accepted.Order?.Id);
+        Assert.Empty(results.NotAccepted);
+        string history = WorkView.RenderObserve(model, order);
+        Assert.Contains(first.Id, history, StringComparison.Ordinal);
+        Assert.Contains(second.Id, history, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void SupersededResultsAreOmittedEvenWhenTheyWereAccepted(bool accepted)
     {
         using var estate = new TestEstate(recordFormat: 2);
@@ -28,6 +63,21 @@ public class ReleaseContentsTests
         var results = ReleaseContents.Results(model, ReleaseContents.Window(model, null, latest.At));
         Assert.Empty(results.Accepted);
         Assert.Equal([latest.Id], results.NotAccepted.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void ALaterUnacceptedAttemptDoesNotInheritAnEarlierResultsAcceptance()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        (_, RecordEnvelope first) = Worked(estate, "W-1");
+        estate.Add("acceptance", estate.OperatorId, """{"statement":"Accepted.","basis":[],"self":false}""", first.Reference);
+        RecordEnvelope attempt = estate.Load().ById[first.Subject!.Id];
+        RecordEnvelope next = estate.Add("attempt", estate.BuilderId, attempt.Body.GetRawText(), attempt.Subject);
+        RecordEnvelope later = estate.Add("result", estate.BuilderId, first.Body.GetRawText(), next.Reference);
+        EstateModel model = estate.Load();
+        var results = ReleaseContents.Results(model, ReleaseContents.Window(model, null, later.At));
+        Assert.Equal(first.Id, Assert.Single(results.Accepted).Result.Id);
+        Assert.Equal(later.Id, Assert.Single(results.NotAccepted).Id);
     }
 
     [Fact]

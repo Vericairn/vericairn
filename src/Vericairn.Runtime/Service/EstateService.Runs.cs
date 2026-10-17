@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AskState = Vericairn.Records.Estate.Asks;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
@@ -476,55 +477,61 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
-            string estate = session.Manifest.Estate;
-            IReadOnlyList<AgentRuns.Run> runs = AgentRuns.All(model);
-            var rows = new List<RunRow>();
-            foreach (AgentRuns.Run run in runs)
-            {
-                var directory = new RunDirectory(estate, run.Id);
-                RunObservedState? observed = directory.Read();
-                RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory.ReadStop()) : null);
-                rows.Add(new RunRow(
-                    run.Id,
-                    EstateModel.BodyString(run.Intent, "identity") ?? run.Id,
-                    run.Launcher,
-                    run.Principal,
-                    run.Assignment,
-                    run.Goal,
-                    run.Workspace,
-                    run.Status,
-                    run.Cap.Clone(),
-                    run.Usage.ValueKind == JsonValueKind.Object ? run.Usage.Clone() : null,
-                    Element(Charges(AgentRuns.ChargeOf(run), run.Cap)),
-                    stop,
-                    run.InFlight ? observed?.Heartbeat : null,
-                    run.InFlight && Fresh(observed),
-                    run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
-                    run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
-                    run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
-                    run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals,
-                    run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
-                    run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : null));
-            }
-
-            var ledgers = new List<LedgerRow>();
-            foreach (RecordEnvelope goal in model.Current("goal").OrderBy(g => g.At, StringComparer.Ordinal).ThenBy(g => g.Id, StringComparer.Ordinal))
-            {
-                AgentRuns.Ledger ledger = AgentRuns.Of(model, goal);
-                string status = GoalRules.Status(model, goal);
-                if (ledger.Runs.Count == 0 && status != "active")
-                {
-                    continue;
-                }
-
-                List<LedgerUnit> units = AgentRuns.ChargedUnits.Where(ledger.Budget.ContainsKey)
-                    .Select(u => new LedgerUnit(u, ledger.Budget[u], ledger.Spent.GetValueOrDefault(u), ledger.Remaining(u)!.Value, u == "currency" ? ledger.Currency : null)).ToList();
-                List<string> fenced = AgentRuns.StartRefusals(model, goal, null, Element(AgentRuns.CapFor(ledger))).Select(r => r.Message).ToList();
-                ledgers.Add(new LedgerRow(goal.Id, EstateModel.BodyString(goal, "title"), status, units, ledger.InFlight, ledger.Concurrency, ledger.AttemptsPerStep, fenced));
-            }
-
-            return new RunsResponse(rows, ledgers);
+            return Runs(model);
         }
+    }
+
+    // Caller holds the service gate; progress uses its already loaded model and still reads current worker observations.
+    private RunsResponse Runs(EstateModel model)
+    {
+        string estate = session.Manifest.Estate;
+        IReadOnlyList<AgentRuns.Run> runs = AgentRuns.All(model);
+        var rows = new List<RunRow>();
+        foreach (AgentRuns.Run run in runs)
+        {
+            var directory = new RunDirectory(estate, run.Id);
+            RunObservedState? observed = directory.Read();
+            RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory.ReadStop()) : null);
+            rows.Add(new RunRow(
+                run.Id,
+                EstateModel.BodyString(run.Intent, "identity") ?? run.Id,
+                run.Launcher,
+                run.Principal,
+                run.Assignment,
+                run.Goal,
+                run.Workspace,
+                run.Status,
+                run.Cap.Clone(),
+                run.Usage.ValueKind == JsonValueKind.Object ? run.Usage.Clone() : null,
+                Element(Charges(AgentRuns.ChargeOf(run), run.Cap)),
+                stop,
+                run.InFlight ? observed?.Heartbeat : null,
+                run.InFlight && Fresh(observed),
+                run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
+                run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
+                run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
+                run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals,
+                run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
+                run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : null));
+        }
+
+        var ledgers = new List<LedgerRow>();
+        foreach (RecordEnvelope goal in model.Current("goal").OrderBy(g => g.At, StringComparer.Ordinal).ThenBy(g => g.Id, StringComparer.Ordinal))
+        {
+            AgentRuns.Ledger ledger = AgentRuns.Of(model, goal);
+            string status = GoalRules.Status(model, goal);
+            if (ledger.Runs.Count == 0 && status != "active")
+            {
+                continue;
+            }
+
+            List<LedgerUnit> units = AgentRuns.ChargedUnits.Where(ledger.Budget.ContainsKey)
+                .Select(u => new LedgerUnit(u, ledger.Budget[u], ledger.Spent.GetValueOrDefault(u), ledger.Remaining(u)!.Value, u == "currency" ? ledger.Currency : null)).ToList();
+            List<string> fenced = AgentRuns.StartRefusals(model, goal, null, Element(AgentRuns.CapFor(ledger))).Select(r => r.Message).ToList();
+            ledgers.Add(new LedgerRow(goal.Id, EstateModel.BodyString(goal, "title"), status, units, ledger.InFlight, ledger.Concurrency, ledger.AttemptsPerStep, fenced));
+        }
+
+        return new RunsResponse(rows, ledgers);
     }
 
     /// <inheritdoc />
@@ -1047,7 +1054,7 @@ public sealed partial class EstateService
         }
     }
 
-    private string? RecordSignal(string run, string by, string goalId, RunSignal signal, bool settled = false)
+    private string? RecordSignal(string run, string by, string goalId, RunSignal signal)
     {
         try
         {
@@ -1070,19 +1077,7 @@ public sealed partial class EstateService
                     return null;
                 }
 
-                var body = new JsonObject
-                {
-                    ["to"] = GoalRules.AccepterOf(model, goal).Principal ?? by,
-                    ["goal"] = goal.Id,
-                    ["state"] = "open",
-                    ["question"] = $"{prefix} needs attention at {signal.At}: {signal.Summary} Inspect the run?",
-                    ["recommendation"] = "Inspect the worker's observation, the locally retained output and the assignment before deciding on another attempt.",
-                    ["consequence"] = settled
-                        ? "The run has exited. Its observation remains for review; another run needs fresh admission."
-                        : signal.Severity == "critical"
-                        ? "The worker asks the existing stop path to contain this run. Its allowance remains reserved until the whole boundary is observed exited."
-                        : "This warning does not stop the run. The observation remains for review; continued looping or abnormal spending may reach a critical threshold.",
-                };
+                JsonObject body = SignalAskBody(model, goal, run, by, signal, settled: false);
                 WriteOutcome written = WriteLocked(new RecordDraft("ask", by, Element(body), found.Intent.Reference), model);
                 return written.Ok ? written.Written!.Id : null;
             }
@@ -1092,6 +1087,20 @@ public sealed partial class EstateService
             return null;
         }
     }
+
+    private static JsonObject SignalAskBody(EstateModel model, RecordEnvelope goal, string run, string by, RunSignal signal, bool settled) => new()
+    {
+        ["to"] = GoalRules.AccepterOf(model, goal).Principal ?? by,
+        ["goal"] = goal.Id,
+        ["state"] = "open",
+        ["question"] = $"Run {run} [{signal.Code}/{signal.Severity}] needs attention at {signal.At}: {signal.Summary} Inspect the run?",
+        ["recommendation"] = "Inspect the worker's observation, the locally retained output and the assignment before deciding on another attempt.",
+        ["consequence"] = settled
+            ? "The run has exited. Its observation remains for review; another run needs fresh admission."
+            : signal.Severity == "critical"
+            ? "The worker asks the existing stop path to contain this run. Its allowance remains reserved until the whole boundary is observed exited."
+            : "This warning does not stop the run. The observation remains for review; continued looping or abnormal spending may reach a critical threshold.",
+    };
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
     private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon)
@@ -1126,7 +1135,7 @@ public sealed partial class EstateService
         {
             var signal = new RunSignal("scope-settlement", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
                 $"The worker's final scope audit found {scope.OutsideCount.ToString(CultureInfo.InvariantCulture)} paths outside the brief{(scope.Problem is null ? "." : "; the audit is incomplete.")} The run's boundary has already exited; review its changes.");
-            outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal with { Attention = RecordSignal(run, by, goalId, signal) }] };
+            outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
         }
 
         try
@@ -1141,7 +1150,7 @@ public sealed partial class EstateService
                 {
                     var signal = new RunSignal("attempt-missing", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
                         "The run settled without the agent's attempt on its assignment during the run. A clean harness exit does not establish that the agent did the work.");
-                    outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal with { Attention = RecordSignal(run, by, goalId, signal, settled: true) }] };
+                    outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal] };
                 }
                 if (found is { Status: "not-started" })
                 {
@@ -1297,8 +1306,92 @@ public sealed partial class EstateService
 
             JsonObject body = JsonNode.Parse(found.Latest.Body.GetRawText())!.AsObject();
             change(body);
-            return WriteLocked(new RecordDraft("operation", by, Element(body), found.Latest.Subject, found.Latest.Id), model);
+            var draft = new RecordDraft("operation", by, Element(body), found.Latest.Subject, found.Latest.Id);
+            if (body["status"]?.GetValue<string>() is not ("observed-success" or "known-failure" or "canceled"))
+            {
+                return WriteLocked(draft, model);
+            }
+
+            return SettleAttentionLocked(model, found, draft);
         }
+    }
+
+    // Process attention ends with the run; settlement review starts there. Reserve new ask ids before hashing the operation,
+    // then pin those asks to that hash. The operation, new asks and old ask withdrawals are judged and journaled together.
+    // A person may already have answered a process ask; only still-waiting asks named by this run are withdrawn.
+    private WriteOutcome SettleAttentionLocked(EstateModel model, AgentRuns.Run run, RecordDraft draft)
+    {
+        var attention = new HashSet<string>(StringComparer.Ordinal);
+        if (draft.Body.TryGetProperty("liveness", out JsonElement liveness) && liveness.TryGetProperty("attention", out JsonElement stall) && stall.ValueKind == JsonValueKind.String)
+        {
+            attention.Add(stall.GetString()!);
+        }
+
+        if (draft.Body.TryGetProperty("signals", out JsonElement signals))
+        {
+            foreach (JsonElement signal in signals.EnumerateArray())
+            {
+                if (signal.TryGetProperty("attention", out JsonElement asked) && asked.ValueKind == JsonValueKind.String) attention.Add(asked.GetString()!);
+            }
+        }
+
+        List<RecordEnvelope> waiting = attention.Select(id => model.ById.GetValueOrDefault(id)).OfType<RecordEnvelope>()
+            .Select(model.Latest).DistinctBy(a => a.Id)
+            .Where(a => a.Type == "ask" && a.By == draft.By && a.Subject?.Id == run.Id && AskState.IsWaiting(AskState.State(model, a).State))
+            .OrderBy(a => a.Id, StringComparer.Ordinal).ToList();
+        List<RecordDraft> reviews = SettlementReviewAsks(model, run, ref draft);
+        if (waiting.Count == 0 && reviews.Count == 0)
+        {
+            return WriteLocked(draft, model);
+        }
+
+        (AuthoredRecord? settlement, string? refusal) = AuthorLocked(draft, model);
+        if (settlement is null) return Refuse(refusal!);
+        var records = new List<AuthoredRecord> { settlement };
+        foreach (RecordDraft review in reviews)
+        {
+            (AuthoredRecord? asked, string? problem) = AuthorLocked(review with { Subject = settlement.Envelope.Reference }, model);
+            if (asked is null) return Refuse(problem!);
+            records.Add(asked);
+        }
+        foreach (RecordEnvelope ask in waiting)
+        {
+            JsonObject body = JsonNode.Parse(ask.Body.GetRawText())!.AsObject();
+            body["state"] = "withdrawn";
+            body["recommendation"] = $"No longer needed: run {run.Id} settled as {EstateModel.BodyString(settlement.Envelope, "status")} in operation {settlement.Envelope.Id}. Its worker observations remain available for review.";
+            (AuthoredRecord? withdrawn, string? problem) = AuthorLocked(new RecordDraft("ask", ask.By, Element(body), settlement.Envelope.Reference, ask.Id), model);
+            if (withdrawn is null) return Refuse(problem!);
+            records.Add(withdrawn);
+        }
+
+        (IReadOnlyList<RecordWritten> written, Problem? rejected) = StoreTogetherLocked(records, "Settle a run, open its settlement review asks and withdraw its process attention asks.", null);
+        return rejected is null ? WriteOutcome.Success(written[0]) : WriteOutcome.Fail(rejected);
+    }
+
+    private List<RecordDraft> SettlementReviewAsks(EstateModel model, AgentRuns.Run run, ref RecordDraft draft)
+    {
+        var reviews = new List<RecordDraft>();
+        JsonObject operation = JsonNode.Parse(draft.Body.GetRawText())!.AsObject();
+        if (operation["signals"] is not JsonArray signals || run.Goal is not string goalId
+            || AgentRuns.GoalAt(model, goalId) is not RecordEnvelope goal) return reviews;
+        foreach (JsonObject node in signals.OfType<JsonObject>())
+        {
+            if (node["code"]?.GetValue<string>() is not ("attempt-missing" or "scope-settlement") || node["attention"] is not null) continue;
+            try
+            {
+                WorkerOptions.BeforeAttentionRecord?.Invoke();
+                RunSignal signal = node.Deserialize<RunSignal>(RunRecordJson)!;
+                string id = Ulid.NewUlid().Value;
+                reviews.Add(new RecordDraft("ask", draft.By, Element(SignalAskBody(model, goal, run.Id, draft.By, signal, settled: true)), Id: id));
+                node["attention"] = id;
+            }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or UnauthorizedAccessException)
+            {
+                // Keep the observation without an attention id, as with failed attention recording during supervision.
+            }
+        }
+        draft = draft with { Body = Element(operation) };
+        return reviews;
     }
 
     /// <summary>The usage of a run that never started: nothing in each unit its cap states.</summary>

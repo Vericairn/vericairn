@@ -13,6 +13,18 @@ namespace Vericairn.Providers.GitHub;
 /// <summary>The GitHub provider for releases, over the GitHub CLI on the PATH, logged in by the user; Vericairn never sees or stores the token.</summary>
 public sealed class GitHubReleaseProvider : IReleaseProvider
 {
+    private readonly Func<ProcessStartInfo, ProcessResult> run;
+
+    /// <summary>Runs the GitHub CLI with a two-minute deadline and bounded output for each command.</summary>
+    public GitHubReleaseProvider() : this(info => BoundedProcess.Run(info, TimeSpan.FromMinutes(2)))
+    {
+    }
+
+    internal GitHubReleaseProvider(Func<ProcessStartInfo, ProcessResult> run)
+    {
+        this.run = run;
+    }
+
     /// <summary>The provider id recorded on every operation this implementation dispatches.</summary>
     public const string ProviderId = "github-releases";
 
@@ -36,6 +48,16 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
         ["github"]);
 
     /// <inheritdoc />
+    public string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentNullException.ThrowIfNull(settings);
+        string reference = settings.TryGetValue("ref", out string? named) ? named : "main";
+        return Gh(out string output, "api", $"repos/{destination}/commits/{Uri.EscapeDataString(reference)}", "--jq", ".sha") == 0
+            ? output.Trim() : null;
+    }
+
+    /// <inheritdoc />
     public DispatchReceipt Dispatch(DispatchRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -54,7 +76,7 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
             arguments.Add($"{key}={value}");
         }
 
-        int code = Gh(out string output, [.. arguments]);
+        int code = Gh(out string output, mayHaveEffect: true, [.. arguments]);
         if (code != 0)
         {
             string text = output.Trim();
@@ -66,25 +88,33 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
             throw new ProviderUncertainException($"The dispatch command failed after the request may have been sent: {text}");
         }
 
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (DateTimeOffset.UtcNow < deadline)
+        try
         {
-            Thread.Sleep(3000);
-            if (Gh(out string runs, "run", "list", "-R", request.Destination, "--workflow", workflow, "--event", "workflow_dispatch", "--branch", reference, "-L", "10", "--json", "databaseId,createdAt,url,status") == 0)
+            var deadline = DateTimeOffset.UtcNow.AddSeconds(30);
+            while (DateTimeOffset.UtcNow < deadline)
             {
-                using JsonDocument document = JsonDocument.Parse(runs);
-                foreach (JsonElement run in document.RootElement.EnumerateArray())
+                Thread.Sleep(3000);
+                if (Gh(out string runs, "run", "list", "-R", request.Destination, "--workflow", workflow, "--event", "workflow_dispatch", "--branch", reference, "-L", "10", "--json", "databaseId,createdAt,url,status") == 0)
                 {
-                    if (run.TryGetProperty("createdAt", out JsonElement created) && DateTimeOffset.TryParse(created.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) && at >= dispatchedAt.AddSeconds(-5))
+                    using JsonDocument document = JsonDocument.Parse(runs);
+                    foreach (JsonElement run in document.RootElement.EnumerateArray())
                     {
-                        string id = run.GetProperty("databaseId").GetInt64().ToString(CultureInfo.InvariantCulture);
-                        return new DispatchReceipt(id, run.GetProperty("url").GetString(), $"Workflow {workflow} dispatched on {reference}; run {id} started.", RecordParser.FormatTimestamp(dispatchedAt));
+                        if (run.TryGetProperty("createdAt", out JsonElement created) && DateTimeOffset.TryParse(created.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset at) && at >= dispatchedAt.AddSeconds(-5))
+                        {
+                            string id = run.GetProperty("databaseId").GetInt64().ToString(CultureInfo.InvariantCulture);
+                            return new DispatchReceipt(id, run.GetProperty("url").GetString(), $"Workflow {workflow} dispatched on {reference}; run {id} started.", RecordParser.FormatTimestamp(dispatchedAt));
+                        }
                     }
                 }
             }
-        }
 
-        return new DispatchReceipt(null, null, $"Workflow {workflow} was dispatched on {reference} but no run was identified within thirty seconds; observe the workflow's runs before any retry.", RecordParser.FormatTimestamp(dispatchedAt));
+            return new DispatchReceipt(null, null, $"Workflow {workflow} was dispatched on {reference} but no run was identified within thirty seconds; observe the workflow's runs before any retry.", RecordParser.FormatTimestamp(dispatchedAt));
+        }
+        catch (Exception exception) when (exception is ProviderRefusedException or JsonException)
+        {
+            // The workflow request already succeeded. A later observation failure cannot mean no effect happened.
+            throw new ProviderUncertainException("The workflow was dispatched, but its run could not be identified; observe and reconcile before any retry.", exception);
+        }
     }
 
     /// <inheritdoc />
@@ -174,7 +204,9 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
         }
     }
 
-    private static int Gh(out string output, params string[] arguments)
+    private int Gh(out string output, params string[] arguments) => Gh(out output, mayHaveEffect: false, arguments);
+
+    private int Gh(out string output, bool mayHaveEffect, params string[] arguments)
     {
         var info = new ProcessStartInfo("gh") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
         foreach (string argument in arguments)
@@ -184,23 +216,21 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
 
         info.Environment["GH_PROMPT_DISABLED"] = "1";
         info.Environment["NO_COLOR"] = "1";
-        try
+        ProcessResult result = run(info);
+        if (result.Outcome != ProcessOutcome.Exited)
         {
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException("gh did not start.");
-            string standardOutput = process.StandardOutput.ReadToEnd();
-            string standardError = process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(120_000))
+            string message = result.Outcome == ProcessOutcome.NotStarted
+                ? "The GitHub CLI (gh) could not be started; install it on the PATH and log in yourself."
+                : $"gh {result.Description}.";
+            if (mayHaveEffect && result.Started)
             {
-                process.Kill(entireProcessTree: true);
-                throw new ProviderUncertainException("gh did not answer within two minutes.");
+                throw new ProviderUncertainException(message + " The workflow request may have been sent; observe and reconcile before any retry.");
             }
 
-            output = process.ExitCode == 0 ? standardOutput : standardError + standardOutput;
-            return process.ExitCode;
+            throw new ProviderRefusedException(message);
         }
-        catch (System.ComponentModel.Win32Exception exception)
-        {
-            throw new ProviderRefusedException("The GitHub CLI (gh) is not on the PATH; install it and log in yourself.", exception);
-        }
+
+        output = result.ExitCode == 0 ? result.StandardOutput : result.StandardError + result.StandardOutput;
+        return result.ExitCode!.Value;
     }
 }

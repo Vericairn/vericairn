@@ -10,7 +10,11 @@
     <!-- The CLI consumes restore findings from the same archive used for extraction. -->
     <InternalsVisibleTo Include="vericairn" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
     <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Daemon.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Adapters.Git" />
+    <InternalsVisibleTo Include="Vericairn.Providers.GitHub" />
   </ItemGroup>
 
   <ItemGroup>

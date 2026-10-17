@@ -175,6 +175,27 @@ public static class ReleaseFlow
         return body;
     }
 
+    // An unresolved retry is durable before the provider is called; no record vocabulary or transition changes are needed.
+    internal static JsonObject RetryIntent(JsonElement previous, JsonObject intent, string reconciliation)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reconciliation);
+        JsonObject body = Copy(previous);
+        body["status"] = "uncertain";
+        body["dispatchedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        body["reconciliation"] = reconciliation;
+        body.Remove("observed");
+        // A retry may repair its workflow or ref. Pin those actual settings, without the earlier run id or observation.
+        body["intent"] = intent["intent"]!.DeepClone();
+        body["target"] = intent["target"]!.DeepClone();
+        foreach (JsonNode? evidence in intent["evidence"]!.AsArray())
+        {
+            body["evidence"]!.AsArray().Add(evidence!.DeepClone());
+        }
+
+        body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Retry intent claimed before calling the provider; its dispatch outcome is not yet known." });
+        return body;
+    }
+
     /// <summary>A cancellation before any effect or after reconciliation showed none.</summary>
     public static JsonObject Canceled(JsonElement previous, string reason)
     {

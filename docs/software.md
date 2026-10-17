@@ -274,7 +274,23 @@ declares the same settings and simulates GitHub in memory for the conformance su
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
-earlier release reads none.
+earlier release reads none. From 0.7.2, `ResolveCommit` resolves the requested build ref at the provider to an
+exact commit for the living-document gate. Its default returns unknown, so an older provider can still dispatch
+releases without repository document checks, but cannot bypass those checks. GitHub resolves through its commits
+API; the runtime compares the registered clone at that commit and refuses with fetch guidance if it is absent.
+The actual run commit is checked again before a candidate is recorded, since a branch can move after submission.
+
+The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
+and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream
+is limited to 4,194,304 characters; exceeding that limit fails the command instead of using partial output.
+Timeout or cancellation terminates the owned process group on POSIX or Job Object on Windows, including
+descendants retaining output pipes after their parent exits. Cleanup waits at most one additional second;
+if exit cannot yet be confirmed, native ownership is retained for later cleanup. A gh failure before the
+workflow command starts is refused. Once it starts, an interrupted command leaves an uncertain effect;
+a later failure to identify its run also stays uncertain and requires observation and reconciliation.
+On POSIX, this uses the worker's exclusive child-ownership rule: run the runtime under an init process,
+not as PID 1, and without ignored SIGCHLD or automatic child reaping; an unsupported host is refused
+before launching a command.
 
 A product declares how its releases are made on its own record, in an optional `release` object (read from
 release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
@@ -301,10 +317,15 @@ The release as intent, then observed effect:
    missing required setting is refused), and writes an `operation` with status `not-started` under the
    identity `<provider>:<destination>:vX` with every setting in its target; then it dispatches and writes
    the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
-   identified, or `known-failure` when the provider refused before any effect. While an operation under
-   that identity is dispatched or uncertain, a second submit is refused, as it is after observed success (a
-   corrective release is a new version); after a failure or a cancellation, a retry needs `--reconciliation`
-   stating how the earlier outcome was settled. While a living document of the product is due at level
+   identified, or `known-failure` when the provider refused before any effect. The identity is claimed
+   atomically before dispatch, while unrelated runtime operations keep answering. An existing
+   `not-started` intent has an unknown effect: a second submit is refused and `release observe` records
+   its uncertainty before observing the provider. Observe and reconcile it before any retry, including
+   after a restart or a failure to store the dispatch receipt. A dispatched or uncertain operation also
+   refuses another submit, as does observed success (a corrective release is a new version). After a
+   failure or cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled;
+   that retry is recorded as uncertain before calling the provider. An active dispatch cannot be canceled
+   or reconciled until the call returns. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
    derives `covers` triggers from the registered clone's current `HEAD`, not the release's `ref`. Bring that
@@ -385,10 +406,11 @@ Only current results in that window are listed: a result superseded by a later r
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
 that result's exact hash or its work order's current revision and hash. This includes another principal's results with
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
-work-order revision does not count for the current revision. Every remaining current result appears only under **Work
-recorded, not yet accepted**. Each current result of an accepted work order is listed separately, without
-consolidation by work order or contributor; an earlier partial or failed result can therefore appear alongside
-a completed one. Classification reads current estate state, not an acceptance snapshot at the window's end.
+work-order revision does not count for the current revision. From 0.7.2, **Work accepted** has one entry per work order,
+naming its latest accepted current result in the window (by recorded time, then identifier) and its acceptance. Earlier
+results and attempts are reachable from the entry with `vericairn work observe <key>`. Later unaccepted results and results
+of other unaccepted work appear under **Work recorded, not yet accepted**. Frozen sets remain unchanged.
+Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
 ## Vericairn's NuGet publication
@@ -843,15 +865,19 @@ History is the last 20 successful, fully reported runs of the same launcher and 
 
 ## Attention and containment (0.7.0)
 
-Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+Every new signal kind and severity gets one ask addressed to the goal's decider, and its id is retained with the run. Process signals pin the run's exact intent; settlement-review signals pin its exact settlement. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
 
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
 
-Attention asks pin the run's original intent. Once settlement supersedes that operation, a current ask is
-reported as `record.subject-stale`; the worker does not revise or answer it. Inspect the settled run before
-answering through the existing decision path. The warning does not reopen the settled run or its reservation.
+From 0.7.2, settlement withdraws its still-waiting process attention asks, such as stall and command-audit asks,
+as no longer needed. Each withdrawal is authored by the asker, pins the exact settlement, and preserves the
+question and the original observation. An ask already answered by a person's decision stays answered. Settled,
+closed asks no longer produce stale-subject warnings; observations remain available for review. The
+`attempt-missing` and `scope-settlement` asks are created at settlement and stay open for review, pinned to the
+settled operation's exact revision and hash. Settlement, these new asks and the process-ask withdrawals are
+validated together and journaled; an interrupted write remains a reconciliation task.
 
 ## Recorded watching settings (0.7.0)
 
@@ -1254,8 +1280,12 @@ write targets and treats interpreter input as unverified code. The fourth live r
 with only `audit-unverified` for the Python heredoc, and settled observed-success with 2 wall minutes and 95,406 tokens.
 It raised the missing-attempt signal correctly, but Codex refused the estate MCP calls because they required approval
 under `exec`'s `never` policy. The agent changed nothing. FIX-18 now pre-approves only the estate server's tools.
-A further live run is needed to verify those calls under `exec`, work beyond brief access and MCP attempt/result
-authoring. Neither observed-success nor these partial live observations accept the work.
+The fifth live run of `531d169` recorded its cap before launch, observed the admitted model at `max`, and recorded
+3 wall minutes and 205,767 tokens. The agent authored its signed attempt and result through the estate MCP server
+and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
+the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
+sandbox; that limitation is assigned to a separate work order. Observed-success and live qualification do not
+accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the

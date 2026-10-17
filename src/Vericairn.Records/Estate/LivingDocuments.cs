@@ -105,6 +105,19 @@ public static class LivingDocuments
     }
 
     /// <summary>
+    /// The declarations of a product at the exact commit its release builds. Repository covered paths are read at that commit,
+    /// never at a clone's HEAD; the estate's own files and record triggers retain their usual rules.
+    /// </summary>
+    public static IReadOnlyList<State> AtReleaseCommit(EstateModel model, string product, string commit)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        return model.Current("living-document").Where(d => NamesProduct(model, d, product))
+            .OrderBy(d => EstateModel.BodyString(d, "path"), StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
+            .Select(d => Evaluate(model, d, commit)).ToList();
+    }
+
+    /// <summary>
     /// The documents of a product that close its release gate: those whose release trigger names it, by any revision of the product
     /// record, and that are due at level refuse or unavailable while they declare refuse.
     /// </summary>
@@ -195,7 +208,7 @@ public static class LivingDocuments
         }).ToList();
     }
 
-    private static State Evaluate(EstateModel model, RecordEnvelope declaration)
+    private static State Evaluate(EstateModel model, RecordEnvelope declaration, string? releaseCommit = null)
     {
         IReadOnlyList<string> chain = model.Chain(declaration);
         string path = EstateModel.BodyString(declaration, "path") ?? string.Empty;
@@ -217,7 +230,7 @@ public static class LivingDocuments
         var notes = new List<string>();
 
         // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
-        // estate's own files are read from its working tree; another repository's through its source, at its clone's head here.
+        // estate's own files are read from its working tree; another repository's at the release commit when given, otherwise HEAD.
         IReadOnlyList<string> coveredPaths = CoveredPaths(declaration);
         RecordEnvelope? coveredReview = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
         string? at = null;
@@ -226,7 +239,8 @@ public static class LivingDocuments
         {
             identity = CoveredIdentity(model.Root, coveredPaths);
         }
-        else if (coveredPaths.Count > 0 && DocumentSources.Find(EstateModel.BodyString(declaration, "source")) is IDocumentSource source && source.Head(model, declaration) is string head)
+        else if (coveredPaths.Count > 0 && DocumentSources.Find(EstateModel.BodyString(declaration, "source")) is IDocumentSource source &&
+                 (releaseCommit is null ? source.Head(model, declaration) : source.Resolve(model, declaration, releaseCommit)) is string head)
         {
             at = head;
             identity = source.Covered(model, declaration, coveredPaths, head);

@@ -19,6 +19,14 @@ namespace Vericairn.Runtime.Store;
 /// </summary>
 public sealed class EstateSession : IDisposable
 {
+    private readonly RecordParseCache parseCache = new();
+    private LiveStore.FileSnapshot? loadedFiles;
+
+    internal long ParsedFiles => parseCache.ParsedFiles;
+
+    // The response envelope must come from the very bytes whose model was just judged, not a second full store read/sync.
+    internal RecordFile? LoadedFile(string path) => loadedFiles?.ByPath.GetValueOrDefault(path);
+
     private EstateSession(string root, EstateManifest manifest, LiveStore live, IObjectStore objects)
     {
         Root = root;
@@ -75,7 +83,13 @@ public sealed class EstateSession : IDisposable
             Live.SyncFromDirectory(Root);
         }
 
-        EstateModel model = EstateLoader.Load(Root, Live.Files());
+        LiveStore.FileSnapshot files = Live.Snapshot();
+        if (!ReferenceEquals(files, loadedFiles))
+        {
+            parseCache.Retain(files.ByPath);
+            loadedFiles = files;
+        }
+        EstateModel model = EstateLoader.Load(Root, files.Files, parseCache);
         Live.SetMeta("lastLoadedAt", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         return model;
     }

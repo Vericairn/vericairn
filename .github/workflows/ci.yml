@@ -10,6 +10,17 @@ permissions:
   contents: read
 
 jobs:
+  workflow-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check the workflow action allow-list and full commit pins
+        run: ruby .github/scripts/check-workflow-actions.rb
+      - name: Test workflow policy and package verification
+        run: |
+          ruby .github/scripts/test-workflow-actions.rb
+          python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
   build-test:
     strategy:
       fail-fast: false

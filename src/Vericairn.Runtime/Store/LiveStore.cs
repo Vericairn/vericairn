@@ -14,6 +14,11 @@ namespace Vericairn.Runtime.Store;
 public sealed class LiveStore : IDisposable
 {
     private readonly SqliteConnection connection;
+    private FileSnapshot? snapshot;
+    private long snapshotVersion;
+
+    // Deterministic work counters for first-screen regression tests, independent of machine timing.
+    internal long FilesRead { get; private set; }
 
     /// <summary>Opens (creating when needed) the live store database.</summary>
     public LiveStore(string databasePath)
@@ -60,10 +65,29 @@ public sealed class LiveStore : IDisposable
         while (reader.Read())
         {
             files.Add(new RecordFile(reader.GetString(0), (byte[])reader[1]));
+            FilesRead++;
         }
 
         return files;
     }
+
+    // Private original bytes for the loader. Public Files() still returns independent buffers. Local writes invalidate this
+    // snapshot; SQLite's data_version also catches another connection changing the canonical local-only store.
+    internal FileSnapshot Snapshot()
+    {
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "PRAGMA data_version;";
+        long version = (long)command.ExecuteScalar()!;
+        if (snapshot is null || snapshotVersion != version)
+        {
+            IReadOnlyList<RecordFile> files = Files();
+            snapshot = new FileSnapshot(files, files.ToDictionary(f => f.Path, StringComparer.Ordinal));
+            snapshotVersion = version;
+        }
+        return snapshot;
+    }
+
+    internal sealed record FileSnapshot(IReadOnlyList<RecordFile> Files, IReadOnlyDictionary<string, RecordFile> ByPath);
 
     /// <summary>Number of record files held.</summary>
     public long Count()
@@ -93,6 +117,7 @@ public sealed class LiveStore : IDisposable
         command.Parameters.AddWithValue("$mtime", mtime);
         command.Parameters.AddWithValue("$bytes", bytes);
         command.ExecuteNonQuery();
+        snapshot = null;
     }
 
     /// <summary>Removes a record file; true when it was held.</summary>
@@ -101,7 +126,9 @@ public sealed class LiveStore : IDisposable
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "DELETE FROM files WHERE path = $path;";
         command.Parameters.AddWithValue("$path", path);
-        return command.ExecuteNonQuery() > 0;
+        bool removed = command.ExecuteNonQuery() > 0;
+        if (removed) { snapshot = null; }
+        return removed;
     }
 
     /// <summary>

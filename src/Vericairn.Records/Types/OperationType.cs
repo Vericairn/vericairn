@@ -436,7 +436,13 @@ public sealed class OperationType : IRecordType
             context.RequireReference("signals.attention", attention, "ask");
             if (context.Find(attention) is { Type: "ask" } ask && ask.Subject?.Id != context.Model.Chain(context.Record)[0])
             {
-                context.Error("operation.signals", "A signal's attention item names this run's intent.");
+                // Settlement review asks pin the revision that produced them. Later evidence may supersede that operation
+                // while retaining its immutable signals; require the pinned settlement to remain in this same run's chain.
+                bool settlementReview = code is "attempt-missing" or "scope-settlement"
+                    && ask.Subject is not null && context.Find(ask.Subject.Id) is { Type: "operation" } settledOperation
+                    && ask.Subject == settledOperation.Reference && context.Model.Chain(context.Record).Contains(settledOperation.Id)
+                    && EstateModel.BodyString(settledOperation, "status") is "observed-success" or "known-failure" or "canceled";
+                if (!settlementReview) context.Error("operation.signals", "A signal's attention item names this run's intent, or for a settlement review, an exact settled revision of the same run.");
             }
             signal.NoOtherKeys();
             if (!signalKeys.Add(code + ":" + severity) || EstateModel.BodyString(context.Record, "action") != AgentRun)

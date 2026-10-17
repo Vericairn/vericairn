@@ -108,6 +108,12 @@ public class NativeSettlementTests
             RunSignal signal = Assert.Single(settled.Signals!, s => s.Code == "attempt-missing");
             Assert.Contains(missing, signal.Summary, StringComparison.Ordinal);
             Assert.NotNull(signal.Attention);
+            EstateModel model = run.Estate.Load();
+            var ask = model.ById[signal.Attention];
+            Assert.Equal("open", Asks.State(model, ask).State);
+            Assert.True(model.IsCurrent(ask));
+            Assert.Equal(AgentRuns.Find(model, started.Run)!.Latest.Reference, ask.Subject);
+            Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location.StartsWith("records/ask/", StringComparison.Ordinal));
             Assert.Contains(missing, evidence, StringComparison.Ordinal);
             Assert.Contains(CommunicationPresentation.Attention(run.Service), a => a.Kind == "incident" && a.Record == started.Run);
         }

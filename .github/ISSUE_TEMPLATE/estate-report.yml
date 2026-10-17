@@ -1,0 +1,56 @@
+name: Estate report
+description: A problem found while operating an estate with Vericairn.
+title: "Estate report: "
+labels: ["estate-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe what Vericairn did, in terms anyone can reproduce on a scratch estate.
+        Leave out the name, records and details of the estate where you found it, and never include a secret, a token or a machine path.
+  - type: input
+    id: version
+    attributes:
+      label: Vericairn version
+      description: The output of `vericairn version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Records and the estate check
+        - Work, assignments and results
+        - The worker and agent launchers
+        - Releases and providers
+        - Living documents and documentation
+        - Identity, devices and connections
+        - Workbench
+        - A pack or extension
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The command or action, and what Vericairn did. Paste output with machine paths and identifiers removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce it on a scratch estate
+      description: Steps that start from `vericairn estate init` in an empty folder, if you can.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: What it blocks or puts at risk, and any workaround.

@@ -104,9 +104,8 @@ public class PairingJourneyTests
             Assert.Equal("current", Listed(connection).GetProperty("state").GetString());
 
             // Revoked on the runtime's machine: refused at once. Here the laptop's key shares this test's home with the runtime, which
-            // signed the laptop's write with it; a revocation applies from its own second, so the write must sit in an earlier one.
-            Thread.Sleep(1100);
-            CliHarness.Ok("--estate", root, "--json", "devices", "revoke", device, "--by", op, "--reason", "The laptop was lost.");
+            // signed the laptop's write with it. Give revocation an explicit second after that signed history.
+            CliHarness.RevokeAfterRecords(root, new Vericairn.Protocol.RevokeRequest(device, op, "The laptop was lost."));
             JsonElement denied = Listed(connection);
             Assert.Equal("denied", denied.GetProperty("state").GetString());
             Assert.Contains("revoked", denied.GetProperty("message").GetString(), StringComparison.Ordinal);

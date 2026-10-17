@@ -39,10 +39,15 @@ public sealed partial class ShellViewModel
         string? id = ActingPrincipalId;
         if (id is null || connection?.Api is not { } api) { return null; }
         RecordResponse? person = Try(() => CurrentPrincipal(api, id)!);
-        return person is not null && person.Envelope.TryGetProperty("body", out var body) && Str(body, "kind") == "human" ? id : null;
+        return HumanRecipient(person);
     }
 
-    private void RefreshCommunication()
+    private string? HumanRecipient(RecordResponse? person) =>
+        person is not null && person.Envelope.TryGetProperty("body", out var body) && Str(body, "kind") == "human" ? ActingPrincipalId : null;
+
+    private void RefreshCommunication() => RefreshCommunication(null, CommunicationRecipient());
+
+    private void RefreshCommunication(StatusResponse? observedStatus, string? recipient)
     {
         if (connection?.Api is not { } api)
         {
@@ -50,19 +55,19 @@ public sealed partial class ShellViewModel
             return;
         }
 
-        communication = Try(() => api.Communication(CommunicationRecipient())) ?? communication with { Unavailable = "The runtime did not answer; the previous profile is stale." };
-        if (Try(api.Status) is StatusResponse status)
+        communication = Try(() => api.Communication(recipient)) ?? communication with { Unavailable = "The runtime did not answer; the previous profile is stale." };
+        if ((observedStatus ?? Try(api.Status)) is StatusResponse status)
         {
             CommunicationProfile view = StatusViewDepth == "inherit" ? communication :
-                Try(() => api.Communication(CommunicationRecipient(), view: new(Status: StatusViewDepth))) ?? communication with { Unavailable = "The one-view setting could not be read." };
+                Try(() => api.Communication(recipient, view: new(Status: StatusViewDepth))) ?? communication with { Unavailable = "The one-view setting could not be read." };
             HumanStatus = CommunicationPresentation.Status(status, view);
         }
     }
 
-    private void AddCommunicationAttention()
+    private void AddCommunicationAttention(string? recipient, Func<ProgressResponse> progress)
     {
         if (connection?.Api is not { } api) { return; }
-        foreach (CommunicationAttention item in CommunicationPresentation.Attention(api, CommunicationRecipient()))
+        foreach (CommunicationAttention item in CommunicationPresentation.Attention(api, recipient, progress))
         {
             if (item.Record is null || !Attention.Any(a => a.SubjectId == item.Record && a.Kind == item.Kind))
             {

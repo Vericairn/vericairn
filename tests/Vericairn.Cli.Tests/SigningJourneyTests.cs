@@ -3,6 +3,7 @@
 
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Vericairn.Protocol;
 using Vericairn.Records.Signing;
 
 namespace Vericairn.Cli.Tests;
@@ -62,8 +63,7 @@ public class SigningJourneyTests
 
             // Revocation from the operator's machine: the builder's later records are refused and earlier ones stay valid.
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, homeA);
-            Thread.Sleep(1100); // revocation applies from its own second; the earlier records must sit in an earlier one
-            CliHarness.Ok("--estate", a, "--json", "devices", "revoke", builderDevice, "--by", op, "--reason", "Machine retired.");
+            CliHarness.RevokeAfterRecords(a, new RevokeRequest(builderDevice, op, "Machine retired."));
             Assert.Contains("read-only", CliHarness.Run("--estate", a, "--json", "records", "new", "work-order", "--by", builder, "--body", orderPath).Err, StringComparison.Ordinal);
             Assert.Equal(0, CliHarness.Run("--estate", a, "estate", "check").Code);
             JsonElement devices = CliHarness.Ok("--estate", a, "--json", "devices", "list").Json;
@@ -270,8 +270,7 @@ public class SigningJourneyTests
             Assert.Equal(2, wrong.Code);
             Assert.Contains("does not open", wrong.Err, StringComparison.Ordinal);
             CliHarness.Outcome admitted = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "admit", replacement, "--by", op, "--note", "Replaces the lost laptop.", "--recovery", keyFile, "--passphrase-stdin");
-            Thread.Sleep(1100); // revocation applies from its own second; the laptop's records must sit in an earlier one
-            CliHarness.Outcome revoked = CliHarness.OkWithInput(Passphrase + "\n", "--estate", a, "--json", "devices", "revoke", laptop, "--by", op, "--reason", "Laptop lost.", "--recovery", keyFile, "--passphrase-stdin");
+            RecordWritten revoked = CliHarness.RevokeAfterRecords(a, new RevokeRequest(laptop, op, "Laptop lost.", keyFile, Passphrase));
 
             // The replacement signs as the operator again, and both uses stay in view until the operator reviews them.
             CliHarness.Ok("--estate", a, "--json", "records", "new", "work-order", "--by", op, "--body", Order(scratch, "W-1"));
@@ -280,9 +279,9 @@ public class SigningJourneyTests
             Assert.Equal(2, check.Out.Split("recovery.unreviewed").Length - 1);
             Assert.Contains("recovery.unreviewed", CliHarness.Ok("--estate", a, "status").Out, StringComparison.Ordinal);
             string review = CliHarness.WriteJson(scratch, "review.json", """{"independence":"self","outcome":"pass","summary":"My own recovery after the laptop was lost.","findings":[]}""");
-            foreach (CliHarness.Outcome use in new[] { admitted, revoked })
+            foreach ((string id, string hash) in new[] { (admitted.Id, admitted.Hash), (revoked.Id, revoked.Hash) })
             {
-                CliHarness.Ok("--estate", a, "--json", "records", "new", "review", "--by", op, "--subject", $"admission:{use.Id}:{use.Hash}", "--body", review);
+                CliHarness.Ok("--estate", a, "--json", "records", "new", "review", "--by", op, "--subject", $"admission:{id}:{hash}", "--body", review);
             }
 
             check = CliHarness.Run("--estate", a, "estate", "check");
