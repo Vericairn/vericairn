@@ -41,9 +41,10 @@ public class WorkspaceRootJourneyTests
         // The refused default run left its worktree for inspection. A new root never silently takes it over outside that root.
         string previous = Directory.EnumerateFiles(Path.Combine(journey.Home, "estates"), ".git", SearchOption.AllDirectories).Single();
         string oldWorkspace = Path.GetDirectoryName(previous)!;
+        string canonicalWorkspace = Path.GetFullPath(Git(oldWorkspace, "rev-parse", "--show-toplevel"));
         refused = await journey.Run();
         Assert.Equal(2, refused.Code);
-        Assert.Contains(oldWorkspace, refused.Err, StringComparison.Ordinal);
+        Assert.Contains($"at '{canonicalWorkspace}'", refused.Err, StringComparison.Ordinal);
         Assert.Contains("worktree remove", refused.Err, StringComparison.Ordinal);
         Git(journey.Clone, "worktree", "remove", "--force", oldWorkspace);
 

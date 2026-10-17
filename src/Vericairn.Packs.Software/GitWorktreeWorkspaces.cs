@@ -51,6 +51,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         {
             throw new ProviderRefusedException("The registered clone is not a git repository with this git.");
         }
+        common = Path.GetFullPath(common.TrimEnd('\r', '\n'));
 
         if (Git(clone, out _, "check-ref-format", "--branch", branch) != 0)
         {
@@ -63,7 +64,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         string? existing = null;
         foreach (string field in inventory.Split('\0'))
         {
-            if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = field[9..];
+            if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = Path.GetFullPath(field[9..]);
             else if (field == "branch refs/heads/" + branch && existing is not null)
             {
                 string physical = Directory.Exists(existing) ? HarnessWorkspace.Canonical(existing) : Path.GetFullPath(existing);
@@ -80,7 +81,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         {
             directory = HarnessWorkspace.Canonical(directory);
             if (!Within(root, directory)) throw new ProviderRefusedException("The workspace resolves outside the selected workspace root.");
-            bool same = Git(directory, out string own, "rev-parse", "--path-format=absolute", "--git-common-dir") == 0 && Same(own, common);
+            bool same = Git(directory, out string own, "rev-parse", "--path-format=absolute", "--git-common-dir") == 0 && Same(Path.GetFullPath(own.TrimEnd('\r', '\n')), common);
             if (same && Git(directory, out string current, "symbolic-ref", "--short", "-q", "HEAD") == 0 && current.Trim() == branch)
             {
                 return new PreparedWorkspace(directory, branch, Head(directory), true);
@@ -136,7 +137,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
 
     private static bool Same(string a, string b) =>
-        string.Equals(Path.GetFullPath(a.Trim()).TrimEnd('/', '\\'), Path.GetFullPath(b.Trim()).TrimEnd('/', '\\'), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 
     private static int Git(string directory, out string output, params string[] arguments)
     {
