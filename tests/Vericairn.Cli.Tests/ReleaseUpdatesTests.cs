@@ -109,6 +109,29 @@ public sealed class ReleaseUpdatesTests : IDisposable
     }
 
     [Fact]
+    public async Task AnUnavailableAttemptLockPreventsAnyRequest()
+    {
+        var store = new ReleaseUpdateStore(home);
+        store.Configure(true);
+        // A directory in place of the lock prevents an attempt from being reserved on every platform,
+        // without relying on permissions that privileged test users can bypass.
+        File.Delete(Path.Combine(home, "updates", "check.lock"));
+        Directory.CreateDirectory(Path.Combine(home, "updates", "check.lock"));
+        Assert.Null(await new ReleaseUpdates(store, source, clock).CheckAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
+    public async Task ADirectoryInPlaceOfSettingsCannotEnableTheCheck()
+    {
+        Directory.CreateDirectory(Path.Combine(home, "updates", "settings.json"));
+        var store = new ReleaseUpdateStore(home);
+        Assert.False(store.Enabled);
+        Assert.Null(await new ReleaseUpdates(store, source, clock).CheckAsync(TestContext.Current.CancellationToken));
+        Assert.Equal(0, source.Calls);
+    }
+
+    [Fact]
     public async Task CorruptCacheCannotResetTheDailyLimit()
     {
         var store = new ReleaseUpdateStore(home);

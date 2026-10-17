@@ -67,7 +67,11 @@ internal sealed class ReleaseUpdateStore(string? home = null)
     private T? Read<T>(string name)
     {
         string path = FilePath(name);
-        if (!File.Exists(path)) return default;
+        if (!File.Exists(path))
+        {
+            if (Directory.Exists(path)) throw new IOException("Release check state must be an ordinary file.");
+            return default;
+        }
         if (new FileInfo(path).Length > 4096) throw new JsonException("Release check state exceeds its size limit.");
         return JsonSerializer.Deserialize<T>(File.ReadAllBytes(path), Json) ?? throw new JsonException("Release check state is empty.");
     }
