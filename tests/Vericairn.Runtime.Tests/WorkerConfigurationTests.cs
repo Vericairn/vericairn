@@ -365,6 +365,6 @@ public sealed class WorkerConfigurationTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(home)) Directory.Delete(home, recursive: true);
+        if (Directory.Exists(home)) WorkspaceCleanup.Delete(home);
     }
 }

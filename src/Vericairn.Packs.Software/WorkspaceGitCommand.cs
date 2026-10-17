@@ -30,6 +30,9 @@ internal static class WorkspaceGitCommand
                 "core.sshCommand=", "core.alternateRefsCommand=", "diff.external=", "diff.trustExitCode=false",
                 "protocol.allow=never", "protocol.file.allow=always", "gc.auto=0", "maintenance.auto=false",
                 "fetch.writeCommitGraph=false", "submodule.recurse=false",
+                // Configuration isolation cannot inherit a Windows installation's long-path opt-in. Staging refs can
+                // exceed MAX_PATH even when the published workspace fits; keep this non-executing option explicit.
+                "core.longpaths=true",
             })
             {
                 info.ArgumentList.Add("-c");
@@ -68,7 +71,7 @@ internal static class WorkspaceGitCommand
         }
         finally
         {
-            Directory.Delete(control, recursive: true);
+            WorkspaceCleanup.Delete(control);
         }
     }
 
@@ -95,5 +98,5 @@ internal sealed class WorkspaceGitView : IDisposable
 
     internal string Path { get; }
 
-    public void Dispose() => Directory.Delete(Path, recursive: true);
+    public void Dispose() => WorkspaceCleanup.Delete(Path);
 }

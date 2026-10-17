@@ -8,6 +8,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -120,12 +121,7 @@ public sealed class GitCommandAdapterTests : SourceAdapterConformance, IDisposab
     {
         try
         {
-            foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

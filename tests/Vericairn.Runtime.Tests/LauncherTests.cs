@@ -40,7 +40,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -70,7 +70,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -154,7 +154,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -384,12 +384,7 @@ public class LauncherTests
         }
         finally
         {
-            foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(path, FileAttributes.Normal);
-            }
-
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 

@@ -518,7 +518,11 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    working tree. Preparation installs the directory only after checkout completes; a failed preparation removes
    its temporary repository so a retry starts cleanly. A later run reuses the branch's workspace only inside the
    selected root; otherwise refusal names its location and cleanup guidance. Legacy linked worktrees must be
-   preserved and removed before a new launch.
+   preserved and removed before a new launch. Worker Git commands explicitly enable `core.longpaths`, so isolating
+   configuration does not restore Git for Windows' short-path limit during staging or recovery. Git-facing paths,
+   including object alternates, use forward slashes. Temporary-repository cleanup removes Windows read-only objects
+   through handles opened without following links; directory links are removed themselves, and read-only hard links
+   are unlinked without changing their other names' attributes. Unix cleanup unlinks files without changing modes.
    The brief, as
    `vericairn work brief` gives it, is exported into the workspace as `.vericairn/brief.md`, in a directory that ignores
    itself so that nothing in it is committed.
@@ -732,7 +736,7 @@ A local, model-free app-server `command/exec` probe confirmed its behavior: the 
 `.git/index.lock`; adding only the workspace `.git` allowed `git add` and `git commit`. The synthetic clone's `.git`
 and the workspace's `.codex` and `.agents` stayed unwritable. That probe used an empty login-free home and excluded
 temporary-directory allowances to keep its temporary fixtures outside those unrelated grants. It establishes this
-local sandbox mechanism, not a live worker qualification; the builder still performs the seventh live run.
+local sandbox mechanism. The builder's seventh live run subsequently committed successfully, as recorded below.
 
 The generated configuration and launch override set `mcp_servers.vericairn.default_tools_approval_mode = "approve"`.
 This pre-approves the agent's calls to the estate server so noninteractive `exec` can read the brief and record the
@@ -1360,6 +1364,11 @@ fake harness's probe and dispatch, refusal of other writable roots and shared Gi
 configuration, scope violations, concurrent branch moves, recovery and both cleanup layouts. The seventh live
 run of `36c90ba` committed exactly the permitted `NOTES.md` in its own workspace repository; settlement audited
 the commit and fetched its branch into the registered clone, whose `.git` the agent could not write.
+Three-platform CI on `c400386` passed on macOS and Linux. Its Windows failures exposed native-versus-Git path
+comparisons, a staging ref lock beyond Git's default path limit, and read-only objects left for assembly cleanup.
+Round three normalizes the comparisons, explicitly enables long paths in isolated Git commands, and uses the same
+link-safe cleanup for product scratch repositories and test workspaces. Windows verification of those fixes remains
+the builder's; local macOS tests cannot establish the Windows behavior.
 FIX-19 targets 0.7.3 and merges only after 0.7.2 publishes.
 Observed-success and live qualification do not accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor

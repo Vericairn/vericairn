@@ -113,7 +113,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
             }
             finally
             {
-                if (Directory.Exists(preparing)) Directory.Delete(preparing, recursive: true);
+                if (Directory.Exists(preparing)) WorkspaceCleanup.Delete(preparing);
             }
             directory = HarnessWorkspace.Canonical(directory);
         }

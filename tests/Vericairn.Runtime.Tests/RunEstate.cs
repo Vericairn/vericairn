@@ -170,12 +170,7 @@ internal sealed class RunEstate : IDisposable
         Estate.Dispose();
         try
         {
-            foreach (string file in Directory.EnumerateFiles(Scratch, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-
-            Directory.Delete(Scratch, recursive: true);
+            WorkspaceCleanup.Delete(Scratch);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

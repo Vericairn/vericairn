@@ -18,9 +18,9 @@ public class WorkspaceRepositoryTests
         var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
         PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/own", null, Path.Combine(run.Scratch, "workspace"));
         Assert.True(Directory.Exists(Path.Combine(workspace.Path, ".git")));
-        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(workspace.Path, ".git")),
+        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(workspace.Path, ".git")).Replace('\\', '/'),
             RunEstate.Git(workspace.Path, "rev-parse", "--path-format=absolute", "--git-common-dir"));
-        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(run.Clone, ".git", "objects")),
+        Assert.Equal(HarnessWorkspace.Canonical(Path.Combine(run.Clone, ".git", "objects")).Replace('\\', '/'),
             File.ReadAllText(Path.Combine(workspace.Path, ".git", "objects", "info", "alternates")).Trim());
         File.WriteAllText(Path.Combine(workspace.Path, "allowed.txt"), "an agent's commit\n");
         RunEstate.Git(workspace.Path, "add", "allowed.txt");
@@ -32,6 +32,31 @@ public class WorkspaceRepositoryTests
         Assert.Empty(RunEstate.Git(workspace.Path, "remote"));
         Assert.True(File.Exists(Path.Combine(workspace.Path, ".git", "objects", head[..2], head[2..])));
         Assert.False(File.Exists(Path.Combine(run.Clone, ".git", "objects", head[..2], head[2..])));
+    }
+
+    [Fact]
+    public void WorkerGitEnablesLongPathsWithoutAmbientConfiguration()
+    {
+        using var run = new RunEstate();
+        RunEstate.Git(run.Clone, "config", "core.longpaths", "false");
+        Assert.Equal("true", WorkspaceGitCommand.Require(run.Clone, "config", "--bool", "--get", "core.longpaths"));
+    }
+
+    [Fact]
+    public void ALongBranchCanBePreparedAndRecoveredBeforeContentValidation()
+    {
+        using var run = new RunEstate();
+        string root = Path.Combine(Vericairn.Records.Signing.VericairnHome.Path(), "estates", run.Service.Session.Manifest.Estate, "workspaces");
+        string branch = "work/" + new string('a', 40);
+        string path = Path.Combine(root, branch.Replace('/', '-'));
+        // The staging name plus this ref's lock crosses MAX_PATH in the Windows CI home, even though the final ref fits.
+        var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, branch, null, path, root);
+        Assert.Equal(RunEstate.Git(run.Clone, "rev-parse", "HEAD"), workspace.Commit);
+        Assert.True(provider.Prepare(run.Clone, branch, null, path, root).Reused);
+        WorkspaceSnapshot baseline = provider.Capture(workspace);
+        Assert.Null(baseline.Problem);
+        Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
     }
 
     [Fact]
@@ -224,7 +249,7 @@ public class WorkspaceRepositoryTests
         Assert.Null(provider.CheckScope(workspace, baseline, ["**"]).Problem);
         Assert.Null(provider.RetainForReview(workspace));
         // Cleanup is the operator's, after preserving uncommitted files. No worktree registration needs removal.
-        Delete(workspace.Path);
+        WorkspaceCleanup.Delete(workspace.Path);
         PreparedWorkspace fresh = reopened.Prepare(run.Clone, workspace.Branch, null, workspace.Path);
         Assert.False(fresh.Reused);
         Assert.Equal(recovered.Commit, fresh.Commit);
@@ -312,11 +337,5 @@ public class WorkspaceRepositoryTests
         Assert.StartsWith(prefix, writable, StringComparison.Ordinal);
         Assert.Equal([Path.Combine(workspace.Path, ".git")], System.Text.Json.JsonSerializer.Deserialize<string[]>(writable[prefix.Length..^1])!);
         Assert.True(Directory.Exists(Path.Combine(workspace.Path, ".git")));
-    }
-
-    private static void Delete(string directory)
-    {
-        foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
-        Directory.Delete(directory, recursive: true);
     }
 }

@@ -82,7 +82,7 @@ internal static class WorkspaceGitScope
         {
             if (Directory.Exists(isolated))
             {
-                Directory.Delete(isolated, recursive: true);
+                WorkspaceCleanup.Delete(isolated);
             }
         }
 
@@ -95,6 +95,8 @@ internal static class WorkspaceGitScope
                 StandardOutputEncoding = new UTF8Encoding(false, true),
             };
             info.ArgumentList.Add("--git-dir=" + isolated);
+            info.ArgumentList.Add("-c");
+            info.ArgumentList.Add("core.longpaths=true");
             foreach (string argument in arguments)
             {
                 info.ArgumentList.Add(argument);
