@@ -19,8 +19,8 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="AllowedEfforts">Permitted native efforts; the launcher's vocabulary when omitted.</param>
 public sealed record WorkerConfiguration(string Model, string Effort, IReadOnlyList<string>? AllowedModels = null, IReadOnlyList<string>? AllowedEfforts = null);
 
-/// <summary>Owner-only launcher choices under VericairnHome, read afresh for each run by the CLI and daemon.</summary>
-public sealed class WorkerConfigurationStore
+/// <summary>Owner-only launcher choices and workspace placement under VericairnHome, read afresh for each run by the CLI and daemon.</summary>
+public sealed partial class WorkerConfigurationStore
 {
     private static readonly JsonSerializerOptions Json = new(ProtocolJson.Options)
     {
@@ -59,26 +59,13 @@ public sealed class WorkerConfigurationStore
         ArgumentNullException.ThrowIfNull(configuration);
         string path = PathOf(launcher);
         Validate(launcher, configuration);
-        RefuseLink(path);
-        if (OperatingSystem.IsWindows())
-        {
-            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
-            SecurityIdentifier owner = identity.User ?? throw new ProviderRefusedException("The worker configuration owner could not be established.");
-            var access = new DirectorySecurity();
-            access.SetOwner(owner);
-            access.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            access.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
-            var folder = new DirectoryInfo(directory);
-            folder.Create(access);
-            folder.SetAccessControl(access);
-        }
-        else
-        {
-            Directory.CreateDirectory(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
+        WriteFile(path, configuration);
+    }
 
+    private void WriteFile<T>(string path, T configuration)
+    {
+        RefuseLink(path);
+        CreateOwnerDirectory(directory);
         string temporary = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
@@ -94,6 +81,28 @@ public sealed class WorkerConfigurationStore
         finally
         {
             File.Delete(temporary);
+        }
+    }
+
+    private static void CreateOwnerDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            SecurityIdentifier owner = identity.User ?? throw new ProviderRefusedException("The worker configuration owner could not be established.");
+            var access = new DirectorySecurity();
+            access.SetOwner(owner);
+            access.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            access.AddAccessRule(new FileSystemAccessRule(owner, FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            var folder = new DirectoryInfo(path);
+            folder.Create(access);
+            folder.SetAccessControl(access);
+        }
+        else
+        {
+            Directory.CreateDirectory(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
     }
 
@@ -115,17 +124,24 @@ public sealed class WorkerConfigurationStore
     {
         ArgumentNullException.ThrowIfNull(launcher);
         if (launcher.Launcher is not ("codex" or "claude-code")) throw new ProviderRefusedException("Worker configuration supports only codex and claude-code.");
-        RefuseLink(directory);
-        RefuseLink(Path.GetDirectoryName(directory)!);
+        return ConfigurationPath(launcher.Launcher + ".json");
+    }
+
+    private string ConfigurationPath(string name)
+    {
         for (DirectoryInfo? parent = new(directory); parent is not null; parent = parent.Parent)
         {
-            if (parent.LinkTarget is not null) parent = new DirectoryInfo(parent.ResolveLinkTarget(returnFinalTarget: true)!.FullName);
-            if (Directory.Exists(Path.Combine(parent.FullName, ".git")) || File.Exists(Path.Combine(parent.FullName, ".git"))
-                || File.Exists(Path.Combine(parent.FullName, "estate", "manifest.json")))
+            RefuseLink(parent.FullName);
+            if (RepositoryOrEstate(parent.FullName))
                 throw new ProviderRefusedException("Worker configuration must be outside repositories and estates; choose a machine-local Vericairn home.");
         }
-        return Path.Combine(directory, launcher.Launcher + ".json");
+        return Path.Combine(directory, name);
     }
+
+    private static bool RepositoryOrEstate(string path) => Directory.Exists(Path.Combine(path, ".git")) || File.Exists(Path.Combine(path, ".git"))
+        || File.Exists(Path.Combine(path, "estate", "manifest.json"))
+        || (File.Exists(Path.Combine(path, "HEAD")) && Directory.Exists(Path.Combine(path, "objects"))
+            && (Directory.Exists(Path.Combine(path, "refs")) || Directory.Exists(Path.Combine(path, "reftable"))));
 
     private static void RefuseLink(string path)
     {

@@ -20,6 +20,30 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class WorkerTests
 {
+    [Fact]
+    public void TheMachineWorkspaceRootAlsoAppliesToAHostSuppliedLauncher()
+    {
+        using var run = new RunEstate();
+        var store = new WorkerConfigurationStore();
+        string? previous = store.ReadWorkspaceRoot();
+        try
+        {
+            string root = Path.Combine(run.Scratch, "runs");
+            store.WriteWorkspaceRoot(root);
+            string report = run.Report("configured-generic");
+            RunResponse started = run.Start("generic", "claude", report);
+            Assert.True(started.Ok, started.Message);
+            Assert.Equal("observed-success", run.Settled(started.Run).Status);
+            string workspace = Assert.Single(FakeHarness.Reports(report))["directory"]!.GetValue<string>();
+            Assert.Equal(Path.Combine(root, run.Service.Session.Manifest.Estate, "work-w-1"), workspace);
+        }
+        finally
+        {
+            if (previous is not null) store.WriteWorkspaceRoot(previous);
+            else File.Delete(Path.Combine(VericairnHome.Path(), "worker", "workspaces.json"));
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

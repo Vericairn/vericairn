@@ -46,7 +46,9 @@ internal static class HarnessConfiguration
         }
         if (found.Count > 0)
         {
-            throw new ProviderRefusedException("Unqualified harness configuration was found: " + string.Join(", ", found.Take(20)) + (found.Count > 20 ? ", and further entries" : "") + ". No run was dispatched.");
+            string fix = found.Any(f => f.StartsWith("ancestor-", StringComparison.Ordinal))
+                ? " Move workspaces outside those ancestors with vericairn worker configure --workspaces <dir>." : string.Empty;
+            throw new ProviderRefusedException("Unqualified harness configuration was found: " + string.Join(", ", found.Take(20)) + (found.Count > 20 ? ", and further entries" : "") + "." + fix + " No run was dispatched.");
         }
         return instructions.OrderBy(c => c.Id, StringComparer.Ordinal).ToArray();
 

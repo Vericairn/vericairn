@@ -341,6 +341,16 @@ public class LauncherTests
             Assert.Equal(head, Git(clone, "rev-parse", "HEAD"));
             Assert.Empty(Git(clone, "status", "--porcelain"));
 
+            string relocated = Path.Combine(root, "workspaces", "relocated");
+            Git(clone, "worktree", "move", first.Path, relocated);
+            PreparedWorkspace reused = workspaces.Prepare(clone, "work/w-1", null, first.Path, Path.Combine(root, "workspaces"));
+            Assert.True(reused.Reused);
+            Assert.Equal(relocated, reused.Path);
+            Assert.True(File.Exists(Path.Combine(reused.Path, "widget.txt")));
+            string refused = Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-1", null, Path.Combine(root, "other", "work-w-1"), Path.Combine(root, "other"))).Message;
+            Assert.Contains(relocated, refused, StringComparison.Ordinal);
+            Assert.Contains("git worktree remove", refused, StringComparison.Ordinal);
+
             string occupied = Path.Combine(root, "occupied");
             Directory.CreateDirectory(occupied);
             Assert.Contains("is not a worktree of the clone on that branch", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-2", null, occupied)).Message, StringComparison.Ordinal);

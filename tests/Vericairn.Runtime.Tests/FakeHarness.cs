@@ -97,6 +97,20 @@ internal static class FakeHarness
         bool codex = scenario == "native-codex";
         if (arguments.Contains("--version"))
         {
+            if (behavior["pauseVersion"]?.GetValue<bool>() == true)
+            {
+                string countFile = report + ".version-count";
+                int count = File.Exists(countFile) ? int.Parse(File.ReadAllText(countFile), CultureInfo.InvariantCulture) + 1 : 1;
+                File.WriteAllText(countFile, count.ToString(CultureInfo.InvariantCulture));
+                string gate = report + ".version-" + count.ToString(CultureInfo.InvariantCulture);
+                File.WriteAllText(gate, "waiting");
+                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
+                while (!File.Exists(gate + ".continue"))
+                {
+                    if (DateTimeOffset.UtcNow >= until) return 2;
+                    Thread.Sleep(10);
+                }
+            }
             Console.WriteLine(behavior["version"]?.GetValue<string>() ?? (codex ? "codex-cli 0.159.0-alpha.12.1" : "2.1.296 (Claude Code)"));
             return 0;
         }
