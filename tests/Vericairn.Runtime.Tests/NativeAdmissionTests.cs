@@ -15,6 +15,19 @@ namespace Vericairn.Runtime.Tests;
 public class NativeAdmissionTests
 {
     [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void LaunchedHarnessSeesEndOfInput(string harness)
+    {
+        using var fixture = new NativeRun(harness);
+        fixture.Probe.Behavior("stdin", "eof");
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
+        Assert.Equal("eof", File.ReadAllText(fixture.Probe.Report + ".stdin"));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void CodexMaxIsAdmittedButAHarnessRefusalSettlesAsFailure(bool refuseAtLaunch)

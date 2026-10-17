@@ -130,7 +130,7 @@ internal static class FakeHarness
             string? goals = behavior["goals"]?.GetValue<string>();
             if (goals != "missing") Console.WriteLine("goals " + (behavior["featureStage"]?.GetValue<string>() ?? "stable") + " " + (goals == "false" ? "false" : "true"));
             if (goals == "duplicate") Console.WriteLine("goals stable true");
-            Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true");
+            Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true\ncode_mode_host stable true");
             foreach (string name in DisabledCodexFeatures) Console.WriteLine(name + " stable false");
             if (behavior["featuresSuffix"]?.GetValue<string>() is string featuresSuffix) Console.WriteLine(featuresSuffix);
             return 0;
@@ -178,6 +178,13 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["stdin"]?.GetValue<string>() == "eof")
+        {
+            Task<int> input = Task.Run(Console.In.Read);
+            bool eof = input.Wait(TimeSpan.FromSeconds(2)) && input.Result == -1;
+            File.WriteAllText(report + ".stdin", eof ? "eof" : "open");
+            return eof ? 0 : 2;
+        }
         if (codex && behavior["refuseEffort"]?.GetValue<string>() is string refusedEffort
             && arguments.Contains("model_reasoning_effort=" + JsonSerializer.Serialize(refusedEffort)))
         {
@@ -219,7 +226,7 @@ internal static class FakeHarness
     private static readonly string[] DisabledCodexFeatures =
     [
         "apps", "plugins", "remote_plugin", "hooks", "multi_agent", "multi_agent_v2", "browser_use", "browser_use_external",
-        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_host", "code_mode_only",
+        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_only",
         "memories", "workspace_dependencies", "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "shell_snapshot",
     ];
 

@@ -12,6 +12,23 @@ namespace Vericairn.Runtime.Tests;
 
 public class NativePreflightTests
 {
+    [Fact]
+    public void CodexEnablesTheOrdinaryToolHostWithoutEnablingCodeMode()
+    {
+        using var fixture = new NativeProbe("codex");
+        LaunchContext context = fixture.Prepare();
+        string configuration = File.ReadAllText(Path.Combine(context.Environment["CODEX_HOME"], "config.toml"));
+        IReadOnlyList<string> command = fixture.Launcher.Command(context);
+        Assert.Contains("code_mode_host = true", configuration, StringComparison.Ordinal);
+        Assert.Contains("features.code_mode_host=true", command);
+        foreach (string feature in new[] { "code_mode", "code_mode_only" })
+        {
+            Assert.Contains(feature + " = false", configuration, StringComparison.Ordinal);
+            Assert.Contains("features." + feature + "=false", command);
+        }
+        Assert.True(fixture.Launcher.Preflight(context).Complete);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

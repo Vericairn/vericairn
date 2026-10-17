@@ -14,11 +14,11 @@ internal static class CodexInventory
     private static readonly string[] Tools = ["exec_command", "write_stdin", "apply_patch", "view_image", "update_plan", "request_user_input",
         "request_user_input_async", "send_message_to_user_async", "clock.curr_time", "tool_search",
         "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource", "create_goal", "get_goal", "update_goal"];
-    private static readonly string[] Enabled = ["goals", "shell_tool", "unified_exec", "view_image"];
+    private static readonly string[] Enabled = ["goals", "shell_tool", "unified_exec", "view_image", "code_mode_host"];
     private static readonly string[] Disabled =
     [
         "apps", "plugins", "remote_plugin", "hooks", "multi_agent", "multi_agent_v2", "browser_use", "browser_use_external",
-        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_host", "code_mode_only",
+        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_only",
         "memories", "workspace_dependencies", "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "shell_snapshot",
     ];
     // These reported switches do not add tools or discover extensions in this exact version. Other enabled switches refuse.

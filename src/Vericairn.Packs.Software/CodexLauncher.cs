@@ -71,7 +71,7 @@ public sealed class CodexLauncher : IAgentLauncher
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
-            "Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Tested with stand-in executables; no live Codex or sign-in qualification.",
+            "Enables code_mode_host because the baseline routes ordinary shell and MCP tools through it; code_mode and code_mode_only stay disabled. Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Stand-in tests cover the protocol; the first live run confirmed max inference but exposed disabled tools. Live tool use still needs qualification.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "codex")]);
 

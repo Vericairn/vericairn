@@ -652,6 +652,8 @@ Codex runs with a fresh per-run `CODEX_HOME`: only its provisioned harness `auth
 owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The workspace is
 canonicalized, including filesystem aliases, before writing its project-trust key. A whole `projects` value encodes
 the path as a TOML key, so dots or quotes in it are not interpreted as CLI key separators.
+The baseline routes ordinary shell and MCP tools through `code_mode_host`, so FIX-18 enables that host.
+`code_mode` and `code_mode_only` remain disabled; the admitted tool inventory is unchanged.
 
 Codex merges configuration tables across layers; a complete `mcp_servers` override alone cannot remove ambient
 servers. The launcher therefore probes the effective configuration with `mcp list --json` and refuses unless it
@@ -1175,8 +1177,10 @@ dispatch and records an unstarted, zero-charge failure.
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
 qualification. Real model calls, provider/account-dependent behavior and remote managed policy have not been qualified.
 FIX-18 covers `max` argument construction, configuration, admission and observed harness refusal with stand-ins.
-The builder's first live `worker run` with a build containing FIX-18 must still verify inference at `max`, the
-agent's use of its brief and MCP result tools, and the recorded cap, execution and usage before claiming live qualification.
+The builder's first live run of `6bab07f` with Codex 0.159.0-alpha.12.1 reported `gpt-6-astra` at `max`
+in its session, with 1 wall minute and 34,573 tokens recorded. It exited cleanly but every tool call failed
+because the code-mode host was disabled; the agent recorded no attempt or result. The host correction
+requires a live rerun to qualify tool use, access to the brief and MCP attempt/result authoring.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
