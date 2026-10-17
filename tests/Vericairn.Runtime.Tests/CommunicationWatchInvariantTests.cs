@@ -45,7 +45,7 @@ public class CommunicationWatchInvariantTests
         Assert.Equal([5, 10], signals.Select(s => s.Count));
         Assert.Equal(["warning", "critical"], signals.Select(s => s.Severity));
         Assert.All(signals, s => Assert.NotNull(s.Attention));
-        Assert.Equal(signals.Length, run.Service.Records("ask").Count);
+        Assert.Equal(settled.Signals!.Count, run.Service.Records("ask").Count);
         string identity = settled.Identity;
         RecordResponse operation = run.Service.Record(AgentRuns.Find(run.Estate.Load(), started.Run)!.Latest.Id)!;
         byte[] original = CanonicalJson.SerializePrettyUtf8(operation.Envelope);

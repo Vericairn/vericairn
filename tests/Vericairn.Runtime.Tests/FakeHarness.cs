@@ -130,7 +130,7 @@ internal static class FakeHarness
             string? goals = behavior["goals"]?.GetValue<string>();
             if (goals != "missing") Console.WriteLine("goals " + (behavior["featureStage"]?.GetValue<string>() ?? "stable") + " " + (goals == "false" ? "false" : "true"));
             if (goals == "duplicate") Console.WriteLine("goals stable true");
-            Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true");
+            Console.WriteLine("shell_tool stable true\nunified_exec stable true\nview_image stable true\ncode_mode_host stable true");
             foreach (string name in DisabledCodexFeatures) Console.WriteLine(name + " stable false");
             if (behavior["featuresSuffix"]?.GetValue<string>() is string featuresSuffix) Console.WriteLine(featuresSuffix);
             return 0;
@@ -146,8 +146,34 @@ internal static class FakeHarness
             if (defect is "command" or "cwd") transport[defect] = "unexpected";
             if (defect is "args" or "env_vars") transport[defect] = new JsonArray("unexpected");
             if (defect == "env") transport["env"] = new JsonObject { ["EXTRA"] = "unexpected" };
-            var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport });
+            var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport,
+                ["startup_timeout_sec"] = null, ["tool_timeout_sec"] = null });
+            if (defect == "omitted-timeouts")
+            {
+                list[0]!.AsObject().Remove("startup_timeout_sec");
+                list[0]!.AsObject().Remove("tool_timeout_sec");
+            }
+            if (defect == "startup-timeout") list[0]!["startup_timeout_sec"] = 30;
+            if (defect == "tool-timeout") list[0]!["tool_timeout_sec"] = 60;
+            if (defect == "duplicate-timeout")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"startup_timeout_sec\":null", "\"startup_timeout_sec\":null,\"startup_timeout_sec\":null", StringComparison.Ordinal));
+                return 0;
+            }
             if (behavior["mcpAuth"]?.GetValue<string>() is string auth) list[0]!["auth_status"] = auth;
+            // The installed baseline omits approvals from mcp list; also exercise a harness reporting them.
+            if (behavior["mcpApproval"]?.GetValue<string>() is string approval) list[0]!["default_tools_approval_mode"] = approval;
+            if (defect == "other-approved-server") list[0]!["name"] = "other";
+            if (defect == "extra-approved-server") list.Add(new JsonObject { ["name"] = "other", ["enabled"] = true, ["default_tools_approval_mode"] = "approve" });
+            if (defect == "null-approval") list[0]!["default_tools_approval_mode"] = null;
+            if (defect == "duplicate-approval")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"default_tools_approval_mode\":\"approve\"", "\"default_tools_approval_mode\":\"approve\",\"default_tools_approval_mode\":\"approve\"", StringComparison.Ordinal));
+                return 0;
+            }
+            if (defect == "per-tool-approval") list[0]!["tools"] = new JsonObject { ["work_attempt"] = new JsonObject { ["approval_mode"] = "approve" } };
+            if (defect == "approval-policy") list[0]!["approval_policy"] = "on-request";
+            if (defect == "approval-reviewer") list[0]!["approvals_reviewer"] = "auto_review";
             if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
             if (defect == "transport-control") transport["unapproved"] = true;
             if (defect == "duplicate-env")
@@ -165,6 +191,42 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (behavior["stdin"]?.GetValue<string>() == "eof")
+        {
+            Task<int> input = Task.Run(Console.In.Read);
+            bool eof = input.Wait(TimeSpan.FromSeconds(2)) && input.Result == -1;
+            File.WriteAllText(report + ".stdin", eof ? "eof" : "open");
+            return eof ? 0 : 2;
+        }
+        if (behavior["hold"]?.GetValue<string>() == "exit")
+        {
+            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (!File.Exists(report + ".continue") && DateTimeOffset.UtcNow < until) Thread.Sleep(10);
+        }
+        if (codex && behavior["rollout"]?.GetValue<string>() is string rollout)
+        {
+            string directory = Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME")!, "sessions", "2026", "10", "17");
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "rollout-stand-in.jsonl");
+            string model = arguments[Array.IndexOf(arguments, "--model") + 1];
+            string effort = JsonSerializer.Deserialize<string>(arguments.Single(a => a.StartsWith("model_reasoning_effort=", StringComparison.Ordinal)).Split('=', 2)[1])!;
+            string Context(string m, string e) => JsonSerializer.Serialize(new { type = "turn_context", payload = new { model = m, effort = e } }) + "\n";
+            string text = Context(rollout is "model" or "changed-back" ? "unexpected-model" : model, rollout == "effort" ? "low" : effort);
+            if (rollout == "changed-back") text += Context(model, effort);
+            if (rollout == "malformed") text += "{truncated";
+            if (rollout == "unreadable") Directory.CreateDirectory(path);
+            else File.WriteAllText(path, text);
+            // Stdout intentionally has no model or effort; only the run-owned rollout does.
+            Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\"stand-in\"}");
+            return 0;
+        }
+        if (codex && behavior["refuseEffort"]?.GetValue<string>() is string refusedEffort
+            && arguments.Contains("model_reasoning_effort=" + JsonSerializer.Serialize(refusedEffort)))
+        {
+            Console.Error.WriteLine("The selected model does not support the requested reasoning effort.");
+            Console.WriteLine("""{"type":"turn.failed","error":{"message":"Unsupported reasoning effort."}}""");
+            return 2;
+        }
         if (behavior["execution"]?.GetValue<string>() is string execution)
         {
             string model = arguments[Array.IndexOf(arguments, "--model") + 1];
@@ -199,7 +261,7 @@ internal static class FakeHarness
     private static readonly string[] DisabledCodexFeatures =
     [
         "apps", "plugins", "remote_plugin", "hooks", "multi_agent", "multi_agent_v2", "browser_use", "browser_use_external",
-        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_host", "code_mode_only",
+        "browser_use_full_cdp_access", "computer_use", "in_app_browser", "image_generation", "code_mode", "code_mode_only",
         "memories", "workspace_dependencies", "skill_search", "skill_mcp_dependency_install", "tool_suggest", "sleep_tool", "shell_snapshot",
     ];
 
@@ -377,8 +439,22 @@ internal static class FakeHarness
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat .aws/credentials"}}""");
                 return Linger(acknowledge: false);
             case "watch-codex-warning-hold":
-                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat ../README.md"}}""");
                 return Linger(acknowledge: true);
+            case "watch-codex-parent-search":
+                string parent = Path.GetDirectoryName(Environment.CurrentDirectory)!;
+                Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = $"pwd\nrg --files --hidden -g AGENTS.md '{parent}'" } }));
+                return 0;
+            case "watch-codex-command-input":
+                Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = File.ReadAllText(report + ".command") } }));
+                return 0;
+            case "watch-codex-workspace-change":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"touch README.md"}}""");
+                File.WriteAllText("README.md", "A change outside the brief, inside the workspace.\n");
+                return 0;
+            case "watch-codex-restore":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"dotnet restore"}}""");
+                return 0;
             case "watch-claude-mixed-credentials" or "watch-claude-mixed-network":
                 object mixed = scenario == "watch-claude-mixed-credentials"
                     ? new { paths = new[] { "~/.ssh/id_rsa", "src/invalid\0.cs" } }
@@ -416,13 +492,13 @@ internal static class FakeHarness
                 Emit("""{"type":"result","usage":{"input_tokens":100,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""");
                 return 0;
             case "watch-claude-audit":
-                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"outside.txt","content":"synthetic"}}]}}""");
+                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"../outside.txt","content":"synthetic"}}]}}""");
                 return 0;
             case "watch-codex-audit":
                 Emit("""{"type":"item.started","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid"}}""");
                 Emit("""{"type":"item.completed","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid","aggregated_output":"No actual command ran.","exit_code":0}}""");
                 Emit("""{"type":"item.started","item":{"id":"s1","type":"mcp_tool_call","server":"files","tool":"read","arguments":{"path":".aws/credentials"}}}""");
-                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"outside.txt","kind":"add"}]}}""");
+                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"../outside.txt","kind":"add"}]}}""");
                 return 0;
             case "claude":
                 Emit("""{"type":"system","subtype":"init","session_id":"stand-in","mcp_servers":[{"name":"vericairn","status":"connected"}]}""");
@@ -708,6 +784,7 @@ internal static class FakeHarness
 /// <summary>A qualified synthetic inventory around an existing command adapter; production launchers never use this declaration.</summary>
 internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher inner) : Vericairn.Runtime.Workers.IAgentLauncher
 {
+    public IReadOnlyList<Vericairn.Runtime.Workers.HarnessExecution> ReadExecutionArtifacts(string runDirectory) => inner.ReadExecutionArtifacts(runDirectory);
     public string Launcher => inner.Launcher;
     public Vericairn.Runtime.Providers.ProviderDescriptor Descriptor => inner.Descriptor;
     public string? Harness => inner.Harness;

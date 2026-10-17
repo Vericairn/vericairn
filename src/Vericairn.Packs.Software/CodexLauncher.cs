@@ -17,8 +17,10 @@ namespace Vericairn.Packs.Software;
 /// </summary>
 public sealed class CodexLauncher : IAgentLauncher
 {
+    internal const string McpToolsApproval = "approve";
+
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh", "max"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
 
     /// <inheritdoc />
     public RunPreflight Preflight(LaunchContext context)
@@ -36,6 +38,9 @@ public sealed class CodexLauncher : IAgentLauncher
 
     /// <inheritdoc />
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "thread.started");
+
+    /// <inheritdoc />
+    public IReadOnlyList<HarnessExecution> ReadExecutionArtifacts(string runDirectory) => CodexRollout.Read(runDirectory);
 
     /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
@@ -67,10 +72,11 @@ public sealed class CodexLauncher : IAgentLauncher
         [
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Shipped baseline: codex-cli 0.159.0-alpha.12.1. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
+            "Native efforts: none, minimal, low, medium, high, xhigh, max. The version, help, feature and MCP probes do not validate model/effort support; Codex validates it at launch. An observed nonzero exit, including an effort refusal, is recorded as known-failure, never success.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
-            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
-            "Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Tested with stand-in executables; no live Codex or sign-in qualification.",
+            "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport. The generated configuration and launch override pre-approve only vericairn's tools; the server still checks the run principal's authority on every call. Global approval_policy remains unset. The baseline's MCP list omits approval settings and tool lists, so approval verification rests on the exact generated configuration and isolation checks.",
+            "Enables code_mode_host because the baseline routes ordinary shell and MCP tools through it; code_mode and code_mode_only stay disabled. Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Stand-in tests cover the protocol. Five builder live runs confirmed max inference, the ordinary tool host, rollout model/effort observation, missing-attempt attention, brief-file access and the corrected command audit. The fifth confirmed estate-only MCP pre-approval, signed attempt/result authoring and exactly the permitted file change. Its commit failed because the linked worktree's Git directory was outside the sandbox; that limitation belongs to a separate work order.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "codex")]);
 
@@ -154,9 +160,16 @@ public sealed class CodexLauncher : IAgentLauncher
 
             JsonElement server = root[0];
             JsonElement transport = server.GetProperty("transport");
-            bool approved = HarnessInventory.OnlyProperties(server, "name", "enabled", "disabled_reason", "auth_status", "transport")
+            // The baseline omits approvals from mcp list, even when configured. Establish checks the exact generated
+            // home and excludes other configuration sources; the same server-only approval is pinned in Overrides.
+            // If a qualified harness reports it, accept only that exact value, never per-tool or global controls.
+            // Unset timeouts may be null; configured timeouts remain unapproved controls.
+            bool approved = HarnessInventory.OnlyProperties(server, "name", "enabled", "disabled_reason", "auth_status", "transport", "startup_timeout_sec", "tool_timeout_sec", "default_tools_approval_mode")
                 && HarnessInventory.OnlyProperties(transport, "type", "command", "args", "env", "env_vars", "cwd")
+                && (!server.TryGetProperty("default_tools_approval_mode", out JsonElement approval) || approval.GetString() == McpToolsApproval)
                 && (!server.TryGetProperty("disabled_reason", out JsonElement reason) || reason.ValueKind == JsonValueKind.Null)
+                && (!server.TryGetProperty("startup_timeout_sec", out JsonElement startupTimeout) || startupTimeout.ValueKind == JsonValueKind.Null)
+                && (!server.TryGetProperty("tool_timeout_sec", out JsonElement toolTimeout) || toolTimeout.ValueKind == JsonValueKind.Null)
                 && server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
                 && transport.GetProperty("type").GetString() == "stdio" && transport.GetProperty("command").GetString() == context.McpServer[0]
                 && transport.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))
@@ -171,6 +184,8 @@ public sealed class CodexLauncher : IAgentLauncher
                 throw new ProviderRefusedException("Codex's effective MCP transport differs from the run's approved configuration; launch was refused.");
             }
             return HarnessInventory.Digest(new { transport = HarnessInventory.McpEvidence(context, "effective-list"),
+                defaultToolsApprovalMode = McpToolsApproval,
+                approvalReport = server.TryGetProperty("default_tools_approval_mode", out JsonElement reportedApproval) ? reportedApproval.GetString() : "absent",
                 authStatus = server.TryGetProperty("auth_status", out JsonElement auth) ? auth.GetRawText() : "absent" });
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException)
@@ -179,7 +194,8 @@ public sealed class CodexLauncher : IAgentLauncher
         }
     }
 
-    internal static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "}}}";
+    // Preapproval removes only Codex's interactive MCP gate. The server still acts as the run's principal and checks authority.
+    internal static string Mcp(LaunchContext context) => "{vericairn={command=" + Toml(context.McpServer[0]) + ",args=[" + string.Join(",", context.McpServer.Skip(1).Select(Toml)) + "],env={" + string.Join(",", context.McpEnvironment.OrderBy(e => e.Key, StringComparer.Ordinal).Select(e => Toml(e.Key) + "=" + Toml(e.Value))) + "},default_tools_approval_mode=" + Toml(McpToolsApproval) + "}}";
 
     /// <summary>Each completed turn reports the tokens it spent, its input and output tokens, added to the run's tally.</summary>
     public HarnessSignal? Read(string line)

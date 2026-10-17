@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text.Json;
 using Vericairn.Packs.Software;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
@@ -81,6 +82,7 @@ public class LauncherTests
         string root = Path.Combine(Path.GetTempPath(), "vericairn-config-" + Ulid.NewUlid().Value);
         string workspace = Path.Combine(root, "workspace.with.dots");
         string home = Path.Combine(root, "home");
+        string serverReport = Path.Combine(root, "server.json");
         Directory.CreateDirectory(workspace);
         Directory.CreateDirectory(home);
         try
@@ -94,11 +96,12 @@ public class LauncherTests
             var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = executable };
             LaunchContext context = Context(settings) with
             {
-                Workspace = workspace, Environment = environment, McpServer = ["nonexistent-approved-sentinel"],
+                // Inventory hashes the approved executable; the probe must never start this stand-in server.
+                Workspace = workspace, Environment = environment, McpServer = FakeHarness.Command("native-server", serverReport),
                 McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
             };
             string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
-            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\n");
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\ndefault_tools_approval_mode=\"approve\"\n");
             (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), workspace);
             Assert.Equal(0, code);
             Assert.Contains("project_ambient", baseline, StringComparison.Ordinal);
@@ -138,7 +141,16 @@ public class LauncherTests
             Assert.Equal(workspace, prepared.Workspace);
             string configuration = File.ReadAllText(Path.Combine(prepared.Environment["CODEX_HOME"], "config.toml"));
             Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
+            Assert.Contains("default_tools_approval_mode=\"approve\"", configuration, StringComparison.Ordinal);
+            Assert.DoesNotContain("approval_policy", configuration, StringComparison.Ordinal);
+            (int approvalCode, string approvalList, _) = HarnessProcess.Run([executable, .. CodexLauncher.Overrides(prepared), "mcp", "list", "--json"], prepared.Environment, TimeSpan.FromSeconds(30), prepared.Workspace);
+            Assert.Equal(0, approvalCode);
+            // The installed baseline accepts the setting but does not expose it or the server's tools in this report.
+            Assert.DoesNotContain("default_tools_approval_mode", approvalList, StringComparison.Ordinal);
+            Assert.DoesNotContain("enabled_tools", approvalList, StringComparison.Ordinal);
+            CodexLauncher.VerifyMcp(prepared);
             Assert.DoesNotContain("workspace-alias", configuration, StringComparison.Ordinal);
+            Assert.False(File.Exists(serverReport));
         }
         finally
         {
@@ -242,16 +254,27 @@ public class LauncherTests
         Assert.True(launcher.Read("""{"type":"result","subtype":"success"}""")!.UsageIncomplete);
     }
 
-    [Fact]
-    public void CodexRunsItsOwnGoalThroughExecWithTheMcpServerOnItsCommandLine()
+    [Theory]
+    [InlineData("none")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void CodexRunsItsOwnGoalThroughExecWithTheMcpServerOnItsCommandLine(string effort)
     {
         var launcher = new CodexLauncher();
         LaunchContext context = Context(NoSettings) with { McpServer = ["C:\\Program Files\\vericairn.exe", "--estate", "/estates/the \"widget\"", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["VERICAIRN_HOME"] = "/home/me/.config/vericairn" } };
+        Assert.Contains(effort, launcher.ExecutionCapabilities.Efforts);
+        context = context with { Execution = JsonSerializer.SerializeToElement(new { requested = new { model = "gpt-6-astra", effort } }) };
         IReadOnlyList<string> command = launcher.Command(context);
         Assert.Equal(["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c"], command.Take(8));
         Assert.StartsWith("mcp_servers={vericairn={command=", command[8], StringComparison.Ordinal);
         Assert.Contains("env={\"VERICAIRN_HOME\"=\"/home/me/.config/vericairn\"}", command[8], StringComparison.Ordinal);
         Assert.Equal("projects={\"/work/widget\"={trust_level=\"untrusted\"}}", command[10]);
+        int modelAt = command.ToList().IndexOf("--model");
+        Assert.Equal(["--model", "gpt-6-astra", "-c", "model_reasoning_effort=\"" + effort + "\""], command.Skip(modelAt).Take(4));
         Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
         Assert.True(launcher.Read("""{"type":"turn.started"}""")!.UsageStarted);

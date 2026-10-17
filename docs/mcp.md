@@ -113,7 +113,9 @@ MCP servers and their dependencies are themselves part of the launcher's complet
 The stock CLI and daemon load machine-local model and effort defaults and optional allowlists for each
 native worker run, including agent goal steps. Set or show them on the worker's machine with
 `vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`);
-omit model and effort to show it. Repeated `--allow-model` and `--allow-effort` options narrow the choices
+omit model and effort to show it. FIX-18 adds Codex's `max` effort for 0.7.2; the
+[launcher guide](software.md#explicit-execution-and-environment-admission-run-01-070) lists the vocabulary and limits of validation at launch.
+Repeated `--allow-model` and `--allow-effort` options narrow the choices
 and must include their defaults. Configuration is per machine and is never recorded in the estate.
 The owner-only files stay under `VericairnHome`; reads and writes are refused if that home is inside a
 Git repository or estate. If the user's home directory is a repository, set `VERICAIRN_HOME` outside all

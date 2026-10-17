@@ -16,6 +16,29 @@ public sealed class WorkerConfigurationTests : IDisposable
     private static readonly JsonElement Cap = JsonSerializer.SerializeToElement(new { wallMinutes = 1 });
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CodexMaxDefaultsAndAllowlistsReachAdmission(bool allowlist)
+    {
+        var launcher = new CodexLauncher();
+        var store = new WorkerConfigurationStore(home);
+        store.Write(launcher, new("gpt-6-astra", "max", AllowedEfforts: allowlist ? ["high", "max"] : null));
+        WorkerConfiguration stored = store.Read(launcher)!;
+        Assert.Equal("gpt-6-astra", stored.Model);
+        Assert.Equal("max", stored.Effort);
+        Assert.Equal(allowlist ? ["high", "max"] : null, stored.AllowedEfforts);
+        RunConfiguration configuration = store.Resolve(launcher, "codex")!;
+        var selection = RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, [], null, Cap);
+        Assert.Equal("gpt-6-astra", selection["requested"]!["model"]!.GetValue<string>());
+        Assert.Equal("max", selection["requested"]!["effort"]!.GetValue<string>());
+        AssertOwnerOnly(Path.Combine(home, "worker", "codex.json"));
+        Assert.Throws<ProviderRefusedException>(() => store.Write(launcher, new("gpt-6-astra", "unlimited")));
+        Assert.Equal("max", store.Read(launcher)!.Effort);
+        Assert.Throws<ProviderRefusedException>(() => RunSelection.Resolve(configuration, launcher.ExecutionCapabilities, [],
+            JsonSerializer.SerializeToElement(new { effort = "unlimited" }), Cap));
+    }
+
+    [Theory]
     [InlineData("codex")]
     [InlineData("claude-code")]
     public void LocalDefaultsAndAllowlistsUseRunOnePrecedenceWithoutAddingCapabilities(string name)

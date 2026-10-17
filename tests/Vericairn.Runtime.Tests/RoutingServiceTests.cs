@@ -68,7 +68,7 @@ public class RoutingServiceTests
         string op = run.Estate.OperatorId;
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("principal", op, RunEstate.Json("""{"kind":"agent","name":"Test Builder","roles":["builder"],"agent":{"vendor":"Anthropic","product":"Claude Code"}}"""), Supersedes: run.Estate.BuilderId)));
         RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("roster", op, RunEstate.Json($$"""{"roles":[{"role":"builder","principals":["{{run.Estate.BuilderId}}"]},{"role":"publisher","principals":["{{op}}"]},{"role":"decider","principals":["{{op}}"]}]}"""))));
-        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json($$"""{"key":"W-2","kind":"ordinary","title":"Document the widget","intent":"Document it.","scope":["widget guide"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{run.Goal}}"}],"deliverables":["guide"]}"""))));
+        RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("work-order", op, RunEstate.Json($$"""{"key":"W-2","kind":"ordinary","title":"Document the widget","intent":"Document it.","scope":["widget guide","path:docs/"],"exitQuestion":"Does the guide describe the widget?","inputs":[{"type":"goal","id":"{{run.Goal}}"}],"deliverables":["guide"]}"""))));
     }
 
     private static JsonElement Step(NextResponse next, string key) =>

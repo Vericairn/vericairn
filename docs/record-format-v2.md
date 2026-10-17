@@ -615,12 +615,14 @@ attention write is retried and does not prevent containment. Settlement records 
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
 nor containment.
 
-From 0.7.2, settlement withdraws the still-open or notified asks named by its `liveness.attention` and
+From 0.7.2, settlement withdraws the still-open or notified process asks named by its `liveness.attention` and
 `signals[].attention`. The asker authors the withdrawal, whose subject pins the exact settlement and whose
 recommendation records that attention is no longer needed. The original ask and observation remain in history.
 An ask a person already answered stays answered; unrelated questions about the run stay open. Closed asks about
-the settled run no longer need reconsideration merely because settlement superseded its intent. Settlement and
-withdrawals are validated together and journaled, so a partial storage failure remains visible for reconciliation.
+the settled run no longer need reconsideration merely because settlement superseded its intent. New
+`attempt-missing` and `scope-settlement` asks stay open, with subjects pinned to the exact settled operation
+revision and hash. Settlement, these new review asks and process-ask withdrawals are validated together and
+journaled, so a partial storage failure remains visible for reconciliation.
 
 At settlement the worker compares a physical file inventory captured after brief export and before launch with the
 workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or
@@ -634,9 +636,12 @@ object/reference directory is pinned before launch; isolated Git metadata exclud
 replacement refs, grafts, attributes and external diff drivers. Missing history or an unreadable branch makes the
 audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
-repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
-`path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
-and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
+repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments).
+Bare patterns contain no whitespace; use `path:` for an explicit pattern, including a path containing spaces.
+For example, `path:NOTES.md` permits that file at the repository root; "NOTES.md at the repository's root"
+is prose and grants no path permission. Worker admission refuses a brief with no interpretable pattern before
+recording intent or launching a harness. Prose may accompany at least one pattern. Absolute paths, parent traversal
+and shell expansions grant nothing, and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
@@ -755,11 +760,11 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
 
 `work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.
 
-Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded.
+Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `scope-read`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded. `scope-read` warns about a read outside the workspace and does not stop the run; `scope` remains critical for confidently identified write targets outside the workspace and launch-supplied temporary directory. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified` warnings without a stop. Changes inside the workspace are checked against the brief at settlement. Network detections warn; credential detections remain critical for reads and writes alike.
 
 A watched run's immutable `target.watch` is a JSON-encoded string of its resolved thresholds, and `target.watchHistoryTokensPerMinute` pins the recent historical median or `unavailable`. History uses only fully reported successful runs of that goal and launcher; no current run reports its own baseline.
 
-A signal's `attention` must refer to an ask about that run's original intent. One ask is recorded per signal kind and severity, including after a lifecycle event is repeated. Critical observations retain the existing `stop` facts through observed containment. The final `scope-settlement` warning describes a boundary that has already exited. A missing attention id explicitly preserves a recording failure; it is not evidence that an ask was recorded.
+A signal's `attention` refers to an ask about that run's original intent, except that `attempt-missing` and `scope-settlement` also allow an exact-hash settled revision in the same run's chain. The worker creates these review asks in the settlement batch, pinned to that settlement; later evidence revisions may retain the signals and their pinned asks. Original-intent references remain valid for historical records. One ask is recorded per signal kind and severity, including after a lifecycle event is repeated. Critical observations retain the existing `stop` facts through observed containment. The final `scope-settlement` warning describes a boundary that has already exited. FIX-18 also admits `attempt-missing`: a settlement warning that the agent recorded no new attempt on the run's exact assignment during the run. The same statement appears in operation evidence; the existing status meaning is unchanged. A missing attention id explicitly preserves a recording failure; it is not evidence that an ask was recorded.
 
 Goals and rosters may record `limits.watch`, with optional integer fields `normalTokensPerMinute` (1–1,000,000,000), `burnMultiplier` (2–100), `burnMinimumTokens` (1–1,000,000,000,000), `burnWindowSeconds` (1–86,400), `burnCapPercent` (1–100), `loopWarning` (2–1,000), `loopStop` (3–10,000) and `loopWindow` (3–10,000). Specified loop fields must be ordered; the fully inherited settings must satisfy `loopWarning < loopStop <= loopWindow` before launch. Unknown fields, fractions and out-of-range values are refused. Rosters also accept `limits.stallSeconds` (1–86,400). These additions use the existing goal and roster revision authority, without another grant.
 

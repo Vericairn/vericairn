@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Records.Estate;
+using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
@@ -245,6 +246,53 @@ public class AgentRunLedgerTests
         body["signals"] = signals;
         RecordEnvelope changed = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
         Assert.Contains(ledger.Estate.Load().Findings, f => f.Code == "operation.signals" && f.Location == changed.ExpectedPath);
+    }
+
+    [Theory]
+    [InlineData("attempt-missing", "settlement", true)]
+    [InlineData("scope-settlement", "settlement", true)]
+    [InlineData("attempt-missing", "intent", true)]
+    [InlineData("scope-settlement", "intent", true)]
+    [InlineData("attempt-missing", "foreign", false)]
+    [InlineData("attempt-missing", "unpinned", false)]
+    [InlineData("attempt-missing", "earlier-settlement", true)]
+    [InlineData("network", "settlement", false)]
+    public void SettlementAttentionMayPinItsExactSettlementWhileLegacyIntentReferencesStillLoad(string code, string subject, bool valid)
+    {
+        var ledger = new Ledger("""{"wallMinutes":60,"attemptsPerStep":10}""");
+        RecordEnvelope prior = ledger.Run("settlement-attention", Small, Usage);
+        RecordEnvelope other = ledger.Run("other-attention", Small, Usage);
+        string askId = Ulid.NewUlid().Value;
+        var body = System.Text.Json.Nodes.JsonNode.Parse(prior.Body.GetRawText())!.AsObject();
+        body["signals"] = System.Text.Json.Nodes.JsonNode.Parse($$"""[{"code":"{{code}}","severity":"warning","at":"2026-10-13T12:00:40Z","summary":"Review the settled run.","attention":"{{askId}}"}]""");
+        RecordEnvelope settlement = ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: prior.Id);
+        EstateModel beforeAsk = ledger.Estate.Load();
+        RecordReference reference = subject switch
+        {
+            "intent" => beforeAsk.ById[beforeAsk.Chain(settlement)[0]].Reference,
+            "foreign" => other.Reference,
+            "unpinned" => settlement.Reference with { Hash = null },
+            "earlier-settlement" => prior.Reference,
+            _ => settlement.Reference,
+        };
+        RecordEnvelope ask = ledger.Estate.Add("ask", ledger.Estate.OperatorId,
+            $$"""{"to":"{{ledger.Estate.OperatorId}}","question":"Inspect the settled run?","recommendation":"Read its observation.","consequence":"The observation waits for review.","state":"open"}""", reference, id: askId);
+        EstateModel model = ledger.Estate.Load();
+        if (valid)
+        {
+            Assert.DoesNotContain(model.Findings, f => f.Severity == Severity.Error);
+            if (subject == "settlement")
+            {
+                Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location == ask.ExpectedPath);
+                body["evidence"]!.AsArray().Add(System.Text.Json.Nodes.JsonNode.Parse("""{"summary":"Additional observation of the same settled run."}"""));
+                ledger.Estate.Add("operation", ledger.Estate.OperatorId, body.ToJsonString(), supersedes: settlement.Id);
+                Assert.DoesNotContain(ledger.Estate.Load().Findings, f => f.Severity == Severity.Error);
+            }
+        }
+        else
+        {
+            Assert.Contains(model.Findings, f => f.Code == "operation.signals" && f.Location == settlement.ExpectedPath);
+        }
     }
 
     [Fact]

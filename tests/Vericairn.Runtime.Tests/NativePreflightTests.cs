@@ -12,6 +12,35 @@ namespace Vericairn.Runtime.Tests;
 
 public class NativePreflightTests
 {
+    [Fact]
+    public void CodexEnablesTheOrdinaryToolHostWithoutEnablingCodeMode()
+    {
+        using var fixture = new NativeProbe("codex");
+        LaunchContext context = fixture.Prepare();
+        string configuration = File.ReadAllText(Path.Combine(context.Environment["CODEX_HOME"], "config.toml"));
+        IReadOnlyList<string> command = fixture.Launcher.Command(context);
+        Assert.Contains("code_mode_host = true", configuration, StringComparison.Ordinal);
+        Assert.Contains("features.code_mode_host=true", command);
+        foreach (string feature in new[] { "code_mode", "code_mode_only" })
+        {
+            Assert.Contains(feature + " = false", configuration, StringComparison.Ordinal);
+            Assert.Contains("features." + feature + "=false", command);
+        }
+        Assert.True(fixture.Launcher.Preflight(context).Complete);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CodexAcceptsAbsentOrNullMcpTimeoutMetadata(bool omitted)
+    {
+        using var fixture = new NativeProbe("codex");
+        if (omitted) fixture.Behavior("mcp", "omitted-timeouts");
+        RunPreflight inventory = fixture.Launcher.Preflight(fixture.Prepare());
+        Assert.True(inventory.Complete);
+        Assert.False(File.Exists(fixture.Report));
+    }
+
     [Theory]
     [InlineData("tool_search")]
     [InlineData("request_user_input_async")]

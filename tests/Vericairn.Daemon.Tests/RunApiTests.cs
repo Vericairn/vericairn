@@ -68,7 +68,7 @@ public class RunApiTests
             string goal = Ok(api.GoalPropose(new GoalProposeRequest(op, Json($$$"""{"title":"Build the widget","objective":"Ship the widget.","completion":[{"evidence":"It ships.","check":"Read it."}],"constraints":[],"kind":"finite","sponsor":"{{{op}}}","budget":{"wallMinutes":60,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""")))).Id;
             Ok(api.GoalActivate(goal, new GoalActionRequest(op)));
             Ok(api.NewRecord(new NewRecordRequest("work-order", op, Json($$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}"""))));
-            string assignment = Ok(api.Assign(new AssignRequest("W-1", builder, op, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}""")))).Id;
+            string assignment = Ok(api.Assign(new AssignRequest("W-1", builder, op, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}""")))).Id;
             string resource = Ok(api.NewRecord(new NewRecordRequest("resource", op, Json("""{"kind":"repository","name":"widget","role":"Its source.","location":{"github":"Example/widget"},"visibility":"private"}""")))).Id;
             RepositoryClones.Register(host.Service.Session.Manifest.Estate, resource, scratch);
 

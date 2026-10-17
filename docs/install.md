@@ -97,6 +97,12 @@ choices, including each default. With no model allowlist only the default model 
 allowlist the launcher's supported efforts are allowed. Setting replaces that launcher's defaults and
 allowlists. It never widens the qualified inventory or adds tools, servers, variables or routes.
 
+Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and, in builds containing FIX-18 for 0.7.2,
+`max`. For example, `dotnet vc worker configure --launcher codex --model gpt-6-astra --effort max` stores
+that selection. The inventory probes do not validate a model's effort support; the harness validates it at launch.
+An observed nonzero exit, including an effort refusal, is recorded as `known-failure`. See the
+[execution guide](software.md#explicit-execution-and-environment-admission-run-01-070) for the admission and usage limits.
+
 Configuration is per machine and is never recorded in the estate. The owner-only files live at
 `worker/codex.json` and `worker/claude-code.json` under the user's Vericairn home. Reads and writes refuse
 when that home is inside a Git repository or an estate. If your home directory is a repository, set

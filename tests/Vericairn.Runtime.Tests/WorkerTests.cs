@@ -216,7 +216,7 @@ public class WorkerTests
         Assert.NotNull(settled.Stop!.ContainedAt);
         AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
         Assert.Equal(["not-started", "dispatched", "known-failure"], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
-        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(2, run.Service.Records("ask").Count);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -336,7 +336,7 @@ public class WorkerTests
     [Fact]
     public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"the widget\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"path:widget/\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
         RunResponse started = run.Start("generic", "scope-edits", run.Report("scope"));
         Assert.True(started.Ok, started.Message);
         RunRow row = run.Settled(started.Run);
@@ -448,9 +448,16 @@ public class WorkerTests
         Assert.NotNull(settled.Liveness!.AttentionAt);
         Assert.NotNull(settled.Liveness.Attention);
         Assert.Null(settled.Liveness.StoppedAt);
-        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(2, run.Service.Records("ask").Count);
         EstateModel model = run.Estate.Load();
         Assert.Equal("withdrawn", Asks.State(model, model.ById[settled.Liveness.Attention!]).State);
+        RecordEnvelope settlement = AgentRuns.Find(model, started.Run)!.Latest;
+        RunSignal missing = Assert.Single(settled.Signals!, s => s.Code == "attempt-missing");
+        RecordEnvelope missingAsk = model.ById[missing.Attention!];
+        Assert.Equal("open", Asks.State(model, missingAsk).State);
+        Assert.True(model.IsCurrent(missingAsk));
+        Assert.Equal(settlement.Reference, missingAsk.Subject);
+        Assert.Contains(Asks.Deliveries(model).SelectMany(d => d.Asks), a => a.Id == missingAsk.Id);
         Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location.StartsWith("records/ask/", StringComparison.Ordinal));
         Assert.Equal(0, run.Service.Check().Errors);
     }

@@ -56,7 +56,7 @@ public sealed class OperationType : IRecordType
         new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
         new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
         new("liveness", "object", false, "Worker-observed event-stream liveness: stallSeconds, lastEventAt, and optional attentionAt, attention (ask id), stoppedAt. Attention at one silence limit; stop at two.", 2),
-        new("signals", "object[]", false, "Worker event-stream observations: code, severity (warning|critical), at, summary, optional fingerprint, count and attention (ask id). Raw invocation inputs never enter a record.", 2),
+        new("signals", "object[]", false, "Worker event-stream and settlement observations: code, severity (warning|critical), at, summary, optional fingerprint, count and attention (ask id). Raw invocation inputs never enter a record.", 2),
         new("execution", "object", false, "Immutable admitted model, effort, provenance, disabled Adapter, environment inventory and context allocation, recorded before dispatch.", 2),
         new("executionObserved", "object", false, "Harness reports at settlement, with discrepancies and facts still unknown; never inferred from the request.", 2),
         new("stop", "object", false, "For an agent-run that was stopped: requestedAt and requestedBy (a principal, or worker for a cap the run reached), optional reason, then each fact once observed: transmittedAt with transmission, acknowledgedAt with acknowledgment, escalatedAt with escalation, and containedAt, only in a settled revision. A stop not observed stays requested.", 2),
@@ -426,7 +426,7 @@ public sealed class OperationType : IRecordType
         var signalKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (BodyReader signal in signals ?? [])
         {
-            string? code = signal.Enum("code", true, "network", "credentials", "scope", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement", "execution", "tool-inventory");
+            string? code = signal.Enum("code", true, "network", "credentials", "scope", "scope-read", "audit-unverified", "burn-rate", "loop", "stall", "scope-settlement", "execution", "tool-inventory", "attempt-missing");
             string? severity = signal.Enum("severity", true, "warning", "critical");
             signal.Timestamp("at", true);
             signal.Text("summary", true, 2000);
@@ -436,7 +436,13 @@ public sealed class OperationType : IRecordType
             context.RequireReference("signals.attention", attention, "ask");
             if (context.Find(attention) is { Type: "ask" } ask && ask.Subject?.Id != context.Model.Chain(context.Record)[0])
             {
-                context.Error("operation.signals", "A signal's attention item names this run's intent.");
+                // Settlement review asks pin the revision that produced them. Later evidence may supersede that operation
+                // while retaining its immutable signals; require the pinned settlement to remain in this same run's chain.
+                bool settlementReview = code is "attempt-missing" or "scope-settlement"
+                    && ask.Subject is not null && context.Find(ask.Subject.Id) is { Type: "operation" } settledOperation
+                    && ask.Subject == settledOperation.Reference && context.Model.Chain(context.Record).Contains(settledOperation.Id)
+                    && EstateModel.BodyString(settledOperation, "status") is "observed-success" or "known-failure" or "canceled";
+                if (!settlementReview) context.Error("operation.signals", "A signal's attention item names this run's intent, or for a settlement review, an exact settled revision of the same run.");
             }
             signal.NoOtherKeys();
             if (!signalKeys.Add(code + ":" + severity) || EstateModel.BodyString(context.Record, "action") != AgentRun)

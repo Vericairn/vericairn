@@ -3,10 +3,23 @@
 
 namespace Vericairn.Runtime.Workers;
 
-/// <summary>The assignment's repository-relative path patterns, shared by the event and settlement audits.</summary>
+/// <summary>Repository-relative patterns and workspace-boundary checks used by the worker audits.</summary>
 public static class PermittedPaths
 {
-    /// <summary>Whether text is an interpretable repository-relative path or pattern.</summary>
+    /// <summary>
+    /// Interprets a brief entry as a relative pattern. Bare patterns contain no whitespace;
+    /// an explicit path: prefix distinguishes a literal path containing spaces from prose.
+    /// </summary>
+    public static string? Pattern(string entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        bool explicitPath = entry.StartsWith("path:", StringComparison.Ordinal);
+        string pattern = (explicitPath ? entry[5..] : entry).Trim();
+        return Relative(pattern) && (explicitPath || !pattern.Any(char.IsWhiteSpace))
+            && pattern.IndexOfAny(['~', '$', '`']) < 0 ? pattern : null;
+    }
+
+    /// <summary>Whether text has a repository-relative path shape, independent of a brief entry's prose or prefix.</summary>
     public static bool Relative(string path) => !string.IsNullOrWhiteSpace(path) && path.Length <= 2000
         && !Path.IsPathRooted(path) && !path.Contains(':', StringComparison.Ordinal) && !path.Contains('\\', StringComparison.Ordinal)
         && !path.Any(char.IsControl) && path.Split('/').All(part => part is not ("." or ".."));
@@ -78,20 +91,28 @@ public static class PermittedPaths
     /// </summary>
     public static bool Allows(string path, string workspace, IReadOnlyList<string> permitted)
     {
+        ArgumentNullException.ThrowIfNull(permitted);
+        string? relative = WithinWorkspace(path, workspace);
+        return relative is not null && relative != "." && permitted.Select(Pattern).Any(pattern => pattern is not null && Matches(relative, pattern));
+    }
+
+    internal static bool Contains(string path, string workspace) => WithinWorkspace(path, workspace) is not null;
+
+    private static string? WithinWorkspace(string path, string workspace)
+    {
         ArgumentNullException.ThrowIfNull(path);
         ArgumentNullException.ThrowIfNull(workspace);
-        ArgumentNullException.ThrowIfNull(permitted);
         if (path.IndexOfAny(['~', '$', '`', '\0']) >= 0 || path.Contains(':', StringComparison.Ordinal) && !Path.IsPathFullyQualified(path))
         {
-            return false;
+            return null;
         }
 
         string root = Path.GetFullPath(workspace);
         string full = Path.GetFullPath(path.Replace('\\', '/'), root);
         string relative = Path.GetRelativePath(root, full).Replace('\\', '/');
-        if (!Relative(relative))
+        if (relative != "." && !Relative(relative))
         {
-            return false;
+            return null;
         }
 
         string current = root;
@@ -102,7 +123,7 @@ public static class PermittedPaths
             {
                 if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
                 {
-                    return false;
+                    return null;
                 }
             }
             catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
@@ -111,7 +132,6 @@ public static class PermittedPaths
             }
         }
 
-        return permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
-            .Where(Relative).Any(pattern => Matches(relative, pattern));
+        return relative;
     }
 }

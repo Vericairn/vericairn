@@ -15,6 +15,68 @@ namespace Vericairn.Runtime.Tests;
 public class NativeAdmissionTests
 {
     [Theory]
+    [InlineData("codex")]
+    [InlineData("claude")]
+    public void LaunchedHarnessSeesEndOfInput(string harness)
+    {
+        using var fixture = new NativeRun(harness);
+        fixture.Probe.Behavior("stdin", "eof");
+        RunResponse started = fixture.Start();
+        Assert.True(started.Ok, started.Message);
+        Assert.Equal("observed-success", fixture.Run.Settled(started.Run).Status);
+        Assert.Equal("eof", File.ReadAllText(fixture.Probe.Report + ".stdin"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CodexMaxIsAdmittedButAHarnessRefusalSettlesAsFailure(bool refuseAtLaunch)
+    {
+        using var fixture = new NativeRun("codex", budget: """{"wallMinutes":60,"attemptsPerStep":3,"tokens":1000}""");
+        var store = new WorkerConfigurationStore();
+        string path = Path.Combine(VericairnHome.Path(), "worker", "codex.json");
+        Assert.False(File.Exists(path));
+        try
+        {
+            store.Write(fixture.Probe.Launcher, new("gpt-6-astra", "max"));
+            fixture.Run.Service.WorkerOptions = fixture.Run.Service.WorkerOptions with
+            {
+                Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal),
+            };
+            if (refuseAtLaunch) fixture.Probe.Behavior("refuseEffort", "max");
+            else fixture.Probe.Behavior("rollout", "match");
+            RunResponse started = fixture.Start();
+            Assert.True(started.Ok, started.Message);
+            RunRow settled = fixture.Run.Settled(started.Run);
+            Assert.Equal(refuseAtLaunch ? "known-failure" : "observed-success", settled.Status);
+            string[] arguments = JsonSerializer.Deserialize<string[]>(File.ReadAllText(fixture.Probe.Report))!;
+            Assert.Contains("model_reasoning_effort=\"max\"", arguments);
+            JsonElement requested = settled.Execution!.Value.GetProperty("requested");
+            Assert.Equal("gpt-6-astra", requested.GetProperty("model").GetString());
+            Assert.Equal("max", requested.GetProperty("effort").GetString());
+            var records = AgentRuns.Find(fixture.Run.Estate.Load(), started.Run)!;
+            Assert.Equal(1000, records.Intent.Body.GetProperty("cap").GetProperty("tokens").GetInt64());
+            if (refuseAtLaunch)
+            {
+                Assert.Contains("exited with code 2", records.Latest.Body.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
+                Assert.Contains("effort", settled.ExecutionObserved!.Value.GetProperty("unknown").EnumerateArray().Select(v => v.GetString()));
+                Assert.Equal(1000, settled.Charged.GetProperty("tokens").GetInt64());
+            }
+            else
+            {
+                JsonElement actual = Assert.Single(settled.ExecutionObserved!.Value.GetProperty("reports").EnumerateArray());
+                Assert.Equal("gpt-6-astra", actual.GetProperty("model").GetString());
+                Assert.Equal("max", actual.GetProperty("effort").GetString());
+            }
+            Assert.Equal(0, fixture.Run.Service.Check().Errors);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public void ChangingLocalConfigurationDuringPreparationRequiresFreshAdmission(bool afterIntent)
@@ -103,7 +165,7 @@ public class NativeAdmissionTests
         }
         else
         {
-            Assert.Empty(settled.Signals!);
+            Assert.Equal("attempt-missing", Assert.Single(settled.Signals!).Code);
             Assert.Empty(settled.ExecutionObserved!.Value.GetProperty("discrepancies").EnumerateArray());
         }
         var custody = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);

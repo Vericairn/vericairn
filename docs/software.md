@@ -471,7 +471,12 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
 recorded through the MCP tools as its checks, and the brief's prohibited effects, the goal's constraints and only the
 changes the brief permits as its constraints, on one line. The launcher argument construction and configuration checks are covered by the launcher tests; the limits of
-that qualification are stated below. The `command` setting of each launcher names another executable, or a JSON array of one and
+that qualification are stated below. The agent's initial prompt is `/goal <condition>`; the full brief is in
+`.vericairn/brief.md` and is available through `work_brief` on the configured `vericairn` MCP server, acting as
+the run's agent principal. The brief carries the assignment, permitted changes, prohibited effects, review criteria,
+mandatory originals and the complete withheld list. The agent can retrieve pinned originals with `context_read`
+and records its own attempt and result with `work_attempt` and `work_result`; a worker exit does not accept that result.
+The `command` setting of each launcher names another executable, or a JSON array of one and
 its leading arguments. Native qualification refuses leading option flags in that setting: the launcher supplies every
 harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
 bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
@@ -510,6 +515,10 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
+   If the agent recorded no new attempt on this exact assignment during the run, settlement adds
+   `attempt-missing` evidence and a warning with an attention ask. The CLI settlement and status attention
+   say that it settled without the agent's attempt; an earlier attempt does not satisfy this check.
+   The operation's status and the CLI exit-code meaning are unchanged.
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
@@ -669,13 +678,29 @@ Codex runs with a fresh per-run `CODEX_HOME`: only its provisioned harness `auth
 owner-only permissions on Unix. User settings, MCP credentials, plugins and hooks are not imported. The workspace is
 canonicalized, including filesystem aliases, before writing its project-trust key. A whole `projects` value encodes
 the path as a TOML key, so dots or quotes in it are not interpreted as CLI key separators.
+The baseline routes ordinary shell and MCP tools through `code_mode_host`, so FIX-18 enables that host.
+`code_mode` and `code_mode_only` remain disabled; the admitted tool inventory is unchanged.
+
+The generated configuration and launch override set `mcp_servers.vericairn.default_tools_approval_mode = "approve"`.
+This pre-approves the agent's calls to the estate server so noninteractive `exec` can read the brief and record the
+agent's attempt and result. It applies only to `vericairn`; no global or other-server approval is granted, and
+`approval_policy` remains unset, leaving `exec`'s `never` policy in place. The server acts only as the run's principal.
+Every call still passes the runtime's authority checks; pre-approval grants no additional authority and cannot accept
+the agent's own work. No user approval policy or reviewer is imported.
 
 Codex merges configuration tables across layers; a complete `mcp_servers` override alone cannot remove ambient
 servers. The launcher therefore probes the effective configuration with `mcp list --json` and refuses unless it
 contains exactly the enabled `vericairn` stdio server with the approved command, arguments and environment, no inherited
 environment-variable list and no changed working directory. Extra entries, even disabled ones, merged transport
 settings, and incompatible managed policy refuse launch. Project trust is set to untrusted using the canonical
-workspace key. The probe does not start a coding agent or an MCP server. See the [Codex configuration
+workspace key. FIX-18 accepts the baseline's absent or null `startup_timeout_sec` and `tool_timeout_sec`
+metadata; configured timeouts, duplicate fields and unaccounted controls still refuse launch. If the list reports
+`default_tools_approval_mode`, only `"approve"` on the sole `vericairn` server is accepted; other values and per-tool
+overrides refuse. The installed baseline omits approval settings from both `mcp list --json` and `mcp get --json`.
+Approval verification therefore rests on the exact generated home, fixed launch overrides and exclusion of other
+configuration sources, not a claim that the list reports it. The probes do not discover the server's tools, so the
+launcher does not invent an `enabled_tools` allowlist.
+The probe does not start a coding agent or an MCP server. See the [Codex configuration
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
 
 Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only the provisioned `claudeAiOauth` login from its
@@ -747,9 +772,12 @@ before launch and reads objects through isolated Git metadata, without loading a
 replacement refs, grafts, attributes or external diff drivers. Missing history or an unreadable branch marks the
 audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
-repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
-`path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
-and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
+repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments).
+Bare patterns contain no whitespace; use `path:` for an explicit pattern, including a path containing spaces.
+For example, `path:NOTES.md` permits that file at the repository root; "NOTES.md at the repository's root"
+is prose and grants no path permission. Worker admission refuses a brief with no interpretable pattern before
+recording intent or launching a harness. Prose may accompany at least one pattern. Absolute paths, parent traversal
+and shell expansions grant nothing, and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
@@ -789,7 +817,41 @@ resume reports a newly completed phase as an added record.
 
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
 
-Recognizable network commands, structured network URLs and web tools, credential paths, common secret environment variables and secret-store commands, and invocation paths outside the assignment's permitted paths produce worker signals. Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names are not treated as executable operations. Path checks share the settlement audit's literal-directory and glob rules, normalize traversal and refuse workspace links. Reading the exported brief remains possible. Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
+Recognizable network commands, structured network URLs and web tools produce warnings; `dotnet restore` is one such
+network attempt. Credential paths, common secret environment variables and secret-store commands remain critical
+for reads and writes alike. Classified read-only invocations inside the workspace raise no scope signal, even for
+a file outside the brief's permitted changes, such
+as reading `README.md` when only `path:NOTES.md` is permitted. Reads outside the workspace raise `scope-read` at warning
+and continue; `pwd` followed by `rg --files --hidden -g AGENTS.md` on the workspace's parent is such a read.
+Critical `scope` requires a confidently identified outside write target: operands of known mutating commands
+(`cp`, `mv`, `rm`, `touch`, `mkdir`, `rmdir`, `ln`, `tee`, `truncate`, `chmod`, `chown` and their PowerShell equivalents),
+output-redirection targets, `apply_patch` and structured file-change paths, or Git `-C`, `--work-tree` and `--output`
+targets. An outside-looking operand of an unclassified invocation raises `audit-unverified` at warning, without a
+stop. Opaque programs cannot establish a confident change, even when code contains `open` with an outside filename.
+Unresolved variable targets and paths whose physical containment cannot be verified also warn rather than asserting
+an outside change. Changes inside this disposable worktree raise no event-stream scope signal, whether
+or not the brief permits them: the settlement audit checks actual changes against the brief's patterns. Thus
+`touch README.md` continues when only `path:NOTES.md` is permitted, but changing `README.md` is flagged at settlement.
+Input redirection is a read. Heredoc bodies (`<<`, `<<-`) and here-string operands (`<<<`) are input, never path
+operands. Interpreter input is scanned for recognizable network and credential patterns and raises `audit-unverified`,
+as inline `-c` code does. Redirections on the command line remain checked, including those beside a heredoc.
+
+The audit also permits the temporary directory actually supplied in the harness's launch environment: `TMPDIR`
+on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. The shipped launchers preserve these admitted variables;
+they do not create another temporary directory. The audit uses the same captured environment as the launched process,
+recognizes those variables in path operands, and checks traversal against the resulting boundary. It does not infer
+a system temporary directory or take a boundary from tool-event input; system `/tmp` is permitted only when the
+run's supplied temporary variable names it.
+
+Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names
+are not treated as executable operations. Path checks normalize traversal and do not assume links or expansions
+remain inside the workspace. Git message values (`-m`, `--message`, `--message=…`) for commit, tag, merge, revert,
+notes and stash are text, not paths. Git show, log, diff, blame, cat-file, ls-tree, ls-files, rev-parse and status
+are classified as reads; their `rev:path` operands, such as `HEAD:README.md`, name Git objects rather than filesystem
+paths. Read classification also covers common file readers, searches and structured read tools; mutating or
+helper-executing options, such as `find -delete`, `rg --pre` and `git diff --output`, are not classified as reads.
+An outside-looking operand of an unclassified helper raises uncertainty; the explicit Git output target remains a known write target.
+Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.
 
@@ -803,17 +865,19 @@ History is the last 20 successful, fully reported runs of the same launcher and 
 
 ## Attention and containment (0.7.0)
 
-Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, live path violations, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+Every new signal kind and severity gets one ask addressed to the goal's decider, and its id is retained with the run. Process signals pin the run's exact intent; settlement-review signals pin its exact settlement. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
 
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
 
-Attention asks initially pin the run's original intent. From 0.7.2, settlement withdraws its still-waiting attention
-asks as no longer needed. Each withdrawal is authored by the asker, pins the exact settlement, and preserves the
+From 0.7.2, settlement withdraws its still-waiting process attention asks, such as stall and command-audit asks,
+as no longer needed. Each withdrawal is authored by the asker, pins the exact settlement, and preserves the
 question and the original observation. An ask already answered by a person's decision stays answered. Settled,
-closed asks no longer produce stale-subject warnings; observations remain available for review. Settlement and
-withdrawals are validated together and journaled; an interrupted write remains a reconciliation task.
+closed asks no longer produce stale-subject warnings; observations remain available for review. The
+`attempt-missing` and `scope-settlement` asks are created at settlement and stay open for review, pinned to the
+settled operation's exact revision and hash. Settlement, these new asks and the process-ask withdrawals are
+validated together and journaled; an interrupted write remains a reconciliation task.
 
 ## Recorded watching settings (0.7.0)
 
@@ -934,6 +998,14 @@ required choices or unsupported values refuse dispatch, without ambient fallback
 adapter passes an explicit model and native reasoning-effort configuration; the Claude Code adapter
 passes an explicit model and native effort flag. An explicit provider default omits only the effort flag.
 
+Codex's native efforts are `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`; FIX-18 adds `max`
+for 0.7.2 while retaining every existing value. For `max`, the launcher passes
+`--model <model> -c 'model_reasoning_effort="max"'`. Configuration and admission check this vocabulary and
+the local allowlists. The installed baseline's version, help, feature-list and MCP-list probes do not establish
+whether a model accepts an effort: even an invalid effort can pass those probes. Codex validates the selection
+at launch. An observed nonzero exit, including an effort refusal, is recorded as `known-failure`, never success;
+unreported usage is charged at the reserved cap. A lost observer remains uncertain under the usual run rules.
+
 `worker run` and `goal step` accept `--configuration <name>` and repeated `--execution name=value` for
 `model`, `effort`, `provider`, `destination`, `dataBoundary` and `adapter`. They also accept
 `--input-tokens`, `--output-tokens` and `--context-package <sha256:...>`. For example, the execution part
@@ -942,7 +1014,7 @@ not permission to change an inherited restriction. Configure a stock native work
 runs it before starting a run or an agent goal step:
 
 ```sh
-vericairn worker configure --launcher codex --model model-alias --effort high
+vericairn worker configure --launcher codex --model gpt-6-astra --effort max
 vericairn worker configure --launcher codex
 ```
 
@@ -1039,7 +1111,15 @@ Settlement's `executionObserved` keeps distinct harness reports, discrepancies a
 The worker never fills missing actual model, effort, revision, provider, destination, version or inventory
 facts from its request. Reports are bounded and portable; unsafe or excessive reports leave an explicit
 incomplete-report observation. A discrepancy remains even if a later report returns to the requested
-choice. WATCH-01 receives the admitted selection and inventory: execution discrepancies and unadmitted
+choice. After Codex exits, the launcher reads `turn_context` model and effort from the run home's
+`sessions/<yyyy>/<MM>/<dd>/rollout-*.jsonl` files. Missing, unreadable, malformed or over-limit rollouts
+supply no facts; the admitted selection is never substituted. The scan is limited to 4,096 entries,
+64 MiB and 128 distinct reports, and does not follow links. Only model and effort are read from these
+entries; other fields remain unknown unless separately reported. A discrepancy discovered after exit
+is retained in `executionObserved` without pretending to stop an exited process. The additive
+`IAgentLauncher.ReadExecutionArtifacts(runDirectory)` hook supplies these post-exit facts; existing
+launchers default to no artifact reports.
+WATCH-01 receives the admitted selection and inventory: live execution discrepancies and unadmitted
 tool invocations produce critical signals and use its existing attention and stop path. All original
 command, credentials, network, scope, loop and burn-rate auditing remains in place.
 Codex's `command_execution` and `file_change` events are matched to its qualified `exec_command` and
@@ -1092,7 +1172,7 @@ MCP server. The signed `harness-qualification` record uses record format 2 and h
 | `tools` | The closed built-in tool list, executable and entry-file content identities; Codex also includes its complete observed feature listing. |
 | `configuration` | The isolated configuration policy and platform identity, including disabled extensions and normalized command bindings. |
 | `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
-| `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests its reported authentication status. |
+| `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
@@ -1131,11 +1211,11 @@ It includes native MCP discovery and the model-conditional clock and user-input 
 can hide their schemas on a particular turn. The inventory identifies the built-in capabilities, not a guarantee that
 every tool is callable on every turn. See the [Codex tool registry](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs).
 The launcher requires
-`goals`, `shell_tool`, `unified_exec` and `view_image` enabled, disables web search, ignores exec-policy rules, and
+`goals`, `shell_tool`, `unified_exec`, `view_image` and `code_mode_host` enabled, disables web search, ignores exec-policy rules, and
 explicitly disables these extension/tool features:
 
 `apps`, `plugins`, `remote_plugin`, `hooks`, `multi_agent`, `multi_agent_v2`, `browser_use`, `browser_use_external`,
-`browser_use_full_cdp_access`, `computer_use`, `in_app_browser`, `image_generation`, `code_mode`, `code_mode_host`,
+`browser_use_full_cdp_access`, `computer_use`, `in_app_browser`, `image_generation`, `code_mode`,
 `code_mode_only`, `memories`, `workspace_dependencies`, `skill_search`, `skill_mcp_dependency_install`, `tool_suggest`,
 `sleep_tool`, `shell_snapshot`.
 
@@ -1182,7 +1262,30 @@ bindings cannot silently change while the portable inventory remains the same. A
 dispatch and records an unstarted, zero-charge failure.
 
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
-qualification. Real model calls, provider/account-dependent behavior and remote managed policy have not been qualified.
+qualification. The live observations below cover only the reported runs; other provider/account-dependent behavior
+and remote managed policy have not been qualified.
+FIX-18 covers `max` argument construction, configuration, admission and observed harness refusal with stand-ins.
+The builder's first live run of `6bab07f` with Codex 0.159.0-alpha.12.1 reported `gpt-6-astra` at `max`
+in its session, with 1 wall minute and 34,573 tokens recorded. It exited cleanly but every tool call failed
+because the code-mode host was disabled; the agent recorded no attempt or result.
+The builder's second live run of `80423b5`, using the same Codex version at `max`, executed its first shell command,
+reported the admitted model and effort from its rollout with no discrepancy, and raised the missing-attempt signal
+and ask at settlement. The command searched the workspace's parent for `AGENTS.md`; the old audit stopped this read
+as a critical scope violation. FIX-18 now separates reads from changes, confines event-stream scope stops to
+possible changes outside the workspace, and refuses briefs with no interpretable permitted path pattern.
+Changes inside the worktree are checked against the brief at settlement. The third live run of `42f989d` passed
+its worktree `rg --files` search and `cat .vericairn/brief.md`, then stopped when the old audit mistook a Python
+heredoc's division operator for an outside write path. FIX-18 now reserves scope stops for confidently identified
+write targets and treats interpreter input as unverified code. The fourth live run of `8e272de` passed that audit,
+with only `audit-unverified` for the Python heredoc, and settled observed-success with 2 wall minutes and 95,406 tokens.
+It raised the missing-attempt signal correctly, but Codex refused the estate MCP calls because they required approval
+under `exec`'s `never` policy. The agent changed nothing. FIX-18 now pre-approves only the estate server's tools.
+The fifth live run of `531d169` recorded its cap before launch, observed the admitted model at `max`, and recorded
+3 wall minutes and 205,767 tokens. The agent authored its signed attempt and result through the estate MCP server
+and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
+the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
+sandbox; that limitation is assigned to a separate work order. Observed-success and live qualification do not
+accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the

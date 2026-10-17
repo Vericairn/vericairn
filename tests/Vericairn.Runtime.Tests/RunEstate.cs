@@ -23,7 +23,7 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 internal sealed class RunEstate : IDisposable
 {
-    public const string Brief = """{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["widget repository, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""";
+    public const string Brief = """{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":["no publication"],"workspace":["widget repository, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""";
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
@@ -32,6 +32,8 @@ internal sealed class RunEstate : IDisposable
         Estate = new TestEstate(recordFormat: 2);
         Scratch = Path.Combine(Path.GetTempPath(), "vericairn-run-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(Scratch);
+        string temporary = Path.Combine(Scratch, "harness-temporary");
+        Directory.CreateDirectory(temporary);
         Service = EstateService.Open(Estate.Root);
         var registry = new ProviderRegistry();
         registry.Register(new ReportedLauncher(new ClaudeCodeLauncher()));
@@ -41,7 +43,12 @@ internal sealed class RunEstate : IDisposable
         Service.Providers = registry;
         Service.WorkerOptions = (options ?? new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) }) with
         {
-            Environment = options?.Environment ?? new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names) { ["CODEX_HOME"] = Path.Combine(Scratch, "stand-in-login") },
+            Environment = options?.Environment ?? new Dictionary<string, string>(WorkerEnvironment.Current(), WorkerEnvironment.Names)
+            {
+                ["CODEX_HOME"] = Path.Combine(Scratch, "stand-in-login"),
+                // Outside-workspace fixtures must also be outside the harness's explicitly supplied temporary boundary.
+                ["TMPDIR"] = temporary, ["TEMP"] = temporary, ["TMP"] = temporary,
+            },
         };
 
         OperatorDevice = Ok(Service.DeviceCreate(new DeviceCreateRequest(Estate.OperatorId, "Operator's laptop", "file"))).Id;

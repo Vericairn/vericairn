@@ -48,9 +48,11 @@ public sealed class WorkerJourneyTests : IDisposable
         try
         {
             (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
-            CliHarness.Ok("--estate", root, "worker", "run", assignment, "--launcher", "claude-code", "--agent", builder, "--by", op, "--repository", resource,
+            CliHarness.Outcome ran = CliHarness.Ok("--estate", root, "worker", "run", assignment, "--launcher", "claude-code", "--agent", builder, "--by", op, "--repository", resource,
                 "--configuration", "claude-code", "--execution", "model=model-b", "--execution", "effort=low", "--input-tokens", "200", "--output-tokens", "100", "--context-bytes", "1000000",
                 "--setting", "command=" + FakeHarness.Setting("execution", Path.Combine(scratch, "report.jsonl")));
+            Assert.Contains("settled without the agent's attempt", ran.Out, StringComparison.Ordinal);
+            Assert.Contains("settled without the agent's attempt", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
             JsonElement run = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());
             using EstateService api = EstateService.Open(root);
             var custody = new RunDirectory(api.Session.Manifest.Estate, run.GetProperty("run").GetString()!);
@@ -123,6 +125,7 @@ public sealed class WorkerJourneyTests : IDisposable
             Assert.True(ran.Code == 0, ran.Out + ran.Err + string.Join('\n', File.Exists(report) ? File.ReadAllLines(report).Select(l => l[..Math.Min(l.Length, 400)]) : []));
             Assert.Contains("dispatched  widget, branch work/w-1", ran.Out, StringComparison.Ordinal);
             Assert.Contains("cap wallMinutes 120, attemptsPerStep 2", ran.Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("settled without the agent's attempt", ran.Out, StringComparison.Ordinal);
             Assert.Contains("observed-success  claude-code as " + builder, ran.Out, StringComparison.Ordinal);
             Assert.Contains("tokens 600", ran.Out, StringComparison.Ordinal);
 
@@ -228,7 +231,7 @@ public sealed class WorkerJourneyTests : IDisposable
         string goal = CliHarness.Ok("--estate", root, "--json", "goal", "propose", "--by", op, "--title", "Build the widget", "--objective", "Ship the widget.", "--done", """{"type":"work-order","fields":{"key":"W-1"},"state":"accepted"}""", "--budget", "wallMinutes=120", "--budget", "attemptsPerStep=2").Id;
         CliHarness.Ok("--estate", root, "--json", "goal", "activate", goal, "--by", op);
         CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", op, "--body", CliHarness.WriteJson(scratch, "order.json", $$"""{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Build it.","scope":["widget"],"exitQuestion":"Does the widget build and pass its tests?","inputs":[{"type":"goal","id":"{{goal}}"}],"deliverables":["widget"]}"""));
-        string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["widget, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""")).Id;
+        string assignment = CliHarness.Ok("--estate", root, "--json", "work", "assign", "W-1", "--contributor", builder, "--by", op, "--brief", CliHarness.WriteJson(scratch, "brief.json", """{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":["no publication"],"workspace":["widget, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""")).Id;
 
         string clone = Path.Combine(scratch, "widget");
         Directory.CreateDirectory(clone);
