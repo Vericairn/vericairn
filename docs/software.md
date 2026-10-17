@@ -809,9 +809,11 @@ Attention writes are retried while observing and at settlement. A failed attenti
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
 
-Attention asks pin the run's original intent. Once settlement supersedes that operation, a current ask is
-reported as `record.subject-stale`; the worker does not revise or answer it. Inspect the settled run before
-answering through the existing decision path. The warning does not reopen the settled run or its reservation.
+Attention asks initially pin the run's original intent. From 0.7.2, settlement withdraws its still-waiting attention
+asks as no longer needed. Each withdrawal is authored by the asker, pins the exact settlement, and preserves the
+question and the original observation. An ask already answered by a person's decision stays answered. Settled,
+closed asks no longer produce stale-subject warnings; observations remain available for review. Settlement and
+withdrawals are validated together and journaled; an interrupted write remains a reconciliation task.
 
 ## Recorded watching settings (0.7.0)
 

@@ -2590,9 +2590,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
             RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
             string status = order is null ? "planned" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
-            bool moot = stored.Count == 0 || missing.Count == 0
-                || stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
-                || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"));
+            bool routing = journal.Records.Any(r => r.Type == "assignment");
+            bool moot = stored.Count == 0 || missing.Count == 0 || (routing &&
+                (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
+                 || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"))));
             if (moot)
             {
                 journal.Close();
@@ -2600,7 +2601,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
-            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned.");
+            string consequence = routing
+                ? $"The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned."
+                : "Reconcile the missing records from the stored evidence; nothing stored is removed, and the task remains until the batch is complete.";
+            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. {consequence}");
         }
 
         return findings;

@@ -615,6 +615,13 @@ attention write is retried and does not prevent containment. Settlement records 
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
 nor containment.
 
+From 0.7.2, settlement withdraws the still-open or notified asks named by its `liveness.attention` and
+`signals[].attention`. The asker authors the withdrawal, whose subject pins the exact settlement and whose
+recommendation records that attention is no longer needed. The original ask and observation remain in history.
+An ask a person already answered stays answered; unrelated questions about the run stay open. Closed asks about
+the settled run no longer need reconsideration merely because settlement superseded its intent. Settlement and
+withdrawals are validated together and journaled, so a partial storage failure remains visible for reconciliation.
+
 At settlement the worker compares a physical file inventory captured after brief export and before launch with the
 workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or
 Git environment variables, and the physical root must retain the baseline's identity. Content, symlink targets

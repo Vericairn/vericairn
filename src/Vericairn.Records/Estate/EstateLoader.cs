@@ -258,6 +258,11 @@ public static class EstateLoader
             {
                 findings.Info("record.subject-withdrawn", record.ExpectedPath, $"The subject, release {EstateModel.BodyString(latest, "version")}, was withdrawn by {latest.Id}; this record refers to an earlier revision, and the withdrawal answers it.");
             }
+            else if (record.Type == "ask" && target.Type == "operation" && EstateModel.BodyString(latest, "action") == "agent-run" &&
+                     EstateModel.BodyString(latest, "status") is "observed-success" or "known-failure" or "canceled" && !Asks.IsWaiting(Asks.State(model, record).State))
+            {
+                findings.Info("ask.run-settled", record.ExpectedPath, $"The run settled in operation {latest.Id}; this ask is already {Asks.State(model, record).State} and needs no reconsideration because of that settlement.");
+            }
             else
             {
                 findings.Warning("record.subject-stale", record.ExpectedPath, $"The subject has been superseded by {latest.Id}; this record refers to an earlier revision and needs reconsideration.");
