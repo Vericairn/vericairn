@@ -7,15 +7,17 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The code being prepared for 0.7.1 includes hand-over and resume from retained records, worker observations of
+Vericairn 0.7.1 includes hand-over and resume from retained records, worker observations of
 commands, token rates and repeated calls, personal communication settings and delegation, measured context packages with
 explicit withheld lists and pinned retrieval, and explicit model, effort and environment admission for each
 agent run. Human-authorized harness requalification pins one exact version and its probe digests. Workbench
-adds communication settings and hand-over/resume views. The [0.7.0 documentation set](docs/releases/0.7.0/README.md)
-describes these features, the COMMS-02 qualification evidence and the limits below; that candidate was withdrawn.
+adds communication settings and hand-over/resume views. The [0.7.1 documentation set](docs/releases/0.7.1/README.md)
+describes these features, the COMMS-02 qualification evidence and the limits below.
 
 The last published release is [0.6.1](https://github.com/Vericairn/vericairn/releases/tag/v0.6.1), published on
-October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. The 0.7.0 candidate also carries
+October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. The 0.7.0 candidate was withdrawn
+before publication by decision `01M53S6DYFCPJMG0AQRSN8ZFSP`, recorded in withdrawal
+`01M53S6FN1GANBY5HSNDKE5N08`. Its frozen set remains indexed; 0.7.1 carries its work with FIX-12. This includes
 FIX-09's bounded loopback authentication and recoverable notes window, and FIX-10's deterministic permitted-path
 matching and independent audit checks. FIX-11 adds machine-local worker configuration, restricts harness
 qualification to the runtime's own machine and completes the generated CLI option reference.
@@ -35,6 +37,9 @@ If your home holds `.claude` or `.codex` settings, move workspaces outside it wi
 `vericairn worker configure --workspaces <absolute-directory>`; `vericairn worker configure` shows the root.
 The root applies to every launcher, must be outside repositories, estates and configured ancestors, and is
 reread by the CLI and daemon for each run. New roots are owner-only. The harness configuration scan remains strict.
+Codex also refuses the user's own `~/.agents` customization, independently of workspace placement or
+`CODEX_HOME`; use a worker account without that discovery root. An empty ordinary directory or one containing
+only recognized instruction files is allowed by the native scan; skills, other entries and uninspected links are refused.
 Harness qualification is machine-local too: paired local-network devices are refused. The
 [software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes the setup and
 admission checks. The efficiency Adapter
@@ -50,7 +55,7 @@ sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md
 and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
 the maintained documents, the release notes and known limitations. The index there also names the versions
 withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the drafts for the next release. Main now contains the 0.7.0 code and its documentation under preparation;
+documents at `docs/` are the maintained drafts. The 0.7.1 set carries 0.7.0's work and FIX-12;
 these changes are not part of the published 0.6.1 build or its frozen documentation set.
 
 For 0.6.1, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
@@ -63,7 +68,7 @@ release and pins the one it runs on.
 
 ## Install the command line and SDK
 
-NuGet distribution is prepared for 0.7.0. Once that release's packages are published, install the command
+NuGet distribution is included in 0.7.1. Once that release's packages are published, install the command
 line with the .NET 10 SDK on Linux, macOS or Windows:
 
 ```sh

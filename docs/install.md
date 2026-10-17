@@ -1,8 +1,13 @@
 # Installing Vericairn
 
-This installation draft describes the code being prepared for 0.7.1, after the 0.7.0 candidate was withdrawn.
+This installation draft describes 0.7.1, which carries the withdrawn 0.7.0 candidate's work with FIX-12.
+The candidate was withdrawn before publication under decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal
+record `01M53S6FN1GANBY5HSNDKE5N08`; its frozen set stays indexed and is not an upgrade target.
 NuGet distribution becomes available after the operator publishes a release and its publication workflow succeeds.
 The `0.0.1-reserved` packages reserve names; they are not the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
+The NuGet workflow verifies the exact package assets the operator publishes against that release's own
+`SHA256SUMS`; it does not compare them with the estate's accepted candidate. Publication of the accepted
+draft is the operator's responsibility. No package is rebuilt during upload, and duplicate versions are skipped.
 
 ## Command line from NuGet
 
@@ -124,6 +129,15 @@ refused with its location: preserve its work, then use `git worktree remove` wit
 registered clone, or select a root containing it. Changing the root does not move a worktree.
 Workspace paths stay local and never enter records. Moving workspaces changes their ancestors; separately
 discovered user skills and managed configuration still face the same native checks.
+In particular, a Codex run is refused while the user's own `~/.agents` contains skills or other customization,
+even with a workspace outside that home and a fresh `CODEX_HOME`. Use a worker account without this discovery
+root. The native scan allows an empty ordinary directory or one containing only recognized instruction files;
+it refuses other entries, child directories and uninspected links. Workspace-root validation itself refuses any `.agents`
+marker in the root or its ancestors, including an empty one.
+
+FIX-12 checks the current holder of the work order for every run, before preparing its workspace and again
+before recording intent. A run on an assignment displaced by hand-over is refused, whether the assignment
+was named explicitly or routed, without an intent or charge. Existing runs still need observed containment.
 
 The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
 Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

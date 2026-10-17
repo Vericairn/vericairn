@@ -1,9 +1,12 @@
 # API version 1
 
-This draft describes the code being prepared for 0.7.1: hand-over/resume, watched runs, communication settings, measured context,
+This draft describes 0.7.1: hand-over/resume, watched runs, communication settings, measured context,
 explicit execution admission and harness requalification, alongside the existing API v1 operations. Features marked
 "from 0.6.0" first appeared in that withdrawn candidate and shipped in 0.6.1 with FIX-08's corrections.
-The release documentation index records that history. The 0.7.0 candidate was withdrawn. NuGet installation
+The release documentation index records that history. The 0.7.0 candidate was withdrawn before publication
+under decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal record `01M53S6FN1GANBY5HSNDKE5N08`;
+0.7.1 carries its work with FIX-12's workspace placement, current-holder checks and signing-field scan correction.
+NuGet installation
 becomes available only after the operator publishes a release and its package publication workflow succeeds.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
@@ -580,10 +583,20 @@ at `<root>/<estate>/<branch-slug>`. Invalid roots refuse before intent. A root c
 dispatch and settles as an uncharged known failure. Workspace paths never enter records. See the
 [software guide](software.md#explicit-execution-and-environment-admission-run-01-070) for root validation
 and reuse of an existing branch worktree.
+Choose a root outside a home holding `.claude`, `.codex`, `.agents` or `.mcp.json`; the root and its ancestors
+cannot contain these markers. Codex separately inspects the user's own `~/.agents`, so moving a workspace
+does not admit user skills or other customization there. An empty ordinary directory or recognized instruction
+files alone are allowed by that native scan; use a worker account without the discovery root for native runs.
 
 Every run's assignment is checked against its work order's current holder before preparation and again
 before intent. An assignment displaced by hand-over is refused on `POST /v1/runs` as well as routed goal
 steps, without an intent or budget charge. No request or response field changes.
+
+Worker attention asks pin a run's original intent. Once settlement supersedes it, current asks can be reported
+as `record.subject-stale`; settlement does not answer or revise them. Inspect the settled run and answer through
+the existing decision path. FIX-12's repository credential scan exempts only validated device `body.publicKey`
+and envelope `signatures[].signature` values. Other fields and invalid encodings remain scanned, and signature
+verification and machine-path checks still apply.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for

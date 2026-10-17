@@ -69,8 +69,10 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This draft describes the code being prepared for 0.7.1, following the withdrawn 0.7.0 candidate and published
-0.6.1. It covers FIX-12's workspace placement and hand-over guards alongside FIX-09, NuGet distribution,
+This draft describes 0.7.1, which carries the withdrawn 0.7.0 candidate's work with FIX-12, following published
+0.6.1. Decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal record `01M53S6FN1GANBY5HSNDKE5N08`
+withdrew 0.7.0 before publication; its documentation set stays frozen and indexed. This draft covers
+FIX-12's workspace placement, hand-over guards and validated signing-field exemption alongside FIX-09, NuGet distribution,
 hand-over/resume, watching, communication, context, deterministic audits and explicit qualified run admission. The worker first
 appeared in the withdrawn 0.6.0 candidate and shipped in 0.6.1. NuGet installation becomes available only after
 the operator publishes a release and its package publication workflow succeeds. The
@@ -274,7 +276,10 @@ The release as intent, then observed effect:
    corrective release is a new version); after a failure or a cancellation, a retry needs `--reconciliation`
    stating how the earlier outcome was settled. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
-   naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). Where a
+   naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
+   derives `covers` triggers from the registered clone's current `HEAD`, not the release's `ref`. Bring that
+   clone to the intended release commit before checking; a review at another commit cannot clear changed
+   covered paths at its current `HEAD`. Nothing is fetched or checked out automatically. Where a
    clone of its repository is registered here, each document of the product in another repository that
    declares a `refuse` level and was cleared by a review is also read at the commit the `ref` setting names
    in that clone. Nothing is fetched, so bring the clone to the commit the build will use. Bytes that differ
@@ -325,16 +330,17 @@ For a previous set that records no window, as 0.5.2's and earlier sets do, they 
 notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
 explicit start). Until the version's publication is recorded they end at the second before they are generated.
 
-The next set after 0.6.1 must use `--since 2026-10-16T04:29:43Z`: 0.6.1 was rendered from a clone
-missing nine records dated 04:29–04:34 UTC. For 0.7.0, run
-`vericairn docs notes --from 0.6.1 --to 0.7.0 --out docs/releases/0.7.0 --since 2026-10-16T04:29:43Z`
-against the estate that holds those records. This deliberately overlaps 0.6.1; its frozen set stays unchanged.
+The 0.7.1 notes are rendered from the estate's records with
+`vericairn docs notes --from 0.6.1 --to 0.7.1 --out docs/releases/0.7.1 --since 2026-10-16T04:29:42Z`.
+The start is exclusive: 04:29:42Z is one second before the record dated exactly 04:29:43Z, so all nine
+records missing from the clone used for 0.6.1's notes enter the window. The withdrawn 0.7.0 set started at
+04:29:43Z and omitted that first record. The overlap with 0.6.1 is deliberate; both earlier sets stay frozen.
 
 The product's CLI test suite checks every file of each frozen set against
 `docs/releases/frozen-sha256.json`: changed bytes, missing files and added files fail the guard. Published and withdrawn
 sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
 editable until frozen and indexed. This is a test guard, not a write barrier in `docs notes` or the reference generator:
-run generation only against a set under preparation.
+run generation only against a set that has not been frozen.
 
 Generated API parameter rows omit the description separator when there is no description and carry no trailing
 spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no
@@ -350,21 +356,28 @@ result is outside the window. A current result appears under **Work accepted** w
 that result's exact hash or its work order's current revision and hash. This includes another principal's results with
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
 work-order revision does not count for the current revision. Every remaining current result appears only under **Work
-recorded, not yet accepted**. The progress report uses the same classification for each published release.
+recorded, not yet accepted**. Each current result of an accepted work order is listed separately, without
+consolidation by work order or contributor; an earlier partial or failed result can therefore appear alongside
+a completed one. Classification reads current estate state, not an acceptance snapshot at the window's end.
+The progress report uses the same classification for each published release.
 
 ## Vericairn's NuGet publication
 
-From 0.7.0, `.github/workflows/release.yml` packs the Community command line and libraries with the release
+From 0.7.1, carrying DIST-01 from the withdrawn 0.7.0 candidate, `.github/workflows/release.yml` packs the Community command line and libraries with the release
 version checked against `VersionPrefix` in `Directory.Build.props`, clearing the development suffix.
 It attaches the `.nupkg` and `.snupkg` files to the draft release and lists every file in `SHA256SUMS`,
-alongside the self-contained archives. No package is pushed while the release is a candidate, so a
-withdrawn draft has not occupied that version on NuGet.
+alongside the self-contained archives. The draft build itself pushes no package; a draft withdrawn before
+publication has not occupied that version on NuGet.
 
 Only the operator's publication triggers `.github/workflows/nuget.yml` (`release: types: [published]`).
 That workflow downloads the published release's package assets and `SHA256SUMS` by release id, requires
 every package and symbol asset to appear exactly once in the checksums, and verifies each hash before
 requesting credentials. Missing, extra or changed package assets refuse publication. Non-package archive
 entries remain in the release's checksum file; this workflow downloads and pushes only the packages.
+Nuget.org receives exactly the package assets the operator publishes, verified against that release's own
+`SHA256SUMS`. The workflow does not compare those bytes with the estate's accepted candidate or require
+an acceptance record; a published prerelease also triggers it. The operator binds the two by publishing
+the exact accepted draft. Changing both assets and their checksum file would not be caught by that comparison.
 
 The workflow has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
@@ -744,6 +757,10 @@ Attention writes are retried while observing and at settlement. A failed attenti
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
 
+Attention asks pin the run's original intent. Once settlement supersedes that operation, a current ask is
+reported as `record.subject-stale`; the worker does not revise or answer it. Inspect the settled run before
+answering through the existing decision path. The warning does not reopen the settled run or its reservation.
+
 ## Recorded watching settings (0.7.0)
 
 Goals and rosters hold partial overrides in `limits.watch`. Each field inherits from the launcher, then the current revision of the goal's named roster (or the estate's current roster), then the goal. A goal's role overrides do not remove roster limits. The operator or authorized administrator revises the roster; the goal's existing revision authority controls its limits. Request settings cannot replace these thresholds.
@@ -924,10 +941,19 @@ and removes it, or chooses a root containing it; setting a root never moves or d
 This lets native runs use a workspace outside a home holding ordinary Claude Code or Codex configuration.
 The native scan is unchanged. Its ancestor-configuration refusal names `worker configure --workspaces` as
 the remedy; independently discovered user skills and managed configuration still face the same checks.
+Codex separately inspects the user's own `~/.agents`, outside `CODEX_HOME`. A run is refused while it holds
+skills or other customization, even when the workspace is elsewhere. Use a worker account without this
+discovery root. The native scan permits an empty ordinary directory or one holding only recognized instruction
+files; it refuses other entries, child directories and uninspected links. Workspace-root validation is stricter:
+any `.agents` marker in the root or an ancestor refuses that root, even an empty directory.
 
 Record credential checks exclude only encoding values validated by the record rules: a device body's
 `publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,
 including a nested field with the same name, is still scanned. Invalid encodings receive no exemption.
+For this exemption, `publicKey` must decode as a P-256 SubjectPublicKeyInfo key and `signature` as 64
+base64url-decoded bytes. This is not a blanket exemption for signing metadata or a substitute for
+cryptographic signature verification. Record bytes and line numbers are preserved, and the machine-path
+scan still inspects the original text. Non-record files receive no signing-field exemption.
 
 Local configuration narrows permitted choices and never widens the qualified inventory. The native environment
 policy derives from the inventory only after the shipped baseline or an exact

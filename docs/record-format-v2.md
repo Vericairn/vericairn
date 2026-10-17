@@ -6,8 +6,9 @@ it was written under. A record states the format it was written in, and an estat
 carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
-publication. This draft describes 0.7.0, which follows published 0.6.1 and reads formats 1 and 2, writing at most
-format 2. It adds work-progress, communication-setting, communication-delegation and harness-qualification types,
+publication. The 0.7.0 candidate was also withdrawn before publication; 0.7.1 carries its work with FIX-12.
+This draft describes 0.7.1, which follows published 0.6.1 and reads formats 1 and 2, writing at most
+format 2. The additions first present in 0.7.0 are work-progress, communication-setting, communication-delegation and harness-qualification types,
 estate observations, watching settings and execution admission fields. These additions require a 0.7.0-capable
 reader before authoring them, but no format-3 migration; older records retain their original bytes and rules.
 
