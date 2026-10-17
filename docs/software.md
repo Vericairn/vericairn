@@ -274,7 +274,11 @@ declares the same settings and simulates GitHub in memory for the conformance su
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
-earlier release reads none.
+earlier release reads none. From 0.7.2, `ResolveCommit` resolves the requested build ref at the provider to an
+exact commit for the living-document gate. Its default returns unknown, so an older provider can still dispatch
+releases without repository document checks, but cannot bypass those checks. GitHub resolves through its commits
+API; the runtime compares the registered clone at that commit and refuses with fetch guidance if it is absent.
+The actual run commit is checked again before a candidate is recorded, since a branch can move after submission.
 
 The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
 and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream

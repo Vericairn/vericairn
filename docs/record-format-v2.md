@@ -324,8 +324,11 @@ level among its reasons: `remind` shows in status; `warn` is also a `document.du
 `refuse` also refuses the next `vericairn release submit` of the product, before any intent is recorded, naming every
 such document at once. `vericairn release submit` also refuses, before any intent is recorded, when a cleared document
 of another repository that declares `refuse` and whose `release` trigger names the product differs, at the commit being
-released, from the content its latest review cleared; it makes that comparison only where a clone of that repository is
-registered here. A declaration that names a source, trigger, check or generator no installed pack provides is shown as
+released, from the content its latest review cleared. From 0.7.2 the build provider resolves that commit at the destination;
+both document bytes and repository `covers` checks use that exact commit. An unresolved commit refuses submission.
+The comparison runs where a clone is registered; if that clone lacks the commit, the refusal names the repository to
+fetch. It never substitutes the clone's HEAD. Observation checks the actual built commit again before recording a
+candidate, including when the branch moved after submission. A declaration that names a source, trigger, check or generator no installed pack provides is shown as
 unavailable (`document.unavailable`) and, when it declares a `refuse` trigger, closes its product's release gate until
 the pack is installed or the declaration is revised. Status in JSON lists every declared document with its state,
 reasons and latest clearance.

@@ -68,6 +68,12 @@ public interface IReleaseProvider
     /// <summary>What this implementation is, with its settings and the location keys it serves.</summary>
     ProviderDescriptor Descriptor { get; }
 
+    /// <summary>
+    /// Resolves the build's ref at its destination to an exact commit, without dispatching. Null means this implementation cannot
+    /// establish it; a release needing repository document checks is then refused. The observed run's commit is checked again.
+    /// </summary>
+    string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) => null;
+
     /// <summary>Dispatches the build; throws <see cref="ProviderRefusedException"/> before any effect, or <see cref="ProviderUncertainException"/> when an effect may have happened.</summary>
     DispatchReceipt Dispatch(DispatchRequest request);
 
@@ -145,6 +151,9 @@ public sealed class FakeReleaseProvider : IReleaseProvider
 
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; }
+
+    /// <inheritdoc />
+    public string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) => HeadSha;
 
     /// <inheritdoc />
     public DispatchReceipt Dispatch(DispatchRequest request)
