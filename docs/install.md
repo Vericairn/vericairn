@@ -1,8 +1,7 @@
 # Installing Vericairn
 
-This installation draft describes 0.7.1, which carries the withdrawn 0.7.0 candidate's work with FIX-12.
-The candidate was withdrawn before publication under decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal
-record `01M53S6FN1GANBY5HSNDKE5N08`; its frozen set stays indexed and is not an upgrade target.
+This installation draft describes 0.7.2 after published 0.7.1, with FIX-13, FIX-14, FIX-15, FIX-16 and
+FIX-18. Earlier sets stay frozen, including the withdrawn 0.7.0 candidate carried in 0.7.1 with FIX-12.
 NuGet distribution becomes available after the operator publishes a release and its publication workflow succeeds.
 The `0.0.1-reserved` packages reserve names; they are not the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
 The NuGet workflow verifies the exact package assets the operator publishes against that release's own
@@ -74,6 +73,16 @@ include that native helper; use the macOS archive when you need the bundled help
 Workbench continues to use its own archive, with the `vericairn` executable beside it; the tool package installs the command
 line only. See the [Workbench draft](workbench.md).
 
+On POSIX, the bounded Git and gh runner requires the runtime to run under an init process, not as PID 1,
+without ignored `SIGCHLD`, automatic child reaping or an independent child reaper. Unsupported hosts refuse
+before launching a command. Each Git command has 30 seconds, each gh command two minutes, and each output
+stream has a 4,194,304-character limit; [software.md](software.md#release-providers-and-the-products-release-profile)
+describes containment and uncertain dispatch.
+
+Workbench's first screen reuses status and progress observations and avoids repeated full-history scans.
+Unchanged bytes reuse parsing and hashes; opening still validates every record once. Large estates can
+still take time, and headless checks establish no fixed native startup-time bound.
+
 ## Worker prerequisites and holding limits
 
 The native inventory baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`.
@@ -84,7 +93,7 @@ Qualification is machine-local: its API route refuses paired local-network devic
 local socket and signed loopback requests still require human qualification authority.
 
 Before a native run, set model and effort defaults on the worker's machine. Replace the model and effort
-placeholders with your chosen model selector and an effort supported by that launcher:
+values with your chosen model selector and an effort supported by that launcher:
 
 ```sh
 dotnet vc worker configure --launcher codex --model <model> --effort <effort>
@@ -97,8 +106,7 @@ choices, including each default. With no model allowlist only the default model 
 allowlist the launcher's supported efforts are allowed. Setting replaces that launcher's defaults and
 allowlists. It never widens the qualified inventory or adds tools, servers, variables or routes.
 
-Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and, in builds containing FIX-18 for 0.7.2,
-`max`. For example, `dotnet vc worker configure --launcher codex --model gpt-6-astra --effort max` stores
+Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max` in 0.7.2. For example, `dotnet vc worker configure --launcher codex --model gpt-6-astra --effort max` stores
 that selection. The inventory probes do not validate a model's effort support; the harness validates it at launch.
 An observed nonzero exit, including an effort refusal, is recorded as `known-failure`. See the
 [execution guide](software.md#explicit-execution-and-environment-admission-run-01-070) for the admission and usage limits.
@@ -144,6 +152,14 @@ marker in the root or its ancestors, including an empty one.
 FIX-12 checks the current holder of the work order for every run, before preparing its workspace and again
 before recording intent. A run on an assignment displaced by hand-over is refused, whether the assignment
 was named explicitly or routed, without an intent or charge. Existing runs still need observed containment.
+
+The Codex launcher enables the ordinary code-mode tool host and pre-approves only the estate MCP server's
+tools; the server still enforces the acting principal's authority. Global approval policy is unset.
+Five live runs exercised the fixes; the fifth recorded cap, max execution, usage, signed attempt/result
+and exactly the permitted file change. They do not qualify other accounts, versions, platforms or billing.
+A worker-launched Codex run cannot yet commit: its git worktree metadata lies outside the sandbox.
+Changes stay uncommitted in the worktree for review; FIX-19 makes the workspace a repository of its own.
+The brief must contain at least one interpretable permitted path pattern; prose alone refuses before intent.
 
 The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
 Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

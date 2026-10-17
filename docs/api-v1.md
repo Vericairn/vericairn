@@ -1,13 +1,13 @@
 # API version 1
 
-This draft describes 0.7.1: hand-over/resume, watched runs, communication settings, measured context,
-explicit execution admission and harness requalification, alongside the existing API v1 operations. Features marked
-"from 0.6.0" first appeared in that withdrawn candidate and shipped in 0.6.1 with FIX-08's corrections.
-The release documentation index records that history. The 0.7.0 candidate was withdrawn before publication
-under decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal record `01M53S6FN1GANBY5HSNDKE5N08`;
-0.7.1 carries its work with FIX-12's workspace placement, current-holder checks and signing-field scan correction.
-NuGet installation
-becomes available only after the operator publishes a release and its package publication workflow succeeds.
+This draft describes 0.7.2 after published 0.7.1. FIX-13 adds exact-commit release document checks
+and settlement of process attention asks; FIX-15 claims dispatch identities before provider effects;
+FIX-16 validates before publishing records and exposes unreadable recovery journals; FIX-18 adds
+Codex max effort, run-owned execution observations and corrected worker signals. FIX-14 hardens the
+CLI/runtime export restore path without adding an HTTP restore route. API v1 remains additive and
+record format 2 is unchanged. The 0.7.0 candidate's features shipped in 0.7.1 with FIX-12;
+the release index retains the withdrawn candidates' history. NuGet availability follows publication
+and the successful package workflow for that version.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -18,6 +18,31 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 (`Vericairn.Sdk`) calls it; the CLI uses the daemon's when one serves the estate and embeds the runtime
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
+
+## Record publication and recovery (0.7.2)
+
+Single and grouped writes judge the proposed estate, including content checks, before publishing any
+new record. Validation failure publishes nothing. A single `EstateService` gate serializes judgment
+through commit; it is not a cross-instance or cross-process writer lease. Route writes through one
+runtime and do not overlap embedded commands, daemon startup or repository synchronization.
+Grouped storage remains sequential and can be interrupted.
+
+Status, check and reconciliation expose malformed, incomplete or unreadable local journals as
+`batch.unreadable`, with a safe `batch-journal:<ULID>` or filename-digest identifier, never a machine
+path or parser error. The journal is retained and retried. Its unknown contents hold all further record
+writes with `reconcile-required`; reads, local configuration and interim live progress notes continue.
+A readable interrupted batch instead reports `batch.incomplete` under its existing reconciliation rules.
+The operator can restore readable journal data or inspect stored effects and preserve the damaged journal
+outside the batches directory before retrying. Separate service reads can reconcile journals too;
+[software.md](software.md#record-publication-and-local-recovery-072) states the single-service boundary.
+
+Release submit resolves the provider's exact build commit for repository document checks and claims
+its operation identity before dispatch. A receiptless intent is uncertain, so observe and reconcile it
+before retrying. Observation persists that uncertainty even when it subsequently waits for a run or
+draft; the response can include the recorded operation. Observation checks documents at the actual
+build commit again before recording success or a candidate. Missing commits refuse with fetch guidance,
+without substituting clone HEAD. Provider I/O runs outside the service gate; this is not distributed
+exactly-once execution across independently running services.
 
 ## Context artifacts (0.7.0 addition)
 
@@ -594,15 +619,18 @@ Every run's assignment is checked against its work order's current holder before
 before intent. An assignment displaced by hand-over is refused on `POST /v1/runs` as well as routed goal
 steps, without an intent or budget charge. No request or response field changes.
 
-Worker attention asks pin a run's original intent. Once settlement supersedes it, current asks can be reported
-as `record.subject-stale`; settlement does not answer or revise them. Inspect the settled run and answer through
-the existing decision path. FIX-12's repository credential scan exempts only validated device `body.publicKey`
-and envelope `signatures[].signature` values. Other fields and invalid encodings remain scanned, and signature
-verification and machine-path checks still apply.
+Settlement withdraws the run's still-waiting process attention asks, preserving the questions and
+observations and pinning each withdrawal to the exact settlement. Already answered asks stay answered;
+closed asks no longer produce stale-subject warnings. `attempt-missing` and `scope-settlement` asks
+are created with the settlement and remain open for review at that exact revision and hash. The
+settlement, new review asks and withdrawals are validated together and journaled; storage can still
+be interrupted. This is withdrawal of obsolete process attention, not an answer or work acceptance.
+FIX-12's credential scan still exempts only validated device `body.publicKey` and envelope
+`signatures[].signature` values; other fields, signature verification and machine-path checks remain.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -620,8 +648,10 @@ changed transport settings refuse launch. Claude Code excludes user, project and
 and enables no plugins, alongside strict MCP configuration. Detected managed settings and known organization logins
 refuse launch; remote or undetected managed policy is not qualified and managed accounts are unsupported. A
 configuration refusal after intent but before process launch settles as an uncharged known failure. These controls
-do not isolate same-user files or keychains, and no live coding agent or live sign-in has been qualified; see
-[software.md](software.md#harness-configuration-and-workspace-exports).
+do not isolate same-user files or keychains. FIX-18's five live Codex runs qualify only the reported run
+path; they do not qualify other accounts, versions or platforms, or Claude Code live sign-in. See
+[software.md](software.md#native-inventory-qualification-run-02-and-run-03) for those observations and
+[the configuration limits](software.md#harness-configuration-and-workspace-exports).
 
 A state or dispatch write failure after launch keeps the allowance reserved. The worker retries state writes and
 recovers an observed dispatch before recording settlement; an unavailable recovery leaves the intent in flight. An
@@ -685,7 +715,8 @@ record was rejected:
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
-| `provider` | Observing a release, the provider refused or could not say what happened; nothing was recorded. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
+| `provider` | Observing a release, the provider refused or could not say what happened; a receiptless intent may already have been revised to uncertain before that provider call. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
+| `reconcile-required` | An unreadable local batch journal holds all further single and grouped record writes until local reconciliation; reads remain available | 422 for `WriteOutcome` routes; inside the response on composite routes |
 | `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting | 409 |
 
 The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
@@ -824,7 +855,7 @@ prose can remain beside a pattern. No request or response fields change.
 
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
 
-`GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each signal's `attention` names an ask about the original run intent. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.
+`GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each process signal's `attention` names an ask about the original run intent; `attempt-missing` and `scope-settlement` name review asks pinned to the exact settlement. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.
 
 A goal's existing proposal/revision body and the generic roster record endpoint accept `limits.watch` partial threshold overrides; roster limits also accept `stallSeconds`. The resolved order is launcher, current roster revision, then goal, as described in [the software guide](software.md#recorded-watching-settings-070). Invalid merged loop limits refuse run start before an intent or harness launch. The run operation's immutable target includes `watch` (JSON encoded as a string), optional `watchRoster` (the roster revision), and `watchHistoryTokensPerMinute`. No new run-request override bypasses these recorded limits.
 

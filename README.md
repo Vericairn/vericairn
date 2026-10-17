@@ -7,12 +7,14 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-Vericairn 0.7.1 includes hand-over and resume from retained records, worker observations of
-commands, token rates and repeated calls, personal communication settings and delegation, measured context packages with
-explicit withheld lists and pinned retrieval, and explicit model, effort and environment admission for each
-agent run. Human-authorized harness requalification pins one exact version and its probe digests. Workbench
-adds communication settings and hand-over/resume views. The [0.7.1 documentation set](docs/releases/0.7.1/README.md)
-describes these features, the COMMS-02 qualification evidence and the limits below.
+The 0.7.2 source includes five fixes after published 0.7.1. FIX-13 orders identifiers within one process,
+checks release documents at the exact build commit, groups accepted notes by work order, settles process
+attention asks, checks workflow action pins and NuGet assets on pull requests, and reduces repeated Workbench
+first-screen reads. FIX-14 binds restored files to an export's inventory (F-01). FIX-15 claims release dispatch
+before the provider call and bounds Git and gh processes. FIX-16 validates records before publication and
+keeps unreadable recovery journals visible. FIX-18 corrects the Codex worker at max effort, its tool host,
+execution observations, command audit and estate-only MCP approval. The [0.7.2 documentation set](docs/releases/0.7.2/README.md)
+describes the changes and their remaining limits.
 
 The current published release is [0.7.1](https://github.com/Vericairn/vericairn/releases/tag/v0.7.1), published on
 October 17, 2026, following 0.6.1. The 0.7.0 candidate was withdrawn
@@ -31,7 +33,7 @@ needs a person's authorized RUN-03 qualification. Generic worker dispatch is ref
 configure that machine's worker with `vericairn worker configure --launcher codex --model <model> --effort <effort>`
 (or `--launcher claude-code`); omit model and effort to show it. Repeated `--allow-model` and `--allow-effort`
 options narrow the permitted choices and never widen the qualified harness inventory. FIX-18 adds Codex's `max`
-effort for 0.7.2; the harness validates model/effort support at launch, and an observed refusal is recorded as a
+effort in 0.7.2; the harness validates model/effort support at launch, and an observed refusal is recorded as a
 failed run. Configuration is per machine and is never recorded in the estate. Its Vericairn home must be outside
 every Git repository and estate;
 if your home directory is a repository, set `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them.
@@ -47,6 +49,11 @@ Harness qualification is machine-local too: paired local-network devices are ref
 admission checks. The efficiency Adapter
 is absent until the planned 0.8.0 work, Remote is not built, and context tokens remain unknown without a
 qualified local tokenizer. Spending and containment limits remain as described in the guides.
+Five live Codex runs exercised the corrected path; the fifth recorded its cap, model and max effort, usage,
+signed attempt and result, and the permitted file change. A worker-launched Codex run cannot yet commit:
+its git worktree metadata is outside the sandbox. Changes stay uncommitted in the worktree for review;
+FIX-19 makes the workspace a repository of its own. These observations qualify only the reported path,
+not other harness versions, accounts, platforms, provider billing or acceptance of the work.
 
 ## Releases
 

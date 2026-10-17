@@ -63,7 +63,7 @@ Ctrl (Cmd on macOS) with 1, 2, 3, 4 focuses navigation, documents (or the attent
 ## Running it
 
 Workbench continues to ship in self-contained archives with `vericairn` beside it. The `dotnet-vc` NuGet
-tool, available after 0.7.1's publication workflow succeeds and invoked as `dotnet vc`, installs the command line only; it does not install Workbench or replace
+tool, available for a version after its publication workflow succeeds and invoked as `dotnet vc`, installs the command line only; it does not install Workbench or replace
 that companion executable. See the [installation draft](install.md).
 
 ```sh
@@ -82,10 +82,12 @@ With `--estate` and `--open`, and a daemon already serving the estate, the named
 
 ## Limitations
 
-First launch and the estate listing become slower as the record count grows. Review
-`01M53R2Y38J97MNSEWNK1965XA` observed this in the withdrawn 0.7.0 candidate; FIX-12 does not change that
-Workbench path. Allow for loading before judging a missing page. These observations establish no fixed
-startup-time bound, and headless tests do not qualify responsiveness on a native desktop.
+FIX-13 in 0.7.2 reduces first-screen work: status and progress observations are reused, startup avoids a
+duplicate refresh, and the runtime caches envelope parsing and hashes only while the original bytes are
+unchanged. Loading still checks record semantics, signatures and authority; opening validates every record
+once. First-screen API reads are bounded independently of the number of records, but large estates can
+still take time. Allow loading to finish before treating an absent page as empty. Headless tests establish
+neither a fixed startup-time bound nor native desktop responsiveness qualification.
 
 Keyboard-only journeys of the work loop, release flow, Goals workspace and progress report have headless tests in the three-platform workflow; a native keyboard-only run with a screen reader needs a person on each desktop and is recorded per cell in the platform obligations, as are the accessibility measurements. Workbench ships as an unsigned developer build per platform beside the command line, with no bundle, installer or signature. Projects wait for the record format to define them. The comparison is a line difference of canonical JSON, not a field-aware merge. Docking is panel placement with keyboard alternatives, not free drag-and-drop of every panel. The probe's `--open` has no value for the Documents page, the review workspace or the composer, and when no daemon answers yet a probe run can measure before the named workspace is open, so start the daemon first.
 

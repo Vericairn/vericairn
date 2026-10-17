@@ -68,7 +68,7 @@ in `checks` with outcome `failed`, not in the result's outcome. An **amendment**
 nothing. Acceptance of a
 result pins the result's hash and follows the work order's policy: results toward milestones need the
 operator; results of ordinary work may be self-accepted under `self-accept-ordinary-work`.
-In 0.7.1, `vericairn work brief <key>` renders the recorded brief with verified required document originals
+In 0.7.2, `vericairn work brief <key>` renders the recorded brief with verified required document originals
 available in this copy, measured context and an explicit withheld list; missing mandatory originals refuse it.
 Record-format-1 rules remain unchanged by this derived artifact (see [software.md](software.md#context-packages-070));
 `vericairn work observe <key>` shows what happened.
@@ -131,7 +131,7 @@ material. Names use `/` separators; case aliases are conservatively refused on e
 Unicode equivalence and case folding on macOS and trailing-dot/space aliases and device names checked on Windows.
 Restore verifies and extracts the same members from one open archive, rechecks each member's buffered bytes before
 writing, and creates each target without overwriting. The manifest's existing conversion to `repository-synced`
-is retained. An I/O failure or source change during extraction can leave earlier verified files in the destination;
+is retained. Restore is not an all-or-nothing filesystem transaction. An I/O failure or source change during extraction can leave earlier verified files in the destination;
 restore does not report success in that case. Inventory hashes establish byte integrity, not the exporter's identity
 or authority; record signatures are still checked separately.
 
