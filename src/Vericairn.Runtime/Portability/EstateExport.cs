@@ -115,7 +115,9 @@ public static class EstateExport
     }
 
     /// <summary>Verifies an export against its inventory without extracting anything. Returns the summary and the problems found.</summary>
-    public static (ExportSummary? Summary, FindingList Findings) Verify(string zipPath)
+    public static (ExportSummary? Summary, FindingList Findings) Verify(string zipPath) => Verify(zipPath, ZipFile.OpenRead);
+
+    private static (ExportSummary? Summary, FindingList Findings) Verify(string zipPath, Func<string, ZipArchive> openArchive)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(zipPath);
         var findings = new FindingList();
@@ -125,7 +127,7 @@ public static class EstateExport
             return (null, findings);
         }
 
-        using ZipArchive zip = ZipFile.OpenRead(zipPath);
+        using ZipArchive zip = openArchive(zipPath);
         ZipArchiveEntry? inventoryEntry = zip.GetEntry(InventoryEntry);
         ZipArchiveEntry? summaryEntry = zip.GetEntry(SummaryEntry);
         if (inventoryEntry is null || summaryEntry is null)
@@ -190,11 +192,13 @@ public static class EstateExport
     /// Restores a verified export into an empty directory as a repository-synced estate (its records as files),
     /// whatever the source profile was. Nothing is restored unless every byte verifies. Returns the summary.
     /// </summary>
-    public static ExportSummary Restore(string zipPath, string destination)
+    public static ExportSummary Restore(string zipPath, string destination) => Restore(zipPath, destination, ZipFile.OpenRead);
+
+    internal static ExportSummary Restore(string zipPath, string destination, Func<string, ZipArchive> openArchive)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(zipPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
-        (ExportSummary? summary, FindingList findings) = Verify(zipPath);
+        (ExportSummary? summary, FindingList findings) = Verify(zipPath, openArchive);
         if (summary is null || findings.HasErrors)
         {
             throw new InvalidOperationException("The export does not verify: " + string.Join("; ", findings.Select(f => f.Message)));
@@ -207,7 +211,7 @@ public static class EstateExport
         }
 
         Directory.CreateDirectory(destination);
-        using ZipArchive zip = ZipFile.OpenRead(zipPath);
+        using ZipArchive zip = openArchive(zipPath);
         foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName != InventoryEntry && e.FullName != SummaryEntry && !e.FullName.EndsWith('/')))
         {
             string relative = entry.FullName;
