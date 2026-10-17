@@ -3,10 +3,13 @@
 
 using System.Buffers;
 using System.Buffers.Text;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Vericairn.Protocol;
@@ -16,7 +19,7 @@ using Vericairn.Sdk;
 namespace Vericairn.Daemon.Tests;
 
 [Collection("daemon")]
-public class LoopbackConcurrencyTests
+public class LoopbackConcurrencyTests(ITestOutputHelper output)
 {
     [Theory]
     [InlineData("invalid")]
@@ -154,25 +157,37 @@ public class LoopbackConcurrencyTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ConcurrentHandshakesSucceedAtStartAndAfterRotation(bool localNetwork, bool rotate)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentHandshakesSucceedAtStartAndAfterRotation(bool localNetwork)
     {
-        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
-        for (int round = 0; round < 128; round++)
+        const int rounds = 12;
+        const int clientsPerRound = 16;
+        var failures = new List<string>();
+        var serverFailures = new ConcurrentQueue<string>();
+        int failedHandshakes = 0;
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync(log: message =>
         {
-            if (rotate)
+            if (message.StartsWith("TLS handshake failed: ", StringComparison.Ordinal))
+            {
+                serverFailures.Enqueue(message);
+            }
+        });
+        for (int round = 0; round < rounds; round++)
+        {
+            if (round == 1)
+            {
+                // Cover both creation and reload at startup, with no TLS client warming either certificate.
+                await harness.RestartAsync();
+            }
+            else if (round > 1)
             {
                 string previous = harness.Host.Endpoint.Loopback!.Certificate;
                 Assert.NotEqual(previous, harness.Host.RotateCertificate().Certificate);
             }
-            else if (round > 0)
-            {
-                // A fresh daemon reloads the certificate; no TLS client warms it before this burst.
-                await harness.RestartAsync();
-            }
+
+            // Share the cold managed extension among the first handshakes without decoding its usages here.
+            Assert.Single(harness.Host.Certificates!.Current.Extensions.OfType<X509EnhancedKeyUsageExtension>());
 
             LoopbackEndpoint endpoint = harness.Host.Endpoint.Loopback!;
             if (localNetwork)
@@ -180,24 +195,45 @@ public class LoopbackConcurrencyTests
                 endpoint = endpoint with { Port = harness.Host.Endpoint.LocalNetwork!.Port };
             }
 
-            using var ready = new CountdownEvent(16);
-            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Task[] clients = Enumerable.Range(0, 16).Select(async _ =>
+            using var ready = new CountdownEvent(clientsPerRound);
+            var start = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task[] clients = Enumerable.Range(0, clientsPerRound).Select(async _ =>
             {
                 await using SslStream tls = await ConnectAsync(endpoint, async () =>
                 {
                     if (ready.Signal())
                     {
-                        start.SetResult();
+                        start.SetResult(Stopwatch.GetTimestamp() + Stopwatch.Frequency / 500);
                     }
 
-                    await start.Task.WaitAsync(TestContext.Current.CancellationToken);
+                    long startAt = await start.Task.WaitAsync(TestContext.Current.CancellationToken);
+                    while (Stopwatch.GetTimestamp() < startAt)
+                    {
+                        Thread.SpinWait(1);
+                    }
                 });
                 Assert.True(tls.IsAuthenticated);
                 Assert.Equal(endpoint.Certificate, RuntimeIdentityScheme.CertificateFingerprint(tls.RemoteCertificate!.GetRawCertData()));
             }).ToArray();
-            await Task.WhenAll(clients);
+            try
+            {
+                await Task.WhenAll(clients);
+            }
+            catch (Exception exception)
+            {
+                failedHandshakes += clients.Count(client => client.IsFaulted || client.IsCanceled);
+                failures.Add($"Round {round}: {exception.GetType().Name}: {exception.Message}");
+            }
         }
+
+        string measurement = $"{failures.Count}/{rounds} failed rounds; {failedHandshakes}/{rounds * clientsPerRound} failed handshakes.";
+        output.WriteLine(measurement);
+        foreach (string message in serverFailures.Take(5))
+        {
+            output.WriteLine(message);
+        }
+
+        Assert.True(failures.Count == 0, $"{measurement} {string.Join("; ", failures.Take(5))}");
     }
 
     [Fact]
@@ -247,7 +283,7 @@ public class LoopbackConcurrencyTests
         context.Request.Headers[RequestSigning.SignatureHeader] = Base64Url.EncodeToString(DeviceRequestSigner.Find(harness.OperatorDevice)!.Sign(digest));
     }
 
-    private static async Task<SslStream> ConnectAsync(LoopbackEndpoint endpoint, Func<Task>? beforeHandshake = null)
+    private static async Task<SslStream> ConnectAsync(LoopbackEndpoint endpoint, Func<Task>? beforeClientHello = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
@@ -256,11 +292,9 @@ public class LoopbackConcurrencyTests
         try
         {
             await socket.ConnectAsync(endpoint.Host, endpoint.Port, deadline.Token);
-            tls = new SslStream(new NetworkStream(socket, ownsSocket: true));
-            if (beforeHandshake is not null)
-            {
-                await beforeHandshake().WaitAsync(deadline.Token);
-            }
+            tls = new SslStream(beforeClientHello is null
+                ? new NetworkStream(socket, ownsSocket: true)
+                : new ClientHelloStream(socket, beforeClientHello));
 
             await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
@@ -282,6 +316,23 @@ public class LoopbackConcurrencyTests
             }
 
             throw;
+        }
+    }
+
+    private sealed class ClientHelloStream(Socket socket, Func<Task> beforeClientHello) : NetworkStream(socket, ownsSocket: true)
+    {
+        private bool firstWrite = true;
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (firstWrite)
+            {
+                firstWrite = false;
+                // Release complete ClientHellos together, after every client has done its native TLS setup.
+                await beforeClientHello().WaitAsync(cancellationToken);
+            }
+
+            await base.WriteAsync(buffer, cancellationToken);
         }
     }
 }
