@@ -69,18 +69,17 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This draft describes 0.7.1, which carries the withdrawn 0.7.0 candidate's work with FIX-12, following published
-0.6.1. Decision `01M53S6DYFCPJMG0AQRSN8ZFSP` and withdrawal record `01M53S6FN1GANBY5HSNDKE5N08`
-withdrew 0.7.0 before publication; its documentation set stays frozen and indexed. This draft covers
-FIX-12's workspace placement, hand-over guards and validated signing-field exemption alongside FIX-09, NuGet distribution,
-hand-over/resume, watching, communication, context, deterministic audits and explicit qualified run admission. The worker first
-appeared in the withdrawn 0.6.0 candidate and shipped in 0.6.1. NuGet installation becomes available only after
-the operator publishes a release and its package publication workflow succeeds. The
-[communication qualification report](communication-qualification.md) separates tested behavior from deferred work.
+This draft describes 0.7.2 after published 0.7.1, carrying FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
+The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
+0.7.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
+execution contracts. It corrects identifier ordering, release gates and dispatch, notes and attention,
+export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
+NuGet installation of a version follows its publication and successful package workflow. The
+[communication qualification report](communication-qualification.md) retains its original evidence and deferrals.
 
 ## Context packages (0.7.0)
 
-In 0.7.1, the foundation's context package preserves exact originals apart from
+In 0.7.2, the foundation's context package preserves exact originals apart from
 derived presentation. `vericairn context prepare <work-order>` computes the step's
 working instructions, effects and pinned inputs. Only optional documents named
 by the work, its inputs or governing decisions enter the selection.
@@ -210,6 +209,17 @@ journal outside the local batches directory before retrying. A readable interrup
 journal's write hold. Journals belong to the clone's local storage identity, shared between roots only
 for the local-only profile.
 
+## Export restore integrity (F-01, FIX-14)
+
+Restore verifies and extracts the same inventory-bound archive members from one open archive. It refuses
+duplicate members or inventory paths, unsafe names and destination-name collisions before creating
+material, rechecks each file's buffered size and hash before writing, and creates targets without overwrite.
+The restored manifest is deliberately converted to the repository-synced profile. Restore is not an
+all-or-nothing filesystem transaction: an I/O failure or source change during extraction can leave earlier
+verified files, with no success reported. The inventory does not establish who produced an export or grant
+authority; record signatures remain separately checked. [The base format](record-format-v1.md#export-and-restore)
+describes normalization and portability rules.
+
 ## The git adapter
 
 Contract `vericairn.adapter.git/1` (`ISourceAdapter`): read-only observation of a repository. `IsRepository`
@@ -328,20 +338,20 @@ The release as intent, then observed effect:
    or reconciled until the call returns. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
-   derives `covers` triggers from the registered clone's current `HEAD`, not the release's `ref`. Bring that
-   clone to the intended release commit before checking; a review at another commit cannot clear changed
-   covered paths at its current `HEAD`. Nothing is fetched or checked out automatically. Where a
-   clone of its repository is registered here, each document of the product in another repository that
-   declares a `refuse` level and was cleared by a review is also read at the commit the `ref` setting names
-   in that clone. Nothing is fetched, so bring the clone to the commit the build will use. Bytes that differ
-   from its latest review refuse the submission with both commits and hashes, and the intent records what
-   was compared, or that a document could not be.
+   derives repository `covers` triggers and compares reviewed document bytes at the exact commit resolved
+   by the provider for the requested release ref. An unknown commit, missing contribution or absent local
+   Git object refuses the applicable gate; fetch the exact commit into the registered clone and review
+   there. The clone's HEAD need not move. The runtime neither fetches nor checks out anything, and the
+   intent records the comparisons. Estate-file checks still read the estate's working tree.
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that
    operation records, never another. While the run is in progress or the draft is incomplete by the
-   product's profile, nothing is recorded and what is missing is printed. When the run succeeded and the
-   draft is complete, the operation becomes `observed-success` and a `release` record with status
+   product's profile, no candidate is recorded and what is missing is printed. A receiptless intent is
+   first revised to uncertain, even when observation then waits for a run or draft. When the run succeeded and the
+   draft is complete, the runtime checks living documents again at the observed build commit before
+   recording success or a candidate. A moved ref can therefore require a new review and observation.
+   After that check the operation becomes `observed-success` and a `release` record with status
    `candidate` is written with every asset's platform and the bill of materials and notices taken from
    the profile, with the run as evidence, and with the release's own record formats: those the manifest
    of the documentation set in the draft states (`recordFormat`, which the build tooling writes from the
@@ -381,11 +391,11 @@ For a previous set that records no window, as 0.5.2's and earlier sets do, they 
 notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
 explicit start). Until the version's publication is recorded they end at the second before they are generated.
 
-The 0.7.1 notes are rendered from the estate's records with
-`vericairn docs notes --from 0.6.1 --to 0.7.1 --out docs/releases/0.7.1 --since 2026-10-16T04:29:42Z`.
-The start is exclusive: 04:29:42Z is one second before the record dated exactly 04:29:43Z, so all nine
-records missing from the clone used for 0.6.1's notes enter the window. The withdrawn 0.7.0 set started at
-04:29:43Z and omitted that first record. The overlap with 0.6.1 is deliberate; both earlier sets stay frozen.
+The 0.7.2 notes render the estate's records with
+`vericairn docs notes --from 0.7.1 --to 0.7.2 --out docs/releases/0.7.2 --since 2026-10-17T05:25:00Z`,
+with the operator's approved Security section on F-01 first. The start is exclusive and deliberately
+widens the previous set's end, 2026-10-17T05:25:37Z, by 37 seconds. The manifest records the exact window;
+the overlap can repeat records and changes no earlier set.
 
 The product's CLI test suite checks every file of each frozen set against
 `docs/releases/frozen-sha256.json`: changed bytes, missing files and added files fail the guard. Published and withdrawn
@@ -431,11 +441,17 @@ Nuget.org receives exactly the package assets the operator publishes, verified a
 an acceptance record; a published prerelease also triggers it. The operator binds the two by publishing
 the exact accepted draft. Changing both assets and their checksum file would not be caught by that comparison.
 
-The workflow has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
+From 0.7.2, CI checks every workflow's external action and reusable-workflow reference against
+`.github/workflows/actions.allow`, requiring a full commit SHA. Tags, short hashes, expressions, local
+and container references are refused. This checks the repository's declared list, not the organization's
+live Actions settings. The NuGet pull-request job builds packages and symbols, writes checksums and runs
+the same verifier used by publication, without a NuGet login, identity-token permission or upload.
+
+The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
-returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the workflow never
-checks out or rebuilds the packages. It pushes the verified package files and then their verified symbol
-files. Both pushes use `--skip-duplicate`, so an operator's rerun can finish a partly completed publication
+returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the publication job
+never rebuilds the packages. It checks out the verification script from the workflow ref. It pushes the verified
+package files and then their verified symbol files. Both pushes use `--skip-duplicate`, so an operator's rerun can finish a partly completed publication
 without replacing an existing version. A failed or partial publication still needs inspection: a skipped duplicate
 is not a new verification of the bytes already held by nuget.org. See the [operator setup note](https://github.com/Vericairn/vericairn/blob/4ac21bc/docs/releases/README.md#nuget-publication-setup).
 
@@ -606,7 +622,8 @@ the ledger of every goal with a run or active now: each unit's budget, spend and
 new run would be fenced. The runs' own files, their state, output and MCP configuration, stay under the Vericairn home on
 the machine that ran them, never in a record or a repository.
 
-Limitations: the launchers are tested with stand-in processes; no live coding agent or live sign-in has been qualified.
+Limitations: launcher protocol tests use stand-in processes. FIX-18 adds the five live Codex observations
+listed below; those observations qualify only their exact run path, not other harnesses or accounts.
 RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`. RUN-03 lets an
 authorized human qualify another exact installed version from the same local probes, without a product release.
 Stand-in executables test version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
@@ -620,7 +637,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -717,7 +734,8 @@ See [Claude Code goal requirements](https://code.claude.com/docs/en/goal#require
 
 Detected managed files, macOS managed preferences and Windows policy registry keys refuse launch, including on the
 second preflight. Remote or otherwise undetected managed policy is not qualified. These controls do not prevent
-deliberate same-user filesystem or keychain access, and live sign-in from the isolated login has not been qualified.
+deliberate same-user filesystem or keychain access. The live Codex observations below qualify only their
+reported run path; they do not qualify Claude Code live sign-in or other accounts.
 See [Claude Code settings](https://code.claude.com/docs/en/settings).
 
 Workspace export refuses symbolic links and Windows reparse points anywhere in `.vericairn`, including dangling links
@@ -1272,7 +1290,7 @@ The builder's second live run of `80423b5`, using the same Codex version at `max
 reported the admitted model and effort from its rollout with no discrepancy, and raised the missing-attempt signal
 and ask at settlement. The command searched the workspace's parent for `AGENTS.md`; the old audit stopped this read
 as a critical scope violation. FIX-18 now separates reads from changes, confines event-stream scope stops to
-possible changes outside the workspace, and refuses briefs with no interpretable permitted path pattern.
+confidently identified changes outside the workspace, and refuses briefs with no interpretable permitted path pattern.
 Changes inside the worktree are checked against the brief at settlement. The third live run of `42f989d` passed
 its worktree `rg --files` search and `cat .vericairn/brief.md`, then stopped when the old audit mistook a Python
 heredoc's division operator for an outside write path. FIX-18 now reserves scope stops for confidently identified
@@ -1284,7 +1302,8 @@ The fifth live run of `531d169` recorded its cap before launch, observed the adm
 3 wall minutes and 205,767 tokens. The agent authored its signed attempt and result through the estate MCP server
 and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
 the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
-sandbox; that limitation is assigned to a separate work order. Observed-success and live qualification do not
+sandbox. A worker-launched Codex run cannot yet commit; its changes stay uncommitted in the worktree for
+review. FIX-19 makes the workspace a repository of its own. Observed-success and live qualification do not
 accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
