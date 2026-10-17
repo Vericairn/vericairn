@@ -94,12 +94,17 @@ public static partial class CommandAudit
                 {
                     working = null;
                     Check(() => working = ResolvePath(ExpandPath(cwd, environment), workspace), codes);
+                    if (working is null) codes.Add("audit-unverified");
                 }
             }
 
             Check(() => GatherPaths(action.Input, paths, structured), codes);
             for (int i = 0; i < paths.Count; i++)
-                paths[i] = paths[i] with { Path = ExpandPath(paths[i].Path, environment), WorkingDirectory = working };
+            {
+                int index = i;
+                paths[index] = paths[index] with { WorkingDirectory = working };
+                Check(() => paths[index] = paths[index] with { Path = ExpandPath(paths[index].Path, environment) }, codes);
+            }
             if (action.Tool is "WebFetch" or "WebSearch" or "web_search" || action.Tool.Contains("__web", StringComparison.OrdinalIgnoreCase))
             {
                 codes.Add("network");
@@ -177,6 +182,7 @@ public static partial class CommandAudit
                     }
 
                     string resolved = ResolvePath(normalized, invocation.WorkingDirectory)!;
+                    if (NullDevice(resolved)) return;
                     if (!InsideBoundary(resolved, workspace, environment))
                     {
                         codes.Add(PossiblyInsideBoundary(resolved, workspace, environment) ? "audit-unverified" : invocation.Access switch

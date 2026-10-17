@@ -7,6 +7,8 @@ public static partial class CommandAudit
 {
     private static bool Separator(string word) => word is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n";
     private static string Value(string word) => word.Length >= 2 && word[0] is '\'' or '"' && word[^1] == word[0] ? word[1..^1] : word;
+    private static string SuffixWord(string word, int prefix) => word.Length != Value(word).Length
+        ? word[0] + Value(word)[prefix..] + word[^1] : word[prefix..];
     private static string Executable(string word)
     {
         string name = Value(word).Replace('\\', '/').Split('/')[^1];
@@ -31,7 +33,9 @@ public static partial class CommandAudit
             string? separator = end < tokens.Length ? tokens[end].Text : null;
             CommandContext before = context.Copy();
             if (separator == "|") pipeline ??= before;
-            reads &= InspectSimple(tokens[start..end], paths, codes, isReadOnly, context, depth);
+            bool segmentReads = false;
+            if (!Check(() => segmentReads = InspectSimple(tokens[start..end], paths, codes, isReadOnly, context, depth), codes)) context.Working = null;
+            reads &= segmentReads;
             // A pipeline/background child cannot change the parent's directory or variables. The
             // failure branch of || cannot assume that a preceding cd/assignment succeeded.
             if (separator is "|" or "&" or "||") context = pipeline?.Copy() ?? before;
@@ -57,6 +61,7 @@ public static partial class CommandAudit
             if (item.Input is not null) { bodies.Add(item); continue; }
             string word = item.Text;
             if (!word.StartsWith('\'') && SecretEnvironment().IsMatch(word)) codes.Add("credentials");
+            if (!word.StartsWith('\'') && (word.Contains("$(", StringComparison.Ordinal) || word.Contains('`', StringComparison.Ordinal))) codes.Add("audit-unverified");
             if (word is ">" or ">>" or ">|" or "&>" or "&>>" or ">&" or "<" or "<&")
             {
                 if (arguments.Count > 0 && arguments[^1].All(char.IsAsciiDigit)) arguments.RemoveAt(arguments.Count - 1);
@@ -84,6 +89,12 @@ public static partial class CommandAudit
         string executable = Executable(arguments[start]);
         string[] args = arguments.Skip(start + 1).ToArray();
         string[] values = args.Select(Value).ToArray();
+        if (executable is "export" or "readonly")
+        {
+            foreach (string argument in args)
+                if (!Assignment(argument, context)) codes.Add("audit-unverified");
+            return !redirects;
+        }
         bool reads = false;
         Check(() => reads = isReadOnly(string.Join(' ', arguments.Skip(start))), codes);
         if (NetworkCommands.Contains(executable)) codes.Add("network");
@@ -95,7 +106,7 @@ public static partial class CommandAudit
         {
             string? target = args.FirstOrDefault(a => !a.StartsWith('-'));
             if (target is null) target = local.Environment.GetValueOrDefault(OperatingSystem.IsWindows() ? "USERPROFILE" : "HOME");
-            context.Working = target is null ? null : ResolvePath(ShellPath(target, local), local.Working);
+            context.Working = target is null || values.Contains("-", StringComparer.Ordinal) ? null : ResolveDirectory(target, local, codes);
             if (context.Working is null) codes.Add("audit-unverified");
             return !redirects;
         }
@@ -139,6 +150,7 @@ public static partial class CommandAudit
             InspectGit(args, paths, codes, local, reads);
         else if (!classified)
         {
+            int pathCount = paths.Count;
             int operand = 0;
             for (int i = 0; i < args.Length; i++)
             {
@@ -156,6 +168,7 @@ public static partial class CommandAudit
                 if (!pattern && (reads && executable is not ("pwd" or "Get-Location") || MutatingCommands.Contains(executable) || PathLike(token)))
                     AddShellPath(paths, args[i], reads ? PathAccess.Read : MutatingCommands.Contains(executable) ? PathAccess.Write : PathAccess.Unknown, local);
             }
+            if (paths.Count == pathCount && executable is "ls" or "find" or "rg" or "Get-ChildItem") AddPath(paths, ".", reads ? PathAccess.Read : PathAccess.Unknown, local);
         }
         return reads && !redirects && !classified;
     }
@@ -172,6 +185,14 @@ public static partial class CommandAudit
 
     private static string ShellCode(string word, CommandContext context) => word.StartsWith('\'') && word.EndsWith('\'')
         ? Value(word) : ExpandPath(Value(word), context.ExpansionEnvironment ?? context.Environment);
+
+    private static string? ResolveDirectory(string word, CommandContext context, HashSet<string> codes)
+    {
+        string? resolved = null;
+        Check(() => resolved = ResolvePath(ShellPath(word, context), context.Working), codes);
+        if (resolved is null) codes.Add("audit-unverified");
+        return resolved;
+    }
 
     private static bool Assignment(string word, CommandContext context)
     {
@@ -210,8 +231,7 @@ public static partial class CommandAudit
                     if (wrapper == "env" && name is "-u" or "--unset") context.Environment.Remove(Value(argument));
                     if (wrapper == "env" && name is "-C" or "--chdir" || wrapper == "sudo" && name is "-D" or "--chdir")
                     {
-                        context.Working = ResolvePath(ShellPath(argument, context), context.Working);
-                        if (context.Working is null) codes.Add("audit-unverified");
+                        context.Working = ResolveDirectory(argument, context, codes);
                     }
                     if (wrapper == "time" && name is "-o" or "--output") AddShellPath(paths, argument, PathAccess.Write, context);
                     if (wrapper == "env" && name is "-S" or "--split-string") codes.Add("audit-unverified");

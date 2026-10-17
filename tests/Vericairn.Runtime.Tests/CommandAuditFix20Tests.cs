@@ -15,14 +15,16 @@ public class CommandAuditFix20Tests
     private static readonly string[] Writes = [
         "sed -i 's/a/b/' {target}", "sed -i '' 's/a/b/' {target}", "sed -i.bak -e 's/a/b/' {target}", "sed --in-place=.bak 's/a/b/' {target}",
         "perl -pi -e 's/a/b/' {target}", "perl -i.bak -pe 's/a/b/' {target}",
-        "rsync -a source/ {target}", "rsync -av --exclude cache source/ {target}",
+        "rsync -a source/ {target}", "rsync -t source/ {target}", "rsync -av --exclude cache source/ {target}",
         "tar -xf archive.tar -C {target}", "tar xf archive.tar --directory={target}", "tar -cf {target} source",
         "unzip archive.zip -d {target}", "unzip -q archive.zip -d{target}",
-        "install -m 644 source {target}", "install -d {target}", "install -t {target} source",
-        "patch {target} -i changes.patch", "patch -d {target} -p1 < changes.patch", "patch -o {target} source changes.patch",
-        "dd if=source of={target}", "git worktree add {target} HEAD", "git worktree add -b topic {target} HEAD",
+        "install -m 644 source {target}", "install -d {target}", "install -t {target} source", "install -t{target} source",
+        "patch {target} -i changes.patch", "patch -d {target} -p1 < changes.patch", "patch -o {target} source changes.patch", "patch -d{target} -p1 < changes.patch",
+        "patch source -r {target} -i changes.patch", "patch source --reject-file={target} -i changes.patch",
+        "dd if=source of={target}", "dd if=source \"of={target}\"", "dd if=source 'of={target}'", "git worktree add {target} HEAD", "git worktree add -b topic {target} HEAD",
         "git init {target}", "git init --initial-branch topic {target}", "git clone https://example.invalid/repo {target}",
-        "git clone --depth 1 --branch topic https://example.invalid/repo {target}", "rm -f {target}", "cp source {target}",
+        "git clone --depth 1 --branch topic https://example.invalid/repo {target}", "git clone -c core.autocrlf=false source {target}",
+        "git clone --separate-git-dir={target} source inside", "rm -f {target}", "cp source {target}",
     ];
 
     public static IEnumerable<object[]> WriteMatrix()
@@ -47,13 +49,13 @@ public class CommandAuditFix20Tests
     }
 
     private static readonly string[] Stores = ["keys", "keys/device.p8", "keys/*.p8", "keys/device.cng", "keys/device.se", "keys/device.secret",
-        "connections", "connections/connection.json", "connections/*.json", "estates/estate/local/runtime-certificate.p12",
+        "connections", "connections/connection.json", "connections/*.json", "estates/estate/local", "estates/estate/0123456789abcdef", "estates/estate/local/runtime-certificate.p12",
         "estates/estate/clone/runtime-identity.json", "estates/estate/clone/runtime-identity.json.tmp"];
 
     public static IEnumerable<object[]> CredentialMatrix()
     {
         foreach (string store in Stores)
-            foreach (string prefix in new[] { "absolute", "$VERICAIRN_HOME", "${VERICAIRN_HOME}", "$env:VERICAIRN_HOME", "%VERICAIRN_HOME%", "$ALIAS", "~/state" })
+            foreach (string prefix in new[] { "absolute", "$VERICAIRN_HOME", "${VERICAIRN_HOME}", "$env:VERICAIRN_HOME", "%VERICAIRN_HOME%", "$ALIAS", "$HOME/state", "~/state" })
                 foreach (string operation in new[] { "cat {path}", "cp -R {path} copy", "ls {path}" })
                     yield return [store, prefix, operation];
     }
@@ -108,8 +110,45 @@ public class CommandAuditFix20Tests
         Assert.Contains(Inspect($"ls \"{root}/keys\"", environment), s => s.Code == "credentials");
         environment = EnvironmentForAudit();
         Assert.Contains(Inspect("ALIAS=\"$VERICAIRN_HOME\"; ls \"$ALIAS/keys\"", environment), s => s.Code == "credentials");
+        Assert.Contains(Inspect("export ALIAS=\"$VERICAIRN_HOME\"; ls \"$ALIAS/keys\"", environment), s => s.Code == "credentials");
         Assert.Contains(Inspect("cd \"$VERICAIRN_HOME/keys\" && ls .", environment), s => s.Code == "credentials");
         Assert.Contains(Inspect("ls \"$VERICAIRN_HOME/not-keys/../keys\"", environment), s => s.Code == "credentials");
+    }
+
+    [Fact]
+    public void WrappersDoNotChangeExpansionsAlreadyPerformedByTheCallingShell()
+    {
+        Dictionary<string, string> environment = EnvironmentForAudit();
+        foreach (string wrapper in Wrappers)
+            Assert.Contains(Inspect(wrapper + "ls \"$VERICAIRN_HOME/connections\"", environment), s => s.Code == "credentials");
+        Assert.Contains(Inspect("env VERICAIRN_HOME=inside ls \"$VERICAIRN_HOME/connections\"", environment), s => s.Code == "credentials");
+        Assert.Contains(Inspect("env ALIAS=\"$VERICAIRN_HOME\" sh -c 'ls \"$ALIAS/connections\"'", environment), s => s.Code == "credentials");
+        Assert.DoesNotContain(Inspect("env -i sh -c 'ls \"$VERICAIRN_HOME/connections\"'", environment), s => s.Code == "credentials");
+    }
+
+    [Fact]
+    public void ARelativeHomeOverrideStillIdentifiesItsStores()
+    {
+        Dictionary<string, string> environment = EnvironmentForAudit();
+        environment["VERICAIRN_HOME"] = "state";
+        Assert.Contains(Inspect("ls \"$VERICAIRN_HOME/keys\"", environment), s => s.Code == "credentials");
+        Assert.Contains(Inspect("cat state/connections/connection.json", environment), s => s.Code == "credentials");
+    }
+
+    [Theory]
+    [InlineData("keys")]
+    [InlineData("connections")]
+    [InlineData("estates/estate/local")]
+    [InlineData("estates/estate/0123456789abcdef")]
+    public void ImplicitDirectoryListingsAndSearchesAlsoAccessTheStore(string store)
+    {
+        Dictionary<string, string> environment = EnvironmentForAudit();
+        foreach (string listing in new[] { "ls", "ls -la", "rg --files", "find .", "Get-ChildItem" })
+        {
+            Assert.Contains(Inspect($"cd \"$VERICAIRN_HOME/{store}\" && {listing}", environment), s => s.Code == "credentials");
+            var action = new HarnessAction("cwd-store", "exec_command", JsonSerializer.SerializeToElement(new { command = listing, cwd = environment["VERICAIRN_HOME"] + "/" + store }));
+            Assert.Contains(CommandAudit.Inspect(action, Workspace(), [], environment), s => s.Code == "credentials");
+        }
     }
 
     [Theory]
@@ -148,6 +187,25 @@ public class CommandAuditFix20Tests
     [InlineData("env -C sub rm inside; rm inside")]
     [InlineData("sudo -D sub rm inside")]
     public void DirectoryChangesRespectWorkspaceAndChildScope(string command) => Assert.Empty(Inspect(command));
+
+    [Fact]
+    public void AnUnknownDirectoryDoesNotEraseIndependentCredentialAndNetworkVerdicts()
+    {
+        IReadOnlyList<RunSignal> signals = Inspect("cd invalid\0directory && curl https://example.invalid; cat .aws/credentials");
+        Assert.Equal(["audit-unverified", "credentials", "network"], signals.Select(s => s.Code));
+    }
+
+    [Theory]
+    [InlineData("git -C .. status")]
+    [InlineData("git --work-tree=.. diff")]
+    [InlineData("cp ../source inside")]
+    [InlineData("rsync ../source inside")]
+    [InlineData("install ../source inside")]
+    [InlineData("tar -cf inside -C .. source")]
+    [InlineData("rsync --dry-run source ../outside")]
+    [InlineData("rsync -avn source ../outside")]
+    [InlineData("patch --dry-run ../outside -i changes.patch")]
+    public void OutsideSourcesAreReadsRatherThanWriteTargets(string command) => Assert.Equal("scope-read", Assert.Single(Inspect(command)).Code);
 
     [Theory]
     [InlineData("cd $UNKNOWN && rm target")]
@@ -195,6 +253,18 @@ public class CommandAuditFix20Tests
     {
         foreach (string target in OperatingSystem.IsWindows() ? new[] { "/dev/null", "NUL", "$null" } : ["/dev/null"])
             Assert.Empty(Inspect(template.Replace("{null}", target, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public void ResolvedNullTargetsAlsoPass()
+    {
+        Assert.Empty(Inspect("DEST=/dev/null; echo x > \"$DEST\""));
+        if (OperatingSystem.IsWindows()) Assert.Empty(Inspect("echo x > \"" + Workspace().Replace('\\', '/') + "/NUL\""));
+        else
+        {
+            Assert.Empty(Inspect("echo x > /dev/./null"));
+            Assert.Empty(Inspect("cd /dev && echo x > null"));
+        }
     }
 
     [Theory]

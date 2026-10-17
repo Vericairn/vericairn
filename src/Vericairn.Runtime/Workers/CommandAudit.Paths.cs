@@ -19,7 +19,7 @@ public static partial class CommandAudit
         paths.Add(new InvocationPath(ExpandPath(path, context.Environment), access, context.Working));
 
     private static bool NullDevice(string path) => path == "/dev/null" || OperatingSystem.IsWindows()
-        && (path.Equals("NUL", StringComparison.OrdinalIgnoreCase) || path.Equals("$null", StringComparison.OrdinalIgnoreCase));
+        && (path.Equals("$null", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(path.Replace('\\', '/')).Equals("NUL", StringComparison.OrdinalIgnoreCase));
 
     private static bool Unresolved(string path) => path.IndexOfAny(['~', '$', '`']) >= 0 || PercentExpansion().IsMatch(path);
 
@@ -55,7 +55,7 @@ public static partial class CommandAudit
         string? resolved = ResolvePath(path, working);
         if (resolved is null) return false;
         if (SecretPath().IsMatch(resolved.Replace('\\', '/'))) return true;
-        string? home = CredentialHome(environment);
+        string? home = CredentialHome(environment, working);
         if (home is null) return false;
         string relative = Path.GetRelativePath(home, resolved).Replace('\\', '/');
         // File/CNG/Secure Enclave/Secret Service stores all use keys/. Connections retain pairing
@@ -63,10 +63,10 @@ public static partial class CommandAudit
         return VericairnCredentialRelativePath().IsMatch(relative);
     }
 
-    private static string? CredentialHome(IReadOnlyDictionary<string, string> environment)
+    private static string? CredentialHome(IReadOnlyDictionary<string, string> environment, string? working)
     {
-        if (environment.TryGetValue("VERICAIRN_HOME", out string? configured) && Path.IsPathFullyQualified(configured))
-            return Path.GetFullPath(configured);
+        if (environment.TryGetValue("VERICAIRN_HOME", out string? configured) && !string.IsNullOrWhiteSpace(configured))
+            return ResolvePath(configured, working);
         if (OperatingSystem.IsWindows())
             return environment.TryGetValue("LOCALAPPDATA", out string? local) && Path.IsPathFullyQualified(local) ? Path.Combine(local, "Vericairn") : null;
         if (!OperatingSystem.IsMacOS() && environment.TryGetValue("XDG_CONFIG_HOME", out string? xdg) && Path.IsPathFullyQualified(xdg))
@@ -75,12 +75,12 @@ public static partial class CommandAudit
         return OperatingSystem.IsMacOS() ? Path.Combine(home, "Library", "Application Support", "Vericairn") : Path.Combine(home, ".config", "vericairn");
     }
 
-    [GeneratedRegex(@"(?<![\\$])(?:\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?:env:)?(?<name>[A-Za-z_][A-Za-z0-9_]*)|%(?<name>[A-Za-z_][A-Za-z0-9_]*)%)", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"(?<![\\$])(?:\$\{(?<name>[A-Za-z_][A-Za-z0-9_]*)\}|\$(?:(?i:env:))?(?<name>[A-Za-z_][A-Za-z0-9_]*)|%(?<name>[A-Za-z_][A-Za-z0-9_]*)%)", RegexOptions.CultureInvariant, 100)]
     private static partial Regex PathExpansion();
 
     [GeneratedRegex(@"%[^%]+%", RegexOptions.CultureInvariant, 100)]
     private static partial Regex PercentExpansion();
 
-    [GeneratedRegex(@"\A(?:keys(?:/|$)|connections(?:/|$)|estates/[^/]+/[^/]+/(?:runtime-certificate\.p12|runtime-identity\.json)(?:\.tmp)?$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"\A(?:keys(?:/|$)|connections(?:/|$)|estates/[^/]+/(?:local|[a-f0-9]{16})$|estates/[^/]+/[^/]+/(?:runtime-certificate\.p12|runtime-identity\.json)(?:\.tmp)?$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
     private static partial Regex VericairnCredentialRelativePath();
 }
