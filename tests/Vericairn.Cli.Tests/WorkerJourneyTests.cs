@@ -52,8 +52,11 @@ public sealed class WorkerJourneyTests : IDisposable
                 "--configuration", "claude-code", "--execution", "model=model-b", "--execution", "effort=low", "--input-tokens", "200", "--output-tokens", "100", "--context-bytes", "1000000",
                 "--setting", "command=" + FakeHarness.Setting("execution", Path.Combine(scratch, "report.jsonl")));
             Assert.Contains("settled without the agent's attempt", ran.Out, StringComparison.Ordinal);
-            Assert.Contains("settled without the agent's attempt", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
             JsonElement run = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());
+            string status = CliHarness.Ok("--estate", root, "status").Out;
+            Assert.Contains("worker signals", status, StringComparison.Ordinal);
+            Assert.Contains("vericairn worker runs", status, StringComparison.Ordinal);
+            Assert.Contains("settled without the agent's attempt", CliHarness.Ok("--estate", root, "worker", "runs").Out, StringComparison.Ordinal);
             using EstateService api = EstateService.Open(root);
             var custody = new RunDirectory(api.Session.Manifest.Estate, run.GetProperty("run").GetString()!);
             using JsonDocument retained = JsonDocument.Parse(File.ReadAllBytes(custody.ContextFile));

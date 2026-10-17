@@ -79,11 +79,18 @@ public class CommunicationQualificationTests
         IReadOnlyList<CommunicationAttention> attention = CommunicationPresentation.Attention(client, estate.OperatorId);
         Assert.True(CommunicationPresentation.ShouldDeliver(client.Communication(estate.OperatorId).Fields["progress"].Value, "progress", attention));
         string rendered = CommunicationPresentation.RenderAttention(attention);
-        foreach (string required in new[] { result.Id, result.ComputedHash, "The response was incomplete.", "The original widget effect remains uncertain.", ask.Id, "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
+        foreach (string required in new[] { result.Id, result.ComputedHash, "1 failed checks", "1 unresolved effects", ask.Id, "vericairn records show " + ask.Id })
         {
             Assert.Contains(required, rendered, StringComparison.Ordinal);
         }
 
+        foreach (string required in new[] { "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
+        {
+            Assert.Contains(required, client.Asks(estate.OperatorId).Text, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain(client.Record(result.Id)!.Envelope.GetRawText(), rendered, StringComparison.Ordinal);
+        Assert.Equal(CanonicalJson.SerializePrettyUtf8(host.Service.Status().Json), CanonicalJson.SerializePrettyUtf8(client.Status().Json));
+        Assert.Equal(result.ComputedHash, client.Status().Json.GetProperty("attention").EnumerateArray().Single(a => a.GetProperty("record").GetString() == result.Id).GetProperty("hash").GetString());
         Assert.Equal(CanonicalJson.SerializePrettyUtf8(host.Service.Asks(estate.OperatorId).Json), CanonicalJson.SerializePrettyUtf8(client.Asks(estate.OperatorId).Json));
         Assert.Equal(CanonicalJson.SerializePrettyUtf8(host.Service.Record(result.Id)!.Envelope), CanonicalJson.SerializePrettyUtf8(client.Record(result.Id)!.Envelope));
         Assert.Equal(count, estate.Load().Records.Count);

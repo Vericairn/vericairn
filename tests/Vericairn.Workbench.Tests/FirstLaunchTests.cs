@@ -26,10 +26,10 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
         {
             await fixture.UiAsync(() => shell.OpenEstateAsync(estate.Root));
             Assert.Equal(1, connection.Meter.Calls.Count(c => c.Name == "Progress"));
-            Assert.Contains(shell.Attention, item => item.Kind == "unknown-check" && item.Why.Contains("fixture progress unavailable", StringComparison.Ordinal));
+            Assert.Contains(shell.Attention, item => item.Kind == "unknown-check" && item.State == "unknown" && item.Why.Contains("source unavailable: progress", StringComparison.Ordinal));
             connection.Meter.FailProgress = false;
             await fixture.Ui(shell.Refresh);
-            Assert.DoesNotContain(shell.Attention, item => item.Why.Contains("fixture progress unavailable", StringComparison.Ordinal));
+            Assert.DoesNotContain(shell.Attention, item => item.Why.Contains("source unavailable: progress", StringComparison.Ordinal));
             Assert.NotEmpty(shell.Progress);
         }
         finally

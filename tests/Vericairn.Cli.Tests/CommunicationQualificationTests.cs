@@ -101,7 +101,7 @@ public class CommunicationQualificationTests
     private static JsonElement Json(string text) => JsonSerializer.Deserialize<JsonElement>(text);
 
     [Fact]
-    public void D08B_QuietShortStatusKeepsTheUncertainEffectFailedCheckAndWholeAsk()
+    public void D08B_QuietShortStatusKeepsCompactAttentionAndOpensTheWholeAsk()
     {
         using var estate = new HandoffEstate();
         estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Interrupted work","intent":"Inspect before retrying.","scope":["tests"],"exitQuestion":"Reconciled?","inputs":[],"deliverables":["results"]}""");
@@ -125,10 +125,12 @@ public class CommunicationQualificationTests
         Assert.Contains("uncertain-effect", status, StringComparison.Ordinal);
         Assert.Contains("failed-check", status, StringComparison.Ordinal);
         Assert.Contains("widget-original-operation", status, StringComparison.Ordinal);
-        Assert.Contains("The response was incomplete.", status, StringComparison.Ordinal);
+        Assert.Contains("1 failed checks", status, StringComparison.Ordinal);
+        Assert.Contains("vericairn records show " + ask, status, StringComparison.Ordinal);
+        Assert.DoesNotContain(api.Record(result)!.Envelope.GetRawText(), status, StringComparison.Ordinal);
         var mcp = new ToolRegistry(api, null);
         string askText = mcp.Call("asks_list", new JsonObject { ["to"] = estate.OperatorId }).Text;
-        foreach (string text in new[] { status, askText, api.Asks(estate.OperatorId).Text })
+        foreach (string text in new[] { askText, api.Asks(estate.OperatorId).Text })
         {
             foreach (string required in new[] { ask, "Inspect the original operation before retrying.", "Inspect its existing identity.", "Abandon the retry.", "The work stays blocked and no retry is dispatched." })
             {

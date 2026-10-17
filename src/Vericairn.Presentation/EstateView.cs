@@ -152,24 +152,14 @@ public sealed class EstateView
             items.Add(new AttentionItem("decision needed", $"{order.Key} {order.Title}", "The work order was revised after its acceptance; the current revision has no acceptance.", order.StatusLabel, view.AsOf, "Reconsider the current revision.", "work-order", order.Id));
         }
 
-        foreach (AssignmentRow assignment in view.Assignments.Where(a => a.State == "awaiting review"))
+        foreach (AssignmentRow assignment in view.Assignments.Where(a => a.State == "awaiting review" && !view.WorkOrders.Any(o => o.Key == a.Key && o.Status == "accepted")))
         {
             items.Add(new AttentionItem("decision needed", $"{assignment.Key}: result {Short(assignment.LatestResult)}", $"{assignment.ContributorName ?? assignment.Contributor} submitted a result ({assignment.Outcome}); it is a claim to inspect.", assignment.StateLabel, view.AsOf, "Review the exact result; accept it or request rework.", "result", assignment.LatestResult));
-        }
-
-        foreach (AssignmentRow assignment in view.Assignments.Where(a => a.Outcome == "blocked"))
-        {
-            items.Add(new AttentionItem("blocked", $"{assignment.Key}: result {Short(assignment.LatestResult)}", "The latest result reports the work as blocked.", assignment.StateLabel, view.AsOf, "Read the result's next step and remove the block or amend the assignment.", "result", assignment.LatestResult));
         }
 
         foreach (ReleaseRowView release in view.Releases.Where(r => r.Status == "candidate"))
         {
             items.Add(new AttentionItem("decision needed", $"release {release.Version}", "A release candidate awaits the operator's acceptance of its exact hash.", release.StatusLabel, view.AsOf, "Accept the candidate from the recorded evidence, then publish by hand.", "release", release.Id));
-        }
-
-        foreach (OperationRow operation in view.Operations.Where(o => o.Status is "uncertain" or "dispatched"))
-        {
-            items.Add(new AttentionItem("uncertain effect", operation.Identity, operation.Status == "uncertain" ? "An external effect may or may not have happened." : "An external operation was dispatched and its outcome is not yet observed.", operation.StatusLabel, view.AsOf, "Observe the provider; reconcile before any retry.", "operation", operation.Id));
         }
 
         foreach (FindingRow finding in view.Findings.Where(f => f.Severity == "error"))

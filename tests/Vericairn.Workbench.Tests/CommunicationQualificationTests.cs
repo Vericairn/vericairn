@@ -81,13 +81,34 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         await fixture.Ui(shell.Refresh);
         Assert.Contains("status (short)", shell.HumanStatus, StringComparison.Ordinal);
         string attention = string.Join('\n', shell.Attention.Select(item => item.Why));
-        foreach (string required in new[] { result.Written!.Id, "The response was incomplete.", "The original widget effect remains uncertain.", ask.Written!.Id, "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
+        foreach (string required in new[] { result.Written!.Id, result.Written.Hash, "1 failed checks", "1 unresolved effects", ask.Written!.Id, "vericairn records show " + ask.Written.Id })
         {
             Assert.Contains(required, attention, StringComparison.Ordinal);
         }
 
+        Assert.DoesNotContain(api.Record(result.Written.Id)!.Envelope.GetRawText(), attention, StringComparison.Ordinal);
+        Presentation.AttentionItem askItem = Assert.Single(shell.Attention, a => a.SubjectId == ask.Written.Id);
+        await fixture.Ui(() => shell.OpenAttention(askItem));
+        foreach (string required in new[] { "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
+        {
+            Assert.Contains(required, api.Asks(person).Text, StringComparison.Ordinal);
+        }
         Assert.Empty(api.Records("acceptance"));
         Assert.Equal("open", api.Record(ask.Written.Id)!.Envelope.GetProperty("body").GetProperty("state").GetString());
+        WriteOutcome review = api.NewRecord(new("review", person, Seed.Json("""{"independence":"self","outcome":"findings","summary":"Inspect the remaining effect.","findings":[{"severity":"error","summary":"Follow up."}]}"""), $"result:{result.Written.Id}:{result.Written.Hash}"));
+        Assert.True(review.Ok, review.Problem?.Message);
+        await fixture.Ui(shell.RefreshProgress);
+        Presentation.AttentionItem reviewItem = Assert.Single(shell.Attention, a => a.Kind == "required-decision" && a.SubjectId == result.Written.Id);
+        Assert.Contains(review.Written!.Hash, reviewItem.Why, StringComparison.Ordinal);
+        await fixture.Ui(() => shell.OpenAttention(reviewItem));
+        Assert.Equal(result.Written.Id, Assert.IsType<ReviewWorkspace>(shell.SelectedDocument).SubjectId);
+        RecordResponse order = Assert.Single(api.Records("work-order"));
+        WriteOutcome accepted = api.NewRecord(new("acceptance", person, Seed.Json("""{"statement":"Work accepted.","basis":[],"self":true}"""), $"work-order:{order.Id}:{order.Hash}"));
+        Assert.True(accepted.Ok, accepted.Problem?.Message);
+        await fixture.Ui(shell.RefreshProgress);
+        Assert.DoesNotContain(shell.Attention, a => a.SubjectId == result.Written.Id);
+        Assert.Contains(shell.Attention, a => a.SubjectId == ask.Written.Id);
+
     }
 
     [Fact]

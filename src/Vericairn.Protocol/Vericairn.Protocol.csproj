@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="vericairn-workbench" />
+    <InternalsVisibleTo Include="Vericairn.Runtime" />
+    <InternalsVisibleTo Include="vericairn" />
   </ItemGroup>
 
 </Project>

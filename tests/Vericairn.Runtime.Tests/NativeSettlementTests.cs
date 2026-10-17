@@ -115,7 +115,7 @@ public class NativeSettlementTests
             Assert.Equal(AgentRuns.Find(model, started.Run)!.Latest.Reference, ask.Subject);
             Assert.DoesNotContain(model.Findings, f => f.Code == "record.subject-stale" && f.Location.StartsWith("records/ask/", StringComparison.Ordinal));
             Assert.Contains(missing, evidence, StringComparison.Ordinal);
-            Assert.Contains(CommunicationPresentation.Attention(run.Service), a => a.Kind == "incident" && a.Record == started.Run);
+            Assert.Contains(CommunicationPresentation.Attention(run.Service), a => a.Kind == "incident" && a.Record == AgentRuns.Find(model, started.Run)!.Latest.Id && a.Command == "vericairn worker runs");
         }
         Assert.Equal(0, run.Service.Check().Errors);
     }

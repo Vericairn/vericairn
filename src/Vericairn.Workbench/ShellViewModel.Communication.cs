@@ -61,18 +61,25 @@ public sealed partial class ShellViewModel
             CommunicationProfile view = StatusViewDepth == "inherit" ? communication :
                 Try(() => api.Communication(recipient, view: new(Status: StatusViewDepth))) ?? communication with { Unavailable = "The one-view setting could not be read." };
             HumanStatus = CommunicationPresentation.Status(status, view);
+            // Periodic attention must use the same renewed status, not the work state retained at the last full refresh.
+            estate = Presentation.EstateView.From(status, DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture));
         }
     }
 
     private void AddCommunicationAttention(string? recipient, Func<ProgressResponse> progress)
     {
         if (connection?.Api is not { } api) { return; }
+        int deliveredAsks = 0;
         foreach (CommunicationAttention item in CommunicationPresentation.Attention(api, recipient, progress))
         {
-            if (item.Record is null || !Attention.Any(a => a.SubjectId == item.Record && a.Kind == item.Kind))
+            string kind = item.RecordType == "ask" && item.Kind == "required-decision" ? "decision needed" : item.Kind;
+            string state = item.RecordType == "ask" ? Presentation.StateLanguage.Label("ask", item.State) : item.State ?? "unknown";
+            if (item.Record is null || !Attention.Any(a => a.SubjectId == item.Record && a.Kind == kind))
             {
-                Attention.Add(new Presentation.AttentionItem(item.Kind, item.Record ?? "Required attention", item.Text, "requires attention",
-                    communication.ObservedAt ?? "unknown", "Inspect the complete source before proceeding.", item.RecordType, item.Record));
+                var row = new Presentation.AttentionItem(kind, item.Record ?? "Required attention", item.Text, state,
+                    item.AsOf ?? "unknown", item.Command ?? "vericairn status", item.Target?.Type ?? item.RecordType, item.Target?.Id ?? item.Record);
+                if (item.RecordType == "ask") { Attention.Insert(deliveredAsks++, row); }
+                else { Attention.Add(row); }
             }
         }
     }

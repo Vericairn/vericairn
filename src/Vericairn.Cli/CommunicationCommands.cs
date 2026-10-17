@@ -56,7 +56,7 @@ internal static partial class Commands
         api.Communication(selection?.Recipient, selection?.Assignment, selection?.Values(kind));
 
     private static string StatusPresentation(IEstateApi api, StatusResponse status, CommunicationSelection? selection) =>
-        CommunicationPresentation.Status(status, Profile(api, "status", selection)) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, selection?.Recipient));
+        CommunicationPresentation.Status(status, Profile(api, "status", selection)) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, selection?.Recipient, () => status.Json.TryGetProperty("attention", out _) ? new ProgressResponse(string.Empty, status.Json, status.HasErrors) : api.Progress()));
 
     private static string ProtectedPresentation(IEstateApi api, string kind, string subject, string original, CommunicationSelection? selection) =>
         CommunicationPresentation.Protected(Profile(api, kind, selection), kind, subject, "Complete source material follows; no recorded content is shortened.", original);

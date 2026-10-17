@@ -52,7 +52,7 @@ internal static partial class CliApp
         root.Subcommands.Add(ContextFamily(estateOption, jsonOption));
         root.Subcommands.Add(UpdatesFamily(jsonOption));
 
-        var status = new Command("status", "Show the estate's current state derived from its records. " + UpdateHelp);
+        var status = new Command("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command; --json includes complete attention references. " + UpdateHelp);
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         status.Options.Add(observeStatus);
@@ -60,7 +60,7 @@ internal static partial class CliApp
         status.SetAction(parseResult => Commands.WithUpdates(updates, () => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult))));
         root.Subcommands.Add(status);
 
-        var progress = new Command("progress", "Show the estate's recorded progress with latest local agent claims and worker observations labelled separately: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
+        var progress = new Command("progress", "Show the estate's recorded progress with latest local agent claims and worker observations labelled separately: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator. Required attention names only open obligations with exact references and inspection commands; ordinary after ordering is planning. --json includes complete attention references.");
         progress.SetAction(parseResult => Commands.Progress(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(progress);
 

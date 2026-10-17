@@ -55,15 +55,15 @@ public class GoalsTests(HeadlessFixture fixture)
         {
             await fixture.UiAsync(() => shell.OpenEstateAsync(root));
 
-            // Each ask is a decision needed, first among them, with its recommendation first and its state in the state language.
+            // Each ask is a compact decision needed, first among them, with its exact source and state in the state language.
             List<AttentionItem> asks = shell.Attention.Where(a => a.SubjectType == "ask").ToList();
             Assert.Equal(2, asks.Count);
             Assert.Equal(asks, shell.Attention.Take(2));
             Assert.All(asks, a => Assert.Equal(("decision needed", "open, awaiting an answer"), (a.KindLabel, a.State)));
-            Assert.StartsWith("No principal is available to carry W-1 Order W-1", asks[0].Subject, StringComparison.Ordinal);
-            Assert.StartsWith("Recommendation: Make Builder available: it has no admitted device", asks[0].Why, StringComparison.Ordinal);
-            Assert.Contains("If unanswered: W-1 waits; the conductor never gives it to a contributor the roster does not name", asks[0].Why, StringComparison.Ordinal);
-            Assert.Contains($"names ask {asks[0].SubjectId} in its answers", asks[0].NextAction, StringComparison.Ordinal);
+            Assert.Equal(asks[0].SubjectId, asks[0].Subject);
+            Assert.StartsWith($"ask {asks[0].SubjectId} at sha256:", asks[0].Why, StringComparison.Ordinal);
+            Assert.Contains("open the ask for its recommendation, alternatives and no-answer consequence", asks[0].Why, StringComparison.Ordinal);
+            Assert.Equal($"vericairn records show {asks[0].SubjectId}", asks[0].NextAction);
 
             // Ctrl+Shift+G opens the Goals workspace on the open goal.
             await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.G, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.G, null); });

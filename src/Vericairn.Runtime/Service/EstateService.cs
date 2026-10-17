@@ -91,8 +91,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             FindingList checks = ChecksWithBatches(model);
-            using JsonDocument json = JsonDocument.Parse(EstateStatus.RenderJson(model, checks));
-            return new StatusResponse(EstateStatus.Render(model, checks), json.RootElement.Clone(), model.Findings.HasErrors || checks.HasErrors);
+            JsonObject json = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
+            json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => ProgressCore(model, checks)), ProtocolJson.Options);
+            return new StatusResponse(EstateStatus.Render(model, checks), Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 
@@ -102,27 +103,57 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            FindingList checks = EstateChecks.Run(model);
-            JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
-            List<WorkProgressClaim> claims = ProgressClaims(model);
-            json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
-            List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
-            json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
-            string text = ProgressReport.Render(model, checks);
-            if (claims.Count > 0)
-            {
-                text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
-                    + string.Join('\n', claims.Select(c => $"  attempt {c.Attempt}, {c.Phase} ({(c.Completed ? "claimed complete" : "in progress")}) by {c.By}: {c.Note}" + (c.Record is null ? " [live state]" : $" [work-progress {c.Record}]"))) + "\n";
-            }
-
-            if (watched.Count > 0)
-            {
-                text += "\nWorker observations of agent runs:\n" + string.Join('\n', watched.SelectMany(r => r.Signals!.Select(s =>
-                    $"  run {r.Run} [{s.Severity} {s.Code}]: {s.Summary} [{(s.Attention is null ? "attention recording pending" : "ask " + s.Attention)}]"))) + "\n";
-            }
-
-            return new ProgressResponse(text, Element(json), model.Findings.HasErrors || checks.HasErrors);
+            ProgressResponse progress = ProgressCore(model, EstateChecks.Run(model));
+            JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
+            json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
+            return progress with { Json = Element(json) };
         }
+    }
+
+    private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
+    {
+        JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
+        List<WorkProgressClaim> claims = ProgressClaims(model);
+        json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
+        List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
+        json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
+        string text = ProgressReport.Render(model, checks);
+        if (claims.Count > 0)
+        {
+            text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
+                + string.Join('\n', claims.Select(c => $"  attempt {c.Attempt}, {c.Phase} ({(c.Completed ? "claimed complete" : "in progress")}) by {c.By}: {c.Note}" + (c.Record is null ? " [live state]" : $" [work-progress {c.Record}]"))) + "\n";
+        }
+
+        if (watched.Count > 0)
+        {
+            text += "\nWorker observations of agent runs:\n" + string.Join('\n', watched.SelectMany(r => r.Signals!.Select(s =>
+                $"  run {r.Run} [{s.Severity} {s.Code}]: {s.Summary} [{(s.Attention is null ? "attention recording pending" : "ask " + s.Attention)}]"))) + "\n";
+        }
+
+        return new ProgressResponse(text, Element(json), model.Findings.HasErrors || checks.HasErrors);
+    }
+
+    // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
+    private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress)
+    {
+        var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
+        RecordResponse Response(RecordEnvelope record)
+        {
+            if (!cache.TryGetValue(record.Id, out RecordResponse? response))
+            {
+                using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
+                response = new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
+                cache.Add(record.Id, response);
+            }
+            return response;
+        }
+        return new AttentionDerivation(
+            type => model.Current(type).Select(Response).ToList(),
+            id => model.ById.TryGetValue(id, out RecordEnvelope? record) ? Response(record) : null,
+            progress,
+            recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
+            () => GoalView.Rows(model).Select(r => new GoalRow(r.Id, r.Hash, r.Title, r.Status, r.Sponsor, r.SponsorName)).ToList(),
+            () => Runs(model)).Derive(null);
     }
 
     /// <inheritdoc />
