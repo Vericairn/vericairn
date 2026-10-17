@@ -2311,6 +2311,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(exception.Message);
         }
 
+        BeforeValidatingRecords?.Invoke([record]);
         FindingList relevant = Invalid(session.Load(), [record], stored: true);
         if (relevant.HasErrors)
         {
@@ -2365,6 +2366,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>A test's hook, called before each record a batch stores: a test throws from it to stop a batch between its records.</summary>
     internal Action<AuthoredRecord>? BeforeStoringTogether { get; set; }
 
+    /// <summary>A test's hook at the validation boundary, for observing publication and injecting a failed judgment.</summary>
+    internal Action<IReadOnlyList<AuthoredRecord>>? BeforeValidatingRecords { get; set; }
+
     /// <summary>
     /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
     /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
@@ -2379,6 +2383,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return ([], denied);
         }
 
+        BeforeValidatingRecords?.Invoke(records);
         FindingList relevant = Invalid(LoadWith(records), records, stored: false);
         if (relevant.HasErrors)
         {
