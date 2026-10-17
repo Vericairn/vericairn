@@ -14,17 +14,17 @@ agent run. Human-authorized harness requalification pins one exact version and i
 adds communication settings and hand-over/resume views. The [0.7.1 documentation set](docs/releases/0.7.1/README.md)
 describes these features, the COMMS-02 qualification evidence and the limits below.
 
-The last published release is [0.6.1](https://github.com/Vericairn/vericairn/releases/tag/v0.6.1), published on
-October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. The 0.7.0 candidate was withdrawn
+The current published release is [0.7.1](https://github.com/Vericairn/vericairn/releases/tag/v0.7.1), published on
+October 17, 2026, following 0.6.1. The 0.7.0 candidate was withdrawn
 before publication by decision `01M53S6DYFCPJMG0AQRSN8ZFSP`, recorded in withdrawal
 `01M53S6FN1GANBY5HSNDKE5N08`. Its frozen set remains indexed; 0.7.1 carries its work with FIX-12. This includes
 FIX-09's bounded loopback authentication and recoverable notes window, and FIX-10's deterministic permitted-path
 matching and independent audit checks. FIX-11 adds machine-local worker configuration, restricts harness
 qualification to the runtime's own machine and completes the generated CLI option reference.
 FIX-12 adds a machine-local workspace root, enforces hand-over for explicit worker runs, and keeps validated
-public keys and signatures out of credential-pattern matching. NuGet installation goes live only after the operator
-publishes a release and its Trusted Publishing workflow succeeds; this documentation does not claim those
-packages are already available.
+public keys and signatures out of credential-pattern matching. The 0.7.1 command-line tool and SDK packages are
+available on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup) records their
+Trusted Publishing run and the manual workflow path used after publication.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
 needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
@@ -55,42 +55,45 @@ sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md
 and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
 the maintained documents, the release notes and known limitations. The index there also names the versions
 withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the maintained drafts. The 0.7.1 set carries 0.7.0's work and FIX-12;
-these changes are not part of the published 0.6.1 build or its frozen documentation set.
+documents at `docs/` are the maintained drafts. The published 0.7.1 set carries 0.7.0's work and FIX-12;
+the earlier sets remain frozen, including 0.7.0's withdrawn candidate.
 
-For 0.6.1, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
+For 0.7.1, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
 The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
 any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
-as the [install guide](docs/releases/0.6.1/install.md) describes.
+as the [install guide](docs/releases/0.7.1/install.md) describes.
 
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
 
 ## Install the command line and SDK
 
-NuGet distribution is included in 0.7.1. Once that release's packages are published, install the command
-line with the .NET 10 SDK on Linux, macOS or Windows:
+The 0.7.1 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
 
 ```sh
-dotnet tool install --global dotnet-vc
+dotnet tool install --global dotnet-vc --version 0.7.1
 dotnet vc version
 dotnet vc doctor
 dotnet vc records describe
 ```
 
 The global tool directory must be on PATH, as the installer describes. A repository can instead keep a
-local tool manifest; see the [installation draft](docs/install.md). The tool is framework-dependent; the
-self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
+local tool manifest; see the [0.7.1 install guide](docs/releases/0.7.1/install.md#9-nuget-command-line-and-sdk).
+The tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
 also carry the Secure Enclave helper. The NuGet tool does not bundle that helper or Workbench.
+The worker's agent-side MCP command still resolves `vericairn`; keep the archive executable on PATH for worker
+runs. A NuGet-only worker installation is not qualified by the package installation checks.
 
 In a .NET 10 project, install the SDK with:
 
 ```sh
-dotnet add package Vericairn
+dotnet add package Vericairn --version 0.7.1
 ```
 
 `Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
-and assemblies. See the [SDK guide](docs/api-v1.md#the-sdk). The packages contain Community code only.
+and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.7.1;
+the SDK front door does not embed a runtime or daemon. See the [SDK guide](docs/api-v1.md#the-sdk).
+The packages contain Community code only.
 Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
 
 ## What is here
