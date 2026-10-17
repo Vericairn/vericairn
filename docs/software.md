@@ -789,12 +789,25 @@ for reads and writes alike. Classified read-only invocations inside the workspac
 a file outside the brief's permitted changes, such
 as reading `README.md` when only `path:NOTES.md` is permitted. Reads outside the workspace raise `scope-read` at warning
 and continue; `pwd` followed by `rg --files --hidden -g AGENTS.md` on the workspace's parent is such a read.
-Known mutating commands, `apply_patch` paths and output redirection raise critical `scope` only when they may change
-a path outside the workspace. Changes inside this disposable worktree raise no event-stream scope signal, whether
+Critical `scope` requires a confidently identified outside write target: operands of known mutating commands
+(`cp`, `mv`, `rm`, `touch`, `mkdir`, `rmdir`, `ln`, `tee`, `truncate`, `chmod`, `chown` and their PowerShell equivalents),
+output-redirection targets, `apply_patch` and structured file-change paths, or Git `-C`, `--work-tree` and `--output`
+targets. An outside-looking operand of an unclassified invocation raises `audit-unverified` at warning, without a
+stop. Opaque programs cannot establish a confident change, even when code contains `open` with an outside filename.
+Unresolved variable targets and paths whose physical containment cannot be verified also warn rather than asserting
+an outside change. Changes inside this disposable worktree raise no event-stream scope signal, whether
 or not the brief permits them: the settlement audit checks actual changes against the brief's patterns. Thus
 `touch README.md` continues when only `path:NOTES.md` is permitted, but changing `README.md` is flagged at settlement.
-Input redirection is a read. Commands the audit cannot classify retain conservative path checks and incomplete-audit
-warnings; an outside-workspace path they may change still raises critical `scope`.
+Input redirection is a read. Heredoc bodies (`<<`, `<<-`) and here-string operands (`<<<`) are input, never path
+operands. Interpreter input is scanned for recognizable network and credential patterns and raises `audit-unverified`,
+as inline `-c` code does. Redirections on the command line remain checked, including those beside a heredoc.
+
+The audit also permits the temporary directory actually supplied in the harness's launch environment: `TMPDIR`
+on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. The shipped launchers preserve these admitted variables;
+they do not create another temporary directory. The audit uses the same captured environment as the launched process,
+recognizes those variables in path operands, and checks traversal against the resulting boundary. It does not infer
+a system temporary directory or take a boundary from tool-event input; system `/tmp` is permitted only when the
+run's supplied temporary variable names it.
 
 Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names
 are not treated as executable operations. Path checks normalize traversal and do not assume links or expansions
@@ -803,6 +816,7 @@ notes and stash are text, not paths. Git show, log, diff, blame, cat-file, ls-tr
 are classified as reads; their `rev:path` operands, such as `HEAD:README.md`, name Git objects rather than filesystem
 paths. Read classification also covers common file readers, searches and structured read tools; mutating or
 helper-executing options, such as `find -delete`, `rg --pre` and `git diff --output`, are not classified as reads.
+An outside-looking operand of an unclassified helper raises uncertainty; the explicit Git output target remains a known write target.
 Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.
@@ -817,7 +831,7 @@ History is the last 20 successful, fully reported runs of the same launcher and 
 
 ## Attention and containment (0.7.0)
 
-Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, outside-workspace reads, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, invocations that may change paths outside the workspace, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
 
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
@@ -1221,9 +1235,11 @@ reported the admitted model and effort from its rollout with no discrepancy, and
 and ask at settlement. The command searched the workspace's parent for `AGENTS.md`; the old audit stopped this read
 as a critical scope violation. FIX-18 now separates reads from changes, confines event-stream scope stops to
 possible changes outside the workspace, and refuses briefs with no interpretable permitted path pattern.
-Changes inside the worktree are checked against the brief at settlement. A third live run is still needed to
-qualify work beyond that search, access to the brief, and MCP attempt/result authoring. Neither observed-success
-nor these partial live observations accept the work.
+Changes inside the worktree are checked against the brief at settlement. The third live run of `42f989d` passed
+its worktree `rg --files` search and `cat .vericairn/brief.md`, then stopped when the old audit mistook a Python
+heredoc's division operator for an outside write path. FIX-18 now reserves scope stops for confidently identified
+write targets and treats interpreter input as unverified code. A further live run is needed to qualify work beyond
+brief access and MCP attempt/result authoring. Neither observed-success nor these partial live observations accept the work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
