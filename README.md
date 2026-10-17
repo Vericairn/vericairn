@@ -30,8 +30,10 @@ The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `
 needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
 configure that machine's worker with `vericairn worker configure --launcher codex --model <model> --effort <effort>`
 (or `--launcher claude-code`); omit model and effort to show it. Repeated `--allow-model` and `--allow-effort`
-options narrow the permitted choices and never widen the qualified harness inventory. Configuration is per
-machine and is never recorded in the estate. Its Vericairn home must be outside every Git repository and estate;
+options narrow the permitted choices and never widen the qualified harness inventory. FIX-18 adds Codex's `max`
+effort for 0.7.2; the harness validates model/effort support at launch, and an observed refusal is recorded as a
+failed run. Configuration is per machine and is never recorded in the estate. Its Vericairn home must be outside
+every Git repository and estate;
 if your home directory is a repository, set `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them.
 If your home holds `.claude` or `.codex` settings, move workspaces outside it with
 `vericairn worker configure --workspaces <absolute-directory>`; `vericairn worker configure` shows the root.

@@ -571,6 +571,8 @@ from its files and live store, even while a daemon serves it.
 
 Before a native run, configure model and effort defaults on the runtime's machine with
 `vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`).
+FIX-18 adds `max` to Codex's advertised native efforts for 0.7.2, including API run admission; the harness
+validates model/effort support at launch, and an observed nonzero exit is recorded as `known-failure`.
 The stock CLI and daemon read that machine's configuration for each run and agent goal step. Missing or
 invalid configuration refuses before intent; explicit API run choices cannot replace it. Optional allowlists
 narrow choices without widening the qualified inventory. See [explicit execution](#explicit-agent-run-execution-run-01-070)

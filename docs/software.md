@@ -449,7 +449,12 @@ Software Domain Pack ships three launchers and the git worktree workspace:
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
 recorded through the MCP tools as its checks, and the brief's prohibited effects, the goal's constraints and only the
 changes the brief permits as its constraints, on one line. The launcher argument construction and configuration checks are covered by the launcher tests; the limits of
-that qualification are stated below. The `command` setting of each launcher names another executable, or a JSON array of one and
+that qualification are stated below. The agent's initial prompt is `/goal <condition>`; the full brief is in
+`.vericairn/brief.md` and is available through `work_brief` on the configured `vericairn` MCP server, acting as
+the run's agent principal. The brief carries the assignment, permitted changes, prohibited effects, review criteria,
+mandatory originals and the complete withheld list. The agent can retrieve pinned originals with `context_read`
+and records its own attempt and result with `work_attempt` and `work_result`; a worker exit does not accept that result.
+The `command` setting of each launcher names another executable, or a JSON array of one and
 its leading arguments. Native qualification refuses leading option flags in that setting: the launcher supplies every
 harness option. Positional wrapper arguments and entry-file content have inventory identities, and local command
 bindings are rechecked before dispatch. No launcher reads a price, so a cap in currency is charged in full.
@@ -910,6 +915,14 @@ required choices or unsupported values refuse dispatch, without ambient fallback
 adapter passes an explicit model and native reasoning-effort configuration; the Claude Code adapter
 passes an explicit model and native effort flag. An explicit provider default omits only the effort flag.
 
+Codex's native efforts are `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`; FIX-18 adds `max`
+for 0.7.2 while retaining every existing value. For `max`, the launcher passes
+`--model <model> -c 'model_reasoning_effort="max"'`. Configuration and admission check this vocabulary and
+the local allowlists. The installed baseline's version, help, feature-list and MCP-list probes do not establish
+whether a model accepts an effort: even an invalid effort can pass those probes. Codex validates the selection
+at launch. An observed nonzero exit, including an effort refusal, is recorded as `known-failure`, never success;
+unreported usage is charged at the reserved cap. A lost observer remains uncertain under the usual run rules.
+
 `worker run` and `goal step` accept `--configuration <name>` and repeated `--execution name=value` for
 `model`, `effort`, `provider`, `destination`, `dataBoundary` and `adapter`. They also accept
 `--input-tokens`, `--output-tokens` and `--context-package <sha256:...>`. For example, the execution part
@@ -918,7 +931,7 @@ not permission to change an inherited restriction. Configure a stock native work
 runs it before starting a run or an agent goal step:
 
 ```sh
-vericairn worker configure --launcher codex --model model-alias --effort high
+vericairn worker configure --launcher codex --model gpt-6-astra --effort max
 vericairn worker configure --launcher codex
 ```
 
@@ -1159,6 +1172,9 @@ dispatch and records an unstarted, zero-charge failure.
 
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
 qualification. Real model calls, provider/account-dependent behavior and remote managed policy have not been qualified.
+FIX-18 covers `max` argument construction, configuration, admission and observed harness refusal with stand-ins.
+The builder's first live `worker run` with a build containing FIX-18 must still verify inference at `max`, the
+agent's use of its brief and MCP result tools, and the recorded cap, execution and usage before claiming live qualification.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
