@@ -4,6 +4,7 @@
 using System.Collections.Concurrent;
 using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -46,11 +47,12 @@ public class TlsHandshakeLogTests
         if (rejectServerCertificate)
         {
             await using var tls = new SslStream(stream, leaveInnerStreamOpen: true);
-            await Assert.ThrowsAnyAsync<IOException>(() => tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
                 TargetHost = "vericairn-runtime",
                 AllowTlsResume = false,
             }, deadline.Token));
+            Assert.True(failure is IOException or AuthenticationException, $"{failure.GetType().Name}: {failure.Message}");
         }
         else
         {
@@ -59,9 +61,16 @@ public class TlsHandshakeLogTests
             await stream.WriteAsync(new byte[] { 21, 3, 3, 0, 2, 2, 40 }, deadline.Token);
             socket.Shutdown(SocketShutdown.Send);
             var buffer = new byte[256];
-            while (await stream.ReadAsync(buffer, deadline.Token) != 0)
+            try
             {
-                // Consume the server's alert, if any, through connection closure.
+                while (await stream.ReadAsync(buffer, deadline.Token) != 0)
+                {
+                    // Consume the server's alert, if any, through connection closure.
+                }
+            }
+            catch (IOException)
+            {
+                // A native TLS refusal may reset the socket instead of closing it with EOF.
             }
         }
 
