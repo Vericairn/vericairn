@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.IO.Compression;
 using System.Text.Json;
 using Vericairn.Records.Signing;
 
@@ -115,6 +116,38 @@ public class PortabilityJourneyTests
         finally
         {
             CliHarness.Delete(c, d, scratch);
+        }
+    }
+
+    [Fact]
+    public void DuplicateMemberIsReportedAsARejectedExportWithoutRestoringAnything()
+    {
+        string root = CliHarness.TempDirectory("duplicate-export");
+        string scratch = CliHarness.TempDirectory("duplicate-export-scratch");
+        try
+        {
+            Init(root);
+            Directory.CreateDirectory(Path.Combine(root, "docs"));
+            File.WriteAllText(Path.Combine(root, "docs", "probe.md"), "verified bytes");
+            string archive = Path.Combine(scratch, "estate.zip");
+            CliHarness.Ok("--estate", root, "--json", "estate", "export", "--out", archive);
+            using (ZipArchive zip = ZipFile.Open(archive, ZipArchiveMode.Update))
+            using (var writer = new StreamWriter(zip.CreateEntry("docs/probe.md").Open()))
+            {
+                writer.Write("unverified replacement");
+            }
+
+            string destination = Path.Combine(scratch, "restored");
+            CliHarness.Outcome result = CliHarness.Run("--json", "estate", "restore", "--from", archive, "--to", destination);
+            Assert.NotEqual(0, result.Code);
+            Assert.Contains("export.entry-duplicate", result.Out, StringComparison.Ordinal);
+            Assert.Contains("docs/probe.md", result.Out, StringComparison.Ordinal);
+            Assert.Contains("Nothing restored", result.Err, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(destination));
+        }
+        finally
+        {
+            CliHarness.Delete(root, scratch);
         }
     }
 

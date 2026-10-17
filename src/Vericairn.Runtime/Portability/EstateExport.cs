@@ -126,12 +126,37 @@ public static class EstateExport
         }
 
         using ZipArchive zip = ZipFile.OpenRead(zipPath);
-        ZipArchiveEntry? inventoryEntry = zip.GetEntry(InventoryEntry);
-        ZipArchiveEntry? summaryEntry = zip.GetEntry(SummaryEntry);
-        if (inventoryEntry is null || summaryEntry is null)
+        VerifiedExport verified = Verify(zip, zipPath);
+        return (verified.Summary, verified.Findings);
+    }
+
+    private static VerifiedExport Verify(ZipArchive zip, string zipPath)
+    {
+        var findings = new FindingList();
+        var verified = new VerifiedExport(findings);
+        var members = new Dictionary<string, ZipArchiveEntry>(StringComparer.Ordinal);
+        var paths = new ExportPaths(findings);
+        foreach (ZipArchiveEntry entry in zip.Entries)
+        {
+            if (!members.TryAdd(entry.FullName, entry))
+            {
+                findings.Error("export.entry-duplicate", entry.FullName, $"Duplicate archive member '{entry.FullName}'; each name must identify exactly one member, including export metadata.");
+            }
+
+            paths.Add(entry.FullName, entry.FullName.EndsWith('/'));
+        }
+
+        if (!members.TryGetValue(InventoryEntry, out ZipArchiveEntry? inventoryEntry)
+            || !members.TryGetValue(SummaryEntry, out ZipArchiveEntry? summaryEntry))
         {
             findings.Error("export.format", zipPath, "Not a Vericairn export: the inventory or the summary entry is missing.");
-            return (null, findings);
+            return verified;
+        }
+
+        // There must be one unambiguous identity for every name before even metadata is consumed.
+        if (findings.HasErrors)
+        {
+            return verified;
         }
 
         byte[] inventoryBytes = ReadEntry(inventoryEntry);
@@ -141,7 +166,7 @@ public static class EstateExport
         if (ContentHash.Sha256(inventoryBytes) != inventoryHash)
         {
             findings.Error("export.inventory", InventoryEntry, "The inventory does not match the hash in the export summary.");
-            return (null, findings);
+            return verified;
         }
 
         using JsonDocument inventoryDocument = JsonDocument.Parse(inventoryBytes);
@@ -151,9 +176,20 @@ public static class EstateExport
             string path = item.GetProperty("path").GetString() ?? string.Empty;
             string hash = item.GetProperty("hash").GetString() ?? string.Empty;
             long size = item.GetProperty("bytes").GetInt64();
-            listed.Add(path);
-            ZipArchiveEntry? entry = zip.GetEntry(path);
-            if (entry is null)
+            if (!listed.Add(path))
+            {
+                findings.Error("export.inventory-duplicate", path, $"Duplicate inventory path '{path}'; each member must be listed exactly once.");
+                continue;
+            }
+
+            paths.Add(path, directory: false);
+            if (path is InventoryEntry or SummaryEntry || path.EndsWith('/'))
+            {
+                findings.Error("export.inventory-path", path, "The inventory may list only payload files, not export metadata or directories.");
+                continue;
+            }
+
+            if (!members.TryGetValue(path, out ZipArchiveEntry? entry))
             {
                 findings.Error("export.entry-missing", path, "Listed in the inventory but absent from the export.");
                 continue;
@@ -163,10 +199,13 @@ public static class EstateExport
             if (bytes.LongLength != size || ContentHash.Sha256(bytes) != hash)
             {
                 findings.Error("export.entry-hash", path, "The entry's bytes do not match the inventory.");
+                continue;
             }
+
+            verified.Members.Add(new VerifiedMember(entry, size, hash));
         }
 
-        foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName != InventoryEntry && e.FullName != SummaryEntry && !e.FullName.EndsWith('/')))
+        foreach (ZipArchiveEntry entry in members.Values.Where(e => e.FullName != InventoryEntry && e.FullName != SummaryEntry && !e.FullName.EndsWith('/')))
         {
             if (!listed.Contains(entry.FullName))
             {
@@ -174,7 +213,7 @@ public static class EstateExport
             }
         }
 
-        var result = new ExportSummary(
+        verified.Summary = new ExportSummary(
             summary.GetProperty("id").GetString() ?? string.Empty,
             summary.GetProperty("estate").GetString() ?? string.Empty,
             summary.GetProperty("createdAt").GetString() ?? string.Empty,
@@ -183,21 +222,47 @@ public static class EstateExport
             summary.GetProperty("objects").GetInt32(),
             summary.GetProperty("documents").GetInt32(),
             inventoryHash);
-        return (result, findings);
+        return verified;
     }
 
     /// <summary>
     /// Restores a verified export into an empty directory as a repository-synced estate (its records as files),
     /// whatever the source profile was. Nothing is restored unless every byte verifies. Returns the summary.
     /// </summary>
-    public static ExportSummary Restore(string zipPath, string destination)
+    public static ExportSummary Restore(string zipPath, string destination) => Restore(zipPath, destination, ZipFile.OpenRead);
+
+    internal static ExportSummary Restore(string zipPath, string destination, Func<string, ZipArchive> openArchive)
+    {
+        (ExportSummary? summary, FindingList findings) = TryRestore(zipPath, destination, openArchive);
+        if (summary is null || findings.HasErrors)
+        {
+            throw new InvalidOperationException("The export does not verify: " + string.Join("; ", findings.Select(f => $"{f.Location}: {f.Message}")));
+        }
+
+        return summary;
+    }
+
+    // The CLI needs structured verification findings without opening a separate preview archive.
+    internal static (ExportSummary? Summary, FindingList Findings) TryRestore(string zipPath, string destination) =>
+        TryRestore(zipPath, destination, ZipFile.OpenRead);
+
+    private static (ExportSummary? Summary, FindingList Findings) TryRestore(string zipPath, string destination, Func<string, ZipArchive> openArchive)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(zipPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
-        (ExportSummary? summary, FindingList findings) = Verify(zipPath);
-        if (summary is null || findings.HasErrors)
+        if (!File.Exists(zipPath))
         {
-            throw new InvalidOperationException("The export does not verify: " + string.Join("; ", findings.Select(f => f.Message)));
+            var findings = new FindingList();
+            findings.Error("export.missing", zipPath, "The export file does not exist.");
+            return (null, findings);
+        }
+
+        // Keep this archive open through extraction. Never resolve a name again or reopen the source path.
+        using ZipArchive zip = openArchive(zipPath);
+        VerifiedExport verified = Verify(zip, zipPath);
+        if (verified.Summary is null || verified.Findings.HasErrors)
+        {
+            return (verified.Summary, verified.Findings);
         }
 
         destination = Path.GetFullPath(destination);
@@ -207,27 +272,40 @@ public static class EstateExport
         }
 
         Directory.CreateDirectory(destination);
-        using ZipArchive zip = ZipFile.OpenRead(zipPath);
-        foreach (ZipArchiveEntry entry in zip.Entries.Where(e => e.FullName != InventoryEntry && e.FullName != SummaryEntry && !e.FullName.EndsWith('/')))
+        foreach (VerifiedMember member in verified.Members)
         {
-            string relative = entry.FullName;
-            if (relative.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            string relative = member.Entry.FullName;
+            byte[] bytes = ReadEntry(member.Entry);
+            // An open handle prevents pathname replacement from selecting another archive, but an existing writer
+            // could still change its storage. Only the buffer that passes this check may reach a target file.
+            if (bytes.LongLength != member.Size || ContentHash.Sha256(bytes) != member.Hash)
             {
-                throw new InvalidOperationException($"Refusing entry '{relative}'.");
+                throw new InvalidOperationException($"The export changed after verification: '{relative}' no longer matches the inventory.");
             }
 
             string target = Path.Combine(destination, relative.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            byte[] bytes = ReadEntry(entry);
             if (relative == EstateLayout.ManifestPath)
             {
                 bytes = AsRepositorySynced(bytes);
             }
 
-            File.WriteAllBytes(target, bytes);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            output.Write(bytes);
         }
 
-        return summary;
+        return (verified.Summary, verified.Findings);
+    }
+
+    private sealed record VerifiedMember(ZipArchiveEntry Entry, long Size, string Hash);
+
+    private sealed class VerifiedExport(FindingList findings)
+    {
+        public ExportSummary? Summary { get; set; }
+
+        public FindingList Findings { get; } = findings;
+
+        public List<VerifiedMember> Members { get; } = [];
     }
 
     private static byte[] AsRepositorySynced(byte[] manifestBytes)

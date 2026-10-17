@@ -1460,14 +1460,13 @@ internal static partial class Commands
     {
         try
         {
-            (ExportSummary? verified, FindingList findings) = EstateExport.Verify(from);
-            if (verified is null || findings.HasErrors)
+            (ExportSummary? summary, FindingList findings) = EstateExport.TryRestore(from, to);
+            if (summary is null || findings.HasErrors)
             {
                 Console.Error.WriteLine("Nothing restored: the export does not verify against its inventory.");
                 return ReportFindings(ToFindings(findings, "rejected"), json);
             }
 
-            ExportSummary summary = EstateExport.Restore(from, to);
             using EstateSession session = EstateSession.Open(to);
             EstateModel model = session.Load();
             FindingList checks = EstateChecks.Run(model);
