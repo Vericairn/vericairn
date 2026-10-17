@@ -13,9 +13,11 @@ namespace Vericairn.Cli.Tests;
 public class WorkerConfigurationJourneyTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task StockWorkerLoadsLocalConfigurationBeforeDispatch(bool daemon)
+    [InlineData(false, "high")]
+    [InlineData(true, "high")]
+    [InlineData(false, "max")]
+    [InlineData(true, "max")]
+    public async Task StockWorkerLoadsLocalConfigurationBeforeDispatch(bool daemon, string effort)
     {
         _ = CliHarness.Run("--help");
         string scratch = CliHarness.TempDirectory("stock-worker");
@@ -38,13 +40,14 @@ public class WorkerConfigurationJourneyTests
             Assert.False(File.Exists(report + ".probed"));
             Assert.Empty((await Binary("--json", "worker", "runs")).Json.GetProperty("runs").EnumerateArray());
 
-            Success(await Binary("worker", "configure", "--launcher", "codex", "--model", "model-a", "--effort", "high",
-                "--allow-model", "model-a", "--allow-model", "model-b", "--allow-effort", "high"));
+            Success(await Binary("worker", "configure", "--launcher", "codex", "--model", "model-a", "--effort", effort,
+                "--allow-model", "model-a", "--allow-model", "model-b", "--allow-effort", effort));
+            Assert.Equal(2, (await Binary("worker", "configure", "--launcher", "codex", "--model", "model-a", "--effort", "unlimited")).Code);
             JsonElement shown = Success(await Binary("--json", "worker", "configure", "--launcher", "codex")).Json;
             Assert.Equal("model-a", shown.GetProperty("model").GetString());
-            Assert.Equal("high", shown.GetProperty("effort").GetString());
+            Assert.Equal(effort, shown.GetProperty("effort").GetString());
             Assert.Equal(["model-a", "model-b"], shown.GetProperty("allowedModels").EnumerateArray().Select(v => v.GetString()));
-            foreach (string choice in new[] { "model=model-c", "effort=low", "destination=unapproved" })
+            foreach (string choice in new[] { "model=model-c", "effort=low", "effort=unlimited", "destination=unapproved" })
             {
                 Assert.Equal(2, (await Binary([.. run, "--execution", choice])).Code);
                 Assert.False(File.Exists(report + ".probed"));
@@ -60,9 +63,10 @@ public class WorkerConfigurationJourneyTests
             Success(await Binary([.. run, "--execution", "model=model-b"]));
             string[] arguments = JsonSerializer.Deserialize<string[]>(File.ReadAllText(report))!;
             Assert.Equal("model-b", arguments[Array.IndexOf(arguments, "--model") + 1]);
-            Assert.Contains("model_reasoning_effort=\"high\"", arguments);
+            Assert.Contains("model_reasoning_effort=\"" + effort + "\"", arguments);
             JsonElement recorded = Assert.Single(Success(await Binary("--json", "worker", "runs")).Json.GetProperty("runs").EnumerateArray());
             Assert.Equal("observed-success", recorded.GetProperty("status").GetString());
+            Assert.Equal(effort, recorded.GetProperty("execution").GetProperty("requested").GetProperty("effort").GetString());
             Assert.Equal("baseline", recorded.GetProperty("execution").GetProperty("harnessAdmission").GetProperty("kind").GetString());
             Assert.Contains("qualified-codex", recorded.GetProperty("execution").GetProperty("environment").GetProperty("policy").GetString(), StringComparison.Ordinal);
             Assert.DoesNotContain(home, recorded.GetRawText(), StringComparison.Ordinal);

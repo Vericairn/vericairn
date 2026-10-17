@@ -165,6 +165,13 @@ internal static class FakeHarness
             return 0;
         }
         File.WriteAllText(report, JsonSerializer.Serialize(arguments));
+        if (codex && behavior["refuseEffort"]?.GetValue<string>() is string refusedEffort
+            && arguments.Contains("model_reasoning_effort=" + JsonSerializer.Serialize(refusedEffort)))
+        {
+            Console.Error.WriteLine("The selected model does not support the requested reasoning effort.");
+            Console.WriteLine("""{"type":"turn.failed","error":{"message":"Unsupported reasoning effort."}}""");
+            return 2;
+        }
         if (behavior["execution"]?.GetValue<string>() is string execution)
         {
             string model = arguments[Array.IndexOf(arguments, "--model") + 1];

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text.Json;
 using Vericairn.Packs.Software;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
@@ -242,16 +243,27 @@ public class LauncherTests
         Assert.True(launcher.Read("""{"type":"result","subtype":"success"}""")!.UsageIncomplete);
     }
 
-    [Fact]
-    public void CodexRunsItsOwnGoalThroughExecWithTheMcpServerOnItsCommandLine()
+    [Theory]
+    [InlineData("none")]
+    [InlineData("minimal")]
+    [InlineData("low")]
+    [InlineData("medium")]
+    [InlineData("high")]
+    [InlineData("xhigh")]
+    [InlineData("max")]
+    public void CodexRunsItsOwnGoalThroughExecWithTheMcpServerOnItsCommandLine(string effort)
     {
         var launcher = new CodexLauncher();
         LaunchContext context = Context(NoSettings) with { McpServer = ["C:\\Program Files\\vericairn.exe", "--estate", "/estates/the \"widget\"", "mcp", "serve", "--as", "01M4TRNE1GYEK4P8MXQAB3C8Q4"], McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal) { ["VERICAIRN_HOME"] = "/home/me/.config/vericairn" } };
+        Assert.Contains(effort, launcher.ExecutionCapabilities.Efforts);
+        context = context with { Execution = JsonSerializer.SerializeToElement(new { requested = new { model = "gpt-6-astra", effort } }) };
         IReadOnlyList<string> command = launcher.Command(context);
         Assert.Equal(["codex", "exec", "--json", "--cd", "/work/widget", "--sandbox", "workspace-write", "-c"], command.Take(8));
         Assert.StartsWith("mcp_servers={vericairn={command=", command[8], StringComparison.Ordinal);
         Assert.Contains("env={\"VERICAIRN_HOME\"=\"/home/me/.config/vericairn\"}", command[8], StringComparison.Ordinal);
         Assert.Equal("projects={\"/work/widget\"={trust_level=\"untrusted\"}}", command[10]);
+        int modelAt = command.ToList().IndexOf("--model");
+        Assert.Equal(["--model", "gpt-6-astra", "-c", "model_reasoning_effort=\"" + effort + "\""], command.Skip(modelAt).Take(4));
         Assert.Equal("/goal Is it done? Checks: it builds.", command[^1]);
         Assert.Equal(800 + 150, launcher.Read("""{"type":"turn.completed","usage":{"input_tokens":800,"cached_input_tokens":100,"output_tokens":150}}""")!.TokensAdded);
         Assert.True(launcher.Read("""{"type":"turn.started"}""")!.UsageStarted);

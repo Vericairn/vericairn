@@ -18,7 +18,7 @@ namespace Vericairn.Packs.Software;
 public sealed class CodexLauncher : IAgentLauncher
 {
     /// <inheritdoc />
-    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
+    public RunCapabilities ExecutionCapabilities { get; } = new(RunSelection.Scopes, ["none", "minimal", "low", "medium", "high", "xhigh", "max"], ["openai"], ["openai-inference"], ["worker-user"], ProviderDefault: true, ClosedEnvironment: true);
 
     /// <inheritdoc />
     public RunPreflight Preflight(LaunchContext context)
@@ -67,6 +67,7 @@ public sealed class CodexLauncher : IAgentLauncher
         [
             "Runs codex exec --json --cd <workspace> --sandbox workspace-write with a fresh run home and a verified vericairn-only MCP configuration \"/goal <condition>\": Codex's own /goal, with the vericairn MCP server configured for the run.",
             "Shipped baseline: codex-cli 0.159.0-alpha.12.1. Another exact version needs a current human qualification with matching local probe digests; no version range is inferred. Version, flags, isolated configuration, features and MCP are checked before intent and dispatch.",
+            "Native efforts: none, minimal, low, medium, high, xhigh, max. The version, help, feature and MCP probes do not validate model/effort support; Codex validates it at launch. An observed nonzero exit, including an effort refusal, is recorded as known-failure, never success.",
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport.",
