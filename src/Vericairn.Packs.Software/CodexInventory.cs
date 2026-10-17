@@ -35,6 +35,7 @@ internal static class CodexInventory
         .Concat(["web_search=\"disabled\"", "skills.bundled.enabled=false"]);
 
     internal static string Configuration(LaunchContext context) => "mcp_servers=" + CodexLauncher.Mcp(context) + "\nprojects=" + CodexLauncher.Projects(context)
+        + "\nsandbox_workspace_write=" + CodexLauncher.Sandbox(context)
         + "\nweb_search=\"disabled\"\nskills.bundled.enabled = false\n[features]\ngoals = true\n" + string.Join('\n', Enabled.Where(n => n != "goals").Select(n => n + " = true").Concat(Disabled.Select(n => n + " = false"))) + "\n";
 
     internal static RunPreflight Establish(LaunchContext context, bool qualifying = false)
@@ -62,6 +63,7 @@ internal static class CodexInventory
             qualification = "run-02-codex-v1", version, tools = Tools, features = effective.OrderBy(p => p.Key, StringComparer.Ordinal),
             help = HarnessInventory.Digest(new { help, execHelp, mcpHelp }), home = "run-only-login-and-generated-config", rules = "ignored",
             webSearch = "disabled", projectTrust = "untrusted", bundledSkills = "disabled", estateToolsApproval = CodexLauncher.McpToolsApproval,
+            sandbox = "workspace-write", additionalWritableRoot = "workspace/.git",
             arguments = HarnessInventory.Arguments(context, "codex"),
             loginPresent = File.Exists(Path.Combine(context.Environment["CODEX_HOME"], "auth.json")),
         });
@@ -80,11 +82,33 @@ internal static class CodexInventory
 
         void CheckHome()
         {
+            CheckGitDirectory(context);
             string home = HarnessInventory.Home(context, "CODEX_HOME", "codex", "auth.json", "config.toml", "tmp");
             if (File.ReadAllText(Path.Combine(home, "config.toml")) != Configuration(context))
             {
                 throw new ProviderRefusedException("The run-specific CODEX_HOME configuration differs from the launcher's isolated configuration.");
             }
+        }
+    }
+
+    internal static void CheckGitDirectory(LaunchContext context)
+    {
+        string git = Path.Combine(context.Workspace, ".git");
+        try
+        {
+            // Qualification probes use an empty workspace. If Git administration exists, it must be owned here:
+            // neither a linked-worktree file, a symlink/junction, nor an independent-looking directory with commondir.
+            if (!HarnessInventory.Exists(git)) return;
+            FileAttributes attributes = File.GetAttributes(git);
+            if (!attributes.HasFlag(FileAttributes.Directory) || attributes.HasFlag(FileAttributes.ReparsePoint)
+                || HarnessInventory.Exists(Path.Combine(git, "commondir")))
+            {
+                throw new ProviderRefusedException("Codex's writable .git root must be the workspace's own repository directory; linked or shared Git administration is refused.");
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new ProviderRefusedException("Codex's workspace-owned writable .git root could not be verified.", exception);
         }
     }
 

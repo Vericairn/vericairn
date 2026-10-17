@@ -127,6 +127,7 @@ internal static class FakeHarness
         }
         if (arguments.Contains("features") && arguments.Contains("list"))
         {
+            File.WriteAllText(report + ".feature-arguments.json", JsonSerializer.Serialize(arguments));
             string? goals = behavior["goals"]?.GetValue<string>();
             if (goals != "missing") Console.WriteLine("goals " + (behavior["featureStage"]?.GetValue<string>() ?? "stable") + " " + (goals == "false" ? "false" : "true"));
             if (goals == "duplicate") Console.WriteLine("goals stable true");

@@ -307,7 +307,10 @@ public class WorkspaceRepositoryTests
         Assert.Equal("workspace-write", command[command.ToList().IndexOf("--sandbox") + 1]);
         Assert.DoesNotContain("--add-dir", command);
         Assert.DoesNotContain(command, value => value.Contains(run.Clone, StringComparison.Ordinal));
-        Assert.DoesNotContain(command, value => value.Contains("writable_roots", StringComparison.Ordinal));
+        string writable = Assert.Single(command, value => value.Contains("writable_roots", StringComparison.Ordinal));
+        const string prefix = "sandbox_workspace_write={writable_roots=";
+        Assert.StartsWith(prefix, writable, StringComparison.Ordinal);
+        Assert.Equal([Path.Combine(workspace.Path, ".git")], System.Text.Json.JsonSerializer.Deserialize<string[]>(writable[prefix.Length..^1])!);
         Assert.True(Directory.Exists(Path.Combine(workspace.Path, ".git")));
     }
 

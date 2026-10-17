@@ -465,7 +465,7 @@ Software Domain Pack ships three launchers and the Git workspace provider (whose
 | Launcher | Runs |
 |---|---|
 | `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
-| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
+| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' -c 'sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
@@ -496,8 +496,9 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    order's key unless `--branch` names another). It starts at the registered clone's existing work branch, or at
    `--base` or the clone's HEAD for a new branch. Its index, refs, logs and new objects are inside the workspace;
    an object alternate borrows the registered clone's objects read-only, as with `git clone --shared`. No remote,
-   repository configuration or hook template is imported. The clone's `.git` is never added to the agent's writable
-   roots. The location is selected by the machine's workspace configuration below and is never the clone's own
+   repository configuration or hook template is imported. Codex explicitly adds only the workspace's own `.git`
+   as a writable root, because its sandbox otherwise protects that directory even inside the workspace. The clone's
+   `.git` is never added. The location is selected by the machine's workspace configuration below and is never the clone's own
    working tree. Preparation installs the directory only after checkout completes; a failed preparation removes
    its temporary repository so a retry starts cleanly. A later run reuses the branch's workspace only inside the
    selected root; otherwise refusal names its location and cleanup guidance. Legacy linked worktrees must be
@@ -698,6 +699,23 @@ canonicalized, including filesystem aliases, before writing its project-trust ke
 the path as a TOML key, so dots or quotes in it are not interpreted as CLI key separators.
 The baseline routes ordinary shell and MCP tools through `code_mode_host`, so FIX-18 enables that host.
 `code_mode` and `code_mode_only` remain disabled; the admitted tool inventory is unchanged.
+
+Codex's `workspace-write` sandbox makes `.git` read-only even beneath its writable workspace. FIX-19 gives each
+workspace its own repository; round two adds exactly that directory through
+`sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}` in both the generated home and the fixed
+launch and probe overrides. No clone path, other extra writable root, approval reviewer or sandbox bypass is added.
+Preparation and preflight refuse a `.git` file, symbolic link/junction or a directory with `commondir`, so this
+permission cannot point at a linked worktree's shared administration. Qualification's empty scratch workspace may
+have no `.git` yet. The configuration probe checks the complete generated file before and after its subprocesses;
+a changed, missing, duplicated or additional writable root refuses launch. Its portable configuration digest names
+the workspace-relative permission without recording the machine path.
+
+The installed `0.159.0-alpha.12.1` executable's generated schema declares `SandboxWorkspaceWrite.writable_roots`.
+A local, model-free app-server `command/exec` probe confirmed its behavior: the control failed to create
+`.git/index.lock`; adding only the workspace `.git` allowed `git add` and `git commit`. The synthetic clone's `.git`
+and the workspace's `.codex` and `.agents` stayed unwritable. That probe used an empty login-free home and excluded
+temporary-directory allowances to keep its temporary fixtures outside those unrelated grants. It establishes this
+local sandbox mechanism, not a live worker qualification; the builder still performs the seventh live run.
 
 The generated configuration and launch override set `mcp_servers.vericairn.default_tools_approval_mode = "approve"`.
 This pre-approves the agent's calls to the estate server so noninteractive `exec` can read the brief and record the
@@ -1316,10 +1334,14 @@ The fifth live run of `531d169` recorded its cap before launch, observed the adm
 and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
 the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
 sandbox. FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
-branch. Its automated tests include a stand-in worker that commits its permitted change, unchanged Codex writable
-roots, hostile workspace configuration, scope violations, concurrent branch moves, recovery and both cleanup
-layouts. A live committing Codex run on this implementation remains the builder's qualification work, together
-with three-platform CI on the pushed head. FIX-19 targets 0.7.3 and merges only after 0.7.2 publishes.
+branch. The sixth live run of `eb12a8e` recorded its cap, the observed model at `max`, usage and the signed attempt
+and result, and changed exactly `NOTES.md`. Its commit still failed: Codex protects `.git` even inside a writable
+workspace. Round two adds only the independent workspace's `.git` as an explicit writable root, verified by the
+installed schema and the local sandbox probe described above. Tests cover the exact generated permission, the
+fake harness's probe and dispatch, refusal of other writable roots and shared Git administration, hostile workspace
+configuration, scope violations, concurrent branch moves, recovery and both cleanup layouts. The seventh live
+committing Codex run remains the builder's qualification work, together with three-platform CI on the pushed head.
+FIX-19 targets 0.7.3 and merges only after 0.7.2 publishes.
 Observed-success and live qualification do not accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.

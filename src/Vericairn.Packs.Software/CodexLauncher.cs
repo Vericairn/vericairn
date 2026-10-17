@@ -76,7 +76,8 @@ public sealed class CodexLauncher : IAgentLauncher
             "Signs in with Codex's own login under its home; no API key or other credential passes to it, so a run that relies on one in the environment does not sign in.",
             "Adds up the tokens of each completed turn; it reads no price, so a cap in currency is charged in full.",
             "A run-specific CODEX_HOME imports only the harness login file, never user configuration; an effective MCP-list probe refuses any ambient server or altered transport. The generated configuration and launch override pre-approve only vericairn's tools; the server still checks the run principal's authority on every call. Global approval_policy remains unset. The baseline's MCP list omits approval settings and tool lists, so approval verification rests on the exact generated configuration and isolation checks.",
-            "Enables code_mode_host because the baseline routes ordinary shell and MCP tools through it; code_mode and code_mode_only stay disabled. Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Stand-in tests cover the protocol. Five builder live runs confirmed max inference, the ordinary tool host, rollout model/effort observation, missing-attempt attention, brief-file access and the corrected command audit. The fifth confirmed estate-only MCP pre-approval, signed attempt/result authoring and exactly the permitted file change, but its linked worktree could not commit in the sandbox. FIX-19 now uses workspace-owned Git metadata and fetches the audited branch for review without widening the writable roots. Automated committing runs pass; a live committing Codex run on this layout and three-platform CI remain the builder's qualification work.",
+            "Adds exactly the independent workspace's .git through sandbox_workspace_write.writable_roots in the generated configuration and fixed overrides; workspace-write otherwise protects it. Preparation and preflight refuse linked or shared Git administration, and the exact configuration probe refuses every other added root. The registered clone's .git is never added. The installed baseline's schema and a model-free local sandbox probe confirmed that this permits git add and commit while the clone's .git and the workspace's .codex and .agents remain protected; no approval reviewer or sandbox bypass is added.",
+            "Enables code_mode_host because the baseline routes ordinary shell and MCP tools through it; code_mode and code_mode_only stay disabled. Inventories the fixed built-in tools with extension features disabled; refuses workspace, user-skill and system configuration it cannot neutralize. Stand-in tests cover the protocol. The first five builder live runs confirmed max inference, the ordinary tool host, rollout model/effort observation, missing-attempt attention, brief-file access, the corrected command audit, estate-only MCP pre-approval and signed attempt/result authoring. The fifth could not commit in a linked worktree. The sixth, on eb12a8e, recorded the cap, model at max, usage, signed attempt/result and exact NOTES.md change, but Codex still protected its workspace-owned .git. FIX-19 round two adds only that writable root. The seventh live committing run and three-platform CI remain the builder's qualification work.",
         ],
         [new ProviderSetting("stall-seconds", "Event-stream silence limit in seconds; roster and goal limits override it.", false, "600"), new ProviderSetting("command", "The Codex executable, or a JSON array with positional entry arguments; leading option flags are not qualified.", false, "codex")]);
 
@@ -91,6 +92,7 @@ public sealed class CodexLauncher : IAgentLauncher
     {
         ArgumentNullException.ThrowIfNull(context);
         context = context with { Workspace = HarnessWorkspace.Canonical(context.Workspace) };
+        CodexInventory.CheckGitDirectory(context);
         string home = Path.Combine(Path.GetDirectoryName(context.McpConfiguration)!, "codex");
         HarnessInventory.FreshHome(home);
         Directory.CreateDirectory(home);
@@ -143,7 +145,12 @@ public sealed class CodexLauncher : IAgentLauncher
     // Override one whole projects value: CLI dotted-key parsing does not interpret TOML quotes in a path segment.
     internal static string Projects(LaunchContext context) => "{" + Toml(context.Workspace) + "={trust_level=\"untrusted\"}}";
 
+    // workspace-write protects .git even inside its workspace root. This explicit child root belongs only to the run's
+    // independent repository; never add the clone's common Git directory or relax the other protected directories.
+    internal static string Sandbox(LaunchContext context) => "{writable_roots=[" + Toml(Path.Combine(context.Workspace, ".git")) + "]}";
+
     internal static IReadOnlyList<string> Overrides(LaunchContext context) => ["-c", "mcp_servers=" + Mcp(context), "-c", "projects=" + Projects(context),
+        "-c", "sandbox_workspace_write=" + Sandbox(context),
         .. CodexInventory.Settings.SelectMany(s => new[] { "-c", s })];
 
     internal static string VerifyMcp(LaunchContext context)
