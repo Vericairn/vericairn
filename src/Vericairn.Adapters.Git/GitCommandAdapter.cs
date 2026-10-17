@@ -11,6 +11,18 @@ namespace Vericairn.Adapters.Git;
 /// <summary>The git adapter over the git command on the PATH: every call is a read-only git command.</summary>
 public sealed class GitCommandAdapter : ISourceAdapter
 {
+    private readonly Func<ProcessStartInfo, ProcessResult> run;
+
+    /// <summary>Observes git with a thirty-second deadline and bounded output for each command.</summary>
+    public GitCommandAdapter() : this(info => BoundedProcess.Run(info, TimeSpan.FromSeconds(30)))
+    {
+    }
+
+    internal GitCommandAdapter(Func<ProcessStartInfo, ProcessResult> run)
+    {
+        this.run = run;
+    }
+
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
         "git-command",
@@ -81,7 +93,7 @@ public sealed class GitCommandAdapter : ISourceAdapter
         return new RepositoryObservation(commit, branch, remote, rootCommit, modified == 0 && untracked == 0, modified, untracked, tags, recent, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
     }
 
-    private static int Git(string path, out string output, params string[] arguments)
+    private int Git(string path, out string output, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = path };
         info.ArgumentList.Add("-c");
@@ -92,22 +104,15 @@ public sealed class GitCommandAdapter : ISourceAdapter
         }
 
         info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
-        try
+        ProcessResult result = run(info);
+        if (result.Outcome != ProcessOutcome.Exited)
         {
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException("git did not start.");
-            output = process.StandardOutput.ReadToEnd();
-            process.StandardError.ReadToEnd();
-            if (!process.WaitForExit(30_000))
-            {
-                process.Kill(entireProcessTree: true);
-                throw new ProviderRefusedException("git did not answer within 30 seconds.");
-            }
+            throw new ProviderRefusedException(result.Outcome == ProcessOutcome.NotStarted
+                ? "git could not be started; install git on the PATH to adopt and observe repositories."
+                : $"git {result.Description}; repository observation is incomplete.");
+        }
 
-            return process.ExitCode;
-        }
-        catch (System.ComponentModel.Win32Exception exception)
-        {
-            throw new ProviderRefusedException("git is not on the PATH; install git to adopt and observe repositories.", exception);
-        }
+        output = result.StandardOutput;
+        return result.ExitCode!.Value;
     }
 }

@@ -276,6 +276,18 @@ cannot say whether an effect happened (`ProviderUncertainException`); the two ar
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
 earlier release reads none.
 
+The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
+and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream
+is limited to 4,194,304 characters; exceeding that limit fails the command instead of using partial output.
+Timeout or cancellation terminates the owned process group on POSIX or Job Object on Windows, including
+descendants retaining output pipes after their parent exits. Cleanup waits at most one additional second;
+if exit cannot yet be confirmed, native ownership is retained for later cleanup. A gh failure before the
+workflow command starts is refused. Once it starts, an interrupted command leaves an uncertain effect;
+a later failure to identify its run also stays uncertain and requires observation and reconciliation.
+On POSIX, this uses the worker's exclusive child-ownership rule: run the runtime under an init process,
+not as PID 1, and without ignored SIGCHLD or automatic child reaping; an unsupported host is refused
+before launching a command.
+
 A product declares how its releases are made on its own record, in an optional `release` object (read from
 release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
 `destination` (the provider id and the settings the product fixes), the `checksums` asset, and the
@@ -301,10 +313,15 @@ The release as intent, then observed effect:
    missing required setting is refused), and writes an `operation` with status `not-started` under the
    identity `<provider>:<destination>:vX` with every setting in its target; then it dispatches and writes
    the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
-   identified, or `known-failure` when the provider refused before any effect. While an operation under
-   that identity is dispatched or uncertain, a second submit is refused, as it is after observed success (a
-   corrective release is a new version); after a failure or a cancellation, a retry needs `--reconciliation`
-   stating how the earlier outcome was settled. While a living document of the product is due at level
+   identified, or `known-failure` when the provider refused before any effect. The identity is claimed
+   atomically before dispatch, while unrelated runtime operations keep answering. An existing
+   `not-started` intent has an unknown effect: a second submit is refused and `release observe` records
+   its uncertainty before observing the provider. Observe and reconcile it before any retry, including
+   after a restart or a failure to store the dispatch receipt. A dispatched or uncertain operation also
+   refuses another submit, as does observed success (a corrective release is a new version). After a
+   failure or cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled;
+   that retry is recorded as uncertain before calling the provider. An active dispatch cannot be canceled
+   or reconciled until the call returns. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
    derives `covers` triggers from the registered clone's current `HEAD`, not the release's `ref`. Bring that
