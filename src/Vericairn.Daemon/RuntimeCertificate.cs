@@ -44,7 +44,7 @@ public static class RuntimeCertificate
                 X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, KeyStorage);
                 if (existing.HasPrivateKey && !IsDue(existing, DateTimeOffset.UtcNow))
                 {
-                    return existing;
+                    return Prepare(existing);
                 }
 
                 existing.Dispose();
@@ -124,11 +124,58 @@ public static class RuntimeCertificate
             }
 
             File.Move(temporary, path, overwrite: true);
-            return X509CertificateLoader.LoadPkcs12(pkcs12, null, KeyStorage);
+            return Prepare(X509CertificateLoader.LoadPkcs12(pkcs12, null, KeyStorage));
         }
         finally
         {
             CryptographicOperations.ZeroMemory(pkcs12);
+        }
+    }
+
+    /// <summary>Decodes the managed extension caches on the loading thread, before any TLS connection can receive this instance.</summary>
+    private static X509Certificate2 Prepare(X509Certificate2 certificate)
+    {
+        try
+        {
+            // X509Certificate2.Extensions and its typed extensions decode lazily. In particular, concurrent first reads of
+            // EnhancedKeyUsages can see an incompletely populated collection and make Kestrel reject Server Authentication.
+            // Do this at both PKCS#12 load sites, including reloads and replacements, before RuntimeCertificates publishes it.
+            foreach (X509Extension extension in certificate.Extensions)
+            {
+                switch (extension)
+                {
+                    case X509EnhancedKeyUsageExtension usage:
+                        _ = usage.EnhancedKeyUsages;
+                        break;
+                    case X509KeyUsageExtension usage:
+                        _ = usage.KeyUsages;
+                        break;
+                    case X509BasicConstraintsExtension constraints:
+                        _ = constraints.CertificateAuthority;
+                        break;
+                    case X509SubjectAlternativeNameExtension names:
+                        _ = names.EnumerateDnsNames().ToArray();
+                        _ = names.EnumerateIPAddresses().ToArray();
+                        break;
+                    case X509SubjectKeyIdentifierExtension subject:
+                        _ = subject.SubjectKeyIdentifier;
+                        break;
+                    case X509AuthorityKeyIdentifierExtension authority:
+                        _ = authority.KeyIdentifier;
+                        break;
+                    case X509AuthorityInformationAccessExtension access:
+                        _ = access.EnumerateCAIssuersUris().ToArray();
+                        _ = access.EnumerateOcspUris().ToArray();
+                        break;
+                }
+            }
+
+            return certificate;
+        }
+        catch
+        {
+            certificate.Dispose();
+            throw;
         }
     }
 }

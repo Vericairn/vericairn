@@ -68,7 +68,8 @@ public class TlsHandshakeLogTests
         string message = await logged.Task.WaitAsync(deadline.Token);
         if (rejectServerCertificate)
         {
-            Assert.Equal($"TLS handshake failed: System.InvalidOperationException: Certificate {certificate.Thumbprint} cannot be used as an SSL server certificate. It has an Extended Key Usage extension but the usages do not include Server Authentication.", message);
+            Assert.StartsWith($"TLS handshake failed: System.InvalidOperationException: Certificate {certificate.Thumbprint} cannot be used as an SSL server certificate.", message, StringComparison.Ordinal);
+            Assert.Contains("usages do not include Server Authentication", message, StringComparison.Ordinal);
         }
         else
         {

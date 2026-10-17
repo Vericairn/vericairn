@@ -45,7 +45,7 @@ public sealed record DaemonOptions
     /// <summary>The clock that pairing codes and the certificate's schedule are judged by; the system's when null.</summary>
     public TimeProvider? Time { get; init; }
 
-    /// <summary>Where the daemon says what it did (pairings, rotations); nowhere when null.</summary>
+    /// <summary>Where the daemon says what it did (pairings, rotations, TLS handshake failures); nowhere when null.</summary>
     public Action<string>? Log { get; init; }
 
     /// <summary>
@@ -69,6 +69,7 @@ public sealed class DaemonHost : IAsyncDisposable
     private static readonly object LoopbackMarker = new();
     private static readonly object LocalNetworkMarker = new();
     private static readonly object CertificateMarker = new();
+    private static readonly object TlsEstablishedMarker = new();
     private static readonly TimeSpan ScheduleCheck = TimeSpan.FromHours(1);
 
     private readonly string endpointFile;
@@ -224,6 +225,12 @@ public sealed class DaemonHost : IAsyncDisposable
         // Always the production environment: what a development environment adds, such as stack traces in answers, never reaches a client.
         WebApplicationBuilder builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ApplicationName = "vericairnd", EnvironmentName = Environments.Production });
         builder.Logging.ClearProviders();
+        if (options.Log is not null)
+        {
+            builder.Logging.AddProvider(new TlsHandshakeLog(host.Log));
+            builder.Logging.AddFilter<TlsHandshakeLog>(TlsHandshakeLog.Category, LogLevel.Debug);
+        }
+
         builder.Services.ConfigureHttpJsonOptions(json =>
         {
             json.SerializerOptions.PropertyNamingPolicy = ProtocolJson.Options.PropertyNamingPolicy;
@@ -258,6 +265,7 @@ public sealed class DaemonHost : IAsyncDisposable
                         ServerCertificateSelector = host.SelectCertificate,
                         SslProtocols = TlsScreenStream.Protocols,
                     });
+                    listen.Use(TlsEstablished);
                 });
             }
 
@@ -294,6 +302,7 @@ public sealed class DaemonHost : IAsyncDisposable
                             tls.CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
                         },
                     });
+                    listen.Use(TlsEstablished);
                 });
             }
         });
@@ -656,10 +665,24 @@ public sealed class DaemonHost : IAsyncDisposable
         {
             await next(connection).ConfigureAwait(false);
         }
+        catch (Exception exception) when (!connection.Items.ContainsKey(TlsEstablishedMarker))
+        {
+            // Kestrel reports ordinary authentication exceptions itself; selector/validation exceptions can escape it.
+            // Once TLS has succeeded, later transport or request failures are not handshake failures.
+            Log(TlsHandshakeLog.Message(exception));
+            throw;
+        }
         finally
         {
             open.TryRemove(connection.ConnectionId, out _);
         }
+    };
+
+    /// <summary>Runs only after HTTPS has authenticated the connection, before the HTTP pipeline.</summary>
+    private static ConnectionDelegate TlsEstablished(ConnectionDelegate next) => connection =>
+    {
+        connection.Items[TlsEstablishedMarker] = true;
+        return next(connection);
     };
 
     private void Publish(DaemonEndpoint endpoint)
