@@ -77,10 +77,14 @@ observation. No new acknowledgement, expiry scheduler or dismissal state is adde
 `CommunicationPresentation.Attention` uses the same derivation in the runtime
 and in clients connected to an older runtime. The runtime adds `attention` to
 canonical status and progress JSON, including API, SDK, MCP and CLI `--json`
-reads. The array is independent of recipient settings and depth. Record-derived
-items agree for the same records; worker concerns can differ by runtime. Existing fields
-and complete original-record reads are unchanged. Human delivery may address a
-recipient's asks without changing canonical JSON.
+reads. The array is independent of recipient settings and depth. Status JSON is
+identical on every machine for the same records: its attention is decided from
+records alone, including recorded worker signals and goal budgets. Progress also
+reads this runtime's worker observations. An attention item that includes signals
+absent from its source record is labelled `Local worker observations`; these
+concerns appear in human status, progress and Workbench, and never in status JSON.
+Existing fields and complete original-record reads are unchanged. Human delivery
+may address a recipient's asks without changing canonical JSON.
 The status hash in an estate observation still covers its existing record-derived
 snapshot; the added attention projection does not alter that record contract.
 

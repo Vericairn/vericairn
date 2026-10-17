@@ -276,6 +276,12 @@ Acceptance remains the operator's decision.
 
 ## Current attention follow-up (FIX-22)
 
+The round-two regression opens two runtimes over the same records with separate
+local state. An unrecorded worker signal and a local transfer failure after
+settlement each leave status JSON byte-identical through the runtime, CLI and
+MCP, while progress and human status retain the labelled local concern. Recorded
+worker signals remain record-derived attention on every runtime.
+
 The observations above describe their stated commits. Required attention now
 follows [the current-state rules](required-attention.md): resolved checks and
 reviews leave the list through recorded evidence, and each remaining item is a

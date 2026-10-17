@@ -24,7 +24,10 @@ the runtime decides, and every response is what the runtime observed.
 Status and progress JSON add a compact `attention` array, independent of response
 depth and recipient settings. Each item preserves the source type, id and complete
 hash, subject, current state, recorded freshness, reason and inspection command.
-It carries no envelope. API, SDK, MCP and CLI machine reads share this projection;
+It carries no envelope. Status JSON remains identical on every machine for the
+same records; its attention reads records alone. Progress additionally includes
+runtime-local worker concerns, labelled `Local worker observations`, as do human
+status and Workbench. API, SDK, MCP and CLI machine reads share these projections;
 record reads remain complete. [Required attention](required-attention.md) specifies
 the fields, resolution rules, unknown cases and compatibility boundaries.
 
