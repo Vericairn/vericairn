@@ -6,8 +6,10 @@ using Vericairn.Cli;
 using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Updates;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Workers;
+using Vericairn.Sdk;
 
 namespace Vericairn.Cli.Tests;
 
@@ -21,6 +23,7 @@ internal static class CliHarness
         {
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, TempDirectory("cli-tests-home"));
         }
+        new ReleaseUpdateStore().Configure(false);
     }
 
     public sealed record Outcome(int Code, string Out, string Err)
@@ -32,7 +35,16 @@ internal static class CliHarness
         public string Hash => Json.GetProperty("hash").GetString()!;
     }
 
-    public static Outcome Run(params string[] args)
+    // Some journeys switch homes while running. Always inject a stand-in as well as disabling the
+    // default test home's setting, so even a fresh home can never initiate an external request.
+    public static Outcome Run(params string[] args) => RunWithUpdates(new(new(), new NoReleaseSource(), TimeProvider.System), args);
+
+    private sealed class NoReleaseSource : IReleaseSource
+    {
+        public Task<PublishedRelease?> LatestAsync(CancellationToken cancellationToken) => Task.FromResult<PublishedRelease?>(null);
+    }
+
+    internal static Outcome RunWithUpdates(ReleaseUpdates? updates, params string[] args)
     {
         var standardOut = new StringWriter { NewLine = "\n" };
         var standardError = new StringWriter { NewLine = "\n" };
@@ -42,7 +54,7 @@ internal static class CliHarness
         Console.SetError(standardError);
         try
         {
-            int code = CliApp.Build().Parse(args).Invoke();
+            int code = CliApp.Build(updates).Parse(args).Invoke();
             return new Outcome(code, standardOut.ToString(), standardError.ToString());
         }
         finally

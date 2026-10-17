@@ -1,7 +1,7 @@
 # Installing Vericairn
 
-This installation draft describes 0.7.2 after published 0.7.1, with FIX-13, FIX-14, FIX-15, FIX-16 and
-FIX-18. Earlier sets stay frozen, including the withdrawn 0.7.0 candidate carried in 0.7.1 with FIX-12.
+This installation draft includes UPDATE-01's release check for 0.7.3, following 0.7.2's FIX-13, FIX-14,
+FIX-15, FIX-16 and FIX-18. Earlier sets stay frozen, including the withdrawn 0.7.0 candidate carried in 0.7.1 with FIX-12.
 NuGet distribution becomes available after the operator publishes a release and its publication workflow succeeds.
 The `0.0.1-reserved` packages reserve names; they are not the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
 The NuGet workflow verifies the exact package assets the operator publishes against that release's own
@@ -46,6 +46,64 @@ dotnet vc --estate <estate root> status
 Installation grants no estate authority; writes still require the acting principal's admitted device.
 The worker's agent-side MCP launcher currently resolves the archive command `vericairn`; keep that
 executable on PATH for worker runs. A NuGet-only worker run is not covered by the package installation checks.
+
+## Release check and upgrades (0.7.3)
+
+By default, `version`, `doctor` and `status`, and Workbench when opened, check for a newer published
+Vericairn release. They share at most one request per rolling 24 hours under the same user's Vericairn
+home, including failed attempts. Workbench also checks while it remains open. Other CLI commands, the
+daemon, MCP and SDK API calls do not initiate this check.
+
+The sole source is GitHub's
+[latest-release endpoint](https://api.github.com/repos/Vericairn/vericairn/releases/latest).
+The request is unauthenticated and contains no installed version, machine, user or estate identifier,
+estate data or usage telemetry. Its only application header is the constant `User-Agent: Vericairn`
+required by GitHub; cookies, credentials, tracing headers and redirects are disabled. Drafts and
+prereleases are ignored. The check waits at most two seconds for the network and never fails a command.
+Offline or on a failed response, it keeps the last successful answer without an error message.
+
+The CLI prints the disclosure and any newer-release notice to **stderr**, including with `--json`;
+stdout and canonical estate status remain unchanged. Workbench shows them in its shell even before an
+estate is opened. The notice includes the version, release-notes link, NuGet command, archive download
+page and estate upgrade command. Nothing installs or upgrades automatically.
+
+Show or change the shared machine-local setting, without making a network request:
+
+```sh
+dotnet vc updates configure
+dotnet vc updates configure --enabled false
+dotnet vc updates configure --enabled true
+dotnet vc updates configure --json
+```
+
+The archive command is `vericairn updates configure` with the same options. `false` prevents requests;
+previously cached release information can still be shown. Settings live in `updates/settings.json`
+under the [Vericairn home](operator-guide.md#machine-local-state). `updates/check.json` keeps the last
+attempt time, last successful answer time and release tag. Neither file contains an identifier or machine
+path, and neither belongs in a repository or estate. Both clients reread the setting before checking.
+If settings are unreadable or invalid, or the attempt cannot be saved, no request is made.
+
+Choose an upgrade route explicitly after reading the release notes:
+
+```sh
+dotnet tool update --global dotnet-vc --version <published-version>
+# For a repository-local tool, omit --global.
+```
+
+For an archive installation or Workbench, download the appropriate archive from the linked release and
+verify its hashes as that release's guide describes. To move an estate's pin, first ensure its target
+published release is recorded in that estate, then use the target release's CLI:
+
+```sh
+vericairn estate upgrade --to <published-version> --check
+vericairn estate upgrade --to <published-version> --by <operator-id>
+```
+
+`estate check` makes no release-check request. It warns with `manifest.release-behind` when the manifest
+pins a release below the newest stable published version known from matching release records or the
+local cache. The cache applies only to `Vericairn/vericairn`; another product's releases do not count.
+This warning never makes the command fail and never changes the pin. See the
+[operator guide](operator-guide.md) for the distinction between installing a tool and upgrading an estate.
 
 ## SDK
 

@@ -16,6 +16,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
+using Vericairn.Records.Updates;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
@@ -2808,6 +2809,8 @@ internal static partial class Commands
         {
             all.Add(finding);
         }
+
+        ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
 
         return all;
     }
