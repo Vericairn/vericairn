@@ -82,6 +82,7 @@ public class LauncherTests
         string root = Path.Combine(Path.GetTempPath(), "vericairn-config-" + Ulid.NewUlid().Value);
         string workspace = Path.Combine(root, "workspace.with.dots");
         string home = Path.Combine(root, "home");
+        string serverReport = Path.Combine(root, "server.json");
         Directory.CreateDirectory(workspace);
         Directory.CreateDirectory(home);
         try
@@ -95,7 +96,8 @@ public class LauncherTests
             var settings = new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = executable };
             LaunchContext context = Context(settings) with
             {
-                Workspace = workspace, Environment = environment, McpServer = ["nonexistent-approved-sentinel"],
+                // Inventory hashes the approved executable; the probe must never start this stand-in server.
+                Workspace = workspace, Environment = environment, McpServer = FakeHarness.Command("native-server", serverReport),
                 McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
             };
             string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
@@ -140,6 +142,7 @@ public class LauncherTests
             string configuration = File.ReadAllText(Path.Combine(prepared.Environment["CODEX_HOME"], "config.toml"));
             Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
             Assert.DoesNotContain("workspace-alias", configuration, StringComparison.Ordinal);
+            Assert.False(File.Exists(serverReport));
         }
         finally
         {

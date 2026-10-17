@@ -13,6 +13,18 @@ namespace Vericairn.Runtime.Tests;
 public class NativePreflightTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CodexAcceptsAbsentOrNullMcpTimeoutMetadata(bool omitted)
+    {
+        using var fixture = new NativeProbe("codex");
+        if (omitted) fixture.Behavior("mcp", "omitted-timeouts");
+        RunPreflight inventory = fixture.Launcher.Preflight(fixture.Prepare());
+        Assert.True(inventory.Complete);
+        Assert.False(File.Exists(fixture.Report));
+    }
+
+    [Theory]
     [InlineData("tool_search")]
     [InlineData("request_user_input_async")]
     [InlineData("send_message_to_user_async")]

@@ -146,7 +146,20 @@ internal static class FakeHarness
             if (defect is "command" or "cwd") transport[defect] = "unexpected";
             if (defect is "args" or "env_vars") transport[defect] = new JsonArray("unexpected");
             if (defect == "env") transport["env"] = new JsonObject { ["EXTRA"] = "unexpected" };
-            var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport });
+            var list = new JsonArray(new JsonObject { ["name"] = "vericairn", ["enabled"] = true, ["transport"] = transport,
+                ["startup_timeout_sec"] = null, ["tool_timeout_sec"] = null });
+            if (defect == "omitted-timeouts")
+            {
+                list[0]!.AsObject().Remove("startup_timeout_sec");
+                list[0]!.AsObject().Remove("tool_timeout_sec");
+            }
+            if (defect == "startup-timeout") list[0]!["startup_timeout_sec"] = 30;
+            if (defect == "tool-timeout") list[0]!["tool_timeout_sec"] = 60;
+            if (defect == "duplicate-timeout")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"startup_timeout_sec\":null", "\"startup_timeout_sec\":null,\"startup_timeout_sec\":null", StringComparison.Ordinal));
+                return 0;
+            }
             if (behavior["mcpAuth"]?.GetValue<string>() is string auth) list[0]!["auth_status"] = auth;
             if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
             if (defect == "transport-control") transport["unapproved"] = true;

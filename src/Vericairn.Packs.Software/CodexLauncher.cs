@@ -155,9 +155,12 @@ public sealed class CodexLauncher : IAgentLauncher
 
             JsonElement server = root[0];
             JsonElement transport = server.GetProperty("transport");
-            bool approved = HarnessInventory.OnlyProperties(server, "name", "enabled", "disabled_reason", "auth_status", "transport")
+            // The baseline lists unset timeouts as null. A configured timeout is still an unapproved control.
+            bool approved = HarnessInventory.OnlyProperties(server, "name", "enabled", "disabled_reason", "auth_status", "transport", "startup_timeout_sec", "tool_timeout_sec")
                 && HarnessInventory.OnlyProperties(transport, "type", "command", "args", "env", "env_vars", "cwd")
                 && (!server.TryGetProperty("disabled_reason", out JsonElement reason) || reason.ValueKind == JsonValueKind.Null)
+                && (!server.TryGetProperty("startup_timeout_sec", out JsonElement startupTimeout) || startupTimeout.ValueKind == JsonValueKind.Null)
+                && (!server.TryGetProperty("tool_timeout_sec", out JsonElement toolTimeout) || toolTimeout.ValueKind == JsonValueKind.Null)
                 && server.GetProperty("name").GetString() == "vericairn" && server.GetProperty("enabled").GetBoolean()
                 && transport.GetProperty("type").GetString() == "stdio" && transport.GetProperty("command").GetString() == context.McpServer[0]
                 && transport.GetProperty("args").EnumerateArray().Select(a => a.GetString()).SequenceEqual(context.McpServer.Skip(1))

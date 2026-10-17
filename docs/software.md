@@ -658,7 +658,9 @@ servers. The launcher therefore probes the effective configuration with `mcp lis
 contains exactly the enabled `vericairn` stdio server with the approved command, arguments and environment, no inherited
 environment-variable list and no changed working directory. Extra entries, even disabled ones, merged transport
 settings, and incompatible managed policy refuse launch. Project trust is set to untrusted using the canonical
-workspace key. The probe does not start a coding agent or an MCP server. See the [Codex configuration
+workspace key. FIX-18 accepts the baseline's absent or null `startup_timeout_sec` and `tool_timeout_sec`
+metadata; configured timeouts, duplicate fields and unaccounted controls still refuse launch.
+The probe does not start a coding agent or an MCP server. See the [Codex configuration
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
 
 Claude Code receives a fresh `CLAUDE_CONFIG_DIR` containing only the provisioned `claudeAiOauth` login from its

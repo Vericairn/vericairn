@@ -104,6 +104,9 @@ public class NativeRefusalTests
     [InlineData("top-level-control")]
     [InlineData("transport-control")]
     [InlineData("duplicate-env")]
+    [InlineData("startup-timeout")]
+    [InlineData("tool-timeout")]
+    [InlineData("duplicate-timeout")]
     public void CodexRefusesUnaccountedEffectiveMcpControls(string defect)
     {
         using var fixture = new NativeProbe("codex");
