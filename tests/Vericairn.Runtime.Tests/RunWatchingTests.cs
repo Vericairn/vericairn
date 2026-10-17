@@ -92,7 +92,7 @@ public class RunWatchingTests
 
     [Theory]
     [InlineData("watch-claude-mixed-credentials", "credentials", true)]
-    [InlineData("watch-claude-mixed-network", "network", true)]
+    [InlineData("watch-claude-mixed-network", "network", false)]
     public void UndecidableItemsDoNotEraseCompletedActionVerdicts(string scenario, string code, bool critical)
     {
         using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "src/", StringComparison.Ordinal));

@@ -3,7 +3,7 @@
 
 namespace Vericairn.Runtime.Workers;
 
-/// <summary>The assignment's repository-relative path patterns, shared by the event and settlement audits.</summary>
+/// <summary>Repository-relative patterns and workspace-boundary checks used by the worker audits.</summary>
 public static class PermittedPaths
 {
     /// <summary>

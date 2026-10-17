@@ -59,6 +59,38 @@ public class WorkerScopeTests
         Assert.Contains(run.Row(started.Run).Signals!, s => s == signal);
     }
 
+    [Fact]
+    public void AWorkspaceChangeIsCheckedAgainstTheBriefOnlyAtSettlement()
+    {
+        using var run = new RunEstate(brief: Brief("path:NOTES.md"));
+        RunResponse started = run.Start("codex", "watch-codex-workspace-change", run.Report("workspace-change"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.DoesNotContain(settled.Signals!, s => s.Code == "scope");
+        Assert.Equal(["README.md"], settled.Scope!.Outside);
+        RunSignal signal = Assert.Single(settled.Signals!, s => s.Code == "scope-settlement");
+        Assert.Equal("warning", signal.Severity);
+        Assert.NotNull(signal.Attention);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void ANetworkAttemptWarnsAndSettlesWithoutAStop()
+    {
+        using var run = new RunEstate(brief: Brief("path:NOTES.md"));
+        RunResponse started = run.Start("codex", "watch-codex-restore", run.Report("network-warning"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        RunSignal signal = Assert.Single(settled.Signals!, s => s.Code == "network");
+        Assert.Equal("warning", signal.Severity);
+        Assert.NotNull(signal.Attention);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     private static string Brief(params string[] entries)
     {
         JsonObject brief = JsonNode.Parse(RunEstate.Brief)!.AsObject();

@@ -432,6 +432,13 @@ internal static class FakeHarness
                 string parent = Path.GetDirectoryName(Environment.CurrentDirectory)!;
                 Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = $"pwd\nrg --files --hidden -g AGENTS.md '{parent}'" } }));
                 return 0;
+            case "watch-codex-workspace-change":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"touch README.md"}}""");
+                File.WriteAllText("README.md", "A change outside the brief, inside the workspace.\n");
+                return 0;
+            case "watch-codex-restore":
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"dotnet restore"}}""");
+                return 0;
             case "watch-claude-mixed-credentials" or "watch-claude-mixed-network":
                 object mixed = scenario == "watch-claude-mixed-credentials"
                     ? new { paths = new[] { "~/.ssh/id_rsa", "src/invalid\0.cs" } }
@@ -469,13 +476,13 @@ internal static class FakeHarness
                 Emit("""{"type":"result","usage":{"input_tokens":100,"output_tokens":25,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}""");
                 return 0;
             case "watch-claude-audit":
-                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"outside.txt","content":"synthetic"}}]}}""");
+                Emit("""{"type":"assistant","message":{"content":[{"type":"text","text":"I claim everything is within scope."},{"type":"tool_use","id":"n1","name":"Bash","input":{"command":"curl https://example.invalid"}},{"type":"tool_use","id":"s1","name":"Read","input":{"file_path":".aws/credentials"}},{"type":"tool_use","id":"p1","name":"Write","input":{"file_path":"../outside.txt","content":"synthetic"}}]}}""");
                 return 0;
             case "watch-codex-audit":
                 Emit("""{"type":"item.started","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid"}}""");
                 Emit("""{"type":"item.completed","item":{"id":"n1","type":"command_execution","command":"curl https://example.invalid","aggregated_output":"No actual command ran.","exit_code":0}}""");
                 Emit("""{"type":"item.started","item":{"id":"s1","type":"mcp_tool_call","server":"files","tool":"read","arguments":{"path":".aws/credentials"}}}""");
-                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"outside.txt","kind":"add"}]}}""");
+                Emit("""{"type":"item.completed","item":{"id":"p1","type":"file_change","changes":[{"path":"../outside.txt","kind":"add"}]}}""");
                 return 0;
             case "claude":
                 Emit("""{"type":"system","subtype":"init","session_id":"stand-in","mcp_servers":[{"name":"vericairn","status":"connected"}]}""");

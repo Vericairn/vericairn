@@ -815,8 +815,9 @@ or CLI exit-code semantics.
 
 FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
 attention without requesting a stop. Reads inside the workspace do not require change permission.
-Invocations that may change paths outside the brief retain critical `scope` signals, and network and
-credential detections are critical for reads and writes. Run admission refuses a brief with no
+Invocations that may change paths outside the workspace retain critical `scope` signals; changes inside
+the workspace are checked against the brief at settlement. Network detections warn, while credential
+detections remain critical for reads and writes. Run admission refuses a brief with no
 interpretable repository-relative `permittedChanges` pattern, explaining forms such as `path:NOTES.md`;
 prose can remain beside a pattern. No request or response fields change.
 
