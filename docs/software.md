@@ -254,6 +254,9 @@ descendants retaining output pipes after their parent exits. Cleanup waits at mo
 if exit cannot yet be confirmed, native ownership is retained for later cleanup. A gh failure before the
 workflow command starts is refused. Once it starts, an interrupted command leaves an uncertain effect;
 a later failure to identify its run also stays uncertain and requires observation and reconciliation.
+On POSIX, this uses the worker's exclusive child-ownership rule: run the runtime under an init process,
+not as PID 1, and without ignored SIGCHLD or automatic child reaping; an unsupported host is refused
+before launching a command.
 
 A product declares how its releases are made on its own record, in an optional `release` object (read from
 release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
