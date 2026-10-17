@@ -41,7 +41,11 @@ record contents and saved handoff packages never vary with depth. CLI reads
 are on demand and show all progress. Workbench's periodic updates apply
 frequency only to optional claims. Required decisions, failed or unknown
 checks, blockers, uncertain effects, incidents and exhausted budgets always
-appear. A missing source remains unknown and visible.
+appear while their recorded state remains open. In 0.7.3, FIX-22 resolves old
+attention from later evidence and shows compact source references, current state,
+freshness and an inspection command. Ordinary `after` planning is not a blocker.
+A missing source remains unknown and visible. See [required attention](required-attention.md)
+for the exact resolution rules and the cases without a typed closure.
 
 A worker brief captures the goal sponsor's settings when that sponsor is a
 person, plus that assignment's override; otherwise it explicitly uses estate
@@ -544,8 +548,9 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
    If the agent recorded no new attempt on this exact assignment during the run, settlement adds
-   `attempt-missing` evidence and a warning with an attention ask. The CLI settlement and status attention
-   say that it settled without the agent's attempt; an earlier attempt does not satisfy this check.
+   `attempt-missing` evidence and a warning with an attention ask. CLI settlement and `worker runs`
+   say that it settled without the agent's attempt; compact status attention points to those observations.
+   An earlier attempt does not satisfy this check.
    The operation's status and the CLI exit-code meaning are unchanged.
 7. After settlement is recorded, fetches the exact audited run-branch head into the registered clone for review.
    The fetch source is a disposable bare view of that head and the workspace's objects, so Git never loads the

@@ -57,3 +57,13 @@ Once the target's published release record and required evidence are in the esta
 CLI to review `vericairn estate upgrade --to <published-version> --check`, then apply it with
 `vericairn estate upgrade --to <published-version> --by <operator-id>`. The existing upgrade checks,
 authority rules and migration record still apply. A cached network answer grants no upgrade authority.
+
+## Required attention
+
+In 0.7.3, `status`, `progress` and Workbench show compact references to obligations
+that remain open, with their current state and an inspection command. Later
+verification, result, review, acceptance and operation records resolve the
+relevant items; ordinary `after` ordering remains planning. Quiet settings do not
+hide required attention, and an unavailable resolution stays unknown. Open the
+item to read the complete record before acting. See [required attention](required-attention.md)
+for the precise rules, including historical corrections that have no typed closure.

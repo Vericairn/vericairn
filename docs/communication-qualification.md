@@ -273,3 +273,14 @@ adapter, compaction and template exclusions to the operator. Every design case h
 not-applicable or named deferred disposition; D08-D had no remaining unimplemented run case.
 This report retains those observations at their stated commits, not a new qualification of 0.7.1.
 Acceptance remains the operator's decision.
+
+## Current attention follow-up (FIX-22)
+
+The observations above describe their stated commits. Required attention now
+follows [the current-state rules](required-attention.md): resolved checks and
+reviews leave the list through recorded evidence, and each remaining item is a
+compact reference. D08-B's current tests check those references at every depth
+and frequency, and check complete recommendations, alternatives, findings and
+checks at their original read routes. Opening Workbench attention reaches that
+source or the reviewed subject. Quiet settings still cannot suppress an open
+obligation, and no read answers an ask or accepts work.
