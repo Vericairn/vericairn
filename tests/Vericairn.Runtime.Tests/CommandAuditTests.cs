@@ -194,12 +194,12 @@ public class CommandAuditTests
         Assert.Equal(severity, Assert.Single(CommandAudit.Inspect(Action(tool, new { path }), Workspace(), ["path:NOTES.md"]), s => s.Code == code).Severity);
 
     [Fact]
-    public void AnOpaqueInlineScriptDoesNotClaimAConfidentOutsideChange()
+    public void AVisibleLiteralWriteInOpaqueCodeKeepsBothVerdicts()
     {
         HarnessAction action = Action("exec_command", new { command = "python3 -c \"open('../outside.txt', 'w').write('x')\"" });
         IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]);
-        Assert.Equal("audit-unverified", Assert.Single(signals).Code);
-        Assert.Equal("warning", signals[0].Severity);
+        Assert.Equal("warning", Assert.Single(signals, s => s.Code == "audit-unverified").Severity);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
     }
 
     [Theory]
