@@ -55,11 +55,37 @@ public sealed class EstateExportTests : IDisposable
     [Theory]
     [InlineData("docs/caf\u00e9.md", "docs/cafe\u0301.md")]
     [InlineData("caf\u00e9/first.md", "cafe\u0301/second.md")]
+    [InlineData("docs/\u00c9.md", "docs/e\u0301.md")]
+    [InlineData("docs/\uac00.md", "docs/\u1100\u1161.md")]
+    [InlineData("docs/a\u0301\u0327.md", "docs/a\u0327\u0301.md")]
     public void MacUnicodeNormalizationCollisionRestoresNothing(string first, string second)
     {
         Assert.SkipUnless(OperatingSystem.IsMacOS(), "macOS filesystems identify canonically equivalent Unicode names.");
         string archive = WriteExport([(first, "first bytes"), (second, "second bytes")]);
         AssertRefused(archive, "export.path-collision");
+    }
+
+    [Theory]
+    [InlineData("docs/probe.md", "docs/probe.md.")]
+    [InlineData("docs/probe.md", "docs/probe.md ")]
+    [InlineData("docs/probe.md", "docs./probe.md")]
+    public void WindowsTrimmedPathCollisionRestoresNothing(string first, string second)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows trims trailing dots and spaces from path components.");
+        string archive = WriteExport([(first, "first bytes"), (second, "second bytes")]);
+        AssertRefused(archive, "export.path-collision");
+    }
+
+    [Theory]
+    [InlineData("docs/CON.txt")]
+    [InlineData("docs/CON .txt")]
+    [InlineData("docs/LPT\u00b2.log")]
+    [InlineData("docs/aux")]
+    public void WindowsDeviceNameRestoresNothing(string path)
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows device names are not ordinary file targets.");
+        string archive = WriteExport([("docs/first.md", "verified first"), (path, "device bytes")]);
+        AssertRefused(archive, "export.entry-path", path);
     }
 
     [Theory]
@@ -70,6 +96,7 @@ public sealed class EstateExportTests : IDisposable
     [InlineData("docs/./probe.md")]
     [InlineData("docs\\probe.md")]
     [InlineData("docs/probe.md:stream")]
+    [InlineData("docs//")]
     public void UnsafePathIsRefusedBeforeEvenTheFirstVerifiedMemberIsWritten(string path)
     {
         string archive = WriteExport([("docs/first.md", "verified first"), (path, "unsafe last")]);
@@ -159,15 +186,41 @@ public sealed class EstateExportTests : IDisposable
     [Fact]
     public void ValidMembersRestoreExactlyAndMetadataAndDirectoryEntriesAreNotExtracted()
     {
-        string archive = WriteExport([("docs/", ""), ("docs/probe.md", "verified bytes"), (".mailmap", "mailmap bytes")],
-            new JsonArray(Item("docs/probe.md", "verified bytes"), Item(".mailmap", "mailmap bytes")));
+        string archive = WriteExport([("docs/", ""), ("docs/probe.md", "verified bytes"), (".mailmap", "mailmap bytes"), ("docs/caf\u00e9-\U0001f9ed.md", "Unicode name")],
+            new JsonArray(Item("docs/probe.md", "verified bytes"), Item(".mailmap", "mailmap bytes"), Item("docs/caf\u00e9-\U0001f9ed.md", "Unicode name")));
         string destination = Path.Combine(scratch, "restored");
         EstateExport.Restore(archive, destination);
 
         Assert.Equal("verified bytes", File.ReadAllText(Path.Combine(destination, "docs", "probe.md")));
         Assert.Equal("mailmap bytes", File.ReadAllText(Path.Combine(destination, ".mailmap")));
-        Assert.Equal(2, Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Count());
+        Assert.Equal("Unicode name", File.ReadAllText(Path.Combine(destination, "docs", "caf\u00e9-\U0001f9ed.md")));
+        Assert.Equal(3, Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Count());
         Assert.False(Directory.Exists(Path.Combine(destination, "export")));
+    }
+
+    [Fact]
+    public void DuplicateRefusalLeavesAnExistingEmptyDestinationEmpty()
+    {
+        string archive = WriteExport([("docs/probe.md", "verified bytes"), ("docs/probe.md", "replacement")],
+            new JsonArray(Item("docs/probe.md", "verified bytes")));
+        string destination = Path.Combine(scratch, "restored");
+        Directory.CreateDirectory(destination);
+        Assert.Throws<InvalidOperationException>(() => EstateExport.Restore(archive, destination));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(destination));
+    }
+
+    [Fact]
+    public void ExistingDestinationContentIsUntouched()
+    {
+        string archive = WriteExport([("docs/probe.md", "verified bytes")]);
+        string destination = Path.Combine(scratch, "restored");
+        Directory.CreateDirectory(destination);
+        string existing = Path.Combine(destination, "existing.md");
+        File.WriteAllText(existing, "keep");
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => EstateExport.Restore(archive, destination));
+        Assert.Contains("destination must be empty", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("keep", File.ReadAllText(existing));
+        Assert.Single(Directory.EnumerateFileSystemEntries(destination));
     }
 
     public void Dispose() => Directory.Delete(scratch, recursive: true);

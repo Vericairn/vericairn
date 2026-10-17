@@ -125,6 +125,16 @@ credentials or authority, so a restored copy verifies every signature and signs 
 where it runs; while its charter leaves signatures optional it can still author unsigned records (at record format 2,
 never an admission).
 
+From 0.7.2, verification refuses duplicate inventory paths, duplicate archive members (including the inventory and
+summary), unsafe relative paths, and file/directory or normalized-name collisions before creating destination
+material. Names use `/` separators; case aliases are conservatively refused on every platform, with canonical
+Unicode equivalence and case folding on macOS and trailing-dot/space aliases and device names checked on Windows.
+Restore verifies and extracts the same members from one open archive, rechecks each member's buffered bytes before
+writing, and creates each target without overwriting. The manifest's existing conversion to `repository-synced`
+is retained. An I/O failure or source change during extraction can leave earlier verified files in the destination;
+restore does not report success in that case. Inventory hashes establish byte integrity, not the exporter's identity
+or authority; record signatures are still checked separately.
+
 ## Software: resources, observations, verifications and operations
 
 A repository the estate uses is a `resource` of kind `repository`, identified by its `rootCommit`, which adoption always
