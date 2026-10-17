@@ -316,7 +316,7 @@ public class GoalStepTests
         Assert.Equal(assignments, run.Service.Records("assignment").Count);
         Assert.Empty(run.Service.Records("operation"));
 
-        // A single record gets the same check from the stored file: the run of W-1's assignment on that branch is refused too.
+        // A single record gets the same checks on its unpublished bytes: the run of W-1's assignment on that branch is refused too.
         RunResponse single = run.Start("claude-code", "claude", run.Report("never"), branch: branch);
         Assert.False(single.Ok, single.Message);
         Assert.Contains(single.Problem!.Findings, f => f.Code == "secrets.pattern");

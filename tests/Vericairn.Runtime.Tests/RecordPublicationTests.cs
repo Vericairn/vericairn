@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Service;
@@ -45,7 +46,7 @@ public class RecordPublicationTests
         Assert.False(Published(service, proposed));
         using EstateService reopened = EstateService.Open(estate.Root);
         Assert.Null(reopened.Record(proposed.Envelope.Id));
-        Assert.Equal(0, reopened.Check().Errors);
+        AssertClean(reopened);
     }
 
     [Theory]
@@ -74,7 +75,7 @@ public class RecordPublicationTests
         Assert.Equal("refused", outcome.Problem!.Code);
         using EstateService reopened = EstateService.Open(estate.Root);
         Assert.Null(reopened.Record(proposed.Envelope.Id));
-        Assert.Equal(0, reopened.Check().Errors);
+        AssertClean(reopened);
     }
 
     [Fact]
@@ -104,6 +105,12 @@ public class RecordPublicationTests
     private static bool Published(EstateService service, AuthoredRecord record) =>
         File.Exists(Path.Combine(service.Root, record.RelativePath)) || service.Session.Live.Has(record.RelativePath);
 
+    private static void AssertClean(EstateService service)
+    {
+        FindingsResponse check = service.Check();
+        Assert.True(check.Errors == 0, string.Join("\n", check.Findings));
+    }
+
     private static EstateService Open(TestEstate estate, bool localOnly)
     {
         if (localOnly)
@@ -112,7 +119,7 @@ public class RecordPublicationTests
             string manifest = Path.Combine(estate.Root, EstateLayout.ManifestPath);
             JsonObject body = JsonNode.Parse(File.ReadAllText(manifest))!.AsObject();
             body["profile"] = "local-only";
-            File.WriteAllText(manifest, body.ToJsonString());
+            File.WriteAllBytes(manifest, CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(body)));
             using var session = Store.EstateSession.Open(estate.Root);
             foreach (RecordFile file in files) session.Live.Put(file.Path, file.Bytes);
             Directory.Delete(Path.Combine(estate.Root, "records"), recursive: true);
