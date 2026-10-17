@@ -57,6 +57,9 @@ not other harness versions, accounts, platforms, provider billing or acceptance 
 
 ## Releases
 
+The [public roadmap](ROADMAP.md) lists the current published release and planned releases and later
+milestones, with no dates or promises.
+
 The published releases are on the [Releases page](https://github.com/Vericairn/vericairn/releases). Each
 carries the command line's archives for Linux, macOS and Windows, `SHA256SUMS`, a software bill of materials and
 the third-party notices; from 0.3.1 a release also carries Workbench's archives and its documentation set. The
