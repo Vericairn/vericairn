@@ -519,8 +519,8 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    its temporary repository so a retry starts cleanly. A later run reuses the branch's workspace only inside the
    selected root; otherwise refusal names its location and cleanup guidance. Legacy linked worktrees must be
    preserved and removed before a new launch. Worker Git commands explicitly enable `core.longpaths`, so isolating
-   configuration does not restore Git for Windows' short-path limit during staging or recovery. Git-facing paths,
-   including object alternates, use forward slashes. Temporary-repository cleanup removes Windows read-only objects
+   configuration does not impose Git for Windows' short-path limit during staging or recovery. Object alternates
+   use Git's forward-slash path form on Windows. Temporary-repository cleanup removes Windows read-only objects
    through handles opened without following links; directory links are removed themselves, and read-only hard links
    are unlinked without changing their other names' attributes. Unix cleanup unlinks files without changing modes.
    The brief, as

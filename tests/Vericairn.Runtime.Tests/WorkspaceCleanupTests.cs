@@ -72,13 +72,13 @@ public class WorkspaceCleanupTests
     public void DirectoryLinksAreRemovedWithoutChangingTheClone(bool rootLink)
     {
         using var run = new RunEstate();
-        string workspace = Path.Combine(run.Scratch, "workspace");
+        string workspace = Path.Combine(run.Scratch, "workspace&literal");
         Directory.CreateDirectory(workspace);
         string marker = Path.Combine(run.Clone, ".git", "readonly-marker");
         File.WriteAllText(marker, "preserve");
         File.SetAttributes(marker, File.GetAttributes(marker) | FileAttributes.ReadOnly);
         FileAttributes original = File.GetAttributes(marker);
-        string link = rootLink ? Path.Combine(run.Scratch, "workspace-link") : Path.Combine(workspace, ".git");
+        string link = rootLink ? Path.Combine(run.Scratch, "workspace-link&literal") : Path.Combine(workspace, ".git");
         DirectoryLink(link, Path.Combine(run.Clone, ".git"));
 
         WorkspaceCleanup.Delete(rootLink ? link : workspace);
@@ -140,8 +140,14 @@ public class WorkspaceCleanupTests
         }
 
         // Junctions require no symbolic-link privilege, so Windows CI exercises the no-follow cleanup boundary too.
-        var start = new ProcessStartInfo("cmd.exe") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string arg in new[] { "/d", "/c", "mklink", "/J", name, target }) start.ArgumentList.Add(arg);
+        var start = new ProcessStartInfo("cmd.exe")
+        {
+            UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+            // One expansion inside quotes keeps spaces and shell metacharacters in temporary paths literal.
+            Arguments = "/d /v:off /c mklink /J \"%VERICAIRN_TEST_JUNCTION%\" \"%VERICAIRN_TEST_TARGET%\"",
+        };
+        start.Environment["VERICAIRN_TEST_JUNCTION"] = name;
+        start.Environment["VERICAIRN_TEST_TARGET"] = target;
         using Process process = Process.Start(start)!;
         string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
         process.WaitForExit();
