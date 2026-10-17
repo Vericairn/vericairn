@@ -21,7 +21,10 @@ Jason Furr's nuget.org user name, not the organization name. No API-key secret i
 
 The draft already holds the release's `.nupkg` and `.snupkg` assets under `SHA256SUMS`. Publishing the
 release triggers `nuget.yml` to verify and push those exact files; it never rebuilds them. Check that run
-and package availability after the first publication. A withdrawn candidate stays off NuGet while its draft remains unpublished. The workflow runs for any published release, including a prerelease, and verifies packages against that release's own `SHA256SUMS`; the operator binds the upload to estate acceptance by publishing exactly the accepted draft. Existing package versions are skipped, never replaced. Details are
+and package availability after the first publication. If the release event could not run the workflow, for example because an
+organization setting refused one of its actions, a person may run it by hand for that published, immutable
+release, `gh workflow run nuget.yml -R Vericairn/vericairn -f release_id=<release id>`, which verifies and pushes
+the same assets. A withdrawn candidate stays off NuGet while its draft remains unpublished. The workflow runs for any published release, including a prerelease, and verifies packages against that release's own `SHA256SUMS`; the operator binds the upload to estate acceptance by publishing exactly the accepted draft. Existing package versions are skipped, never replaced. Details are
 in the [publication draft](../software.md#vericairns-nuget-publication); the next set's installation guide
 should incorporate [the maintained installation draft](../install.md) and its SDK package commands.
 

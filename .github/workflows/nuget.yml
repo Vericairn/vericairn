@@ -1,9 +1,17 @@
 name: nuget
 
 # A candidate may be withdrawn. Only the operator's publication releases its exact package assets.
+# A person may also name a published, immutable release by its id, when its release event could not run this
+# workflow; that run pushes exactly the same verified assets, and a version nuget.org already holds is skipped.
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: The id of a published, immutable release whose package assets to push.
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -21,8 +29,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_ID: ${{ github.event.release.id }}
-        # Address the release by its event's id, so a moved or reused tag cannot select another release.
+          RELEASE_ID: ${{ github.event.release.id || inputs.release_id }}
+          DISPATCHED: ${{ github.event_name == 'workflow_dispatch' }}
+        # Address the release by its id, the event's or the one a person names, so a moved or reused tag cannot select another release.
         run: |
           import json
           import os
@@ -34,7 +43,10 @@ jobs:
           release_id = int(os.environ["RELEASE_ID"])
           release = json.loads(subprocess.check_output(["gh", "api", f"repos/{repository}/releases/{release_id}"]))
           if release["id"] != release_id or release["draft"] or not release["published_at"]:
-              raise SystemExit("The event's release is not published.")
+              raise SystemExit("The release is not published.")
+          # A named release must be immutable, so its assets are exactly those its publication released.
+          if os.environ["DISPATCHED"] == "true" and release.get("immutable") is not True:
+              raise SystemExit("A dispatched run pushes only a published, immutable release.")
           assets = [asset for asset in release["assets"]
                     if asset["name"] == "SHA256SUMS" or asset["name"].endswith((".nupkg", ".snupkg"))]
           names = [asset["name"] for asset in assets]
