@@ -191,6 +191,11 @@ rotation refuses the new certificate on its next connection and is made again fr
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
 
+Before a loaded or replacement certificate is made available to either TLS listener, its managed extensions
+are decoded on the loading thread. Concurrent first handshakes therefore read complete usage values, including
+Server Authentication. Server-side handshake exceptions are reported through `DaemonOptions.Log` with only
+the exception type and message, without exception stacks, inner exceptions, peer certificates or request data.
+
 Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
 are refused during the handshake, before any HTTP request is read.
 

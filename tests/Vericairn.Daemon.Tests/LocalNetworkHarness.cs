@@ -69,12 +69,12 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
             : RequestSigning.LocalNetworkDigest(Binding.Estate, Binding.Identity, method, target, signedAt, body);
 
     /// <summary>Starts the runtime on loopback's local-network profile, on a clock the test moves, or on the system's when <paramref name="systemClock"/>.</summary>
-    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false)
+    public static async Task<LocalNetworkHarness> StartAsync(long recordFormat = 2, int replayCapacity = 10_000, bool systemClock = false, Action<string>? log = null)
     {
         DaemonTestHome.Ensure();
         var estate = new TestEstate(recordFormat);
         var time = new ManualTime(DateTimeOffset.UtcNow, running: true);
-        var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity };
+        var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity, Log = log };
         DaemonHost host = await DaemonHost.StartAsync(
             estate.Root,
             options: options,
