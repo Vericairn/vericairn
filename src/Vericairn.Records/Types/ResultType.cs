@@ -84,7 +84,7 @@ public sealed class ResultType : IRecordType
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {
-            // The reviewer's decision is an acceptance: once one is recorded after the result, the failed check has its answer.
+            // The reviewer's acceptance answers the failed check, through its causal pin or its recorded order.
             RecordEnvelope? acceptance = AcceptanceAfter(context.Model, context.Record);
             if (acceptance is null)
             {
@@ -94,7 +94,7 @@ public sealed class ResultType : IRecordType
             {
                 string accepted = acceptance.Subject!.Id == context.Record.Id ? "this result" : $"its work order {EstateModel.BodyString(context.Model.ById[acceptance.Subject.Id], "key")}";
                 bool self = acceptance.Body.TryGetProperty("self", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
-                context.Findings.Info("result.checks-accepted", context.Location, $"The result claims completed while a check failed, and acceptance {acceptance.Id}, recorded after it, accepts {accepted}; it is {(self ? "a self-acceptance" : "not a self-acceptance")}.");
+                context.Findings.Info("result.checks-accepted", context.Location, $"The result claims completed while a check failed, and acceptance {acceptance.Id} accepts {accepted}; it is {(self ? "a self-acceptance" : "not a self-acceptance")}.");
             }
         }
 

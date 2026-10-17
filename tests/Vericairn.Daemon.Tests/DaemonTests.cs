@@ -14,6 +14,7 @@ using System.Security.Principal;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vericairn.Protocol;
+using Vericairn.Runtime.Service;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Signing;
@@ -203,10 +204,10 @@ public class DaemonTests
         using VericairnClient pinned = VericairnClient.Loopback(impostor, signer);
         Assert.ThrowsAny<HttpRequestException>(() => pinned.Health());
 
-        // Revocation ends loopback access from now on, with no restart. A revocation names the second it takes effect, and the
-        // device's own records of that second would fall after it, so the test waits for the next second like an operator would.
-        await Task.Delay(1100, TestContext.Current.CancellationToken);
-        WriteOutcome revocation = socket.DeviceRevoke(new RevokeRequest(device.Written.Id, estate.OperatorId, "Loopback test over."));
+        // Revocation ends loopback access with no restart; its explicit time follows this device's signed history.
+        using EstateService service = EstateService.Open(estate.Root);
+        DateTimeOffset revokedAt = estate.Load().Records.Max(r => r.AtTime).AddSeconds(1);
+        WriteOutcome revocation = service.DeviceRevoke(new RevokeRequest(device.Written.Id, estate.OperatorId, "Loopback test over."), revokedAt);
         Assert.True(revocation.Ok, revocation.Problem?.Message);
         HttpRequestException revoked = Assert.Throws<HttpRequestException>(() => loopback.Health());
         Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);

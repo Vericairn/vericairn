@@ -603,7 +603,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRevoke(RevokeRequest request)
+    public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, DateTimeOffset.UtcNow);
+
+    // A supplied time lets journeys put revocation after signed history without waiting for the next wall-clock second.
+    internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset at)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Ulid.IsValid(request.By))
@@ -626,9 +629,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse($"Device {request.Device} has no current admission to revoke.");
             }
 
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(at) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id);
+            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: at);
             return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
         }
     }
@@ -1285,6 +1288,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit)
     {
+        // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
+        if (commit is null && NeedsReleaseCommit(model, product))
+        {
+            return (["The exact release commit is unavailable for the product's living documents; resolve it at the build provider before submitting again"], []);
+        }
+
         IReadOnlyList<LivingDocuments.State> documents = commit is null
             ? LivingDocuments.Derive(model).Where(d => LivingDocuments.NamesProduct(model, d.Declaration, product)).ToList()
             : LivingDocuments.AtReleaseCommit(model, product, commit);
@@ -1292,6 +1301,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
         return (changed, compared);
     }
+
+    private static bool NeedsReleaseCommit(EstateModel model, string product) =>
+        model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is not null &&
+            LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
 
     /// <summary>
     /// The reviewer's independence of the content, as the record's rules judge it from the estate's records: self when it revised the
@@ -1406,8 +1419,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            needsCommit = model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is not null &&
-                LivingDocuments.NamesProduct(model, d, request.Product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
+            needsCommit = NeedsReleaseCommit(model, request.Product);
         }
 
         // Resolve at the build provider, not at a potentially stale clone. Provider I/O never holds the service gate.
