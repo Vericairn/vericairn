@@ -39,7 +39,10 @@ public static class EstateLoader
     }
 
     /// <summary>Loads an estate whose records are supplied by the caller (from files, a live store or an export).</summary>
-    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files)
+    public static EstateModel Load(string root, IReadOnlyList<RecordFile> files) => Load(root, files, null);
+
+    // Only parsing is reusable. References, authority, signatures, manifest and output-file findings are rejudged on every load.
+    internal static EstateModel Load(string root, IReadOnlyList<RecordFile> files, RecordParseCache? cache)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(files);
@@ -68,7 +71,7 @@ public static class EstateLoader
                 continue;
             }
 
-            RecordEnvelope? record = RecordParser.Parse(file.Bytes, location, findings);
+            RecordEnvelope? record = cache is null ? RecordParser.Parse(file.Bytes, location, findings) : cache.Parse(file, findings);
             if (record is null)
             {
                 continue;
