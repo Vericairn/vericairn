@@ -80,7 +80,7 @@ the operator publishes a release and its package publication workflow succeeds. 
 
 ## Context packages (0.7.0)
 
-For 0.7.0, the foundation's context package preserves exact originals apart from
+In 0.7.1, the foundation's context package preserves exact originals apart from
 derived presentation. `vericairn context prepare <work-order>` computes the step's
 working instructions, effects and pinned inputs. Only optional documents named
 by the work, its inputs or governing decisions enter the selection.
@@ -559,7 +559,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 

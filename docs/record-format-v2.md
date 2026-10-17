@@ -479,7 +479,7 @@ anything is written; `vericairn goal show <goal>` says whether the goal is ready
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 

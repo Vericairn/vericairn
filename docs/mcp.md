@@ -51,7 +51,7 @@ Every tool description describes and never directs: nothing a tool returns, and 
 
 ## Running it
 
-With 0.7.0's NuGet packages published and the .NET 10 SDK installed:
+After 0.7.1's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
 dotnet tool install --global dotnet-vc
