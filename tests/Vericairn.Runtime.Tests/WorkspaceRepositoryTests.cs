@@ -186,6 +186,28 @@ public class WorkspaceRepositoryTests
     }
 
     [Fact]
+    public void AFailedPreparationLeavesNoPartialWorkspaceAndCanBeRetried()
+    {
+        using var run = new RunEstate();
+        const string branch = "work/retry";
+        string reference = Path.Combine(run.Clone, ".git", "refs", "heads", "work", "retry");
+        Directory.CreateDirectory(Path.GetDirectoryName(reference)!);
+        // A damaged clone can name a commit whose object is missing. Failure must not publish an empty checkout.
+        File.WriteAllText(reference, new string('1', 40) + "\n");
+        string root = Path.Combine(run.Scratch, "workspaces");
+        string path = Path.Combine(root, "workspace");
+        var provider = new GitWorktreeWorkspaces();
+        Assert.Throws<ProviderRefusedException>(() => provider.Prepare(run.Clone, branch, null, path, root));
+        Assert.False(Directory.Exists(path));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+        File.Delete(reference);
+        PreparedWorkspace workspace = provider.Prepare(run.Clone, branch, null, path, root);
+        Assert.False(workspace.Reused);
+        Assert.True(File.Exists(Path.Combine(workspace.Path, "README.md")));
+        Assert.Equal(RunEstate.Git(run.Clone, "rev-parse", "HEAD"), workspace.Commit);
+    }
+
+    [Fact]
     public void ReopeningAndCleaningAnIndependentWorkspacePreservesItsSettledBranch()
     {
         using var run = new RunEstate();

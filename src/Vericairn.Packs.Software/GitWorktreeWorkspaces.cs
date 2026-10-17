@@ -99,13 +99,23 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
             if (!WorkspaceGitScope.ObjectId(baseline)) throw new ProviderRefusedException("The prepared baseline is not a commit.");
 
             // Equivalent object sharing to clone --shared, without importing remotes, templates or repository configuration.
+            // Publish only a complete checkout, so a failed preparation cannot be mistaken for a reusable workspace.
             // Only this fresh, worker-created repository is ever passed to Git as a working repository.
-            WorkspaceGitCommand.Require(parent, "init", "--quiet", "--template=", "--object-format=" + (baseline.Length == 64 ? "sha256" : "sha1"), directory);
+            string preparing = Path.Combine(parent, ".vericairn-preparing-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                WorkspaceGitCommand.Require(parent, "init", "--quiet", "--template=", "--object-format=" + (baseline.Length == 64 ? "sha256" : "sha1"), preparing);
+                File.WriteAllText(Path.Combine(preparing, ".git", "objects", "info", "alternates"), Path.Combine(common, "objects").Replace('\\', '/') + "\n");
+                WorkspaceGitCommand.Require(preparing, "update-ref", "refs/heads/" + branch, baseline);
+                WorkspaceGitCommand.Require(preparing, "symbolic-ref", "HEAD", "refs/heads/" + branch);
+                WorkspaceGitCommand.Require(preparing, "reset", "--hard", baseline);
+                Directory.Move(preparing, directory);
+            }
+            finally
+            {
+                if (Directory.Exists(preparing)) Directory.Delete(preparing, recursive: true);
+            }
             directory = HarnessWorkspace.Canonical(directory);
-            File.WriteAllText(Path.Combine(directory, ".git", "objects", "info", "alternates"), Path.Combine(common, "objects").Replace('\\', '/') + "\n");
-            WorkspaceGitCommand.Require(directory, "update-ref", "refs/heads/" + branch, baseline);
-            WorkspaceGitCommand.Require(directory, "symbolic-ref", "HEAD", "refs/heads/" + branch);
-            WorkspaceGitCommand.Require(directory, "reset", "--hard", baseline);
         }
 
         string git = Path.Combine(directory, ".git");
