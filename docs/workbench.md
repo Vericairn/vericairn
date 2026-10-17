@@ -2,7 +2,11 @@
 
 `vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; estate state comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings). The shell also shows separately labelled machine-local release information.
 
-## Release notices (0.7.3)
+The current published release is 0.7.2. The release-notice section below describes main's unreleased
+UPDATE-01 work for planned 0.7.3; published 0.7.2 has no newer-release notice. The other capabilities and
+qualification limits apply to 0.7.2.
+
+## Release notices (unreleased, planned 0.7.3)
 
 The shell discloses a check for newer published Vericairn releases, including before an estate is open.
 At opening and while it stays open, Workbench shares the CLI's cache and limit of one unauthenticated

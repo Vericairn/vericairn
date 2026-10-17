@@ -1,13 +1,14 @@
 # API version 1
 
-This draft describes 0.7.2 after published 0.7.1. FIX-13 adds exact-commit release document checks
+This maintained document describes published 0.7.2 and labels main's unreleased changes for planned 0.7.3.
+Main is 0.7.3-dev, carrying FIX-19, UPDATE-01, FIX-20 and FIX-21; none is in a published release.
+FIX-13 adds exact-commit release document checks
 and settlement of process attention asks; FIX-15 claims dispatch identities before provider effects;
 FIX-16 validates before publishing records and exposes unreadable recovery journals; FIX-18 adds
 Codex max effort, run-owned execution observations and corrected worker signals. FIX-14 hardens the
 CLI/runtime export restore path without adding an HTTP restore route. API v1 remains additive and
 record format 2 is unchanged. The 0.7.0 candidate's features shipped in 0.7.1 with FIX-12;
-the release index retains the withdrawn candidates' history. NuGet availability follows publication
-and the successful package workflow for that version.
+the release index retains the withdrawn candidates' history. All eight 0.7.2 NuGet packages are published; the [release index](releases/README.md#nuget-publication-setup) records the publication sequence.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -203,10 +204,12 @@ rotation refuses the new certificate on its next connection and is made again fr
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
 
-Before a loaded or replacement certificate is made available to either TLS listener, its managed extensions
-are decoded on the loading thread. Concurrent first handshakes therefore read complete usage values, including
-Server Authentication. Server-side handshake exceptions are reported through `DaemonOptions.Log` with only
-the exception type and message, without exception stacks, inner exceptions, peer certificates or request data.
+**On main for planned 0.7.3 (FIX-21, unreleased).** Before a loaded or replacement certificate is made
+available to either TLS listener, its managed extensions are decoded on the loading thread. Concurrent first
+handshakes therefore read complete usage values, including Server Authentication. When `DaemonOptions.Log`
+is configured, server-side handshake exceptions are reported with only the exception type and message,
+without exception stacks, inner exceptions, peer certificates or request data. This preparation and handshake
+logging are absent from published 0.7.2.
 
 Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
 are refused during the handshake, before any HTTP request is read.
@@ -565,7 +568,7 @@ pairing does not qualify a Remote client.
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks. `record.subject-stale` and `acceptance.unresolved` apply only while the referring record is current; superseded judgments retain historical integrity validation but no longer need reconsideration. A stale replacement is still flagged. |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
-| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), it is written unsigned, except an admission from record format 2, which is always signed. The record is validated with the estate and removed again when the estate would be invalid. |
+| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), it is written unsigned, except an admission from record format 2, which is always signed. The proposed estate is validated before publication; refusal publishes no invalid record. |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
@@ -626,7 +629,7 @@ and applies to every launcher. The default location is unchanged; a configured r
 at `<root>/<estate>/<branch-slug>`. Invalid roots refuse before intent. A root changed after intent refuses
 dispatch and settles as an uncharged known failure. Workspace paths never enter records. See the
 [software guide](software.md#explicit-execution-and-environment-admission-run-01-070) for root validation
-and reuse of an existing branch worktree.
+and reuse of an existing branch workspace. Published 0.7.2 uses linked worktrees, whose external Git metadata prevents a sandboxed Codex commit. Main uses independent workspace repositories (FIX-19), with guarded branch retention after settlement; that behavior is unreleased and planned for 0.7.3.
 Choose a root outside a home holding `.claude`, `.codex`, `.agents` or `.mcp.json`; the root and its ancestors
 cannot contain these markers. Codex separately inspects the user's own `~/.agents`, so moving a workspace
 does not admit user skills or other customization there. An empty ordinary directory or recognized instruction
@@ -861,14 +864,21 @@ when the agent recorded no new attempt on its exact assignment during the run. I
 operation evidence and shown by CLI settlement and `worker runs`, with a compact reference in status attention, without changing `observed-success`
 or CLI exit-code semantics.
 
-FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
+In published 0.7.2, FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
 attention without requesting a stop. Reads inside the workspace do not require change permission.
 Confidently identified write targets outside the workspace and launch-supplied temporary directory retain critical
 `scope` signals. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified`
-warnings, without a stop. Changes inside the workspace are checked against the brief at settlement. Network detections warn, while credential
+warnings, without a stop. Changes inside the workspace are checked against the brief at settlement. Network detections warn, while recognized credential
 detections remain critical for reads and writes. Run admission refuses a brief with no
 interpretable repository-relative `permittedChanges` pattern, explaining forms such as `path:NOTES.md`;
 prose can remain beside a pattern. No request or response fields change.
+
+**On main for planned 0.7.3 (FIX-20, unreleased).** The audit recognizes the Vericairn home's credential
+stores, token-output commands and more outside-write forms, including literal targets in interpreter code.
+Interpreter input retains `audit-unverified` alongside any independently recognized critical signal; a warning
+alone does not request a stop. Null-device output is exempt from outside-write classification. These changes
+reuse the existing signal codes and API fields. [Command observations](software.md#command-observations-070)
+lists the recognized forms and remaining limits; observation is not credential isolation.
 
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
 
@@ -1078,7 +1088,7 @@ and use the existing attention/stop behavior. No original command audit is filte
 Codex and Claude Code qualify only for the exact versions and isolation evidence documented in the
 [software guide](software.md#native-inventory-qualification-run-02-and-run-03). A different exact version requires a current human qualification with matching local probes;
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
-records the builder's first live Codex observation and the required rerun.
+records the builder's five live Codex observations for the 0.7.2 path and their limits, followed by the unreleased FIX-19 workspace work for 0.7.3.
 The efficiency Adapter is unsupported (EFF-01, 0.8.0); only `disabled` is allowed. Remote is not built.
 These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).

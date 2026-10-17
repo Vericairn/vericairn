@@ -4,23 +4,23 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.7.1 — current published release
+## 0.7.2 — current published release
 
-Set communication preferences, inspect the context supplied to agents and observations of their runs,
-hand work over and resume it, and install the command-line tool and SDK through NuGet. The
-[release notes](docs/releases/0.7.1/release-notes.md) and
-[documentation set](docs/releases/0.7.1/README.md) describe the shipped capabilities and their limits.
-
-## 0.7.2 — planned
-
-Reliability and integrity fixes.
+Integrity fixes bind restored files to their verified inventory, prevent overlapping release dispatch,
+validate records before publication and keep unreadable recovery journals visible. The release also
+corrects the tested Codex worker path and reduces repeated Workbench startup work. Its
+[Security section](docs/releases/0.7.2/release-notes.md#security),
+[release notes](docs/releases/0.7.2/release-notes.md) and
+[documentation set](docs/releases/0.7.2/README.md) describe what shipped and its limits.
 
 ## 0.7.3 — planned
 
 Each worker run gets a workspace repository of its own, so a worker-launched Codex run can commit its
 changes. The command line and Workbench show a newer-release notice with release notes and upgrade
 guidance. The check runs at most once a day, can be switched off, works offline and never installs
-anything.
+anything. Worker command auditing recognizes credential access and more write forms, and handles
+null-device output correctly. Connections stay reliable when several clients connect at once, and status
+shows only what still needs attention, with compact, current items.
 
 ## 0.8.0 — planned
 

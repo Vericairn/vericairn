@@ -73,13 +73,17 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This maintained draft includes the 0.7.3 worker changes in FIX-19 and FIX-20 after published 0.7.2.
-The 0.7.2 release carried FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
+This maintained document describes published 0.7.2, carrying FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
+Main is now 0.7.3-dev and also carries FIX-19's independent workspace repositories, UPDATE-01's newer-release
+notice, FIX-20's command-audit corrections and FIX-21's concurrent TLS handshake correction for planned 0.7.3.
+These changes are unreleased and are labeled below or in [the API guide](api-v1.md#transports); the
+[frozen 0.7.2 guide](releases/0.7.2/software.md) describes the published workspace and audit behavior.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
 0.7.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts. It corrects identifier ordering, release gates and dispatch, notes and attention,
 export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
-NuGet installation of a version follows its publication and successful package workflow. The
+All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
+Installation of another version requires its publication and successful package workflow. The
 [communication qualification report](communication-qualification.md) retains its original evidence and deferrals.
 
 ## Context packages (0.7.0)
@@ -475,6 +479,12 @@ and Records; Runtime, Daemon and Mcp are separate host and adapter packages. The
 adapter and GitHub provider still ship inside the command line; they are not separate NuGet packages.
 
 ## Coding agents: the worker and its launchers
+
+**Workspace version boundary.** The independent workspace repositories, writable workspace Git administration
+and guarded branch retention described in this section are FIX-19 on main, unreleased for planned 0.7.3.
+Published 0.7.2 uses linked worktrees; the fifth live Codex run could edit and author its signed attempt/result
+but could not commit because the shared Git administration was outside its sandbox. The builder must preserve
+and commit those changes. This distinction also applies to the configuration and cleanup instructions below.
 
 The worker contract, `vericairn.worker/1` (the estate's `design/goals.md` § 7), carries one assignment with a coding agent
 toward its work order's exit question. It lives in the runtime; the launchers that start a harness (contract
@@ -879,6 +889,12 @@ resume reports a newly completed phase as an added record.
 
 ## Command observations (0.7.0)
 
+**On main for planned 0.7.3, unreleased.** The audit below includes FIX-20's corrections. Published 0.7.2
+retains the two warnings from its independent candidate review: incomplete recognition of the Vericairn
+home's credential reads and several write forms, and null-device redirection that can wrongly stop a run.
+The [frozen 0.7.2 guide](releases/0.7.2/software.md#command-observations-070) describes that earlier audit.
+FIX-20 corrects the recognized cases below on main; it does not change any published release.
+
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
 
 Recognizable network commands, structured network URLs and web tools produce warnings; `dotnet restore` is one such
@@ -964,7 +980,7 @@ History is the last 20 successful, fully reported runs of the same launcher and 
 
 ## Attention and containment (0.7.0)
 
-Every new signal kind and severity gets one ask addressed to the goal's decider, and its id is retained with the run. Process signals pin the run's exact intent; settlement-review signals pin its exact settlement. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+Every new signal kind and severity gets one ask addressed to the goal's decider, and its id is retained with the run. Process signals pin the run's exact intent; settlement-review signals pin its exact settlement. Network attempts, outside-workspace reads, unverified invocation effects, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Recognized credential-store access, confidently identified write targets outside the workspace and supplied temporary boundary, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
 
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
@@ -1396,7 +1412,9 @@ The fifth live run of `531d169` recorded its cap before launch, observed the adm
 3 wall minutes and 205,767 tokens. The agent authored its signed attempt and result through the estate MCP server
 and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
 the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
-sandbox. FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
+sandbox.
+
+**Unreleased workspace observations for planned 0.7.3.** FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
 branch. The sixth live run of `eb12a8e` recorded its cap, the observed model at `max`, usage and the signed attempt
 and result, and changed exactly `NOTES.md`. Its commit still failed: Codex protects `.git` even inside a writable
 workspace. Round two adds only the independent workspace's `.git` as an explicit writable root, verified by the
@@ -1408,14 +1426,14 @@ the commit and fetched its branch into the registered clone, whose `.git` the ag
 Three-platform CI on `c400386` passed on macOS and Linux. Its Windows failures exposed native-versus-Git path
 comparisons, a staging ref lock beyond Git's default path limit, and read-only objects left for assembly cleanup.
 Round three normalizes the comparisons, explicitly enables long paths in isolated Git commands, and uses the same
-link-safe cleanup for product scratch repositories and test workspaces. Windows verification of those fixes remains
-the builder's; local macOS tests cannot establish the Windows behavior.
-FIX-19 targets 0.7.3 and merges only after 0.7.2 publishes.
-FIX-20 adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
+link-safe cleanup for product scratch repositories and test workspaces. Main includes subsequent Windows path
+and cleanup corrections. The macOS observations listed here alone do not establish their Windows behavior.
+FIX-19 is now on main after 0.7.2's publication; it remains unreleased, planned for 0.7.3.
+FIX-20, also on main and unreleased for planned 0.7.3, adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
 write forms through every supported wrapper, directory changes, opaque inputs and null devices. Stand-in worker
 runs check that credential and outside-write signals request containment, while null redirects and opaque warnings
 settle without a scope stop. These tests run no reported credential or outside-write command and establish no new
-live-harness or platform qualification. The builder must run three-platform CI on the pushed head. The command audit
+live-harness or platform qualification. Release qualification requires three-platform checks on the exact candidate. The command audit
 remains a signal over harness reports, which can arrive after execution; the sandbox and settlement audit remain the
 boundaries. FIX-20 adds no public CLI, API, SDK, record type, signal code, package or lock-file change.
 Observed-success and live qualification do not accept the agent's work.
@@ -1429,3 +1447,14 @@ record format 2, never format 3. RUN-02 and RUN-03 add no MCP tools.
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
 refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
+
+## Newer-release notices (unreleased, planned 0.7.3)
+
+UPDATE-01 on main adds a shared machine-local check for CLI `version`, `doctor` and `status`, and Workbench.
+It makes at most one unauthenticated request per 24 hours to the public latest-release endpoint, counting
+failed attempts, with no identifiers or usage telemetry. `vericairn updates configure --enabled false`
+disables requests; cached knowledge remains usable offline. Notices explain the tool, archive and estate
+upgrade routes and never install or upgrade anything. Estate checks use existing release records and local
+cached knowledge to warn about an older pin without making a network request; canonical status stays unchanged.
+These commands and notices are absent from published 0.7.2. See [Workbench](workbench.md#release-notices-unreleased-planned-073)
+for the desktop behavior.

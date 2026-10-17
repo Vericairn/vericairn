@@ -7,7 +7,8 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The 0.7.2 source includes five fixes after published 0.7.1. FIX-13 orders identifiers within one process,
+The current published release is [0.7.2](https://github.com/Vericairn/vericairn/releases/tag/v0.7.2),
+published on October 17, 2026 at 20:30:51 UTC, tag `v0.7.2`, commit `d1363d9`. It carries five fixes after 0.7.1. FIX-13 orders identifiers within one process,
 checks release documents at the exact build commit, groups accepted notes by work order, settles process
 attention asks, checks workflow action pins and NuGet assets on pull requests, and reduces repeated Workbench
 first-screen reads. FIX-14 binds restored files to an export's inventory (F-01). FIX-15 claims release dispatch
@@ -16,17 +17,20 @@ keeps unreadable recovery journals visible. FIX-18 corrects the Codex worker at 
 execution observations, command audit and estate-only MCP approval. The [0.7.2 documentation set](docs/releases/0.7.2/README.md)
 describes the changes and their remaining limits.
 
-The current published release is [0.7.1](https://github.com/Vericairn/vericairn/releases/tag/v0.7.1), published on
-October 17, 2026, following 0.6.1. The 0.7.0 candidate was withdrawn
-before publication by decision `01M53S6DYFCPJMG0AQRSN8ZFSP`, recorded in withdrawal
-`01M53S6FN1GANBY5HSNDKE5N08`. Its frozen set remains indexed; 0.7.1 carries its work with FIX-12. This includes
-FIX-09's bounded loopback authentication and recoverable notes window, and FIX-10's deterministic permitted-path
-matching and independent audit checks. FIX-11 adds machine-local worker configuration, restricts harness
-qualification to the runtime's own machine and completes the generated CLI option reference.
-FIX-12 adds a machine-local workspace root, enforces hand-over for explicit worker runs, and keeps validated
-public keys and signatures out of credential-pattern matching. The 0.7.1 command-line tool and SDK packages are
-available on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup) records their
-Trusted Publishing run and the manual workflow path used after publication.
+The release notes open with [Security](docs/releases/0.7.2/release-notes.md#security): F-01 affected export
+restoration in every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 before restoring an export.
+The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
+
+Release 0.7.1 remains the previous published release. It carried the withdrawn 0.7.0 candidate's work with
+FIX-12: a machine-local workspace root, current assignment-holder checks and precise treatment of validated
+public keys and signatures. Its earlier frozen set remains unchanged. All eight command-line and library
+packages are available at 0.7.2 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
+records publication and the earlier 0.7.1 recovery.
+
+Main is ahead of the release at 0.7.3-dev. Its independent worker workspace repositories (FIX-19), newer-release
+notice (UPDATE-01), command-audit corrections (FIX-20) and concurrent TLS handshake correction (FIX-21) are
+implemented for planned 0.7.3 and are not in any published release. The maintained guides label that unreleased
+behavior; use the frozen 0.7.2 set for the published build.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
 needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
@@ -50,9 +54,9 @@ admission checks. The efficiency Adapter
 is absent until the planned 0.8.0 work, Remote is not built, and context tokens remain unknown without a
 qualified local tokenizer. Spending and containment limits remain as described in the guides.
 Five live Codex runs exercised the corrected path; the fifth recorded its cap, model and max effort, usage,
-signed attempt and result, and the permitted file change. A worker-launched Codex run cannot yet commit:
+signed attempt and result, and the permitted file change. In published 0.7.2 a worker-launched Codex run cannot commit:
 its git worktree metadata is outside the sandbox. Changes stay uncommitted in the worktree for review;
-FIX-19 makes the workspace a repository of its own. These observations qualify only the reported path,
+FIX-19 on main makes the workspace a repository of its own for planned 0.7.3. These observations qualify only the reported path,
 not other harness versions, accounts, platforms, provider billing or acceptance of the work.
 
 ## Releases
@@ -67,30 +71,30 @@ sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md
 and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
 the maintained documents, the release notes and known limitations. The index there also names the versions
 withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the maintained drafts. The published 0.7.1 set carries 0.7.0's work and FIX-12;
+documents at `docs/` are the maintained drafts. The published 0.7.2 set carries the integrity fixes and corrected worker path;
 the earlier sets remain frozen, including 0.7.0's withdrawn candidate.
 
-For 0.7.1, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
+For 0.7.2, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
 The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
 any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
-as the [install guide](docs/releases/0.7.1/install.md) describes.
+as the [install guide](docs/releases/0.7.2/install.md) describes.
 
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
 
 ## Install the command line and SDK
 
-The 0.7.1 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
+The 0.7.2 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.7.1
+dotnet tool install --global dotnet-vc --version 0.7.2
 dotnet vc version
 dotnet vc doctor
 dotnet vc records describe
 ```
 
 The global tool directory must be on PATH, as the installer describes. A repository can instead keep a
-local tool manifest; see the [0.7.1 install guide](docs/releases/0.7.1/install.md#9-nuget-command-line-and-sdk).
+local tool manifest; see the [0.7.2 install guide](docs/releases/0.7.2/install.md#9-nuget-command-line-and-sdk).
 The tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
 also carry the Secure Enclave helper. The NuGet tool does not bundle that helper or Workbench.
 The worker's agent-side MCP command still resolves `vericairn`; keep the archive executable on PATH for worker
@@ -99,16 +103,18 @@ runs. A NuGet-only worker installation is not qualified by the package installat
 In a .NET 10 project, install the SDK with:
 
 ```sh
-dotnet add package Vericairn --version 0.7.1
+dotnet add package Vericairn --version 0.7.2
 ```
 
 `Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
-and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.7.1;
+and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.7.2;
 the SDK front door does not embed a runtime or daemon. See the [SDK guide](docs/api-v1.md#the-sdk).
 The packages contain Community code only.
 Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
 
 ## What is here
+
+The following capabilities are in published 0.7.2. Main additionally carries the unreleased changes named above.
 
 - `Vericairn.Records`: record formats 1 and 2 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
@@ -132,7 +138,7 @@ Commands written as `vericairn ...` in the archive documentation take the same a
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
   `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `handoff`, `resume`,
-  `communication`, `context`, `doctor`, `version`; a
+  `communication`, `context`, `doctor`, `version` (main adds `updates configure` for planned 0.7.3); a
   client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records, with repository-check findings: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
