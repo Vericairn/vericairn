@@ -51,5 +51,4 @@ roadmap.
 
 ## Later milestone: specialist workflows — planned
 
-Workflows and domain templates for books, Unity projects and courses. Vericairn Standards adds reusable
-materials that users can choose to adopt.
+Workflows and domain templates for books, Unity projects and courses.
