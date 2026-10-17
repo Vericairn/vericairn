@@ -603,10 +603,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, DateTimeOffset.UtcNow);
+    public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
 
     // A supplied time lets journeys put revocation after signed history without waiting for the next wall-clock second.
-    internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset at)
+    internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset? at)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Ulid.IsValid(request.By))
@@ -629,9 +629,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse($"Device {request.Device} has no current admission to revoke.");
             }
 
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(at) };
+            DateTimeOffset revokedAt = at ?? DateTimeOffset.UtcNow;
+            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: at);
+            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
             return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
         }
     }
