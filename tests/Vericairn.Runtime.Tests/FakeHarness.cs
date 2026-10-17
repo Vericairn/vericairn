@@ -161,6 +161,19 @@ internal static class FakeHarness
                 return 0;
             }
             if (behavior["mcpAuth"]?.GetValue<string>() is string auth) list[0]!["auth_status"] = auth;
+            // The installed baseline omits approvals from mcp list; also exercise a harness reporting them.
+            if (behavior["mcpApproval"]?.GetValue<string>() is string approval) list[0]!["default_tools_approval_mode"] = approval;
+            if (defect == "other-approved-server") list[0]!["name"] = "other";
+            if (defect == "extra-approved-server") list.Add(new JsonObject { ["name"] = "other", ["enabled"] = true, ["default_tools_approval_mode"] = "approve" });
+            if (defect == "null-approval") list[0]!["default_tools_approval_mode"] = null;
+            if (defect == "duplicate-approval")
+            {
+                Console.WriteLine(list.ToJsonString().Replace("\"default_tools_approval_mode\":\"approve\"", "\"default_tools_approval_mode\":\"approve\",\"default_tools_approval_mode\":\"approve\"", StringComparison.Ordinal));
+                return 0;
+            }
+            if (defect == "per-tool-approval") list[0]!["tools"] = new JsonObject { ["work_attempt"] = new JsonObject { ["approval_mode"] = "approve" } };
+            if (defect == "approval-policy") list[0]!["approval_policy"] = "on-request";
+            if (defect == "approval-reviewer") list[0]!["approvals_reviewer"] = "auto_review";
             if (defect == "top-level-control") list[0]!["enabled_tools"] = new JsonArray("unapproved");
             if (defect == "transport-control") transport["unapproved"] = true;
             if (defect == "duplicate-env")

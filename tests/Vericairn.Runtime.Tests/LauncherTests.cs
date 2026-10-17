@@ -101,7 +101,7 @@ public class LauncherTests
                 McpEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
             };
             string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
-            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\n");
+            File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\ndefault_tools_approval_mode=\"approve\"\n");
             (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), workspace);
             Assert.Equal(0, code);
             Assert.Contains("project_ambient", baseline, StringComparison.Ordinal);
@@ -141,6 +141,14 @@ public class LauncherTests
             Assert.Equal(workspace, prepared.Workspace);
             string configuration = File.ReadAllText(Path.Combine(prepared.Environment["CODEX_HOME"], "config.toml"));
             Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
+            Assert.Contains("default_tools_approval_mode=\"approve\"", configuration, StringComparison.Ordinal);
+            Assert.DoesNotContain("approval_policy", configuration, StringComparison.Ordinal);
+            (int approvalCode, string approvalList, _) = HarnessProcess.Run([executable, .. CodexLauncher.Overrides(prepared), "mcp", "list", "--json"], prepared.Environment, TimeSpan.FromSeconds(30), prepared.Workspace);
+            Assert.Equal(0, approvalCode);
+            // The installed baseline accepts the setting but does not expose it or the server's tools in this report.
+            Assert.DoesNotContain("default_tools_approval_mode", approvalList, StringComparison.Ordinal);
+            Assert.DoesNotContain("enabled_tools", approvalList, StringComparison.Ordinal);
+            CodexLauncher.VerifyMcp(prepared);
             Assert.DoesNotContain("workspace-alias", configuration, StringComparison.Ordinal);
             Assert.False(File.Exists(serverReport));
         }
