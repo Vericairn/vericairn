@@ -103,7 +103,7 @@ public static partial class CommandAudit
         if (NetworkCommands.Contains(executable)) codes.Add("network");
         if (executable is "printenv" or "cmdkey" or "secret-tool" or "Get-StoredCredential" or "security" or "op" or "pass"
             || executable == "gpg" && values.Any(v => v.StartsWith("--export-secret", StringComparison.Ordinal))
-            || executable == "gh" && values.Length >= 2 && values[0] == "auth" && values[1] == "token") codes.Add("credentials");
+            || executable == "gh" && GitHubTokenOutput(values)) codes.Add("credentials");
 
         if (executable is "cd" or "chdir" or "Set-Location")
         {
@@ -186,6 +186,41 @@ public static partial class CommandAudit
     private static bool PathLike(string value) => value.IndexOfAny(['/', '\\', '.', '~', '$', '`', '%']) >= 0;
     private static bool Shell(string executable) => executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd";
     private static bool Interpreter(string executable) => Shell(executable) || executable is "python" or "python3" or "node" or "ruby" or "perl" or "osascript";
+
+    private static bool GitHubTokenOutput(string[] values)
+    {
+        if (values.Length < 2 || values[0] != "auth") return false;
+        if (values[1] == "token") return true;
+        if (values[1] != "status") return false;
+        bool showToken = false;
+        for (int i = 2; i < values.Length; i++)
+        {
+            string value = values[i];
+            if (value == "--") break;
+            if (value is "--hostname" or "--jq" or "--json" or "--template") { i++; continue; }
+            if (value == "--show-token") { showToken = true; continue; }
+            if (value.StartsWith("--show-token=", StringComparison.Ordinal))
+            {
+                showToken = Enabled(value[13..]);
+                continue;
+            }
+            if (!value.StartsWith('-') || value.StartsWith("--", StringComparison.Ordinal)) continue;
+            for (int flag = 1; flag < value.Length; flag++)
+            {
+                // -a and -t are booleans; -h consumes the rest of this word or the next word.
+                // A hostname containing 't' is not a combined token-display flag.
+                if (value[flag] == 'h') { if (flag == value.Length - 1) i++; break; }
+                if (value[flag] is not ('a' or 't')) break;
+                bool attached = flag + 1 < value.Length && value[flag + 1] == '=';
+                if (value[flag] == 't') showToken = !attached || Enabled(value[(flag + 2)..]);
+                if (attached) break;
+            }
+        }
+        return showToken;
+
+        static bool Enabled(string value) => value == "1" || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("t", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static void AddShellPath(List<InvocationPath> paths, string word, PathAccess access, CommandContext context) =>
         paths.Add(new InvocationPath(ShellPath(word, context), access, context.Working));

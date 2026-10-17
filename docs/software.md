@@ -884,7 +884,10 @@ pending `.tmp` file. Listing the per-clone runtime directory itself also counts,
 no path operand after a known directory change. These are the stores used by `VericairnHome`, `DeviceKeyStores`, `RuntimeConnections`,
 `EstateLocations`, `RuntimeCertificate` and `RuntimeIdentity`; pending pairing codes themselves exist only in daemon
 memory. Recognizable `.p8` and `.p12` operands, the existing credential paths and secret environment variables,
-secret-store commands, and `gh auth token` also produce critical `credentials` signals.
+secret-store commands, `gh auth token`, `gh auth status --show-token`/`-t` (including combined short flags),
+`git credential fill`, and `git credential-<helper> get` also produce critical `credentials` signals, including
+through wrappers and Git directory options. `gh auth status` without token display retains only its network
+warning; `git credential reject` does not produce a credential-output signal.
 
 The audit resolves absolute paths, traversal, `~`, simple `$NAME`, `${NAME}`, `$env:NAME` and `%NAME%` substitutions
 from the captured launch environment, and simple assignments and exports visible within the reported command.

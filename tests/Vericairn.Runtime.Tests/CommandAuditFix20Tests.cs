@@ -84,6 +84,54 @@ public class CommandAuditFix20Tests
     [InlineData("gh auth token")]
     public void GitHubTokenAccessStops(string command) => Assert.Equal("critical", Assert.Single(Inspect(command), s => s.Code == "credentials").Severity);
 
+    public static IEnumerable<object[]> GitHubStatusMatrix()
+    {
+        string[] exposing = ["--show-token", "-t", "-at", "-ta", "-athost.example.invalid", "--hostname host.example.invalid -at",
+            "-h host.example.invalid --show-token", "--json hosts --show-token", "--show-token=true", "-t=true", "-at=1", "--show-token=false -t"];
+        string[] harmless = ["", "--active", "-a", "-h status.example.invalid", "-ahstatus.example.invalid", "--hostname -t",
+            "--template '-t'", "--jq '-t'", "--json hosts", "--show-token=false", "-t=false", "-at=0", "-t --show-token=false", "-- -t"];
+        foreach (string wrapper in Wrappers)
+        {
+            foreach (string flags in exposing) yield return [wrapper + "gh auth status " + flags, true];
+            foreach (string flags in harmless) yield return [wrapper + "gh auth status " + flags, false];
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(GitHubStatusMatrix))]
+    public void GitHubStatusStopsOnlyWhenTokenDisplayIsEnabled(string command, bool exposes)
+    {
+        IReadOnlyList<RunSignal> signals = Inspect(command);
+        Assert.Equal(exposes ? "credentials,network" : "network", string.Join(',', signals.Select(s => s.Code)));
+        if (exposes) Assert.Equal("critical", Assert.Single(signals, s => s.Code == "credentials").Severity);
+    }
+
+    public static IEnumerable<object[]> GitCredentialOutputMatrix()
+    {
+        foreach (string wrapper in Wrappers)
+            foreach (string git in new[] { "git ", "git -C inside ", "git -Cinside ", "git -C .. ", "git -C .. -C workspace " })
+                foreach (string operation in new[] { "credential fill", "credential-osxkeychain get", "credential-manager get", "credential-custom-helper get", "credential reject" })
+                    yield return [wrapper + git + operation, operation != "credential reject", git.Contains("-C ..", StringComparison.Ordinal)];
+    }
+
+    [Theory]
+    [MemberData(nameof(GitCredentialOutputMatrix))]
+    public void GitCredentialOutputStopsThroughWrappersAndDirectoryOptionsButRejectPasses(string command, bool exposes, bool outsideRead)
+    {
+        IReadOnlyList<RunSignal> signals = Inspect(command);
+        string expected = exposes ? "credentials" : "";
+        if (outsideRead) expected += (exposes ? "," : "") + "scope-read";
+        Assert.Equal(expected, string.Join(',', signals.Select(s => s.Code)));
+        if (exposes) Assert.Equal("critical", Assert.Single(signals, s => s.Code == "credentials").Severity);
+        else Assert.DoesNotContain(signals, s => s.Severity == "critical");
+    }
+
+    [Theory]
+    [InlineData("echo 'gh auth status --show-token'")]
+    [InlineData("echo 'git credential fill'")]
+    [InlineData("git commit -m 'git credential-manager get'")]
+    public void CredentialCommandExamplesRemainText(string command) => Assert.Empty(Inspect(command));
+
     [Theory]
     [InlineData("cat $UNKNOWN/keys/device")]
     [InlineData("ls ${UNKNOWN}/connections")]

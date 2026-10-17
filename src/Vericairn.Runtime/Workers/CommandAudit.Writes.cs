@@ -188,6 +188,10 @@ public static partial class CommandAudit
         string[] values = args.Select(Value).ToArray();
         int commandIndex = GitSubcommand(values, 0, values.Length);
         string? command = commandIndex >= 0 ? values[commandIndex] : null;
+        bool credentialHelper = command is not null && command.StartsWith("credential-", StringComparison.Ordinal) && command.Length > 11;
+        bool credentialCommand = command == "credential" || credentialHelper;
+        string? operation = commandIndex >= 0 && commandIndex + 1 < values.Length ? values[commandIndex + 1] : null;
+        if (command == "credential" && operation == "fill" || credentialHelper && operation == "get") codes.Add("credentials");
         if (command is "fetch" or "pull" or "push" or "clone" or "ls-remote") codes.Add("network");
         bool pathsOnly = false;
         var operands = new List<string>();
@@ -201,7 +205,9 @@ public static partial class CommandAudit
                 if (value is "-m" or "--message") { i++; continue; }
                 if (value.StartsWith("--message=", StringComparison.Ordinal)) continue;
             }
-            if (value.Contains("credential", StringComparison.Ordinal)) codes.Add("credentials");
+            // The operation above decides whether a credential subcommand prints secrets. Keep
+            // detecting credential configuration without treating "credential reject" as output.
+            if (i != commandIndex && value.Contains("credential", StringComparison.Ordinal)) codes.Add("credentials");
             if (!pathsOnly)
             {
                 string? target = null;
@@ -211,7 +217,7 @@ public static partial class CommandAudit
                 else if (value.StartsWith("-C", StringComparison.Ordinal) && value.Length > 2) { option = "-C"; target = SuffixWord(args[i], 2); }
                 if (target is not null)
                 {
-                    AddShellPath(paths, target, reads && option != "--output" ? PathAccess.Read : PathAccess.Write, git);
+                    AddShellPath(paths, target, (reads || credentialCommand) && option != "--output" ? PathAccess.Read : PathAccess.Write, git);
                     if (option == "-C") git.Working = ResolveDirectory(target, git, codes);
                     continue;
                 }

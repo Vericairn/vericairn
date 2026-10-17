@@ -142,6 +142,11 @@ public class WorkerScopeTests
     [InlineData("cat $VERICAIRN_HOME/keys/*.p8", "credentials")]
     [InlineData("ls $VERICAIRN_HOME/connections", "credentials")]
     [InlineData("gh auth token", "credentials")]
+    [InlineData("gh auth status --show-token", "credentials")]
+    [InlineData("env nohup gh auth status -at", "credentials")]
+    [InlineData("git -C . credential fill", "credentials")]
+    [InlineData("nice git -C . credential-osxkeychain get", "credentials")]
+    [InlineData("command git credential-manager get", "credentials")]
     [InlineData("env nohup dd of=../outside", "scope")]
     [InlineData("cd .. && nice sed -i 's/a/b/' outside", "scope")]
     [InlineData("python3 -c \"open('../outside', 'w')\"", "scope")]
@@ -166,7 +171,9 @@ public class WorkerScopeTests
     [InlineData("cat NOTES.md > /dev/null 2>/dev/null", null)]
     [InlineData("cat list | xargs rm", "audit-unverified")]
     [InlineData("osascript -e 'do shell script \"touch /etc/x\"'", "audit-unverified")]
-    public void Fix20NullAndOpaqueObservationsDoNotInventAScopeStop(string command, string? warning)
+    [InlineData("gh auth status", "network")]
+    [InlineData("env git -C . credential reject", null)]
+    public void Fix20NoncriticalObservationsDoNotInventAScopeStop(string command, string? warning)
     {
         using var run = new RunEstate(brief: Brief("path:NOTES.md"));
         string report = run.Report("fix20-warning");
