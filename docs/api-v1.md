@@ -1,10 +1,10 @@
 # API version 1
 
-This draft describes the 0.7.0 code: hand-over/resume, watched runs, communication settings, measured context,
+This draft describes the code being prepared for 0.7.1: hand-over/resume, watched runs, communication settings, measured context,
 explicit execution admission and harness requalification, alongside the existing API v1 operations. Features marked
 "from 0.6.0" first appeared in that withdrawn candidate and shipped in 0.6.1 with FIX-08's corrections.
-The release documentation index records that history. NuGet installation becomes available only after 0.7.0's
-publication and successful package publication workflow.
+The release documentation index records that history. The 0.7.0 candidate was withdrawn. NuGet installation
+becomes available only after the operator publishes a release and its package publication workflow succeeds.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -525,7 +525,7 @@ pairing does not qualify a Remote client.
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
 | `POST /v1/work/progress` | Publish the contributor's latest claim on its own attempt (`WorkProgressRequest` / `WorkProgressResponse`); active notes stay local and a completed phase is recorded once. See [agent progress claims](#agent-progress-claims-070-additive). |
-| `POST /v1/work/takeover` | Hand a step an agent holds over to a person, from 0.6.0 (`TakeoverRequest`: the agent's assignment, by, and optionally the person who takes it over, the recording principal when omitted, and a note). Refused, before anything is recorded, unless the assignment is an agent's and still holds its work order, which is neither accepted nor retired, the person is a person, and the recording principal is a person too: the one taking the step over, the sponsor of a goal the step belongs to, or an operator; an agent never records a hand-over, whatever scope it holds, and the records refuse one it writes by any route (`assignment.handover`). The hand-over is a record: a new assignment of the work order to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on. Every run of the agent's assignment still in flight is asked to stop, as `POST /v1/runs/{id}/stop` asks it. Returns a `TakeoverResponse` (message, ok, the assignment written, each stop's `RunStopResponse`, problem) |
+| `POST /v1/work/takeover` | Hand a step an agent holds over to a person, from 0.6.0 (`TakeoverRequest`: the agent's assignment, by, and optionally the person who takes it over, the recording principal when omitted, and a note). Refused, before anything is recorded, unless the assignment is an agent's and still holds its work order, which is neither accepted nor retired, the person is a person, and the recording principal is a person too: the one taking the step over, the sponsor of a goal the step belongs to, or an operator; an agent never records a hand-over, whatever scope it holds, and the records refuse one it writes by any route (`assignment.handover`). The hand-over is a record: a new assignment of the work order to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on. Every run of the agent's assignment still in flight is asked to stop, as `POST /v1/runs/{id}/stop` asks it. A new run on the old assignment is refused before intent, whether named explicitly or supplied by routing; nothing is recorded or charged. Returns a `TakeoverResponse` (message, ok, the assignment written, each stop's `RunStopResponse`, problem) |
 | `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke`, `POST /v1/devices/rename`, `POST /v1/devices/rotate`, `POST /v1/devices/recovery` | Devices and admission; a device is created, renamed and rotated on the machine that holds its key, and the operator's recovery device is made there and its key written once for offline keeping. Admit and revoke accept the recovery key's path and passphrase. From 0.6.0 each `DeviceRow` gives the device's permitted `profiles`; a device on another machine is recorded by pairing. |
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release (applying is refused over the local network) |
 | `GET /v1/documents` | The declared living documents (`DocumentRow`: path, repository, declaration, title, state current, due or unavailable, level, reasons, latest clearance, unavailable contributions, notes) |
@@ -572,6 +572,18 @@ The stock CLI and daemon read that machine's configuration for each run and agen
 invalid configuration refuses before intent; explicit API run choices cannot replace it. Optional allowlists
 narrow choices without widening the qualified inventory. See [explicit execution](#explicit-agent-run-execution-run-01-070)
 for the local configuration boundary and the recorded execution snapshot.
+
+The runtime also rereads the machine-local workspace root set by
+`vericairn worker configure --workspaces <absolute-directory>`. This CLI setting has no HTTP or MCP route
+and applies to every launcher. The default location is unchanged; a configured root places new workspaces
+at `<root>/<estate>/<branch-slug>`. Invalid roots refuse before intent. A root changed after intent refuses
+dispatch and settles as an uncharged known failure. Workspace paths never enter records. See the
+[software guide](software.md#explicit-execution-and-environment-admission-run-01-070) for root validation
+and reuse of an existing branch worktree.
+
+Every run's assignment is checked against its work order's current holder before preparation and again
+before intent. An assignment displaced by hand-over is refused on `POST /v1/runs` as well as routed goal
+steps, without an intent or budget charge. No request or response field changes.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for

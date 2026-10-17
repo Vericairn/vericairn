@@ -69,10 +69,11 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This draft describes 0.7.0, following published 0.6.1. It covers FIX-09, NuGet distribution, hand-over/resume,
-watching, communication, context, deterministic audits and explicit qualified run admission. The worker first
+This draft describes the code being prepared for 0.7.1, following the withdrawn 0.7.0 candidate and published
+0.6.1. It covers FIX-12's workspace placement and hand-over guards alongside FIX-09, NuGet distribution,
+hand-over/resume, watching, communication, context, deterministic audits and explicit qualified run admission. The worker first
 appeared in the withdrawn 0.6.0 candidate and shipped in 0.6.1. NuGet installation becomes available only after
-the operator publishes 0.7.0 and its package publication workflow succeeds. The
+the operator publishes a release and its package publication workflow succeeds. The
 [communication qualification report](communication-qualification.md) separates tested behavior from deferred work.
 
 ## Context packages (0.7.0)
@@ -412,7 +413,8 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 
 `vericairn worker run <assignment> --launcher <id> --agent <principal> --by <principal> --repository <resource> [--goal <id>] [--branch <name>] [--base <ref>] [--wall-minutes <n>] [--setting name=value]... [--detach]`:
 
-1. Refuses, before anything is recorded: an agent that is not the assignment's contributor, or has no admitted device
+1. Refuses, before anything is recorded: an assignment whose work-order step is now held by another assignment,
+   whether the run names it explicitly or routing supplied it; an agent that is not the assignment's contributor, or has no admitted device
    whose key this machine holds (its MCP server would list only the read-only tools); a recording principal that is
    neither the operator, nor holds `local-engineering`, nor is the goal's sponsor when the sponsor is a person; work that belongs to no goal, or to several active goals unless
    `--goal` names one; a goal that is not active, or whose budget does not allow the run (record-format-v2.md, [An agent
@@ -421,8 +423,9 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    (`vericairn sources clone`); the custody precondition, below; and a launcher that cannot run, such as Codex without
    its goals feature.
 2. Prepares the workspace: a git worktree of the repository's registered clone on the work branch (`work/` and the work
-   order's key unless `--branch` names another, made from `--base` or the clone's HEAD), beside the estate's state on this
-   machine and never the clone's own working tree; a later run of the branch takes its worktree up again. The brief, as
+   order's key unless `--branch` names another, made from `--base` or the clone's HEAD). Its location is selected by the
+   machine's workspace configuration below and is never the clone's own working tree. A later run reuses the branch's
+   existing worktree only when it lies under the selected root; otherwise refusal names its location and removal command. The brief, as
    `vericairn work brief` gives it, is exported into the workspace as `.vericairn/brief.md`, in a directory that ignores
    itself so that nothing in it is committed.
 3. Records the intent, the `agent-run` operation with the run's cap from the goal's budget, before anything starts.
@@ -518,7 +521,8 @@ step held, the command says what holds each and records nothing. It activates, f
 **A hand-over.** `vericairn work takeover <assignment> --by <principal> [--contributor <person>] [--note <text>]` hands a
 step an agent holds over to a person: a new assignment of the work order to the person, the hand-over record, carries the
 agent's brief and names the agent's assignment among its sources, and from then on holds the step. Every run of the
-agent's assignment still in flight is asked to stop. A step the agent no longer holds, or whose work order is accepted or
+agent's assignment still in flight is asked to stop. A new run on the old assignment is refused before intent, with
+nothing recorded or charged; the holder is checked before preparation and again before intent. A step the agent no longer holds, or whose work order is accepted or
 retired, is not taken over, and a step goes over to a person only. The hand-over is recorded by a person too: the one
 taking the step over, the sponsor of a goal the step belongs to, or an operator. An agent never records one, whatever
 scope it holds, and the records refuse an assignment that takes a step over from an agent when anyone else wrote it.
@@ -884,13 +888,45 @@ and `worker/claude-code.json` under the user's `VericairnHome`. Reading or writi
 home lies inside a Git repository or an estate, including a repository containing the user's home directory.
 In that case set `VERICAIRN_HOME` to a machine-local directory outside all repositories and estates for both
 the CLI and daemon before starting them. The configuration file, its worker directory and the Vericairn home
-cannot be symbolic links or reparse points; resolved ancestor links cannot hide a repository or estate.
+and their ancestors cannot be symbolic links or reparse points.
 The files hold only `model`, `effort`, optional `allowedModels` and optional
 `allowedEfforts`, all portable identities; never login material, secret values, machine paths or commands.
 The CLI and daemon read the file for each run and recheck it before intent and dispatch, including agent
 goal steps. A daemon restart is unnecessary. `worker configure` is a machine-local CLI operation with no
 HTTP or MCP write route and runs no probes. Hosts may still supply `WorkerOptions.Configurations`, or a
 launcher may supply its own configuration; those existing explicit configurations take precedence.
+
+Workspace placement is a separate setting shared by every launcher on the machine:
+
+```sh
+vericairn worker configure --workspaces <absolute-directory>
+vericairn worker configure
+```
+
+Omit `--launcher` to set or show it; `--json` shows an object whose `root` is the configured path, or `null`
+for the default. The owner-only `worker/workspaces.json` under `VericairnHome` holds only `root`.
+It has the same atomic replacement, repository/estate exclusion and link refusal as launcher configuration;
+unknown fields and duplicate keys refuse. This file is machine-local, so its path value never enters a record.
+The root must be absolute, outside every Git repository (including bare repositories) and estate, and have no
+symbolic links or reparse points in its path. A new root is created owner-only. The root and its ancestors
+cannot hold `.claude`, `.mcp.json`, `.codex` or `.agents`; refusal names the discovered configuration.
+
+New workspaces go at `<root>/<estate>/<branch-slug>`, with branch slashes flattened to hyphens as in the
+existing default. Without a configured root the location stays
+`<VericairnHome>/estates/<estate>/workspaces/<branch-slug>`. The stock CLI and daemon reread the setting for
+every run, including host-configured launchers, and recheck it before intent and immediately before dispatch.
+A change before intent records nothing. A change after intent refuses dispatch and settles as an uncharged
+known failure. No restart is needed. A branch's existing worktree elsewhere under the selected root is reused;
+one outside it is refused with its location and `git worktree remove` guidance. The person preserves any work
+and removes it, or chooses a root containing it; setting a root never moves or deletes an existing worktree.
+
+This lets native runs use a workspace outside a home holding ordinary Claude Code or Codex configuration.
+The native scan is unchanged. Its ancestor-configuration refusal names `worker configure --workspaces` as
+the remedy; independently discovered user skills and managed configuration still face the same checks.
+
+Record credential checks exclude only encoding values validated by the record rules: a device body's
+`publicKey` and an envelope's `signatures[].signature`. The same credential-shaped text in any other field,
+including a nested field with the same name, is still scanned. Invalid encodings receive no exemption.
 
 Local configuration narrows permitted choices and never widens the qualified inventory. The native environment
 policy derives from the inventory only after the shipped baseline or an exact
