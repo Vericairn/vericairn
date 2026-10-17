@@ -246,6 +246,15 @@ cannot say whether an effect happened (`ProviderUncertainException`); the two ar
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
 earlier release reads none.
 
+The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
+and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream
+is limited to 4,194,304 characters; exceeding that limit fails the command instead of using partial output.
+Timeout or cancellation terminates the owned process group on POSIX or Job Object on Windows, including
+descendants retaining output pipes after their parent exits. Cleanup waits at most one additional second;
+if exit cannot yet be confirmed, native ownership is retained for later cleanup. A gh failure before the
+workflow command starts is refused. Once it starts, an interrupted command leaves an uncertain effect;
+a later failure to identify its run also stays uncertain and requires observation and reconciliation.
+
 A product declares how its releases are made on its own record, in an optional `release` object (read from
 release 0.4.2, the first published release to read it; an estate records it only after upgrading): the
 `destination` (the provider id and the settings the product fixes), the `checksums` asset, and the

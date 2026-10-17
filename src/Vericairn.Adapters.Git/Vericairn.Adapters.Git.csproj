@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
     <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
   </ItemGroup>
