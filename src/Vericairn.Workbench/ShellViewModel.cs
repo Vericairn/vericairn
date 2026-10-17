@@ -4,9 +4,11 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Net.Http;
+using System.Reflection;
 using System.Text.Json;
 using Vericairn.Presentation;
 using Vericairn.Protocol;
+using Vericairn.Sdk;
 
 namespace Vericairn.Workbench;
 
@@ -15,7 +17,7 @@ public sealed record Region(string Name, string Question);
 
 /// <summary>
 /// The shell's state: the target context, navigation, documents, the inspector, the activity log, the layout and the views
-/// of home, work and runtime. Everything shown comes from the runtime's responses; the client computes no state of its own.
+/// of home, work and runtime. Estate state comes from the runtime's responses; release notices are labelled machine-local knowledge.
 /// </summary>
 public sealed partial class ShellViewModel : Observable
 {
@@ -23,6 +25,9 @@ public sealed partial class ShellViewModel : Observable
     private readonly Func<string, IEstateConnection> connect;
     private readonly IRuntimeManager runtime;
     private readonly Preferences preferences;
+    private readonly ReleaseUpdates updates;
+    private string updateDisclosure = string.Empty;
+    private string updateNotice = string.Empty;
     private IEstateConnection? connection;
     private EstateView estate = EstateView.From(default(JsonElement), string.Empty);
     private Document? selectedDocument;
@@ -40,10 +45,15 @@ public sealed partial class ShellViewModel : Observable
 
     /// <summary>A shell over a way to connect and a runtime manager.</summary>
     public ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences)
+        : this(connect, runtime, preferences, new ReleaseUpdates()) { }
+
+    internal ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences, ReleaseUpdates updates)
     {
         this.connect = connect;
         this.runtime = runtime;
         this.preferences = preferences;
+        this.updates = updates;
+        updateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
         layout = preferences.LoadLayout();
         Regions = new ObservableCollection<Region>(
         [
@@ -144,6 +154,27 @@ public sealed partial class ShellViewModel : Observable
 
     /// <summary>The status line.</summary>
     public string Status { get => status; internal set => Set(ref status, value); }
+
+    /// <summary>The machine-local release check's disclosure and off switch, visible even without an estate.</summary>
+    public string UpdateDisclosure { get => updateDisclosure; private set => Set(ref updateDisclosure, value); }
+
+    /// <summary>A newer published release and the explicit upgrade routes, outside canonical estate status.</summary>
+    public string UpdateNotice
+    {
+        get => updateNotice;
+        private set { if (Set(ref updateNotice, value)) Raise(nameof(HasUpdateNotice)); }
+    }
+
+    /// <summary>Whether there is a newer-release notice to display.</summary>
+    public bool HasUpdateNotice => updateNotice.Length > 0;
+
+    internal async Task RefreshUpdatesAsync()
+    {
+        UpdateDisclosure = ReleaseUpdates.Disclosure(updates.Enabled);
+        var release = await updates.CheckAsync().ConfigureAwait(true);
+        string installed = typeof(ShellViewModel).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+        UpdateNotice = ReleaseUpdates.Notice(release, installed);
+    }
 
     /// <summary>The path typed on the first screen.</summary>
     public string EstatePath { get => estatePath; set => Set(ref estatePath, value); }

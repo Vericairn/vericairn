@@ -2,15 +2,17 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
 
 /// <summary>The command tree of <c>vericairn</c>; built once per invocation so tests can drive it in-process.</summary>
 internal static partial class CliApp
 {
-    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version.</summary>
-    public static RootCommand Build()
+    /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version, updates.</summary>
+    public static RootCommand Build(ReleaseUpdates? updates = null)
     {
+        updates ??= new ReleaseUpdates();
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
         var estateOption = new Option<string>("--estate", "-e")
         {
@@ -48,13 +50,14 @@ internal static partial class CliApp
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
         root.Subcommands.Add(ContextFamily(estateOption, jsonOption));
+        root.Subcommands.Add(UpdatesFamily(jsonOption));
 
-        var status = new Command("status", "Show the estate's current state derived from its records.");
+        var status = new Command("status", "Show the estate's current state derived from its records. " + UpdateHelp);
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         status.Options.Add(observeStatus);
         status.Options.Add(observer);
-        status.SetAction(parseResult => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult)));
+        status.SetAction(parseResult => Commands.WithUpdates(updates, () => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult))));
         root.Subcommands.Add(status);
 
         var progress = new Command("progress", "Show the estate's recorded progress with latest local agent claims and worker observations labelled separately: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator.");
@@ -87,12 +90,12 @@ internal static partial class CliApp
         decisions.SetAction(parseResult => Commands.Decisions(parseResult.GetValue(estateOption)!, parseResult.GetValue(decisionIdArgument), parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(decisions);
 
-        var doctor = new Command("doctor", "Check this machine's prerequisites.");
-        doctor.SetAction(parseResult => Commands.Doctor(parseResult.GetValue(estateOption)!));
+        var doctor = new Command("doctor", "Check this machine's prerequisites. " + UpdateHelp);
+        doctor.SetAction(parseResult => Commands.WithUpdates(updates, () => Commands.Doctor(parseResult.GetValue(estateOption)!)));
         root.Subcommands.Add(doctor);
 
-        var version = new Command("version", "Print the version.");
-        version.SetAction(_ => Commands.Version());
+        var version = new Command("version", "Print the version. " + UpdateHelp);
+        version.SetAction(_ => Commands.WithUpdates(updates, Commands.Version));
         root.Subcommands.Add(version);
         return root;
     }
@@ -308,7 +311,7 @@ internal static partial class CliApp
             parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(init);
 
-        var check = new Command("check", "Validate records and run repository cleanliness and portability checks.");
+        var check = new Command("check", "Validate records and run repository cleanliness and portability checks. Warn when the manifest pins a release below a newer published release known from this estate's release records or the machine-local cache; use vericairn estate upgrade to review and apply an upgrade. This command makes no release-check request, and a newer-release warning never changes its exit code to an error.");
         check.SetAction(parseResult => Commands.Check(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
         estate.Subcommands.Add(check);
 

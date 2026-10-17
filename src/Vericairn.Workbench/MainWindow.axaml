@@ -71,6 +71,13 @@
 
     <TextBlock DockPanel.Dock="Bottom" Name="StatusBar" Text="{Binding Status}" Padding="12,6" AutomationProperties.Name="Status" />
 
+    <Border DockPanel.Dock="Top" Padding="12,6" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1" AutomationProperties.Name="Machine-local release information">
+      <StackPanel Spacing="4">
+        <SelectableTextBlock Name="UpdateDisclosureText" Text="{Binding UpdateDisclosure}" MinHeight="24" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Release check disclosure and setting" />
+        <SelectableTextBlock Name="UpdateNoticeText" Text="{Binding UpdateNotice}" IsVisible="{Binding HasUpdateNotice}" MinHeight="24" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Newer release and upgrade instructions" />
+      </StackPanel>
+    </Border>
+
     <Grid Name="Body" ColumnDefinitions="240,4,*,4,320" RowDefinitions="*,4,160">
       <Border Name="LeftPanel" Grid.Column="0" Grid.Row="0" Grid.RowSpan="3" IsVisible="{Binding LeftVisible}" AutomationProperties.Name="Navigation">
         <ListBox Name="Navigation" Focusable="True" ItemsSource="{Binding Regions}" SelectedItem="{Binding SelectedRegion}" AutomationProperties.Name="Primary navigation">

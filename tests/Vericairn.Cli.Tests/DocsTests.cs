@@ -98,6 +98,7 @@ public class DocsTests
             Assert.Contains("release providers", commands);
             Assert.Contains("records new", commands);
             Assert.Contains("estate upgrade", commands);
+            Assert.Contains("updates configure", commands);
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Equal(13, manifest.RootElement.GetProperty("documents").GetArrayLength());
@@ -111,6 +112,9 @@ public class DocsTests
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn updates configure`", cli, StringComparison.Ordinal);
+            Assert.Contains("`--enabled <enabled>`", cli, StringComparison.Ordinal);
+            Assert.Contains("Disclosure and upgrade notices go to stderr", cli, StringComparison.Ordinal);
 
             // A command's own --version, the version to release, is documented; built-in options are documented at the root.
             string submit = cli[cli.IndexOf("### `vericairn release submit`", StringComparison.Ordinal)..];

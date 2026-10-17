@@ -15,6 +15,7 @@ using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
+using Vericairn.Records.Updates;
 using Vericairn.Runtime.Objects;
 using Vericairn.Runtime.Portability;
 using Vericairn.Runtime.Providers;
@@ -145,6 +146,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 all.Add(finding);
             }
+
+            ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
 
             return ToFindings(all, $"{model.Records.Count} records");
         }

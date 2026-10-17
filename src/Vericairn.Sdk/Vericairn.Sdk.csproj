@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="vericairn" />
+    <InternalsVisibleTo Include="vericairn-workbench" />
+    <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Workbench.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
   </ItemGroup>

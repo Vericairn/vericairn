@@ -19,6 +19,7 @@ public partial class MainWindow : Window
 {
     private readonly ShellViewModel shell;
     private readonly DispatcherTimer progressTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer updatesTimer = new() { Interval = TimeSpan.FromHours(1) };
 
     /// <summary>The shell over the production connection and runtime manager.</summary>
     public MainWindow() : this(new ShellViewModel(root => new DaemonConnection(root), new CliRuntimeManager(), new Preferences()))
@@ -43,8 +44,14 @@ public partial class MainWindow : Window
         ApplyLayout();
         Closing += OnClosing;
         progressTimer.Tick += (_, _) => shell.RefreshProgress();
-        Opened += (_, _) => progressTimer.Start();
-        Closed += (_, _) => progressTimer.Stop();
+        updatesTimer.Tick += async (_, _) => await shell.RefreshUpdatesAsync().ConfigureAwait(true);
+        Opened += async (_, _) =>
+        {
+            progressTimer.Start();
+            updatesTimer.Start();
+            await shell.RefreshUpdatesAsync().ConfigureAwait(true);
+        };
+        Closed += (_, _) => { progressTimer.Stop(); updatesTimer.Stop(); };
     }
 
     /// <summary>The view model.</summary>

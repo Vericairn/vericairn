@@ -5,6 +5,7 @@ using Avalonia;
 using Avalonia.Headless;
 using Avalonia.Threading;
 using Vericairn.Records.Signing;
+using Vericairn.Records.Updates;
 using Vericairn.Workbench;
 
 [assembly: AssemblyFixture(typeof(Vericairn.Workbench.Tests.HeadlessFixture))]
@@ -32,6 +33,7 @@ public sealed class HeadlessFixture : IDisposable
         {
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-tests-home"));
         }
+        new ReleaseUpdateStore().Configure(false);
     }
 
     /// <summary>The session.</summary>
@@ -56,4 +58,3 @@ public sealed class HeadlessFixture : IDisposable
     {
     }
 }
-
