@@ -271,10 +271,15 @@ The release as intent, then observed effect:
    missing required setting is refused), and writes an `operation` with status `not-started` under the
    identity `<provider>:<destination>:vX` with every setting in its target; then it dispatches and writes
    the revision that says what happened: `dispatched` with the run id, `uncertain` when no run was
-   identified, or `known-failure` when the provider refused before any effect. While an operation under
-   that identity is dispatched or uncertain, a second submit is refused, as it is after observed success (a
-   corrective release is a new version); after a failure or a cancellation, a retry needs `--reconciliation`
-   stating how the earlier outcome was settled. While a living document of the product is due at level
+   identified, or `known-failure` when the provider refused before any effect. The identity is claimed
+   atomically before dispatch, while unrelated runtime operations keep answering. An existing
+   `not-started` intent has an unknown effect: a second submit is refused and `release observe` records
+   its uncertainty before observing the provider. Observe and reconcile it before any retry, including
+   after a restart or a failure to store the dispatch receipt. A dispatched or uncertain operation also
+   refuses another submit, as does observed success (a corrective release is a new version). After a
+   failure or cancellation, a retry needs `--reconciliation` stating how the earlier outcome was settled;
+   that retry is recorded as uncertain before calling the provider. An active dispatch cannot be canceled
+   or reconciled until the call returns. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
    derives `covers` triggers from the registered clone's current `HEAD`, not the release's `ref`. Bring that

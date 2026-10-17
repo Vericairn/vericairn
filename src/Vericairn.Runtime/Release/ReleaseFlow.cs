@@ -175,6 +175,20 @@ public static class ReleaseFlow
         return body;
     }
 
+    // An unresolved retry is durable before the provider is called; no record vocabulary or transition changes are needed.
+    internal static JsonObject RetryIntent(JsonElement previous, string reconciliation)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(reconciliation);
+        JsonObject body = Copy(previous);
+        body["status"] = "uncertain";
+        body["dispatchedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+        body["reconciliation"] = reconciliation;
+        body.Remove("observed");
+        body["target"]!.AsObject().Remove("run");
+        body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Retry intent claimed before calling the provider; its dispatch outcome is not yet known." });
+        return body;
+    }
+
     /// <summary>A cancellation before any effect or after reconciliation showed none.</summary>
     public static JsonObject Canceled(JsonElement previous, string reason)
     {
