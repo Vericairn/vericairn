@@ -127,6 +127,7 @@ internal static class FakeHarness
         }
         if (arguments.Contains("features") && arguments.Contains("list"))
         {
+            File.WriteAllText(report + ".feature-arguments.json", JsonSerializer.Serialize(arguments));
             string? goals = behavior["goals"]?.GetValue<string>();
             if (goals != "missing") Console.WriteLine("goals " + (behavior["featureStage"]?.GetValue<string>() ?? "stable") + " " + (goals == "false" ? "false" : "true"));
             if (goals == "duplicate") Console.WriteLine("goals stable true");
@@ -557,6 +558,13 @@ internal static class FakeHarness
             case "codex-broken" when listing:
                 Console.Error.WriteLine("error: unrecognized subcommand 'features'");
                 return 2;
+            case "workspace-commit":
+                if (!Directory.Exists(".git")) return 2;
+                Directory.CreateDirectory("widget");
+                File.WriteAllText("widget/permitted.txt", "permitted work\n");
+                Git("add", "widget/permitted.txt");
+                Git("commit", "-q", "-m", "Commit inside the workspace");
+                return 0;
             case "scope-edits":
                 Directory.CreateDirectory("src");
                 Directory.CreateDirectory("docs");

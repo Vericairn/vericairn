@@ -36,7 +36,7 @@ internal static class WorkspaceGitScope
         return File.Exists(common) ? Path.GetFullPath(Read(common, 4096).Trim(), directory) : directory;
     }
 
-    internal static void Changes(string? directory, string branch, string? baseline, TimeSpan deadline, HashSet<string> changed)
+    internal static string Changes(string? directory, string branch, string? baseline, TimeSpan deadline, HashSet<string> changed)
     {
         if (string.IsNullOrEmpty(directory) || !WorkspaceScopeAudit.Relative(branch) || !ObjectId(baseline) || deadline <= TimeSpan.Zero)
         {
@@ -76,12 +76,13 @@ internal static class WorkspaceGitScope
 
                 changed.Add(path);
             }
+            return head;
         }
         finally
         {
             if (Directory.Exists(isolated))
             {
-                Directory.Delete(isolated, recursive: true);
+                WorkspaceCleanup.Delete(isolated);
             }
         }
 
@@ -94,6 +95,8 @@ internal static class WorkspaceGitScope
                 StandardOutputEncoding = new UTF8Encoding(false, true),
             };
             info.ArgumentList.Add("--git-dir=" + isolated);
+            info.ArgumentList.Add("-c");
+            info.ArgumentList.Add("core.longpaths=true");
             foreach (string argument in arguments)
             {
                 info.ArgumentList.Add(argument);
@@ -139,7 +142,7 @@ internal static class WorkspaceGitScope
         }
     }
 
-    private static string Head(string directory, string reference)
+    internal static string Head(string directory, string reference)
     {
         string path = Path.Combine(directory, reference.Replace('/', Path.DirectorySeparatorChar));
         string? head = File.Exists(path) ? Read(path, 4096).Trim() : null;
@@ -152,9 +155,9 @@ internal static class WorkspaceGitScope
         return ObjectId(head) ? head! : throw new IOException("The run branch's head is unavailable.");
     }
 
-    private static bool ObjectId(string? value) => value is { Length: 40 or 64 } && value.All(char.IsAsciiHexDigit);
+    internal static bool ObjectId(string? value) => value is { Length: 40 or 64 } && value.All(char.IsAsciiHexDigit);
 
-    private static string Read(string path, int limit)
+    internal static string Read(string path, int limit)
     {
         using SafeFileHandle handle = WorkspaceScopeAudit.OpenRegular(path);
         using var stream = new FileStream(handle, FileAccess.Read);
@@ -164,7 +167,7 @@ internal static class WorkspaceGitScope
         return count <= limit ? new string(buffer, 0, count) : throw new IOException("Git metadata exceeded the scope limit.");
     }
 
-    private static async Task<string> ReadAsync(StreamReader reader)
+    internal static async Task<string> ReadAsync(StreamReader reader)
     {
         var output = new StringBuilder();
         var buffer = new char[8192];

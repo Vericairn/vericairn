@@ -68,7 +68,7 @@ public sealed class RunObservedState
     /// <summary>A failed containment escalation, retained even after a successful retry.</summary>
     public string? EscalationFailure { get; set; }
 
-    /// <summary>Why the settlement could not be recorded, when it could not.</summary>
+    /// <summary>Why settlement or subsequent local branch retention failed, when it did.</summary>
     public string? Problem { get; set; }
 }
 

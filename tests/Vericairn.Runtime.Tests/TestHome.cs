@@ -3,6 +3,7 @@
 
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Workers;
 
 [assembly: AssemblyFixture(typeof(Vericairn.Runtime.Tests.TestHome))]
 
@@ -38,7 +39,7 @@ public sealed class TestHome : IDisposable
 
         try
         {
-            Directory.Delete(created, recursive: true);
+            WorkspaceCleanup.Delete(created);
         }
         catch (IOException)
         {

@@ -308,6 +308,7 @@ public class GoalStepTests
         // A credential-shaped branch name would enter the run's intent: routing's assignment of W-2 and the intent are both kept out.
         GoalStepResponse refused = run.Service.GoalStep(run.Goal, new GoalStepRequest(op, run.Resource, Command(run, "never"), Branch: branch));
         Assert.False(refused.Ok, refused.Message);
+        Assert.True(refused.Problem?.Code == "rejected", refused.Message); // Include the full preparation refusal if the content check was never reached.
         Assert.Contains("Not written: the estate would be invalid with these records (", refused.Message, StringComparison.Ordinal);
         Assert.EndsWith("Nothing was recorded.", refused.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("Routing assigned", refused.Message, StringComparison.Ordinal);

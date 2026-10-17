@@ -492,6 +492,14 @@ public sealed partial class EstateService
             var directory = new RunDirectory(estate, run.Id);
             RunObservedState? observed = directory.Read();
             RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory.ReadStop()) : null);
+            IReadOnlyList<RunSignal>? signals = run.Latest.Body.TryGetProperty("signals", out JsonElement recordedSignals)
+                ? JsonSerializer.Deserialize<RunSignal[]>(recordedSignals, ProtocolJson.Options) : observed?.Signals;
+            if (!run.InFlight && observed is { Settled: not null, Problem: string problem })
+            {
+                // A post-settlement local transfer failure is visible without rewriting the immutable settlement or adding
+                // machine bindings to its records. The provider's refusal is path-free.
+                signals = [.. signals ?? [], new RunSignal("audit-unverified", "warning", observed.ExitedAt ?? run.Latest.At, problem)];
+            }
             rows.Add(new RunRow(
                 run.Id,
                 EstateModel.BodyString(run.Intent, "identity") ?? run.Id,
@@ -510,7 +518,7 @@ public sealed partial class EstateService
                 run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
                 run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
                 run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
-                run.Latest.Body.TryGetProperty("signals", out JsonElement signals) ? JsonSerializer.Deserialize<RunSignal[]>(signals, ProtocolJson.Options) : observed?.Signals,
+                signals,
                 run.Intent.Body.TryGetProperty("execution", out JsonElement execution) ? execution.Clone() : null,
                 run.Latest.Body.TryGetProperty("executionObserved", out JsonElement executionObserved) ? executionObserved.Clone() : null));
         }
@@ -1163,16 +1171,26 @@ public sealed partial class EstateService
                 }
             }
 
-            string? status = null;
-            WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
-            supervisor.Settled(settled.Ok ? status : null, settled.Ok ? null : settled.Problem?.Message);
-            if (!settled.Ok)
-            {
-                return;
-            }
-
             lock (gate)
             {
+                string? status = null;
+                WriteOutcome settled = Revise(run, by, previous => status = Settle(previous, outcome, scope)["status"]?.GetValue<string>());
+                if (!settled.Ok)
+                {
+                    supervisor.Settled(null, settled.Problem?.Message);
+                    return;
+                }
+
+                string? transferProblem;
+                try
+                {
+                    transferProblem = workspaces.RetainForReview(workspace);
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+                {
+                    transferProblem = "The run settled, but its workspace branch could not be retained in the registered clone. Preserve the workspace for review.";
+                }
+                supervisor.Settled(status, transferProblem);
                 EstateModel model = session.Load();
                 if (AgentRuns.GoalAt(model, goalId) is RecordEnvelope goal && Crossed(AgentRuns.Of(model, goal)) is { Count: > 0 } crossed)
                 {

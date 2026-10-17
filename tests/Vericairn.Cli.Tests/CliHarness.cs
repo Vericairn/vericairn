@@ -8,6 +8,7 @@ using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Updates;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Workers;
 using Vericairn.Sdk;
 
 namespace Vericairn.Cli.Tests;
@@ -161,12 +162,7 @@ internal static class CliHarness
         {
             try
             {
-                foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-                {
-                    File.SetAttributes(file, FileAttributes.Normal);
-                }
-
-                Directory.Delete(directory, recursive: true);
+                WorkspaceCleanup.Delete(directory);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {

@@ -9,6 +9,7 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -170,9 +171,7 @@ public sealed class ReleaseDocumentGateTests
         {
             Service.Dispose();
             Estate.Dispose();
-            // Git's object files are read-only on Windows.
-            foreach (string file in Directory.EnumerateFiles(Scratch.Root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
-            Scratch.Dispose();
+            WorkspaceCleanup.Delete(Scratch.Root);
         }
     }
 
