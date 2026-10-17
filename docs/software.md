@@ -190,10 +190,12 @@ refused single record is never published and then deleted as validation rollback
 One `EstateService` instance serializes its operations with its gate, held from judgment through commit.
 That gate does not coordinate separate service instances, even within one process, or separate processes.
 The CLI uses the daemon when it discovers a responding endpoint and otherwise embeds a runtime; discovery
-is not an exclusive writer lease. Use one writer for a storage identity: route clients through one daemon,
-or stop it and run embedded writers sequentially. Do not overlap daemon startup, an embedded writer or
-repository synchronization. Neither the instance gate nor an atomic file rename makes the whole estate
-a multi-process transaction; grouped writes can still stop between records.
+is not an exclusive writer lease. Keep runtime operations for a storage identity on one service while
+writing: route clients through one daemon, or stop it and run embedded commands sequentially. Even a read
+through a separate service can reconcile and remove a batch journal, so it must not overlap a batch write.
+Do not overlap daemon startup, embedded commands or repository synchronization. Neither the instance gate
+nor an atomic file rename makes the whole estate a multi-process transaction; grouped writes can still
+stop between records, and independent repository readers can observe a partly committed batch.
 
 `status`, `check` and `estate reconcile` report an unreadable, malformed or incomplete journal as
 `batch.unreadable`. Its location is a safe local identifier: `batch-journal:<ULID>` for a generated filename,
