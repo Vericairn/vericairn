@@ -22,6 +22,11 @@ public static partial class CommandAudit
     private static readonly HashSet<string> FileCommands = new(StringComparer.OrdinalIgnoreCase)
         { "cat", "head", "tail", "ls", "find", "cp", "mv", "rm", "touch", "mkdir", "rmdir", "tee", "truncate", "chmod", "chown", "Get-Content", "Set-Content", "Add-Content", "Copy-Item", "Move-Item", "Remove-Item", "Get-ChildItem" };
 
+    private static readonly HashSet<string> ReadCommands = new(StringComparer.OrdinalIgnoreCase)
+        { "cat", "head", "tail", "ls", "pwd", "rg", "grep", "find", "wc", "stat", "echo", "printf", "Get-Content", "Get-ChildItem", "Get-Location" };
+
+    private sealed record InvocationPath(string Path, bool ReadOnly);
+
     /// <summary>A stable action fingerprint, independent of event id and JSON property order.</summary>
     public static string Fingerprint(HarnessAction action)
     {
@@ -47,17 +52,17 @@ public static partial class CommandAudit
     /// A failed check adds an audit-unverified warning without discarding the action's completed verdicts.
     /// </summary>
     public static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted) =>
-        Inspect(action, workspace, permitted, command => Regex.IsMatch(command, @"\A(?:cat|head|tail)\s+\.vericairn/brief\.md\s*\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100)));
+        Inspect(action, workspace, permitted, IsReadOnly);
 
-    internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, Func<string, bool> isBriefRead)
+    internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, Func<string, bool> isReadOnly)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(permitted);
-        ArgumentNullException.ThrowIfNull(isBriefRead);
+        ArgumentNullException.ThrowIfNull(isReadOnly);
         var codes = new HashSet<string>(StringComparer.Ordinal);
-        var paths = new List<string>();
-        bool readsBrief = action.Tool == "Read";
-        bool briefReadUnverified = false;
+        var paths = new List<InvocationPath>();
+        bool readOnly = action.Tool is "Read" or "Glob" or "Grep" or "view_image";
+        bool sawCommand = false;
         bool interpretable = false;
         Check(() => interpretable = action.Input.GetRawText().Length <= 65536 && action.Input.ValueKind == JsonValueKind.Object, codes);
         if (!interpretable)
@@ -66,7 +71,7 @@ public static partial class CommandAudit
         }
         else
         {
-            Check(() => GatherPaths(action.Input, paths), codes);
+            Check(() => GatherPaths(action.Input, paths, readOnly), codes);
             if (action.Tool is "WebFetch" or "WebSearch" or "web_search" || action.Tool.Contains("__web", StringComparison.OrdinalIgnoreCase))
             {
                 codes.Add("network");
@@ -87,18 +92,13 @@ public static partial class CommandAudit
             foreach (string field in new[] { "command", "cmd" })
             {
                 string? command = null;
-                if (!Check(() => command = StringField(action.Input, field), codes))
-                {
-                    briefReadUnverified = true;
-                }
-
+                Check(() => command = StringField(action.Input, field), codes);
                 if (command is not null)
                 {
-                    Check(() => InspectCommand(command, paths, codes, 0), codes);
-                    if (!Check(() => readsBrief |= isBriefRead(command), codes))
-                    {
-                        briefReadUnverified = true;
-                    }
+                    bool commandReads = false;
+                    Check(() => commandReads = InspectCommand(command, paths, codes, isReadOnly, 0), codes);
+                    readOnly = (!sawCommand || readOnly) && commandReads && paths.All(p => p.ReadOnly);
+                    sawCommand = true;
                 }
             }
 
@@ -108,7 +108,7 @@ public static partial class CommandAudit
                 {
                     foreach (Match match in PatchPaths().Matches(patch))
                     {
-                        paths.Add(match.Groups[1].Value);
+                        paths.Add(new InvocationPath(match.Groups[1].Value, false));
                     }
                 }
             }, codes);
@@ -131,17 +131,21 @@ public static partial class CommandAudit
                     {
                         Check(() =>
                         {
-                            if (working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
+                            // A classified read needs only the workspace boundary. For other invocations,
+                            // preserve the conservative check of a supplied base that they may change.
+                            if (readOnly ? !PermittedPaths.Contains(working, workspace)
+                                : working != Path.GetFullPath(workspace) && !PermittedPaths.Allows(working, workspace, permitted))
                             {
-                                codes.Add("scope");
+                                codes.Add(readOnly ? "scope-read" : "scope");
                             }
                         }, codes);
                     }
                 }
             }
 
-            foreach (string path in paths)
+            foreach (InvocationPath invocation in paths)
             {
+                string path = invocation.Path;
                 Check(() =>
                 {
                     if (SecretPath().IsMatch(path.Replace('\\', '/')))
@@ -159,12 +163,13 @@ public static partial class CommandAudit
                     }
 
                     string resolved = Path.IsPathFullyQualified(normalized) ? Path.GetFullPath(normalized) : Path.GetFullPath(normalized, working!);
-                    // Reading the exported brief is part of every assignment. An undecidable brief-read check
-                    // cannot establish a scope violation for that path, but does not exempt any other path.
-                    bool brief = resolved == Path.Combine(Path.GetFullPath(workspace), ".vericairn", "brief.md");
-                    if (!(brief && readsBrief) && !PermittedPaths.Allows(resolved, workspace, permitted))
+                    if (invocation.ReadOnly)
                     {
-                        codes.Add(brief && briefReadUnverified ? "audit-unverified" : "scope");
+                        if (!PermittedPaths.Contains(resolved, workspace)) codes.Add("scope-read");
+                    }
+                    else if (!PermittedPaths.Allows(resolved, workspace, permitted))
+                    {
+                        codes.Add("scope");
                     }
                 }, codes);
             }
@@ -173,11 +178,12 @@ public static partial class CommandAudit
         string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
         string? fingerprint = null;
         Check(() => fingerprint = Fingerprint(action), codes);
-        return codes.Order(StringComparer.Ordinal).Select(code => new RunSignal(code, code is "credentials" or "scope" ? "critical" : "warning", at, code switch
+        return codes.Order(StringComparer.Ordinal).Select(code => new RunSignal(code, code is "network" or "credentials" or "scope" ? "critical" : "warning", at, code switch
         {
             "network" => "The worker observed an invocation that attempts network access.",
             "credentials" => "The worker observed an invocation targeting credentials or a secret store.",
-            "scope" => "The worker observed an invocation targeting a path outside the assignment's permitted paths.",
+            "scope" => "The worker observed an invocation that may change a path outside the assignment's permitted paths.",
+            "scope-read" => "The worker observed an invocation that may read outside its workspace.",
             _ => "The worker could not complete one or more invocation checks; completed audit verdicts still apply.",
         }, fingerprint)).ToArray();
     }
@@ -202,7 +208,7 @@ public static partial class CommandAudit
     private static bool CheckFailure(Exception exception) => exception is JsonException or FormatException or InvalidOperationException or KeyNotFoundException or CanonicalJsonException
         or ArgumentException or IOException or UnauthorizedAccessException or NotSupportedException or TimeoutException;
 
-    private static void GatherPaths(JsonElement value, List<string> paths)
+    private static void GatherPaths(JsonElement value, List<InvocationPath> paths, bool readOnly)
     {
         if (value.ValueKind == JsonValueKind.Object)
         {
@@ -212,12 +218,12 @@ public static partial class CommandAudit
                 {
                     if (property.Value.ValueKind == JsonValueKind.String)
                     {
-                        paths.Add(property.Value.GetString()!);
+                        paths.Add(new InvocationPath(property.Value.GetString()!, readOnly));
                     }
                 }
                 else if (property.Name is "changes" or "paths" or "files")
                 {
-                    GatherPaths(property.Value, paths);
+                    GatherPaths(property.Value, paths, readOnly);
                 }
             }
         }
@@ -227,33 +233,37 @@ public static partial class CommandAudit
             {
                 if (item.ValueKind == JsonValueKind.String)
                 {
-                    paths.Add(item.GetString()!);
+                    paths.Add(new InvocationPath(item.GetString()!, readOnly));
                 }
                 else
                 {
-                    GatherPaths(item, paths);
+                    GatherPaths(item, paths, readOnly);
                 }
             }
         }
     }
 
-    private static void InspectCommand(string command, List<string> paths, HashSet<string> codes, int depth)
+    private static bool InspectCommand(string command, List<InvocationPath> paths, HashSet<string> codes, Func<string, bool> isReadOnly, int depth)
     {
         if (depth > 3)
         {
             codes.Add("audit-unverified");
-            return;
+            return false;
         }
 
         string[] words = [];
         if (!Check(() => words = ShellWords().Matches(command).Select(m => m.Value).ToArray(), codes))
         {
-            return;
+            return false;
         }
 
         string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
         bool first = true;
         bool redirect = false;
+        bool inputRedirect = false;
+        bool descriptorRedirect = false;
+        bool reads = false;
+        bool allReadOnly = true;
         string? wrapper = null;
         string executable = "";
         int operand = 0;
@@ -273,18 +283,26 @@ public static partial class CommandAudit
             {
                 first = true;
                 wrapper = null;
+                reads = false;
                 continue;
             }
 
             if (!quoted && (token.Contains('>', StringComparison.Ordinal) || token == "<"))
             {
                 redirect = true;
+                inputRedirect = token == "<";
+                descriptorRedirect = token.Contains('&', StringComparison.Ordinal);
+                allReadOnly &= inputRedirect;
                 continue;
             }
 
             if (redirect)
             {
-                paths.Add(token);
+                if (!descriptorRedirect || !(token == "-" || token.All(char.IsAsciiDigit)))
+                {
+                    paths.Add(new InvocationPath(token, inputRedirect));
+                }
+
                 redirect = false;
                 continue;
             }
@@ -298,7 +316,7 @@ public static partial class CommandAudit
                         string argument = tokens[++i];
                         if (token is "-C" or "--chdir")
                         {
-                            paths.Add(argument);
+                            paths.Add(new InvocationPath(argument, false));
                         }
                     }
 
@@ -324,6 +342,13 @@ public static partial class CommandAudit
                 executable = executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? executable[..^4] : executable;
                 first = false;
                 operand = 0;
+                int end = i + 1;
+                while (end < words.Length && !Separator(words[end])) end++;
+                reads = false;
+                Check(() => reads = isReadOnly(string.Join(" ", words[i..end])), codes);
+                bool shell = executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd"
+                    && i + 2 < end && tokens[i + 1] is "-c" or "-lc" or "-Command" or "/c";
+                allReadOnly &= reads || shell;
                 if (NetworkCommands.Contains(executable))
                 {
                     codes.Add("network");
@@ -345,7 +370,9 @@ public static partial class CommandAudit
             if (executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd" && token is "-c" or "-lc" or "-Command" or "/c" && i + 1 < tokens.Length)
             {
                 string nested = tokens[++i];
-                Check(() => InspectCommand(nested, paths, codes, depth + 1), codes);
+                bool nestedReads = false;
+                Check(() => nestedReads = InspectCommand(nested, paths, codes, isReadOnly, depth + 1), codes);
+                allReadOnly &= nestedReads;
                 continue;
             }
 
@@ -370,7 +397,7 @@ public static partial class CommandAudit
                 {
                     foreach (Match match in CodePaths().Matches(token))
                     {
-                        paths.Add(match.Groups[1].Value);
+                        paths.Add(new InvocationPath(match.Groups[1].Value, false));
                     }
                 }, codes);
 
@@ -380,19 +407,45 @@ public static partial class CommandAudit
                 }
             }
 
+            if (executable is "rg" or "grep" && token is "-g" or "--glob" or "--iglob" or "-e" or "--regexp" or "-t" or "--type" or "-T" or "--type-not" && i + 1 < tokens.Length)
+            {
+                i++;
+                continue;
+            }
+
             if (token.StartsWith('-') || token.Contains("://", StringComparison.Ordinal) || executable is "echo" or "printf")
             {
                 continue;
             }
 
             operand++;
-            bool pattern = executable is "rg" or "grep" or "sed" or "awk" && operand == 1;
-            if (!pattern && (FileCommands.Contains(executable) || token.Contains('/', StringComparison.Ordinal) || token.Contains('\\', StringComparison.Ordinal)
-                || token.StartsWith('.') || token.StartsWith('~')))
+            bool pattern = executable is "rg" or "grep" or "sed" or "awk" && operand == 1
+                && !tokens.Contains("--files", StringComparer.Ordinal)
+                && !tokens.Any(t => t is "-e" or "--regexp" or "-f" or "--file" || t.StartsWith("--regexp=", StringComparison.Ordinal));
+            if (!pattern && ((reads && executable is not ("pwd" or "Get-Location")) || FileCommands.Contains(executable) || token.Contains('/', StringComparison.Ordinal) || token.Contains('\\', StringComparison.Ordinal)
+                || token.Contains('.', StringComparison.Ordinal) || token.StartsWith('~')))
             {
-                paths.Add(token);
+                paths.Add(new InvocationPath(token, reads));
             }
         }
+
+        return allReadOnly;
+    }
+
+    private static bool Separator(string word) => word is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n";
+
+    private static bool IsReadOnly(string command)
+    {
+        string[] words = ShellWords().Matches(command).Select(m => m.Value).ToArray();
+        string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
+        string executable = tokens[0].Replace('\\', '/').Split('/')[^1];
+        if (executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) executable = executable[..^4];
+        if (!ReadCommands.Contains(executable)) return false;
+        // These options execute helpers or write files. Unclassified forms keep the conservative path verdict.
+        if (executable.Equals("find", StringComparison.OrdinalIgnoreCase) && tokens.Any(t => t is "-delete" or "-exec" or "-execdir" or "-ok" or "-okdir" or "-fprint" or "-fprint0" or "-fprintf" or "-fls")) return false;
+        if (executable.Equals("rg", StringComparison.OrdinalIgnoreCase) && tokens.Any(t => t is "--pre" or "--hostname-bin" or "-z" or "--search-zip"
+            || t.StartsWith("--pre=", StringComparison.Ordinal) || t.StartsWith("--hostname-bin=", StringComparison.Ordinal))) return false;
+        return !words.Any(w => !w.StartsWith('\'') && (w.Contains("$(", StringComparison.Ordinal) || w.Contains('`', StringComparison.Ordinal)));
     }
 
     [GeneratedRegex("\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>]+|[;&|<>]+|\\r?\\n", RegexOptions.CultureInvariant, 100)]
@@ -410,6 +463,6 @@ public static partial class CommandAudit
     [GeneratedRegex("(?:open|readFileSync|writeFileSync)\\s*\\(\\s*['\"]([^'\"]+)['\"]", RegexOptions.CultureInvariant, 100)]
     private static partial Regex CodePaths();
 
-    [GeneratedRegex(@"^\*\*\* (?:Add|Update|Delete|Move to) File: (.+)$", RegexOptions.Multiline | RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): ([^\r\n]+)\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant, 100)]
     private static partial Regex PatchPaths();
 }

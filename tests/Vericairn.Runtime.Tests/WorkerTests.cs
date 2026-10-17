@@ -336,7 +336,7 @@ public class WorkerTests
     [Fact]
     public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"the widget\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"path:widget/\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
         RunResponse started = run.Start("generic", "scope-edits", run.Report("scope"));
         Assert.True(started.Ok, started.Message);
         RunRow row = run.Settled(started.Run);

@@ -23,7 +23,7 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 internal sealed class RunEstate : IDisposable
 {
-    public const string Brief = """{"outcome":"A widget.","sources":[],"permittedChanges":["the widget"],"prohibitedEffects":["no publication"],"workspace":["widget repository, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""";
+    public const string Brief = """{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":["no publication"],"workspace":["widget repository, a work branch"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["the tests pass"],"recovery":"Record a result."}""";
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 

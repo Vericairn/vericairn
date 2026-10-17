@@ -11,6 +11,117 @@ namespace Vericairn.Runtime.Tests;
 public class CommandAuditTests
 {
     [Theory]
+    [InlineData("cat README.md")]
+    [InlineData("head docs/design.md")]
+    [InlineData("rg --files --hidden -g AGENTS.md .")]
+    [InlineData("pwd\nrg --files --hidden -g AGENTS.md .")]
+    [InlineData("find . -name AGENTS.md")]
+    [InlineData("Get-Content README.md")]
+    [InlineData("cat README.md > NOTES.md")]
+    [InlineData("cat < README.md")]
+    [InlineData("cat README.md 2>&1")]
+    [InlineData("cat README.md; touch NOTES.md")]
+    public void ReadsInsideTheWorkspaceDoNotUseChangePermissions(string command) =>
+        Assert.Empty(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
+
+    [Theory]
+    [InlineData("cat ../README.md")]
+    [InlineData("rg --files --hidden -g AGENTS.md ..")]
+    [InlineData("pwd\nrg --files --hidden -g AGENTS.md ..")]
+    [InlineData("bash -lc 'cat ../README.md'")]
+    public void ReadsOutsideTheWorkspaceWarnWithoutStopping(string command)
+    {
+        RunSignal signal = Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
+        Assert.Equal("scope-read", signal.Code);
+        Assert.Equal("warning", signal.Severity);
+        Assert.Contains("read outside its workspace", signal.Summary, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("touch README.md")]
+    [InlineData("cat README.md > elsewhere.md")]
+    [InlineData("cat README.md >> ../NOTES.md")]
+    [InlineData("cat README.md; touch ../NOTES.md")]
+    [InlineData("cat README.md | tee elsewhere.md")]
+    [InlineData("find . -delete")]
+    [InlineData("unclassified ../README.md")]
+    [InlineData("rg --pre=helper README.md ../source")]
+    [InlineData("RG --pre=helper README.md ../source")]
+    public void ChangesAndUnclassifiedInvocationsKeepCriticalScopeChecks(string command) =>
+        Assert.Equal("critical", Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]), s => s.Code == "scope").Severity);
+
+    [Fact]
+    public void TheLiveRunParentSearchIsAReadEvenWithAnAbsolutePath()
+    {
+        string parent = Path.GetDirectoryName(Workspace())!;
+        string command = $"pwd\nrg --files --hidden -g AGENTS.md '{parent}'";
+        string line = JsonSerializer.Serialize(new { type = "item.started", item = new { type = "command_execution", id = "live-search", command } });
+        HarnessAction action = Assert.Single(new CodexLauncher().ReadActions(line));
+        RunSignal signal = Assert.Single(CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]));
+        Assert.Equal("scope-read", signal.Code);
+        Assert.Equal("warning", signal.Severity);
+        Assert.DoesNotContain(parent, signal.Summary, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("*** Update File: README.md")]
+    [InlineData("*** Add File: ../NOTES.md")]
+    [InlineData("*** Move to: elsewhere.md")]
+    public void PatchPathsKeepCriticalChangeChecks(string header)
+    {
+        HarnessAction action = Action("apply_patch", new { patch = "*** Begin Patch\n" + header + "\n*** End Patch" });
+        Assert.Equal("critical", Assert.Single(CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]), s => s.Code == "scope").Severity);
+    }
+
+    [Theory]
+    [InlineData("Read", "../README.md", "scope-read", "warning")]
+    [InlineData("Write", "README.md", "scope", "critical")]
+    [InlineData("unknown-tool", "README.md", "scope", "critical")]
+    [InlineData("Read", ".aws/credentials", "credentials", "critical")]
+    public void StructuredAccessKeepsItsClassification(string tool, string path, string code, string severity) =>
+        Assert.Equal(severity, Assert.Single(CommandAudit.Inspect(Action(tool, new { path }), Workspace(), ["path:NOTES.md"]), s => s.Code == code).Severity);
+
+    [Fact]
+    public void AnOpaqueInlineScriptKeepsBothItsUnverifiedAndOutsidePathVerdicts()
+    {
+        HarnessAction action = Action("exec_command", new { command = "python3 -c \"open('../outside.txt', 'w').write('x')\"" });
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]);
+        Assert.Equal("warning", Assert.Single(signals, s => s.Code == "audit-unverified").Severity);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AReadFromAnExplicitWorkingDirectoryUsesTheWorkspaceBoundary(bool outside)
+    {
+        string cwd = outside ? Path.GetDirectoryName(Workspace())! : Path.Combine(Workspace(), "docs");
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("exec_command", new { cwd, command = "cat README.md" }), Workspace(), ["path:NOTES.md"]);
+        if (outside) Assert.Equal("scope-read", Assert.Single(signals).Code);
+        else Assert.Empty(signals);
+    }
+
+    [Fact]
+    public void AnUnclassifiedCommandKeepsTheConservativeWorkingDirectoryCheck()
+    {
+        HarnessAction action = Action("exec_command", new { cwd = Path.Combine(Workspace(), "docs"), command = "unclassified" });
+        Assert.Equal("critical", Assert.Single(CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"])).Severity);
+    }
+
+    [Theory]
+    [InlineData("NOTES.md", "NOTES.md")]
+    [InlineData("path:NOTES.md", "NOTES.md")]
+    [InlineData("path: docs/meeting notes.md", "docs/meeting notes.md")]
+    [InlineData("src/**/*.cs", "src/**/*.cs")]
+    [InlineData("NOTES.md at the repository's root", null)]
+    [InlineData("path:../NOTES.md", null)]
+    [InlineData("path:/NOTES.md", null)]
+    [InlineData("path:$TARGET", null)]
+    [InlineData("path:", null)]
+    public void BriefPatternsSeparateProseFromExplicitPaths(string entry, string? expected) =>
+        Assert.Equal(expected, PermittedPaths.Pattern(entry));
+
+    [Theory]
     [InlineData("curl https://example.invalid", "network")]
     [InlineData("git push origin work", "network")]
     [InlineData("echo ready\ncurl https://example.invalid", "network")]
@@ -23,17 +134,17 @@ public class CommandAuditTests
     [InlineData("printenv", "credentials")]
     [InlineData("printf '%s' \"$AWS_SECRET_ACCESS_KEY\"", "credentials")]
     [InlineData("cat .env", "credentials")]
-    [InlineData("cat ../outside.txt", "scope")]
+    [InlineData("cat ../outside.txt", "scope-read")]
     [InlineData("cp src/a.cs docs/outside.cs", "scope")]
     [InlineData("echo value > outside.txt", "scope")]
-    [InlineData("cat src/../../outside.txt", "scope")]
+    [InlineData("cat src/../../outside.txt", "scope-read")]
     public void RecognizableAttemptsAreFlaggedWithoutRetainingArguments(string command, string code)
     {
         HarnessAction action = Action("Bash", new { command });
         RunSignal signal = Assert.Single(CommandAudit.Inspect(action, Workspace(), ["src/"]), s => s.Code == code);
         Assert.DoesNotContain(command, signal.Summary, StringComparison.Ordinal);
         Assert.StartsWith("sha256:", signal.Fingerprint, StringComparison.Ordinal);
-        Assert.Equal(code == "network" ? "warning" : "critical", signal.Severity);
+        Assert.Equal(code == "scope-read" ? "warning" : "critical", signal.Severity);
     }
 
     [Theory]
@@ -51,7 +162,8 @@ public class CommandAuditTests
     [Fact]
     public void StructuredToolsAreAuditedAndFingerprintsIgnoreInputPropertyOrder()
     {
-        Assert.Contains(CommandAudit.Inspect(Action("Read", new { file_path = "docs/outside.md" }), Workspace(), ["src/"]), s => s.Code == "scope");
+        Assert.Empty(CommandAudit.Inspect(Action("Read", new { file_path = "docs/outside.md" }), Workspace(), ["src/"]));
+        Assert.Equal("warning", Assert.Single(CommandAudit.Inspect(Action("Read", new { file_path = "../outside.md" }), Workspace(), ["src/"])).Severity);
         Assert.Empty(CommandAudit.Inspect(Action("Edit", new { file_path = "src/a.cs", new_string = "curl https://example.invalid" }), Workspace(), ["src/"]));
         Assert.Empty(CommandAudit.Inspect(Action("Read", new { file_path = ".vericairn/brief.md" }), Workspace(), ["src/"]));
         Assert.Empty(CommandAudit.Inspect(Action("command_execution", new { cwd = Workspace(), command = "cat src/a.cs" }), Workspace(), ["src/"]));
@@ -92,7 +204,7 @@ public class CommandAuditTests
         };
         IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", input), Workspace(), ["src/"]);
         Assert.Equal(["audit-unverified", "network"], signals.Select(s => s.Code));
-        Assert.Equal("warning", Assert.Single(signals, s => s.Code == "network").Severity);
+        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "network").Severity);
         AssertUndecidableCheckWarning(signals);
     }
 
@@ -107,7 +219,7 @@ public class CommandAuditTests
             Array.Reverse(paths);
         }
 
-        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", new { paths }), Workspace(), ["src/"]);
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Edit", new { paths }), Workspace(), ["src/"]);
         Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
         AssertUndecidableCheckWarning(signals);
     }
@@ -116,7 +228,7 @@ public class CommandAuditTests
     public void AnAbsolutePathCanStillBeCheckedWhenTheWorkingDirectoryIsUnknown()
     {
         string file = Path.Combine(Workspace(), "outside.txt");
-        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Read", new { cwd = "invalid\0directory", file_path = file }), Workspace(), ["src/"]);
+        IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Edit", new { cwd = "invalid\0directory", file_path = file }), Workspace(), ["src/"]);
         Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
         AssertUndecidableCheckWarning(signals);
     }
@@ -125,8 +237,9 @@ public class CommandAuditTests
     [InlineData("printenv", "credentials")]
     [InlineData("curl https://example.invalid", "network")]
     [InlineData("cat outside.txt", "scope")]
-    [InlineData("cat .vericairn/brief.md", null)]
-    public void ABriefReadTimeoutPreservesOtherVerdictsWithoutInventingAScopeViolation(string command, string? code)
+    [InlineData("cat .vericairn/brief.md", "scope")]
+    [InlineData("cat src/a.cs", null)]
+    public void AReadClassificationTimeoutPreservesIndependentAndConservativeVerdicts(string command, string? code)
     {
         IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(Action("Bash", new { command }), Workspace(), ["src/"],
             _ => throw new System.Text.RegularExpressions.RegexMatchTimeoutException());
@@ -137,7 +250,7 @@ public class CommandAuditTests
         }
         else
         {
-            Assert.Equal(code == "network" ? "warning" : "critical", Assert.Single(signals, s => s.Code == code).Severity);
+            Assert.Equal(code == "scope-read" ? "warning" : "critical", Assert.Single(signals, s => s.Code == code).Severity);
         }
     }
 

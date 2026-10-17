@@ -618,9 +618,12 @@ object/reference directory is pinned before launch; isolated Git metadata exclud
 replacement refs, grafts, attributes and external diff drivers. Missing history or an unreadable branch makes the
 audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
-repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
-`path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
-and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
+repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments).
+Bare patterns contain no whitespace; use `path:` for an explicit pattern, including a path containing spaces.
+For example, `path:NOTES.md` permits that file at the repository root; "NOTES.md at the repository's root"
+is prose and grants no path permission. Worker admission refuses a brief with no interpretable pattern before
+recording intent or launching a harness. Prose may accompany at least one pattern. Absolute paths, parent traversal
+and shell expansions grant nothing, and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
@@ -739,7 +742,7 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
 
 `work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.
 
-Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded.
+Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `scope-read`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded. `scope-read` warns about a read outside the workspace and does not stop the run; `scope` remains critical for invocations that may change paths outside the brief. Network and credential detections are critical for reads and writes alike.
 
 A watched run's immutable `target.watch` is a JSON-encoded string of its resolved thresholds, and `target.watchHistoryTokensPerMinute` pins the recent historical median or `unavailable`. History uses only fully reported successful runs of that goal and launcher; no current run reports its own baseline.
 

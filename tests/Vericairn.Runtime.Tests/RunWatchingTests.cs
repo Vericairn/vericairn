@@ -68,6 +68,7 @@ public class RunWatchingTests
         WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 } signals && signals[0].Attention is not null);
         RunRow live = run.Row(started.Run);
         RunSignal signal = Assert.Single(live.Signals!);
+        Assert.Equal("scope-read", signal.Code);
         Assert.Equal("warning", signal.Severity);
         Assert.Null(live.Stop);
         Assert.Equal("dispatched", live.Status);
@@ -85,16 +86,16 @@ public class RunWatchingTests
     [InlineData("watch-claude-unverified-filesystem")]
     public void InvalidInvocationPathsProduceAnUnverifiedWarningWithoutStopping(string scenario)
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "**", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "**", StringComparison.Ordinal));
         AssertUnverifiedRunContinues(run, scenario);
     }
 
     [Theory]
     [InlineData("watch-claude-mixed-credentials", "credentials", true)]
-    [InlineData("watch-claude-mixed-network", "network", false)]
+    [InlineData("watch-claude-mixed-network", "network", true)]
     public void UndecidableItemsDoNotEraseCompletedActionVerdicts(string scenario, string code, bool critical)
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "src/", StringComparison.Ordinal));
         RunResponse started = run.Start("claude-code", scenario, run.Report("mixed-audit"));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);
@@ -252,7 +253,7 @@ public class RunWatchingTests
     [InlineData("codex", "watch-codex-audit")]
     public void TheWorkerRecordsEventStreamObservationsInsteadOfTheAgentsClaims(string launcher, string scenario)
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "src/", StringComparison.Ordinal));
         RunResponse started = run.Start(launcher, scenario, run.Report("audit"));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);

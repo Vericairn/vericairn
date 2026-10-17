@@ -813,6 +813,13 @@ when the agent recorded no new attempt on its exact assignment during the run. I
 operation evidence and shown by CLI settlement and status attention, without changing `observed-success`
 or CLI exit-code semantics.
 
+FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
+attention without requesting a stop. Reads inside the workspace do not require change permission.
+Invocations that may change paths outside the brief retain critical `scope` signals, and network and
+credential detections are critical for reads and writes. Run admission refuses a brief with no
+interpretable repository-relative `permittedChanges` pattern, explaining forms such as `path:NOTES.md`;
+prose can remain beside a pattern. No request or response fields change.
+
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
 
 `GET /v1/progress` also adds `json.runSignals`: entries with `run`, `status` and `signals`. Its text labels these worker observations separately from `agentClaims`. Each signal's `attention` names an ask about the original run intent. A missing id means attention recording is pending, not that the signal is absent. Critical signals use the existing run stop representation; the reservation is held until observed containment and settlement.

@@ -734,6 +734,11 @@ public sealed partial class EstateService
             return (null, assignmentRefusal, null);
         }
 
+        if (!Strings(assignment.Body.GetProperty("brief"), "permittedChanges").Any(entry => PermittedPaths.Pattern(entry) is not null))
+        {
+            return (null, "The assignment brief's permittedChanges contain no interpretable repository-relative path pattern. Use a pattern such as path:NOTES.md or path:src/**; prose may accompany at least one pattern.", null);
+        }
+
         string? contributor = EstateModel.BodyString(assignment, "contributor");
         if (request.Agent != contributor)
         {

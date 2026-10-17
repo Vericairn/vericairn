@@ -426,8 +426,12 @@ internal static class FakeHarness
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat .aws/credentials"}}""");
                 return Linger(acknowledge: false);
             case "watch-codex-warning-hold":
-                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"curl https://example.invalid"}}""");
+                Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"cat ../README.md"}}""");
                 return Linger(acknowledge: true);
+            case "watch-codex-parent-search":
+                string parent = Path.GetDirectoryName(Environment.CurrentDirectory)!;
+                Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = $"pwd\nrg --files --hidden -g AGENTS.md '{parent}'" } }));
+                return 0;
             case "watch-claude-mixed-credentials" or "watch-claude-mixed-network":
                 object mixed = scenario == "watch-claude-mixed-credentials"
                     ? new { paths = new[] { "~/.ssh/id_rsa", "src/invalid\0.cs" } }

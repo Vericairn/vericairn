@@ -227,8 +227,7 @@ internal static class WorkspaceScopeAudit
         string[] changes = before.Files.Keys.Union(after.Files.Keys, StringComparer.Ordinal)
             .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path))
             .Union(after.CommittedPaths ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-        string[] patterns = permitted.Select(p => p.StartsWith("path:", StringComparison.Ordinal) ? p[5..].Trim() : p.Trim())
-            .Where(Relative).ToArray();
+        string[] patterns = permitted.Select(PermittedPaths.Pattern).OfType<string>().ToArray();
         var outside = new List<string>();
         string? problem = before.Problem ?? after.Problem;
         if (before.Identity != after.Identity)

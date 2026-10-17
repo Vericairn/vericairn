@@ -12,6 +12,24 @@ public class WorkspaceScopeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void SettlementUsesTheSameInterpretablePatternsAsAdmission(bool explicitPattern)
+    {
+        const string prose = "NOTES.md at the repository root";
+        var before = new WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal));
+        var after = new WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["NOTES.md"] = "changed", [prose] = "changed",
+        });
+        Protocol.RunScope scope = WorkspaceScopeAudit.Compare(before, after, explicitPattern ? [prose, "path:NOTES.md"] : [prose]);
+        Assert.Equal(2, scope.Changed);
+        Assert.Equal(explicitPattern ? 1 : 2, scope.OutsideCount);
+        Assert.Contains(prose, scope.Outside);
+        Assert.Equal(!explicitPattern, scope.Problem is not null);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void CommittedChangesRemainVisibleAfterRestorationInTheWorktreeOrALaterCommit(bool commitRestoration)
     {
         using var run = new RunEstate();

@@ -14,7 +14,7 @@ public class RunExecutionWatchTests
     [InlineData("execution-mixed-unfingerprintable", true)]
     public void AnUndecidableCheckKeepsCredentialVerdictsAndTheAdmittedToolInventory(string scenario, bool unadmitted)
     {
-        using var run = new RunEstate(brief: RunEstate.Brief.Replace("the widget", "src/", StringComparison.Ordinal));
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "src/", StringComparison.Ordinal));
         RunResponse started = run.Start("claude-code", scenario, run.Report("mixed"));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);

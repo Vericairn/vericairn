@@ -738,9 +738,12 @@ before launch and reads objects through isolated Git metadata, without loading a
 replacement refs, grafts, attributes or external diff drivers. Missing history or an unreadable branch marks the
 audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
-repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments); an optional
-`path:` prefix is accepted. Prose grants no implicit wildcard, absolute and parent-traversing patterns grant nothing,
-and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
+repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments).
+Bare patterns contain no whitespace; use `path:` for an explicit pattern, including a path containing spaces.
+For example, `path:NOTES.md` permits that file at the repository root; "NOTES.md at the repository's root"
+is prose and grants no path permission. Worker admission refuses a brief with no interpretable pattern before
+recording intent or launching a harness. Prose may accompany at least one pattern. Absolute paths, parent traversal
+and shell expansions grant nothing, and directory matching respects path boundaries. The settling operation and run-list response expose `scope`:
 `changed`, `outsideCount`, `outside` (up to 1000 relative names; unsafe names are hashed), and optional `problem` when
 the audit is unavailable or incomplete, including submodules needing a separate audit. An outside change or incomplete
 audit adds scope attention to the observed summary; it never accepts the work or silently treats an unavailable audit
@@ -780,7 +783,20 @@ resume reports a newly completed phase as an added record.
 
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
 
-Recognizable network commands, structured network URLs and web tools, credential paths, common secret environment variables and secret-store commands, and invocation paths outside the assignment's permitted paths produce worker signals. Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names are not treated as executable operations. Path checks share the settlement audit's literal-directory and glob rules, normalize traversal and refuse workspace links. Reading the exported brief remains possible. Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
+Recognizable network commands, structured network URLs and web tools, credential paths, common secret environment
+variables and secret-store commands produce critical worker signals for reads and writes alike. Classified read-only
+invocations inside the workspace raise no scope signal, even for a file outside the brief's permitted changes, such
+as reading `README.md` when only `path:NOTES.md` is permitted. Reads outside the workspace raise `scope-read` at warning
+and continue; `pwd` followed by `rg --files --hidden -g AGENTS.md` on the workspace's parent is such a read.
+Known mutating commands, `apply_patch` paths and output redirection retain critical `scope` checks against the brief's
+permitted patterns. Input redirection is a read. Commands the audit cannot classify retain conservative path checks
+and incomplete-audit warnings; an outside path they may change still raises critical `scope`.
+
+Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names
+are not treated as executable operations. Path checks share the settlement audit's pattern parser, normalize
+traversal and do not assume links remain inside the workspace. Read classification covers common file readers,
+searches and structured read tools; mutating or helper-executing options, such as `find -delete` and `rg --pre`, are
+not classified as reads. Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.
 
@@ -794,7 +810,7 @@ History is the last 20 successful, fully reported runs of the same launcher and 
 
 ## Attention and containment (0.7.0)
 
-Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Network attempts, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Credential-store access, live path violations, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
+Every new signal kind and severity gets one ask about the run's exact intent, addressed to the goal's decider, and its id is retained with the run. Outside-workspace reads, incomplete audits, early loop/rate thresholds and the final scope audit are warnings. Network attempts, credential-store access, invocations that may change paths outside the brief, the loop stop threshold and critical burn rates request a worker stop immediately. They use the existing stop-file, signal, grace, escalation and whole-boundary containment path. Reservations remain until observed settlement. The final scope audit runs after containment and can only raise attention about changes already made.
 
 Attention writes are retried while observing and at settlement. A failed attention write never prevents a critical stop. If recording stays unavailable, the run retains the observation with no ask id and surfaces show `attention recording pending`; that gap requires reconciliation, not an assumption that an ask exists. The existing silence attention and twice-limit stop retain their own liveness record. Progress claims never reset silence or other worker counters.
 
@@ -1187,12 +1203,18 @@ bindings cannot silently change while the portable inventory remains the same. A
 dispatch and records an unstarted, zero-charge failure.
 
 This is a qualification of the launcher inventory protocol using stand-in executables, not a live-agent or sign-in
-qualification. Real model calls, provider/account-dependent behavior and remote managed policy have not been qualified.
+qualification. The live observations below cover only the reported runs; other provider/account-dependent behavior
+and remote managed policy have not been qualified.
 FIX-18 covers `max` argument construction, configuration, admission and observed harness refusal with stand-ins.
 The builder's first live run of `6bab07f` with Codex 0.159.0-alpha.12.1 reported `gpt-6-astra` at `max`
 in its session, with 1 wall minute and 34,573 tokens recorded. It exited cleanly but every tool call failed
-because the code-mode host was disabled; the agent recorded no attempt or result. The host correction
-requires a live rerun to qualify tool use, access to the brief and MCP attempt/result authoring.
+because the code-mode host was disabled; the agent recorded no attempt or result.
+The builder's second live run of `80423b5`, using the same Codex version at `max`, executed its first shell command,
+reported the admitted model and effort from its rollout with no discrepancy, and raised the missing-attempt signal
+and ask at settlement. The command searched the workspace's parent for `AGENTS.md`; the old audit stopped this read
+as a critical scope violation. FIX-18 now separates reads from changes and refuses briefs with no interpretable
+permitted path pattern. A third live run is still needed to qualify work beyond that search, access to the brief,
+and MCP attempt/result authoring. Neither observed-success nor these partial live observations accept the work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
