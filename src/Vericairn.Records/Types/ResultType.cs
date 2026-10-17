@@ -122,16 +122,19 @@ public sealed class ResultType : IRecordType
     }
 
     /// <summary>
-    /// The latest current acceptance recorded after the result, by time and then by id, that accepts the result itself or its work
-    /// order (any revision of the order its attempt and assignment lead to); null when there is none.
+    /// An exact hash pin establishes that the acceptance saw the result, regardless of clocks or identifier order. An acceptance
+    /// of its work order instead uses recorded time with the identifier as a deterministic tie-break. The latest qualifying
+    /// current acceptance is selected by that same deterministic ordering; null when there is none.
     /// </summary>
     private static RecordEnvelope? AcceptanceAfter(EstateModel model, RecordEnvelope result)
     {
         RecordEnvelope? order = WorkView.OrderOfResult(model, result);
         IReadOnlyList<string> orders = order is null ? [] : model.Chain(model.Latest(order));
         return model.Current("acceptance")
-            .Where(a => a.Subject is { } subject && ((subject.Id == result.Id && subject.Hash == result.ComputedHash) || (subject.Type == "work-order" && orders.Contains(subject.Id, StringComparer.Ordinal))))
-            .Where(a => string.CompareOrdinal(a.At, result.At) > 0 || (a.At == result.At && string.CompareOrdinal(a.Id, result.Id) > 0))
+            .Where(a => a.Subject is { } subject &&
+                ((subject.Id == result.Id && subject.Hash == result.ComputedHash) ||
+                 (subject.Type == "work-order" && orders.Contains(subject.Id, StringComparer.Ordinal) &&
+                  (string.CompareOrdinal(a.At, result.At) > 0 || (a.At == result.At && string.CompareOrdinal(a.Id, result.Id) > 0)))))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
     }

@@ -51,8 +51,8 @@ public static class RecordAuthor
             throw new ArgumentException($"This build writes record formats {RecordFormats.First} to {RecordFormats.Current}, not {format}.", nameof(draft));
         }
 
-        // Times are whole seconds; the identifier keeps the moment's milliseconds, so records made within one second sort, by
-        // identifier, in the order they were made.
+        // Times are whole seconds. Generated identifiers increase in this process's generation order, even in one millisecond or
+        // during clock rollback. Across processes they are only deterministic tie-breaks, never evidence of causal order.
         DateTimeOffset moment = draft.At ?? DateTimeOffset.UtcNow;
         string at = RecordParser.FormatTimestamp(moment);
         string id = draft.Id ?? Ulid.NewUlid(moment).Value;

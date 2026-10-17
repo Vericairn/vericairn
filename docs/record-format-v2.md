@@ -76,9 +76,12 @@ recorded step.
   authority validation; supersession does not repair an invalid pinned hash. FIX-05's replacement acceptance of
   its current work-order revision therefore answers the superseded acceptance of the earlier revision.
 - A new estate starts at the newest format its build writes.
-- A record's `at` is in whole seconds, and its identifier keeps the milliseconds of the moment it was made. Records of
-  one second are ordered by identifier, so a build that writes them sorts them in the order they were made; records a
-  build of 0.4.2 or earlier wrote within one second sort in no particular order among themselves.
+- A record's `at` is in whole seconds. From 0.7.2, generated identifiers increase in one process's generation order,
+  across threads and within a millisecond. A repeated or backwards clock retains the last millisecond and increments
+  the suffix. This does not establish causal order across processes or machines. An exact result acceptance's hash pin
+  establishes that it saw the result; judgments without such a reference use recorded time, with the identifier only
+  a deterministic tie-break. Earlier builds did not guarantee identifier order within a millisecond (0.4.2 and earlier,
+  within a second). Explicitly supplied identifiers carry no generation-order guarantee.
 
 ## Moving an estate to format 2
 

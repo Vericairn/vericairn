@@ -2,13 +2,13 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Numerics;
-using System.Security.Cryptography;
 
 namespace Vericairn.Records.Identity;
 
 /// <summary>
 /// A universally unique, lexicographically sortable identifier: 48 bits of millisecond
-/// timestamp followed by 80 random bits, rendered as 26 upper-case Crockford base32 characters.
+/// timestamp followed by an 80-bit suffix, rendered as 26 upper-case Crockford base32 characters.
+/// Generated identifiers increase within this process, including during clock rollback; they do not establish causal order across machines.
 /// </summary>
 public readonly record struct Ulid : IComparable<Ulid>
 {
@@ -19,6 +19,7 @@ public readonly record struct Ulid : IComparable<Ulid>
     public const int Length = 26;
 
     private readonly string? value;
+    private static readonly MonotonicUlidGenerator Generator = new();
 
     private Ulid(string value) => this.value = value;
 
@@ -41,28 +42,14 @@ public readonly record struct Ulid : IComparable<Ulid>
         }
     }
 
-    /// <summary>Creates a new identifier stamped with the current UTC time.</summary>
+    /// <summary>Creates the next process-monotonic identifier using the current UTC time.</summary>
     public static Ulid NewUlid() => NewUlid(DateTimeOffset.UtcNow);
 
-    /// <summary>Creates a new identifier stamped with the given time.</summary>
-    public static Ulid NewUlid(DateTimeOffset at)
-    {
-        long milliseconds = at.ToUnixTimeMilliseconds();
-        if (milliseconds < 0 || milliseconds > 0xFFFF_FFFF_FFFF)
-        {
-            throw new ArgumentOutOfRangeException(nameof(at), "The timestamp does not fit in 48 bits.");
-        }
-
-        Span<byte> bytes = stackalloc byte[16];
-        for (int i = 5; i >= 0; i--)
-        {
-            bytes[i] = (byte)(milliseconds & 0xFF);
-            milliseconds >>= 8;
-        }
-
-        RandomNumberGenerator.Fill(bytes[6..]);
-        return FromBytes(bytes);
-    }
+    /// <summary>
+    /// Creates the next process-monotonic identifier using the given time. A repeated or earlier millisecond retains the last
+    /// timestamp and increments its suffix. Calls from different threads share the generator; order is the order it serializes them.
+    /// </summary>
+    public static Ulid NewUlid(DateTimeOffset at) => Generator.Next(at);
 
     /// <summary>Encodes 16 bytes as a ULID.</summary>
     public static Ulid FromBytes(ReadOnlySpan<byte> bytes)
