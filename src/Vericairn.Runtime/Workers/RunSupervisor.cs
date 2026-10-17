@@ -69,13 +69,14 @@ public sealed class RunSupervisor
     private long lastEventTick;
     private readonly string workspace;
     private readonly IReadOnlyList<string> permitted;
+    private readonly IReadOnlyDictionary<string, string> environment;
     private readonly HashSet<string> actions = new(StringComparer.Ordinal);
     private readonly Queue<string> actionOrder = new();
     private readonly RunWatch watch;
     private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
     private readonly Func<RunSignal, string?>? signalAttention;
 
-    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution)
+    private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution, IReadOnlyDictionary<string, string> environment)
     {
         this.process = process;
         this.launcher = launcher;
@@ -88,6 +89,7 @@ public sealed class RunSupervisor
         this.attention = attention;
         this.workspace = workspace;
         this.permitted = permitted;
+        this.environment = environment;
         watch = new RunWatch(watchSettings, tokenCap, historyRate, execution);
         this.signalAttention = signalAttention;
         state.Liveness = new RunLiveness((int)stallLimit.TotalSeconds, RecordParser.FormatTimestamp(launchedAt));
@@ -148,6 +150,7 @@ public sealed class RunSupervisor
         }
 
         info.Environment.Clear();
+        environment = new Dictionary<string, string>(environment, WorkerEnvironment.Names);
         foreach ((string name, string value) in environment)
         {
             info.Environment[name] = value;
@@ -176,7 +179,7 @@ public sealed class RunSupervisor
         };
         try
         {
-            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention, execution);
+            var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention, execution, environment);
             supervisor.Save();
             return supervisor;
         }
@@ -459,7 +462,7 @@ public sealed class RunSupervisor
                                 }
                             }
 
-                            foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted))
+                            foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment))
                             {
                                 AddSignal(observation);
                             }

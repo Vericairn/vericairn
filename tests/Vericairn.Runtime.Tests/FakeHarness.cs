@@ -432,6 +432,9 @@ internal static class FakeHarness
                 string parent = Path.GetDirectoryName(Environment.CurrentDirectory)!;
                 Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = $"pwd\nrg --files --hidden -g AGENTS.md '{parent}'" } }));
                 return 0;
+            case "watch-codex-command-input":
+                Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = File.ReadAllText(report + ".command") } }));
+                return 0;
             case "watch-codex-workspace-change":
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"touch README.md"}}""");
                 File.WriteAllText("README.md", "A change outside the brief, inside the workspace.\n");

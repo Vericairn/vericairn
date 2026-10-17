@@ -61,17 +61,17 @@ public class CommandAuditTests
     }
 
     [Theory]
-    [InlineData("echo x > '{outside}'")]
-    [InlineData("rm ../other/file")]
-    [InlineData("cp NOTES.md ~/x")]
-    [InlineData("unclassified $TARGET")]
-    [InlineData("touch ${TARGET}")]
-    public void ChangesOutsideTheWorkspaceRemainCritical(string template)
+    [InlineData("echo x > '{outside}'", "scope")]
+    [InlineData("rm ../other/file", "scope")]
+    [InlineData("cp NOTES.md ~/x", "audit-unverified")]
+    [InlineData("unclassified $TARGET", "audit-unverified")]
+    [InlineData("touch ${TARGET}", "audit-unverified")]
+    public void OutsideChangesRequireAnIdentifiableTarget(string template, string code)
     {
         string command = template.Replace("{outside}", Path.Combine(Path.GetDirectoryName(Workspace())!, "out"), StringComparison.Ordinal);
         RunSignal signal = Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
-        Assert.Equal("scope", signal.Code);
-        Assert.Equal("critical", signal.Severity);
+        Assert.Equal(code, signal.Code);
+        Assert.Equal(code == "scope" ? "critical" : "warning", signal.Severity);
     }
 
     [Fact]
@@ -90,13 +90,17 @@ public class CommandAuditTests
         Assert.Empty(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
 
     [Theory]
-    [InlineData("git commit -m '../README.md'; rm ../outside")]
-    [InlineData("git commit -- -m ../outside")]
-    [InlineData("git diff --output ../outside README.md")]
-    [InlineData("git diff --output=../outside README.md")]
-    [InlineData("git diff --ext-diff ../outside")]
-    public void GitArgumentExemptionsDoNotHideOutsideChanges(string command) =>
-        Assert.Equal("critical", Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]), s => s.Code == "scope").Severity);
+    [InlineData("git commit -m '../README.md'; rm ../outside", "scope")]
+    [InlineData("git commit -- -m ../outside", "audit-unverified")]
+    [InlineData("git diff --output ../outside README.md", "scope")]
+    [InlineData("git diff --output=../outside README.md", "scope")]
+    [InlineData("git diff --ext-diff ../outside", "audit-unverified")]
+    public void GitArgumentExemptionsDoNotHideOutsideChanges(string command, string code)
+    {
+        RunSignal signal = Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
+        Assert.Equal(code, signal.Code);
+        Assert.Equal(code == "scope" ? "critical" : "warning", signal.Severity);
+    }
 
     [Theory]
     [InlineData("git credential fill")]
@@ -144,15 +148,19 @@ public class CommandAuditTests
     }
 
     [Theory]
-    [InlineData("cat README.md >> ../NOTES.md")]
-    [InlineData("cat README.md; touch ../NOTES.md")]
-    [InlineData("cat README.md | tee ../elsewhere.md")]
-    [InlineData("find .. -delete")]
-    [InlineData("unclassified ../README.md")]
-    [InlineData("rg --pre=helper README.md ../source")]
-    [InlineData("RG --pre=helper README.md ../source")]
-    public void ChangesAndUnclassifiedInvocationsKeepCriticalScopeChecks(string command) =>
-        Assert.Equal("critical", Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]), s => s.Code == "scope").Severity);
+    [InlineData("cat README.md >> ../NOTES.md", "scope")]
+    [InlineData("cat README.md; touch ../NOTES.md", "scope")]
+    [InlineData("cat README.md | tee ../elsewhere.md", "scope")]
+    [InlineData("find .. -delete", "audit-unverified")]
+    [InlineData("unclassified ../README.md", "audit-unverified")]
+    [InlineData("rg --pre=helper README.md ../source", "audit-unverified")]
+    [InlineData("RG --pre=helper README.md ../source", "audit-unverified")]
+    public void OutsideChangesAreDistinguishedFromUnclassifiedInvocations(string command, string code)
+    {
+        RunSignal signal = Assert.Single(CommandAudit.Inspect(Action("exec_command", new { command }), Workspace(), ["path:NOTES.md"]));
+        Assert.Equal(code, signal.Code);
+        Assert.Equal(code == "scope" ? "critical" : "warning", signal.Severity);
+    }
 
     [Fact]
     public void TheLiveRunParentSearchIsAReadEvenWithAnAbsolutePath()
@@ -180,18 +188,18 @@ public class CommandAuditTests
     [Theory]
     [InlineData("Read", "../README.md", "scope-read", "warning")]
     [InlineData("Write", "../README.md", "scope", "critical")]
-    [InlineData("unknown-tool", "../README.md", "scope", "critical")]
+    [InlineData("unknown-tool", "../README.md", "audit-unverified", "warning")]
     [InlineData("Read", ".aws/credentials", "credentials", "critical")]
     public void StructuredAccessKeepsItsClassification(string tool, string path, string code, string severity) =>
         Assert.Equal(severity, Assert.Single(CommandAudit.Inspect(Action(tool, new { path }), Workspace(), ["path:NOTES.md"]), s => s.Code == code).Severity);
 
     [Fact]
-    public void AnOpaqueInlineScriptKeepsBothItsUnverifiedAndOutsidePathVerdicts()
+    public void AnOpaqueInlineScriptDoesNotClaimAConfidentOutsideChange()
     {
         HarnessAction action = Action("exec_command", new { command = "python3 -c \"open('../outside.txt', 'w').write('x')\"" });
         IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]);
-        Assert.Equal("warning", Assert.Single(signals, s => s.Code == "audit-unverified").Severity);
-        Assert.Equal("critical", Assert.Single(signals, s => s.Code == "scope").Severity);
+        Assert.Equal("audit-unverified", Assert.Single(signals).Code);
+        Assert.Equal("warning", signals[0].Severity);
     }
 
     [Theory]
@@ -213,7 +221,7 @@ public class CommandAuditTests
         string cwd = outside ? Path.GetDirectoryName(Workspace())! : Path.Combine(Workspace(), "docs");
         HarnessAction action = Action("exec_command", new { cwd, command = "unclassified" });
         IReadOnlyList<RunSignal> signals = CommandAudit.Inspect(action, Workspace(), ["path:NOTES.md"]);
-        if (outside) Assert.Equal("critical", Assert.Single(signals).Severity);
+        if (outside) Assert.Equal("audit-unverified", Assert.Single(signals).Code);
         else Assert.Empty(signals);
     }
 
@@ -345,7 +353,7 @@ public class CommandAuditTests
     [Theory]
     [InlineData("printenv", "credentials")]
     [InlineData("curl https://example.invalid", "network")]
-    [InlineData("cat ../outside.txt", "scope")]
+    [InlineData("cat ../outside.txt", null)]
     [InlineData("cat outside.txt", null)]
     [InlineData("cat .vericairn/brief.md", null)]
     [InlineData("cat src/a.cs", null)]

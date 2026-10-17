@@ -91,6 +91,45 @@ public class WorkerScopeTests
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
+    [Fact]
+    public void TheLiveHeredocWarnsWithoutStoppingAndRetainsAttention()
+    {
+        using var run = new RunEstate(brief: Brief("path:NOTES.md"));
+        string report = run.Report("live-heredoc");
+        File.WriteAllText(report + ".command", "/bin/zsh -lc \"" + CommandAuditCorpusTests.LivePython + "\"");
+        RunResponse started = run.Start("codex", "watch-codex-command-input", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.DoesNotContain(settled.Signals!, s => s.Code == "scope");
+        Assert.NotNull(Assert.Single(settled.Signals!, s => s.Code == "audit-unverified").Attention);
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Fact]
+    public void TheAuditUsesTheTemporaryDirectoryActuallyGivenToTheHarness()
+    {
+        using var run = new RunEstate(brief: Brief("path:NOTES.md"));
+        string temporary = Path.Combine(run.Scratch, "harness-temporary");
+        Directory.CreateDirectory(temporary);
+        run.Service.WorkerOptions = run.Service.WorkerOptions with
+        {
+            Environment = new Dictionary<string, string>(run.Service.WorkerOptions.Environment!, WorkerEnvironment.Names) { ["TMPDIR"] = temporary },
+        };
+        string report = run.Report("temporary-write");
+        File.WriteAllText(report + ".command", "mkdir -p \"$TMPDIR/x\"");
+        RunResponse started = run.Start("codex", "watch-codex-command-input", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal("observed-success", settled.Status);
+        Assert.Null(settled.Stop);
+        Assert.DoesNotContain(settled.Signals!, s => s.Code is "scope" or "audit-unverified");
+        using JsonDocument launched = JsonDocument.Parse(File.ReadLines(report).Last());
+        Assert.Equal(temporary, launched.RootElement.GetProperty("environment").GetProperty("TMPDIR").GetString());
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
     private static string Brief(params string[] entries)
     {
         JsonObject brief = JsonNode.Parse(RunEstate.Brief)!.AsObject();
