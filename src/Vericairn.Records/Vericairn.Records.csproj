@@ -9,6 +9,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Vericairn.Records.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
+    <InternalsVisibleTo Include="Vericairn.Runtime" />
     <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
   </ItemGroup>
 

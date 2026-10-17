@@ -9,11 +9,16 @@ namespace Vericairn.Records.Estate;
 /// <summary>All records of an estate, indexed, with the findings produced while loading them.</summary>
 public sealed class EstateModel
 {
+    private readonly ILookup<string, RecordEnvelope> recordsByType;
+
     /// <summary>Creates a model.</summary>
     public EstateModel(string root, IReadOnlyList<RecordEnvelope> records, IReadOnlyDictionary<string, RecordEnvelope> byId, IReadOnlyDictionary<string, string> supersededBy, FindingList findings)
     {
         Root = root;
         Records = records;
+        // Projections ask for a few types repeatedly. Index once while loading so a Home report does not walk unrelated
+        // history for every empty section. Lookup preserves each type's original path order and all historical revisions.
+        recordsByType = records.ToLookup(r => r.Type, StringComparer.Ordinal);
         ById = byId;
         SupersededBy = supersededBy;
         Findings = findings;
@@ -41,7 +46,7 @@ public sealed class EstateModel
     public bool IsCurrent(RecordEnvelope record) => record is not null && !SupersededBy.ContainsKey(record.Id);
 
     /// <summary>All records of a type.</summary>
-    public IEnumerable<RecordEnvelope> OfType(string type) => Records.Where(r => r.Type == type);
+    public IEnumerable<RecordEnvelope> OfType(string type) => recordsByType[type];
 
     /// <summary>Current records of a type.</summary>
     public IEnumerable<RecordEnvelope> Current(string type) => OfType(type).Where(IsCurrent);

@@ -6,4 +6,8 @@
     <PackageId>Vericairn.Protocol</PackageId>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="vericairn-workbench" />
+  </ItemGroup>
+
 </Project>

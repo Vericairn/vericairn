@@ -105,7 +105,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
             List<WorkProgressClaim> claims = ProgressClaims(model);
             json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
-            List<RunRow> watched = Runs().Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
+            List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
             json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
             string text = ProgressReport.Render(model, checks);
             if (claims.Count > 0)
@@ -162,7 +162,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return null;
             }
 
-            RecordFile? file = session.Files().FirstOrDefault(f => f.Path == record.ExpectedPath);
+            RecordFile? file = session.LoadedFile(record.ExpectedPath);
             using JsonDocument document = JsonDocument.Parse(file?.Bytes ?? []);
             return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
         }
@@ -175,11 +175,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            Dictionary<string, RecordFile> files = session.Files().ToDictionary(f => f.Path, f => f, StringComparer.Ordinal);
             var rows = new List<RecordResponse>();
             foreach (RecordEnvelope record in model.Current(type).OrderBy(r => r.Id, StringComparer.Ordinal))
             {
-                using JsonDocument document = JsonDocument.Parse(files.TryGetValue(record.ExpectedPath, out RecordFile? file) ? file.Bytes : []);
+                using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
                 rows.Add(new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, true, document.RootElement.Clone()));
             }
 

@@ -113,6 +113,14 @@ public static class CommunicationPresentation
     public static IReadOnlyList<CommunicationAttention> Attention(IEstateApi api, string? recipient = null)
     {
         ArgumentNullException.ThrowIfNull(api);
+        return Attention(api, recipient, api.Progress);
+    }
+
+    // A client already showing progress can share that exact response (or failure) for this refresh. Other sources stay fresh;
+    // this is not a retained cache and does not change the public API or suppress mandatory attention when a read failed.
+    internal static IReadOnlyList<CommunicationAttention> Attention(IEstateApi api, string? recipient, Func<ProgressResponse> readProgress)
+    {
+        ArgumentNullException.ThrowIfNull(api);
         var attention = new List<CommunicationAttention>();
         Read(() =>
         {
@@ -153,7 +161,7 @@ public static class CommunicationPresentation
 
         Read(() =>
         {
-            ProgressResponse progress = api.Progress();
+            ProgressResponse progress = readProgress();
             if (progress.Json.TryGetProperty("eligible", out JsonElement eligible))
             {
                 foreach (JsonElement held in Items(eligible, "held"))
