@@ -10,6 +10,8 @@ using Vericairn.Records.Tests;
 
 namespace Vericairn.Daemon.Tests;
 
+// In the daemon collection, so its key generation and reader threads never run beside the timing-sensitive daemon tests.
+[Collection("daemon")]
 public class RuntimeCertificateConcurrencyTests(ITestOutputHelper output)
 {
     [Theory]
