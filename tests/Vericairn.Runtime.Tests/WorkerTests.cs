@@ -35,7 +35,7 @@ public class WorkerTests
             Assert.True(started.Ok, started.Message);
             Assert.Equal("observed-success", run.Settled(started.Run).Status);
             string workspace = Assert.Single(FakeHarness.Reports(report))["directory"]!.GetValue<string>();
-            Assert.Equal(Path.Combine(root, run.Service.Session.Manifest.Estate, "work-w-1"), workspace);
+            Assert.Equal(Path.Combine(Vericairn.Packs.Software.HarnessWorkspace.Canonical(root), run.Service.Session.Manifest.Estate, "work-w-1"), workspace);
         }
         finally
         {

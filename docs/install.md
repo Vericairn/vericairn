@@ -111,8 +111,9 @@ dotnet vc worker configure
 
 Omit `--launcher` for this setting. It applies to every launcher on the machine and is stored in the
 owner-only `worker/workspaces.json` under the Vericairn home. The root must be outside Git repositories
-(including bare repositories) and estates, with no symbolic links or reparse points in its path. The root
-and its ancestors cannot hold `.claude`, `.codex`, `.agents` or `.mcp.json`; refusal names what it found.
+(including bare repositories) and estates, and cannot itself be a symbolic link or reparse point. Linked
+ancestors are resolved and the canonical root is stored. The canonical root and its ancestors cannot hold
+`.claude`, `.codex`, `.agents` or `.mcp.json`; refusal names what it found.
 A new root is created owner-only. Unknown fields and duplicate keys refuse; an invalid file never falls
 back to the default. The CLI and daemon reread it for each run, without a restart, and recheck before dispatch.
 

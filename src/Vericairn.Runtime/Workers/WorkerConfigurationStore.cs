@@ -62,11 +62,12 @@ public sealed partial class WorkerConfigurationStore
         WriteFile(path, configuration);
     }
 
-    private void WriteFile<T>(string path, T configuration)
+    private static void WriteFile<T>(string path, T configuration)
     {
         RefuseLink(path);
-        CreateOwnerDirectory(directory);
-        string temporary = Path.Combine(directory, Guid.NewGuid().ToString("N") + ".tmp");
+        string parent = Path.GetDirectoryName(path)!;
+        CreateOwnerDirectory(parent);
+        string temporary = Path.Combine(parent, Guid.NewGuid().ToString("N") + ".tmp");
         try
         {
             var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
@@ -129,13 +130,34 @@ public sealed partial class WorkerConfigurationStore
 
     private string ConfigurationPath(string name)
     {
-        for (DirectoryInfo? parent = new(directory); parent is not null; parent = parent.Parent)
+        RefuseLink(directory);
+        RefuseLink(Path.GetDirectoryName(directory)!);
+        string canonical = CanonicalDirectory(directory);
+        for (DirectoryInfo? parent = new(canonical); parent is not null; parent = parent.Parent)
         {
-            RefuseLink(parent.FullName);
             if (RepositoryOrEstate(parent.FullName))
                 throw new ProviderRefusedException("Worker configuration must be outside repositories and estates; choose a machine-local Vericairn home.");
         }
-        return Path.Combine(directory, name);
+        return Path.Combine(canonical, name);
+    }
+
+    // Ancestors may be links (including the system's temporary directory); retain an absent tail without creating it.
+    // Walk the resolved parents too, so a link cannot hide a repository, estate or harness configuration above its target.
+    private static string CanonicalDirectory(string path)
+    {
+        string suffix = "";
+        int links = 0;
+        for (DirectoryInfo? parent = new(Path.GetFullPath(path)); parent is not null; parent = parent.Parent)
+        {
+            if (parent.LinkTarget is not null)
+            {
+                if (++links > 40) throw new ProviderRefusedException("The local directory has too many symbolic links or reparse points to resolve.");
+                parent = new DirectoryInfo(parent.ResolveLinkTarget(returnFinalTarget: true)!.FullName);
+            }
+            if (parent.Parent is null) return Path.TrimEndingDirectorySeparator(Path.Combine(parent.FullName, suffix));
+            suffix = Path.Combine(parent.Name, suffix);
+        }
+        throw new ProviderRefusedException("The local directory could not be resolved.");
     }
 
     private static bool RepositoryOrEstate(string path) => Directory.Exists(Path.Combine(path, ".git")) || File.Exists(Path.Combine(path, ".git"))

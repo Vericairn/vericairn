@@ -36,7 +36,7 @@ public class WorkspaceRootJourneyTests
         Assert.Contains(".claude", invalid.Err, StringComparison.Ordinal);
         Assert.False(Directory.Exists(Path.Combine(journey.User, "workspaces")));
         Success(await journey.Binary("worker", "configure", "--workspaces", journey.Workspaces));
-        Assert.Equal(journey.Workspaces, Success(await journey.Binary("--json", "worker", "configure")).Json.GetProperty("root").GetString());
+        Assert.Equal(Path.Combine(journey.CanonicalScratch, "workspaces"), Success(await journey.Binary("--json", "worker", "configure")).Json.GetProperty("root").GetString());
 
         // The refused default run left its worktree for inspection. A new root never silently takes it over outside that root.
         string previous = Directory.EnumerateFiles(Path.Combine(journey.Home, "estates"), ".git", SearchOption.AllDirectories).Single();
@@ -113,7 +113,11 @@ public class WorkspaceRootJourneyTests
         }
         void Check(JsonElement value)
         {
-            if (value.ValueKind == JsonValueKind.String) Assert.DoesNotContain(journey.Scratch, value.GetString()!, StringComparison.OrdinalIgnoreCase);
+            if (value.ValueKind == JsonValueKind.String)
+            {
+                Assert.DoesNotContain(journey.Scratch, value.GetString()!, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain(journey.CanonicalScratch, value.GetString()!, StringComparison.OrdinalIgnoreCase);
+            }
             else if (value.ValueKind == JsonValueKind.Object)
                 foreach (JsonProperty property in value.EnumerateObject()) Check(property.Value);
             else if (value.ValueKind == JsonValueKind.Array)
@@ -147,11 +151,13 @@ public class WorkspaceRootJourneyTests
             previousHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
             Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Home);
             (string op, string agent, _, string assignment, string repository) = WorkerJourneyTests.Estate(Root, Scratch);
+            CanonicalScratch = Path.GetDirectoryName(Path.GetFullPath(Git(Clone, "rev-parse", "--show-toplevel")))!;
             run = ["worker", "run", assignment, "--launcher", launcher, "--agent", agent, "--by", op, "--repository", repository,
                 "--setting", "command=" + FakeHarness.Setting(launcher == "codex" ? "native-codex" : "native-claude", Report)];
         }
 
         public string Scratch { get; }
+        public string CanonicalScratch { get; }
         public string Root { get; }
         public string User { get; }
         public string Home { get; }

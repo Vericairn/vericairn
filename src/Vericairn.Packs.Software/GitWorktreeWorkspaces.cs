@@ -57,7 +57,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
             throw new ProviderRefusedException($"'{branch}' is not a branch name git accepts.");
         }
 
-        string root = Directory.Exists(workspaceRoot) ? HarnessWorkspace.Canonical(workspaceRoot) : Path.GetFullPath(workspaceRoot);
+        string root = CanonicalRoot(workspaceRoot);
         if (Git(clone, out string inventory, "worktree", "list", "--porcelain", "-z") != 0)
             throw new ProviderRefusedException("git could not inspect the branch's existing worktrees.");
         string? existing = null;
@@ -117,6 +117,20 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         string relative = Path.GetRelativePath(root, path);
         return relative != "." && !Path.IsPathRooted(relative) && relative != ".."
             && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static string CanonicalRoot(string directory)
+    {
+        var missing = new Stack<string>();
+        var parent = new DirectoryInfo(Path.GetFullPath(directory));
+        while (!parent.Exists)
+        {
+            missing.Push(parent.Name);
+            parent = parent.Parent ?? throw new ProviderRefusedException("The workspace root could not be canonicalized.");
+        }
+        string path = HarnessWorkspace.Canonical(parent.FullName);
+        foreach (string name in missing) path = Path.Combine(path, name);
+        return path;
     }
 
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";

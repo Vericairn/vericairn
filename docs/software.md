@@ -888,7 +888,7 @@ and `worker/claude-code.json` under the user's `VericairnHome`. Reading or writi
 home lies inside a Git repository or an estate, including a repository containing the user's home directory.
 In that case set `VERICAIRN_HOME` to a machine-local directory outside all repositories and estates for both
 the CLI and daemon before starting them. The configuration file, its worker directory and the Vericairn home
-and their ancestors cannot be symbolic links or reparse points.
+cannot be symbolic links or reparse points. Linked ancestors are resolved before checking for repositories and estates.
 The files hold only `model`, `effort`, optional `allowedModels` and optional
 `allowedEfforts`, all portable identities; never login material, secret values, machine paths or commands.
 The CLI and daemon read the file for each run and recheck it before intent and dispatch, including agent
@@ -907,8 +907,9 @@ Omit `--launcher` to set or show it; `--json` shows an object whose `root` is th
 for the default. The owner-only `worker/workspaces.json` under `VericairnHome` holds only `root`.
 It has the same atomic replacement, repository/estate exclusion and link refusal as launcher configuration;
 unknown fields and duplicate keys refuse. This file is machine-local, so its path value never enters a record.
-The root must be absolute, outside every Git repository (including bare repositories) and estate, and have no
-symbolic links or reparse points in its path. A new root is created owner-only. The root and its ancestors
+The root must be absolute, outside every Git repository (including bare repositories) and estate, and cannot
+itself be a symbolic link or reparse point. Linked ancestors are resolved and the canonical root is stored.
+A new root is created owner-only. The canonical root and its ancestors
 cannot hold `.claude`, `.mcp.json`, `.codex` or `.agents`; refusal names the discovered configuration.
 
 New workspaces go at `<root>/<estate>/<branch-slug>`, with branch slashes flattened to hyphens as in the

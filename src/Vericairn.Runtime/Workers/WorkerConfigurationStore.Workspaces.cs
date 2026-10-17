@@ -43,11 +43,11 @@ public sealed partial class WorkerConfigurationStore
     {
         if (string.IsNullOrWhiteSpace(root) || !Path.IsPathFullyQualified(root))
             throw new ProviderRefusedException("The workspace root must be an absolute directory outside repositories and estates.");
-        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        RefuseLink(root);
+        string full = CanonicalDirectory(root);
         var found = new List<string>();
         for (DirectoryInfo? parent = new(full); parent is not null; parent = parent.Parent)
         {
-            RefuseLink(parent.FullName);
             if (File.Exists(parent.FullName)) throw new ProviderRefusedException("The workspace root must be a directory.");
             if (RepositoryOrEstate(parent.FullName))
                 throw new ProviderRefusedException("The workspace root must be outside repositories and estates.");
