@@ -153,6 +153,53 @@ public class LoopbackConcurrencyTests
         }, TestContext.Current.CancellationToken)));
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ConcurrentHandshakesSucceedAtStartAndAfterRotation(bool localNetwork, bool rotate)
+    {
+        await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
+        for (int round = 0; round < 128; round++)
+        {
+            if (rotate)
+            {
+                string previous = harness.Host.Endpoint.Loopback!.Certificate;
+                Assert.NotEqual(previous, harness.Host.RotateCertificate().Certificate);
+            }
+            else if (round > 0)
+            {
+                // A fresh daemon reloads the certificate; no TLS client warms it before this burst.
+                await harness.RestartAsync();
+            }
+
+            LoopbackEndpoint endpoint = harness.Host.Endpoint.Loopback!;
+            if (localNetwork)
+            {
+                endpoint = endpoint with { Port = harness.Host.Endpoint.LocalNetwork!.Port };
+            }
+
+            using var ready = new CountdownEvent(16);
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task[] clients = Enumerable.Range(0, 16).Select(async _ =>
+            {
+                await using SslStream tls = await ConnectAsync(endpoint, async () =>
+                {
+                    if (ready.Signal())
+                    {
+                        start.SetResult();
+                    }
+
+                    await start.Task.WaitAsync(TestContext.Current.CancellationToken);
+                });
+                Assert.True(tls.IsAuthenticated);
+                Assert.Equal(endpoint.Certificate, RuntimeIdentityScheme.CertificateFingerprint(tls.RemoteCertificate!.GetRawCertData()));
+            }).ToArray();
+            await Task.WhenAll(clients);
+        }
+    }
+
     [Fact]
     public async Task ConnectionsAreBoundedBeforeTlsAcceptsAnotherClient()
     {
@@ -200,7 +247,7 @@ public class LoopbackConcurrencyTests
         context.Request.Headers[RequestSigning.SignatureHeader] = Base64Url.EncodeToString(DeviceRequestSigner.Find(harness.OperatorDevice)!.Sign(digest));
     }
 
-    private static async Task<SslStream> ConnectAsync(LoopbackEndpoint endpoint)
+    private static async Task<SslStream> ConnectAsync(LoopbackEndpoint endpoint, Func<Task>? beforeHandshake = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
         deadline.CancelAfter(TimeSpan.FromSeconds(5));
@@ -210,9 +257,15 @@ public class LoopbackConcurrencyTests
         {
             await socket.ConnectAsync(endpoint.Host, endpoint.Port, deadline.Token);
             tls = new SslStream(new NetworkStream(socket, ownsSocket: true));
+            if (beforeHandshake is not null)
+            {
+                await beforeHandshake().WaitAsync(deadline.Token);
+            }
+
             await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
             {
                 TargetHost = "vericairn-runtime",
+                AllowTlsResume = false,
                 RemoteCertificateValidationCallback = (_, certificate, _, _) => certificate is not null && RuntimeIdentityScheme.CertificateFingerprint(certificate.GetRawCertData()) == endpoint.Certificate,
             }, deadline.Token);
             return tls;
