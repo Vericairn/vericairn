@@ -83,12 +83,16 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 
         // The operator's own laptop, the estate's first authority: it signs every admission a pairing ends with.
         WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.OperatorId, "Operator laptop", "file"));
-        Assert.True(device.Ok, device.Problem?.Message);
+        Assert.True(device.Ok, Failure(device));
         WriteOutcome admitted = socket.DeviceAdmit(new AdmitRequest(device.Written!.Id, estate.OperatorId, "The first authority."));
-        Assert.True(admitted.Ok, admitted.Problem?.Message);
+        Assert.True(admitted.Ok, Failure(admitted));
         string deviceHome = Path.Combine(Path.GetTempPath(), "vericairn-second-machine-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(deviceHome);
         return new LocalNetworkHarness(estate, host, socket, time, deviceHome, device.Written.Id, options);
+
+        // Keep the validation findings: a generic rejection hid the cause of F7's failure during this setup, before its clock move.
+        static string Failure(WriteOutcome outcome) => outcome.Problem?.Message + "\n"
+            + string.Join('\n', outcome.Problem?.Findings.Select(f => $"{f.Code}: {f.Message}") ?? []);
     }
 
     /// <summary>A new runtime instance over the same estate, identity and clock, with an empty replay cache.</summary>

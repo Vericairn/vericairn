@@ -217,28 +217,43 @@ public class ReviewRegressionTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         string op = harness.Estate.OperatorId;
 
-        // A person whose only device on the runtime's machine asks for its owner's presence at every signature.
-        using JsonDocument person = JsonDocument.Parse("""{"kind":"human","name":"Present Person","roles":["contributor"]}""");
-        string present = harness.Socket.NewRecord(new NewRecordRequest("principal", op, person.RootElement)).Written!.Id;
+        // Both fixture records use TestEstate's fixed, advancing clock. Presence is independent of their age.
+        RecordEnvelope person = harness.Estate.Add("principal", op, """{"kind":"human","name":"Present Person","roles":["contributor"]}""");
+        string present = person.Id;
         // Its key is a file here, which a test can make; the record states the enclave custody and presence a Mac with Touch ID would.
         var keys = new FileKeyStore(VericairnHome.Path());
-        harness.Estate.SetClock(DateTimeOffset.UtcNow.AddSeconds(-30));
         string id = Records.Identity.Ulid.NewUlid(harness.Estate.Clock.AddSeconds(1)).Value;
         byte[] spki = keys.Create(id);
-        System.Text.Json.Nodes.JsonObject body = Records.Authoring.DeviceRecords.Body(present, "Laptop with Touch ID", "macos", SecureEnclaveCustody.Kind, RecordSigning.EncodePublicKey(spki), ["embedded"], 2, "required");
-        RecordEnvelope device = harness.Estate.Add("device", present, body.ToJsonString(), id: id, signer: new StoreSigner(keys, id));
-        Assert.True(harness.Socket.DeviceAdmit(new AdmitRequest(device.Id, op, "Present Person's laptop.")).Ok);
+        try
+        {
+            System.Text.Json.Nodes.JsonObject body = Records.Authoring.DeviceRecords.Body(present, "Laptop with Touch ID", "macos", SecureEnclaveCustody.Kind, RecordSigning.EncodePublicKey(spki), ["embedded"], 2, "required");
+            RecordEnvelope device = harness.Estate.Add("device", present, body.ToJsonString(), id: id, signer: new StoreSigner(keys, id));
+            Assert.Equal(person.AtTime.AddSeconds(1), device.AtTime);
+            Written(harness.Socket.DeviceAdmit(new AdmitRequest(device.Id, op, "Present Person's laptop.")));
+            Assert.Contains(id, harness.Host.Service.PresenceRefusal(present), StringComparison.Ordinal);
 
-        // Their phone, paired, is refused a write the runtime would sign with that laptop's key; the same write on the machine goes through.
-        RuntimeConnection phone = harness.Pair(present, "Phone");
-        using VericairnClient client = harness.Connections.Connect(phone);
-        using JsonDocument order = JsonDocument.Parse(Order("W-R9"));
-        HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)));
-        Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
-        Assert.Null(harness.Socket.Brief("W-R9"));
-        Assert.Empty(LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!));
-        Assert.True(harness.Socket.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)).Ok);
-        keys.Remove(id);
+            // Their phone is refused the write requiring presence; the identical write on the machine uses that same device.
+            RuntimeConnection phone = harness.Pair(present, "Phone");
+            using VericairnClient client = harness.Connections.Connect(phone);
+            using JsonDocument order = JsonDocument.Parse(Order("W-R9"));
+            HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)));
+            Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);
+            Assert.Null(harness.Socket.Brief("W-R9"));
+            Assert.Empty(LocalNetworkLedger.Read(Path.GetDirectoryName(DaemonHost.EndpointFilePath(harness.Estate.Root))!));
+            RecordWritten written = Written(harness.Socket.NewRecord(new NewRecordRequest("work-order", present, order.RootElement)));
+            Assert.Equal(id, Assert.Single(harness.Estate.Load().ById[written.Id].Signatures).Device);
+            Assert.Equal(0, harness.Socket.Check().Errors);
+        }
+        finally
+        {
+            keys.Remove(id);
+        }
+
+        static RecordWritten Written(WriteOutcome outcome)
+        {
+            Assert.True(outcome.Ok, outcome.Problem?.Message + "\n" + string.Join('\n', outcome.Problem?.Findings.Select(f => $"{f.Code}: {f.Message}") ?? []));
+            return outcome.Written!;
+        }
     }
 
     [Fact]
