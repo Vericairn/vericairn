@@ -68,7 +68,7 @@ in `checks` with outcome `failed`, not in the result's outcome. An **amendment**
 nothing. Acceptance of a
 result pins the result's hash and follows the work order's policy: results toward milestones need the
 operator; results of ordinary work may be self-accepted under `self-accept-ordinary-work`.
-In 0.7.0, `vericairn work brief <key>` renders the recorded brief with verified required document originals
+In 0.7.1, `vericairn work brief <key>` renders the recorded brief with verified required document originals
 available in this copy, measured context and an explicit withheld list; missing mandatory originals refuse it.
 Record-format-1 rules remain unchanged by this derived artifact (see [software.md](software.md#context-packages-070));
 `vericairn work observe <key>` shows what happened.

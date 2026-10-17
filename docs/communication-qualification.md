@@ -262,13 +262,14 @@ extracted for reuse.
    real logins, live model/provider combinations and live service behavior are
    not claimed. RUN-03 owns requalification of updated harnesses. The generic
    production launcher remains refused, as RUN-02 specifies.
-7. **Independent validation.** Round two needs the builder's Linux/macOS/Windows
+7. **Independent validation at the report's hand-off.** Round two required the builder's Linux/macOS/Windows
    CI run and independent review of meaning and task sufficiency. Optional live
    probes and unavailable platform checks remain skips, not passes. The local
    merge was authorized for this round; nothing was pushed, published or accepted.
 
-The builder should review the merge and round-two commits, the reconciliation
-fix and this report, then run the three-platform suite. Every design case now
-has a passed, not-applicable or named deferred disposition; D08-D has no remaining
-run placeholder. Bring the Remote, adapter, compaction and template exclusions
-to the operator. Acceptance remains the operator's decision.
+At that hand-off, the requested next steps were review of the merge and round-two commits, the
+reconciliation fix and this report, followed by the three-platform suite and presentation of the Remote,
+adapter, compaction and template exclusions to the operator. Every design case had a passed,
+not-applicable or named deferred disposition; D08-D had no remaining unimplemented run case.
+This report retains those observations at their stated commits, not a new qualification of 0.7.1.
+Acceptance remains the operator's decision.

@@ -8,7 +8,7 @@
 
 ## Tools
 
-For 0.7.0, `context_prepare` computes the same context package as
+For 0.7.1, carrying the withdrawn 0.7.0 candidate's additions, `context_prepare` computes the same context package as
 `vericairn context prepare <work-order>`. `context_read` takes `pin`, the
 self-contained `vc1_` identity in a source entry, and returns the same identity
 and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
@@ -51,7 +51,7 @@ Every tool description describes and never directs: nothing a tool returns, and 
 
 ## Running it
 
-With 0.7.0's NuGet packages published and the .NET 10 SDK installed:
+After 0.7.1's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
 dotnet tool install --global dotnet-vc
@@ -96,7 +96,7 @@ original brief remains present, with the effective communication values and
 their sources in a separate section. A worker's exported brief captures the
 same values and asks it to refresh them at the next settled boundary.
 
-This changes the MCP tool list. The builder must regenerate `AGENTS.md` with
+This changes the MCP tool list. Regenerate `AGENTS.md` with
 `vericairn mcp orientation` from the updated runtime; pointer files retain their
 usual role. Remote is not built and is not qualified by this tool.
 
@@ -122,9 +122,23 @@ widens the qualified inventory. It cannot grant tools, MCP servers, environment 
 native inventory admission still requires
 the shipped baseline or a matching current harness qualification. No MCP tool is added or changed;
 there is no configuration write tool, and configuration does not launch an agent or run probes.
+FIX-12 adds the separate machine-local setting
+`vericairn worker configure --workspaces <absolute-directory>`; omit arguments to show its root.
+Choose a root outside repositories, estates and a home holding harness configuration. The root and its
+ancestors cannot contain `.claude`, `.codex`, `.agents` or `.mcp.json`. This setting has no MCP or HTTP route,
+applies to every launcher, is reread for each run and is never recorded. It does not remove Codex's separate
+check of the user's own `~/.agents` customization; use a worker account without that discovery root.
+The native scan permits an empty ordinary directory or recognized instruction files alone, but refuses
+skills, other entries and uninspected links. Every run also rechecks its assignment's current holder before preparation
+and intent; an assignment displaced by hand-over cannot launch explicitly or through routing.
 Harness qualification also remains outside the MCP tool list. Its API operation is machine-local:
 paired local-network devices are refused before probes; local socket and signed loopback requests
 retain the existing human authority checks.
+
+`estate_check` keeps signature verification and machine-path checks. FIX-12 exempts only validated device
+public-key and envelope signature values from credential-pattern matching, not other fields or invalid
+encodings. A worker attention ask still pins the run's original intent and can be reported stale after
+settlement supersedes it; inspecting it or completing the run does not answer it.
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
