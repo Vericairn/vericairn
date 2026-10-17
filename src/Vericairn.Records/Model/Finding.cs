@@ -21,7 +21,7 @@ public enum Severity
 /// <summary>One validation or check result.</summary>
 /// <param name="Severity">How serious it is.</param>
 /// <param name="Code">Stable machine-readable code such as <c>record.hash-mismatch</c>.</param>
-/// <param name="Location">Repository-relative path, optionally with a <c>#fragment</c>.</param>
+/// <param name="Location">Repository-relative path, optionally with a <c>#fragment</c>, or a safe local recovery identifier.</param>
 /// <param name="Message">Human-readable explanation.</param>
 public sealed record Finding(Severity Severity, string Code, string Location, string Message)
 {

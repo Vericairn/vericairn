@@ -32,6 +32,8 @@ namespace Vericairn.Runtime.Service;
 /// </summary>
 public sealed partial class EstateService : IEstateApi, IDisposable
 {
+    // The gate serializes this service's readers and writers through judgment and commit. It does not coordinate another service
+    // instance, an embedded CLI process or a repository sync. Hosts must use one writer; daemon discovery is not a writer lease.
     private readonly object gate = new();
     private readonly EstateSession session;
     private readonly string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
@@ -138,7 +140,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         {
             EstateModel model = session.Load();
             var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+            foreach (Finding finding in model.Findings.Concat(ChecksWithBatches(model)))
             {
                 all.Add(finding);
             }
@@ -2288,7 +2290,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    /// <summary>Signs, stores and validates; a record that would make the estate invalid is removed again. Caller holds the gate.</summary>
+    /// <summary>Signs and judges the proposed state before publishing; no rejected record needs rollback. Caller holds the gate.</summary>
     private WriteOutcome WriteLocked(RecordDraft draft, EstateModel current, IReadOnlyList<IRecordSigner>? signers = null)
     {
         if (RequestDeviceRefusal(current) is Problem denied)
@@ -2302,6 +2304,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse(refusal!);
         }
 
+        if (JudgeProposedLocked([record]) is Problem rejected)
+        {
+            return WriteOutcome.Fail(rejected);
+        }
+
         try
         {
             session.Write(record);
@@ -2309,13 +2316,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
             return Refuse(exception.Message);
-        }
-
-        FindingList relevant = Invalid(session.Load(), [record], stored: true);
-        if (relevant.HasErrors)
-        {
-            session.Discard(record);
-            return WriteOutcome.Fail(new Problem("rejected", $"Not written: the estate would be invalid with this record ({relevant.Errors} errors).", ToFindings(relevant, "rejected").Findings));
         }
 
         return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
@@ -2365,6 +2365,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>A test's hook, called before each record a batch stores: a test throws from it to stop a batch between its records.</summary>
     internal Action<AuthoredRecord>? BeforeStoringTogether { get; set; }
 
+    /// <summary>A test's hook at the validation boundary, for observing publication and injecting a failed judgment.</summary>
+    internal Action<IReadOnlyList<AuthoredRecord>>? BeforeValidatingRecords { get; set; }
+
     /// <summary>
     /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
     /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
@@ -2379,10 +2382,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return ([], denied);
         }
 
-        FindingList relevant = Invalid(LoadWith(records), records, stored: false);
-        if (relevant.HasErrors)
+        if (JudgeProposedLocked(records) is Problem rejected)
         {
-            return ([], new Problem("rejected", $"Not written: the estate would be invalid with these records ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings));
+            return ([], rejected);
         }
 
         BatchJournal journal;
@@ -2424,14 +2426,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>When the estate is opened, judges the batches this machine left unfinished: those that no longer matter are forgotten.</summary>
     private void JudgeInterruptedBatches()
     {
-        if (BatchJournal.All(session).Count == 0)
-        {
-            return;
-        }
-
         lock (gate)
         {
-            InterruptedBatches(session.Load());
+            BatchJournal.ReadResult read = BatchJournal.All(session);
+            if (read.Journals.Count > 0 || read.Unreadable.Count > 0)
+            {
+                InterruptedBatches(session.Load(), read);
+            }
         }
     }
 
@@ -2453,10 +2454,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// its stored assignment is carried after all by the record it was routed with, or when its step is held again or no longer
     /// planned. Removing a journal removes no record. Caller holds the gate.
     /// </summary>
-    private FindingList InterruptedBatches(EstateModel model)
+    private FindingList InterruptedBatches(EstateModel model, BatchJournal.ReadResult? read = null)
     {
-        var findings = new FindingList();
-        foreach (BatchJournal journal in BatchJournal.All(session))
+        read ??= BatchJournal.All(session);
+        FindingList findings = UnreadableBatches(read);
+        foreach (BatchJournal journal in read.Journals)
         {
             List<BatchJournal.Entry> stored = [.. journal.Records.Where(r => model.ById.ContainsKey(r.Id))];
             List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
@@ -2480,6 +2482,44 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         static string Listed(List<BatchJournal.Entry> entries) => string.Join(", ", entries.Select(e => $"{e.Type} {e.Id}"));
     }
 
+    private static FindingList UnreadableBatches(BatchJournal.ReadResult read)
+    {
+        var findings = new FindingList();
+        foreach (BatchJournal.UnreadableJournal journal in read.Unreadable)
+        {
+            findings.Warning("batch.unreadable", journal.Id, $"{journal.Reason} Its file is kept; the batch's effects cannot be judged. All further record writes through this runtime, single or grouped, wait for local reconciliation. Restore readable journal data or have the operator inspect the stored records and preserve the damaged journal outside the batches directory before retrying.");
+        }
+
+        return findings;
+    }
+
+    /// <summary>
+    /// The common single and batch admission boundary. Unknown journal contents could name any records, so both paths wait. The
+    /// proposed model and its content are judged under the caller's instance gate, which stays held until commit; this is not a
+    /// transaction with other service instances or processes, nor a snapshot of externally edited files.
+    /// </summary>
+    private Problem? JudgeProposedLocked(IReadOnlyList<AuthoredRecord> records)
+    {
+        FindingList unreadable = UnreadableBatches(BatchJournal.All(session));
+        if (unreadable.Count > 0)
+        {
+            return new Problem("reconcile-required", "Not written: unreadable batch journals require local reconciliation before further record writes.", ToFindings(unreadable, "reconcile-required").Findings);
+        }
+
+        try
+        {
+            BeforeValidatingRecords?.Invoke(records);
+            FindingList relevant = Invalid(LoadWith(records), records);
+            return relevant.HasErrors
+                ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
+                : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
+        {
+            return new Problem("refused", "Not written: the proposed estate could not be validated. Restore readable estate content before retrying.", []);
+        }
+    }
+
     /// <summary>The estate as it would be with records added that are not stored yet; as it is without any. Caller holds the gate.</summary>
     private EstateModel LoadWith(IReadOnlyList<AuthoredRecord> records)
     {
@@ -2497,7 +2537,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// themselves, and a result whose output no longer has the bytes it claims. Records not stored yet get the content checks a stored
     /// file gets, on their canonical bytes, since the checks of stored files cannot see them.
     /// </summary>
-    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records, bool stored)
+    private static FindingList Invalid(EstateModel model, IReadOnlyList<AuthoredRecord> records)
     {
         var relevant = new FindingList();
         foreach (Finding finding in model.Findings.Where(f => f.Severity == Severity.Error))
@@ -2505,12 +2545,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             relevant.Add(finding);
         }
 
-        if (!stored)
+        foreach (Finding finding in records.SelectMany(r => EstateChecks.Content(r.RelativePath, r.Bytes)).Where(f => f.Severity == Severity.Error))
         {
-            foreach (Finding finding in records.SelectMany(r => EstateChecks.Content(r.RelativePath, r.Bytes)).Where(f => f.Severity == Severity.Error))
-            {
-                relevant.Add(finding);
-            }
+            relevant.Add(finding);
         }
 
         foreach (Finding finding in EstateChecks.Run(model).Where(f => f.Severity == Severity.Error && records.Any(r => f.Location.StartsWith(r.RelativePath, StringComparison.Ordinal))))

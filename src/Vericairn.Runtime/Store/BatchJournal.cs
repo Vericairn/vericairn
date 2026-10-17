@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Runtime.Store;
 
@@ -72,36 +76,114 @@ internal sealed class BatchJournal
         return new BatchJournal(file, id, purpose, workOrder, startedAt, entries);
     }
 
-    /// <summary>Every journal of this session left on this machine, oldest first; one that cannot be read is left alone.</summary>
-    public static IReadOnlyList<BatchJournal> All(EstateSession session)
+    /// <summary>
+    /// Reads journals in filename order, separating usable journals from diagnostics. A missing directory is empty; an unreadable
+    /// directory or file is uncertainty, never absence. Nothing is removed here, and diagnostics contain no raw filename or exception.
+    /// </summary>
+    public static ReadResult All(EstateSession session)
     {
         string directory = Directory(session);
-        if (!System.IO.Directory.Exists(directory))
+        string[] files;
+        try
         {
-            return [];
+            files = System.IO.Directory.GetFiles(directory, "*.json");
+        }
+        catch (DirectoryNotFoundException) when (!File.Exists(directory))
+        {
+            return new ReadResult([], []);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new ReadResult([], [new UnreadableJournal("batch-journal:directory", "The journal directory could not be read.")]);
         }
 
         var journals = new List<BatchJournal>();
-        foreach (string file in System.IO.Directory.EnumerateFiles(directory, "*.json").Order(StringComparer.Ordinal))
+        var unreadable = new List<UnreadableJournal>();
+        foreach (string file in files.Order(StringComparer.Ordinal))
         {
             try
             {
                 using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(file));
-                JsonElement root = document.RootElement;
-                string? Text(JsonElement element, string name) => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-                List<Entry> entries = root.TryGetProperty("records", out JsonElement records) && records.ValueKind == JsonValueKind.Array
-                    ? [.. records.EnumerateArray().Where(r => r.ValueKind == JsonValueKind.Object).Select(r => new Entry(Text(r, "id") ?? "?", Text(r, "type") ?? "?", Text(r, "path") ?? "?"))]
-                    : [];
-                journals.Add(new BatchJournal(file, Text(root, "batch") ?? Path.GetFileNameWithoutExtension(file), Text(root, "purpose") ?? "a batch of records", Text(root, "workOrder"), Text(root, "startedAt") ?? "?", entries));
+                BatchJournal? journal = Read(file, document.RootElement);
+                if (journal is null)
+                {
+                    unreadable.Add(new UnreadableJournal(LocalId(file), "The journal is incomplete or has an invalid structure."));
+                }
+                else
+                {
+                    journals.Add(journal);
+                }
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+            catch (JsonException)
             {
-                // A journal that cannot be read now is read again next time.
+                unreadable.Add(new UnreadableJournal(LocalId(file), "The journal contains malformed or truncated JSON."));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                unreadable.Add(new UnreadableJournal(LocalId(file), "The journal could not be read."));
             }
         }
 
-        return journals;
+        return new ReadResult(journals, unreadable);
     }
+
+    // A filename is untrusted local data. Preserve a generated ULID for locating a normal journal, otherwise identify the basename
+    // by its full digest. Neither a machine path, arbitrary filename text nor a parser/OS exception enters a finding.
+    private static string LocalId(string file)
+    {
+        string name = Path.GetFileNameWithoutExtension(file);
+        return "batch-journal:" + (Ulid.IsValid(name) ? name : "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFileName(file)))));
+    }
+
+    private static BatchJournal? Read(string file, JsonElement root)
+    {
+        if (!Object(root)) return null;
+        string? id = Text(root, "batch");
+        string? purpose = Text(root, "purpose");
+        string? startedAt = Text(root, "startedAt");
+        if (!Ulid.IsValid(id) || id != Path.GetFileNameWithoutExtension(file) || string.IsNullOrWhiteSpace(purpose)
+            || !RecordParser.IsTimestamp(startedAt) || !root.TryGetProperty("workOrder", out JsonElement workOrder)
+            || (workOrder.ValueKind != JsonValueKind.Null && (workOrder.ValueKind != JsonValueKind.String || !Ulid.IsValid(workOrder.GetString())))
+            || !root.TryGetProperty("records", out JsonElement records) || records.ValueKind != JsonValueKind.Array || records.GetArrayLength() == 0)
+        {
+            return null;
+        }
+
+        var entries = new List<Entry>();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonElement record in records.EnumerateArray())
+        {
+            if (!Object(record)) return null;
+            string? recordId = Text(record, "id");
+            string? type = Text(record, "type");
+            string? path = Text(record, "path");
+            if (recordId is null || !Ulid.IsValid(recordId) || !ids.Add(recordId) || type is null || RecordTypeRegistry.Find(type) is null || path is null)
+            {
+                return null;
+            }
+
+            string[] parts = path.Split('/');
+            if (parts.Length != 4 || parts[0] != "records" || parts[1] != type || parts[3] != recordId + ".json"
+                || !DateTime.TryParseExact(parts[2], "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+            {
+                return null;
+            }
+
+            entries.Add(new Entry(recordId, type, path));
+        }
+
+        return new BatchJournal(file, id!, purpose, workOrder.ValueKind == JsonValueKind.Null ? null : workOrder.GetString(), startedAt!, entries);
+
+        static bool Object(JsonElement value) => value.ValueKind == JsonValueKind.Object
+            && value.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() == value.EnumerateObject().Count();
+        static string? Text(JsonElement element, string name) => element.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    /// <summary>Usable journals and journals that must be recovered before any further record writes.</summary>
+    public sealed record ReadResult(IReadOnlyList<BatchJournal> Journals, IReadOnlyList<UnreadableJournal> Unreadable);
+
+    /// <summary>A stable local identifier and a safe reason, never a machine path or untrusted journal content.</summary>
+    public sealed record UnreadableJournal(string Id, string Reason);
 
     /// <summary>Removes the journal: its batch was stored whole, stored nothing, or no longer matters. It removes no record.</summary>
     public void Close()

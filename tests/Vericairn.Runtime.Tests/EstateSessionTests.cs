@@ -98,9 +98,9 @@ public class EstateSessionTests
                 using EstateSession other = EstateSession.Open(alias);
                 Assert.Equal(BatchJournal.Directory(session), BatchJournal.Directory(other));
                 BatchJournal journal = BatchJournal.Begin(session, "Local-only storage identity", null, [prepared.Operator]);
-                Assert.Equal(journal.Id, Assert.Single(BatchJournal.All(other)).Id);
+                Assert.Equal(journal.Id, Assert.Single(BatchJournal.All(other).Journals).Id);
                 journal.Close();
-                Assert.Empty(BatchJournal.All(session));
+                Assert.Empty(BatchJournal.All(session).Journals);
             }
             finally
             {

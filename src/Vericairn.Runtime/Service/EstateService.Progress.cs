@@ -59,7 +59,7 @@ public sealed partial class EstateService
                 return new WorkProgressResponse(null, Problem: Refuse(refusal!).Problem);
             }
 
-            FindingList findings = Invalid(LoadWith([candidate]), [candidate], stored: false);
+            FindingList findings = Invalid(LoadWith([candidate]), [candidate]);
             if (findings.HasErrors)
             {
                 return new WorkProgressResponse(null, Problem: new Problem("rejected", "The progress claim was not stored.", ToFindings(findings, "rejected").Findings));

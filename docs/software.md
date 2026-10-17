@@ -180,6 +180,36 @@ the provider its product declares or its request names, and a provider with no i
 runtime's machine is refused, never replaced by another (`vericairn release providers` lists what is
 available, with the settings each declares).
 
+## Record publication and local recovery (0.7.2)
+
+Single records and grouped records pass the same proposed-state validation, including content checks,
+before publication. A validation error or an I/O failure during judgment publishes nothing. Repository
+records are staged outside the published record tree and renamed into place only after judgment; a
+refused single record is never published and then deleted as validation rollback.
+
+One `EstateService` instance serializes its operations with its gate, held from judgment through commit.
+That gate does not coordinate separate service instances, even within one process, or separate processes.
+The CLI uses the daemon when it discovers a responding endpoint and otherwise embeds a runtime; discovery
+is not an exclusive writer lease. Keep runtime operations for a storage identity on one service while
+writing: route clients through one daemon, or stop it and run embedded commands sequentially. Even a read
+through a separate service can reconcile and remove a batch journal, so it must not overlap a batch write.
+Do not overlap daemon startup, embedded commands or repository synchronization. Neither the instance gate
+nor an atomic file rename makes the whole estate a multi-process transaction; grouped writes can still
+stop between records, and independent repository readers can observe a partly committed batch.
+
+`status`, `check` and `estate reconcile` report an unreadable, malformed or incomplete journal as
+`batch.unreadable`. Its location is a safe local identifier: `batch-journal:<ULID>` for a generated filename,
+or `batch-journal:sha256:<digest>` of another filename (including its extension). An unreadable journal
+directory is `batch-journal:directory`. No machine path or parser error is included. The runtime keeps the
+file and retries reading it on subsequent checks and reopen. Because its records cannot be identified
+reliably, **all further record writes through that runtime, single or grouped, are refused with
+`reconcile-required`**. Reads, local configuration and interim live progress notes remain available.
+Restore readable journal data, or have the operator inspect the stored records and preserve the damaged
+journal outside the local batches directory before retrying. A readable interrupted batch still reports
+`batch.incomplete` until its existing reconciliation conditions are met; it does not impose the unreadable
+journal's write hold. Journals belong to the clone's local storage identity, shared between roots only
+for the local-only profile.
+
 ## The git adapter
 
 Contract `vericairn.adapter.git/1` (`ISourceAdapter`): read-only observation of a repository. `IsRepository`

@@ -125,7 +125,7 @@ public sealed partial class EstateService
                     return StepProblem(goalId, "refused", $"Not recorded: {unsigned} Nothing was recorded.", key, route);
                 }
 
-                FindingList invalid = Invalid(LoadWith([routed]), [routed], stored: false);
+                FindingList invalid = Invalid(LoadWith([routed]), [routed]);
                 if (invalid.HasErrors)
                 {
                     var problem = new Problem("rejected", $"Not recorded: the estate would be invalid with routing's assignment of {key} ({invalid.Errors} errors). Nothing was recorded.", ToFindings(invalid, "rejected").Findings);
