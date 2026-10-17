@@ -38,7 +38,11 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         ]);
 
     /// <inheritdoc />
-    public PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory)
+    public PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory) =>
+        Prepare(clone, branch, baseReference, directory, Path.GetDirectoryName(Path.GetFullPath(directory))!);
+
+    /// <inheritdoc />
+    public PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(clone);
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
@@ -47,15 +51,37 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         {
             throw new ProviderRefusedException("The registered clone is not a git repository with this git.");
         }
+        common = Path.GetFullPath(common.TrimEnd('\r', '\n'));
 
         if (Git(clone, out _, "check-ref-format", "--branch", branch) != 0)
         {
             throw new ProviderRefusedException($"'{branch}' is not a branch name git accepts.");
         }
 
+        string root = CanonicalRoot(workspaceRoot);
+        if (Git(clone, out string inventory, "worktree", "list", "--porcelain", "-z") != 0)
+            throw new ProviderRefusedException("git could not inspect the branch's existing worktrees.");
+        string? existing = null;
+        foreach (string field in inventory.Split('\0'))
+        {
+            if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = Path.GetFullPath(field[9..]);
+            else if (field == "branch refs/heads/" + branch && existing is not null)
+            {
+                string physical = Directory.Exists(existing) ? HarnessWorkspace.Canonical(existing) : Path.GetFullPath(existing);
+                if (Same(physical, HarnessWorkspace.Canonical(clone)))
+                    throw new ProviderRefusedException($"Branch {branch} is checked out in the registered clone at '{existing}'; choose a work branch so the shared clone stays unchanged.");
+                if (!Within(root, physical))
+                    throw new ProviderRefusedException($"Branch {branch} already has a worktree at '{existing}', outside the selected workspace root. Preserve its work, then use git worktree remove with that path from the registered clone, or configure a root containing it.");
+                directory = physical;
+                break;
+            }
+        }
+
         if (Directory.Exists(directory))
         {
-            bool same = Git(directory, out string own, "rev-parse", "--path-format=absolute", "--git-common-dir") == 0 && Same(own, common);
+            directory = HarnessWorkspace.Canonical(directory);
+            if (!Within(root, directory)) throw new ProviderRefusedException("The workspace resolves outside the selected workspace root.");
+            bool same = Git(directory, out string own, "rev-parse", "--path-format=absolute", "--git-common-dir") == 0 && Same(Path.GetFullPath(own.TrimEnd('\r', '\n')), common);
             if (same && Git(directory, out string current, "symbolic-ref", "--short", "-q", "HEAD") == 0 && current.Trim() == branch)
             {
                 return new PreparedWorkspace(directory, branch, Head(directory), true);
@@ -65,6 +91,8 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
+        string parent = HarnessWorkspace.Canonical(Path.GetDirectoryName(directory)!);
+        if (!Within(root, parent) && !Same(root, parent)) throw new ProviderRefusedException("The workspace parent resolves outside the selected workspace root.");
         bool exists = Git(clone, out _, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch) == 0;
         string output;
         int code = exists
@@ -85,10 +113,31 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
     public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline,
         WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory), permitted);
 
+    private static bool Within(string root, string path)
+    {
+        string relative = Path.GetRelativePath(root, path);
+        return relative != "." && !Path.IsPathRooted(relative) && relative != ".."
+            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static string CanonicalRoot(string directory)
+    {
+        var missing = new Stack<string>();
+        var parent = new DirectoryInfo(Path.GetFullPath(directory));
+        while (!parent.Exists)
+        {
+            missing.Push(parent.Name);
+            parent = parent.Parent ?? throw new ProviderRefusedException("The workspace root could not be canonicalized.");
+        }
+        string path = HarnessWorkspace.Canonical(parent.FullName);
+        foreach (string name in missing) path = Path.Combine(path, name);
+        return path;
+    }
+
     private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
 
     private static bool Same(string a, string b) =>
-        string.Equals(Path.GetFullPath(a.Trim()).TrimEnd('/', '\\'), Path.GetFullPath(b.Trim()).TrimEnd('/', '\\'), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
 
     private static int Git(string directory, out string output, params string[] arguments)
     {

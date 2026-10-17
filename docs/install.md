@@ -1,8 +1,8 @@
 # Installing Vericairn
 
-This is the installation draft for 0.7.0's NuGet distribution, available after the operator publishes that
-release and its publication workflow succeeds. The `0.0.1-reserved` packages reserve names; they are not
-the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
+This installation draft describes the code being prepared for 0.7.1, after the 0.7.0 candidate was withdrawn.
+NuGet distribution becomes available after the operator publishes a release and its publication workflow succeeds.
+The `0.0.1-reserved` packages reserve names; they are not the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
 
 ## Command line from NuGet
 
@@ -23,7 +23,7 @@ To pin the tool in a repository instead, run these commands at its root (create 
 
 ```sh
 dotnet new tool-manifest
-dotnet tool install dotnet-vc --version 0.7.0
+dotnet tool install dotnet-vc --version <published-version>
 dotnet vc version
 dotnet vc doctor
 ```
@@ -100,6 +100,30 @@ before starting them. The CLI and daemon reread configuration for each run and a
 its choices needs no daemon restart. Missing or invalid configuration refuses before intent and never
 falls back to ambient harness choices. See the
 [software guide](software.md#explicit-execution-and-environment-admission-run-01-070) for precedence and admission.
+
+A home holding `.claude/settings.json` or `.codex/config.toml` is an ancestor of the default workspace,
+so the native configuration scan refuses runs there. Choose an absolute directory outside that home:
+
+```sh
+dotnet vc worker configure --workspaces <absolute-directory>
+dotnet vc worker configure
+```
+
+Omit `--launcher` for this setting. It applies to every launcher on the machine and is stored in the
+owner-only `worker/workspaces.json` under the Vericairn home. The root must be outside Git repositories
+(including bare repositories) and estates, and cannot itself be a symbolic link or reparse point. Linked
+ancestors are resolved and the canonical root is stored. The canonical root and its ancestors cannot hold
+`.claude`, `.codex`, `.agents` or `.mcp.json`; refusal names what it found.
+A new root is created owner-only. Unknown fields and duplicate keys refuse; an invalid file never falls
+back to the default. The CLI and daemon reread it for each run, without a restart, and recheck before dispatch.
+
+New workspaces go under `<root>/<estate>/<branch-slug>`; slashes in the branch become hyphens.
+With no root configured, the location remains `<VericairnHome>/estates/<estate>/workspaces/<branch-slug>`.
+An existing worktree for the branch is reused anywhere under the selected root. A worktree elsewhere is
+refused with its location: preserve its work, then use `git worktree remove` with that path from the
+registered clone, or select a root containing it. Changing the root does not move a worktree.
+Workspace paths stay local and never enter records. Moving workspaces changes their ancestors; separately
+discovered user skills and managed configuration still face the same native checks.
 
 The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
 Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

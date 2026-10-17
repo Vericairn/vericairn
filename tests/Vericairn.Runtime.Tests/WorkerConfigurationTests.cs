@@ -83,6 +83,229 @@ public sealed class WorkerConfigurationTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(home, "local")));
     }
 
+    [Fact]
+    public void WorkspaceRootsAreMachineLocalOwnerOnlyAndReadAfresh()
+    {
+        var store = new WorkerConfigurationStore(home);
+        Assert.Null(store.ReadWorkspaceRoot());
+        store.Write(new CodexLauncher(), new("model-a", "high"));
+        string first = Path.Combine(home, "runs");
+        store.WriteWorkspaceRoot(first);
+        Assert.Equal(HarnessWorkspace.Canonical(first), store.ReadWorkspaceRoot());
+        AssertOwnerOnly(Path.Combine(home, "worker", "workspaces.json"));
+        if (!OperatingSystem.IsWindows())
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(first));
+        else
+        {
+            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+            foreach (FileSystemAccessRule rule in new DirectoryInfo(first).GetAccessControl().GetAccessRules(true, true, typeof(SecurityIdentifier)))
+                if (rule.AccessControlType == AccessControlType.Allow) Assert.Equal(identity.User, rule.IdentityReference);
+        }
+        string second = Path.Combine(home, "other-runs");
+        new WorkerConfigurationStore(home).WriteWorkspaceRoot(second);
+        Assert.Equal(HarnessWorkspace.Canonical(second), store.ReadWorkspaceRoot());
+        Assert.Equal("model-a", store.Read(new CodexLauncher())!.Model);
+        Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot("relative"));
+        Assert.Equal(HarnessWorkspace.Canonical(second), store.ReadWorkspaceRoot());
+        Directory.CreateDirectory(Path.Combine(second, ".git"));
+        Assert.Throws<ProviderRefusedException>(() => store.ReadWorkspaceRoot());
+    }
+
+    [Theory]
+    [InlineData(".git")]
+    [InlineData("estate/manifest.json")]
+    public void WorkspaceRootsCannotBeInsideRepositoriesOrEstates(string marker)
+    {
+        string parent = Path.Combine(home, "source");
+        string path = Path.Combine(parent, marker);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "marker");
+        var store = new WorkerConfigurationStore(home);
+        Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(Path.Combine(parent, "runs")));
+        Assert.False(Directory.Exists(Path.Combine(parent, "runs")));
+        Assert.Null(store.ReadWorkspaceRoot());
+    }
+
+    [Fact]
+    public void BareRepositoriesAreNotMachineLocalConfigurationOrWorkspaceRoots()
+    {
+        string repository = Path.Combine(home, "bare");
+        Directory.CreateDirectory(repository);
+        RunEstate.Git(repository, "init", "--bare", "-q");
+        Assert.Throws<ProviderRefusedException>(() => new WorkerConfigurationStore(home).WriteWorkspaceRoot(Path.Combine(repository, "runs")));
+        Assert.Throws<ProviderRefusedException>(() => new WorkerConfigurationStore(Path.Combine(repository, "local")).WriteWorkspaceRoot(Path.Combine(home, "runs")));
+    }
+
+    [Theory]
+    [InlineData(".claude/settings.json")]
+    [InlineData(".codex/config.toml")]
+    [InlineData(".mcp.json")]
+    [InlineData(".agents/skills/extra/SKILL.md")]
+    public void WorkspaceRootsRefuseTheirOwnAndAncestorHarnessConfiguration(string relative)
+    {
+        string parent = Path.Combine(home, "user");
+        string path = Path.Combine(parent, relative);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "unqualified");
+        var store = new WorkerConfigurationStore(home);
+        foreach (string root in new[] { parent, Path.Combine(parent, "runs") })
+        {
+            string message = Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(root)).Message;
+            Assert.Contains(relative.Split('/')[0], message, StringComparison.Ordinal);
+            Assert.Contains("vericairn worker configure --workspaces", message, StringComparison.Ordinal);
+        }
+        Assert.Null(store.ReadWorkspaceRoot());
+    }
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("null")]
+    [InlineData("{")]
+    [InlineData("{\"root\":null}")]
+    [InlineData("{\"root\":\"relative\"}")]
+    [InlineData("{\"root\":\"relative\",\"command\":\"extra\"}")]
+    public void InvalidWorkspaceFilesNeverFallBackToTheDefault(string json)
+    {
+        Directory.CreateDirectory(Path.Combine(home, "worker"));
+        File.WriteAllText(Path.Combine(home, "worker", "workspaces.json"), json);
+        Assert.Throws<ProviderRefusedException>(() => new WorkerConfigurationStore(home).ReadWorkspaceRoot());
+    }
+
+    [Fact]
+    public void WorkspaceFilesRejectUnknownAndDuplicateFieldsEvenWithAValidRoot()
+    {
+        var store = new WorkerConfigurationStore(home);
+        store.WriteWorkspaceRoot(Path.Combine(home, "runs"));
+        string path = Path.Combine(home, "worker", "workspaces.json");
+        string root = JsonSerializer.Serialize(Path.Combine(home, "runs"));
+        foreach (string content in new[] { "{\"root\":" + root + ",\"tools\":[]}", "{\"root\":" + root + ",\"root\":" + root + "}" })
+        {
+            File.WriteAllText(path, content);
+            Assert.Throws<ProviderRefusedException>(() => store.ReadWorkspaceRoot());
+        }
+    }
+
+    [Fact]
+    public void WorkspaceConfigurationAndRootsCannotUseLinks()
+    {
+        if (OperatingSystem.IsWindows()) return; // Link creation needs privileges not assumed by the test runner.
+        Directory.CreateDirectory(Path.Combine(home, "target"));
+        string alias = Path.Combine(home, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(home, "target"));
+        var store = new WorkerConfigurationStore(home);
+        Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(alias));
+        Directory.CreateDirectory(Path.Combine(home, "worker"));
+        File.CreateSymbolicLink(Path.Combine(home, "worker", "workspaces.json"), Path.Combine(home, "target", "elsewhere.json"));
+        Assert.Throws<ProviderRefusedException>(() => store.ReadWorkspaceRoot());
+        Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(Path.Combine(home, "runs")));
+        Assert.False(File.Exists(Path.Combine(home, "target", "elsewhere.json")));
+    }
+
+    [Fact]
+    public void ALinkedAncestorOfTheHomeAllowsAbsentAndConfiguredWorkerSettings()
+    {
+        if (OperatingSystem.IsWindows()) return; // Link creation needs privileges not assumed by the test runner.
+        string physical = Path.Combine(home, "physical");
+        Directory.CreateDirectory(physical);
+        string alias = Path.Combine(home, "alias");
+        Directory.CreateSymbolicLink(alias, physical);
+        var store = new WorkerConfigurationStore(Path.Combine(alias, "local"));
+        var launcher = new CodexLauncher();
+        Assert.Null(store.Read(launcher));
+        Assert.Null(store.ReadWorkspaceRoot());
+        store.Write(launcher, new("model-a", "high"));
+        Assert.Equal("model-a", store.Read(launcher)!.Model);
+        string root = Path.Combine(home, "runs");
+        store.WriteWorkspaceRoot(root);
+        Assert.Equal(HarnessWorkspace.Canonical(root), store.ReadWorkspaceRoot());
+        AssertOwnerOnly(Path.Combine(physical, "local", "worker", "codex.json"));
+        AssertOwnerOnly(Path.Combine(physical, "local", "worker", "workspaces.json"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AWorkspaceRootWithALinkedAncestorIsStoredAndReadAsItsCanonicalPath(bool exists)
+    {
+        if (OperatingSystem.IsWindows()) return; // Link creation needs privileges not assumed by the test runner.
+        string physical = Path.Combine(home, "physical");
+        Directory.CreateDirectory(physical);
+        string alias = Path.Combine(home, "alias");
+        Directory.CreateSymbolicLink(alias, physical);
+        string root = Path.Combine(alias, "nested", "runs");
+        if (exists) Directory.CreateDirectory(root);
+        var store = new WorkerConfigurationStore(home);
+        store.WriteWorkspaceRoot(root);
+        string canonical = HarnessWorkspace.Canonical(Path.Combine(physical, "nested", "runs"));
+        Assert.Equal(canonical, store.ReadWorkspaceRoot());
+        using JsonDocument configuration = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(home, "worker", "workspaces.json")));
+        Assert.Equal(canonical, configuration.RootElement.GetProperty("root").GetString());
+        if (!exists)
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(canonical));
+
+        // Once stored, moving the alias cannot redirect a run to another root.
+        Directory.Delete(alias);
+        string other = Path.Combine(home, "other");
+        Directory.CreateDirectory(other);
+        Directory.CreateSymbolicLink(alias, other);
+        Assert.Equal(canonical, store.ReadWorkspaceRoot());
+        Assert.False(Directory.Exists(Path.Combine(other, "nested")));
+    }
+
+    [Theory]
+    [InlineData(".git")]
+    [InlineData("estate/manifest.json")]
+    [InlineData(".claude/settings.json")]
+    [InlineData(".codex/config.toml")]
+    [InlineData(".mcp.json")]
+    [InlineData(".agents/skills/extra/SKILL.md")]
+    public void LinkedAncestorsCannotHideRepositoryEstateOrHarnessConfiguration(string marker)
+    {
+        if (OperatingSystem.IsWindows()) return; // Link creation needs privileges not assumed by the test runner.
+        string physical = Path.Combine(home, "physical");
+        Directory.CreateDirectory(Path.Combine(physical, "nested"));
+        string path = Path.Combine(physical, marker);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "marker");
+        string alias = Path.Combine(home, "alias");
+        Directory.CreateSymbolicLink(alias, Path.Combine(physical, "nested"));
+        string root = Path.Combine(alias, "runs");
+        var store = new WorkerConfigurationStore(home);
+        string refusal = Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(root)).Message;
+        if (marker is ".git" or "estate/manifest.json")
+        {
+            Assert.Contains("outside repositories and estates", refusal, StringComparison.Ordinal);
+            var hidden = new WorkerConfigurationStore(Path.Combine(alias, "local"));
+            Assert.Contains("outside repositories and estates", Assert.Throws<ProviderRefusedException>(() => hidden.ReadWorkspaceRoot()).Message, StringComparison.Ordinal);
+            Assert.Contains("outside repositories and estates", Assert.Throws<ProviderRefusedException>(() => hidden.Write(new CodexLauncher(), new("model-a", "high"))).Message, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Contains(Path.Combine(HarnessWorkspace.Canonical(physical), marker.Split('/')[0]), refusal, StringComparison.Ordinal);
+        }
+        Assert.False(Directory.Exists(root));
+        Assert.Null(store.ReadWorkspaceRoot());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TheHomeAndWorkerDirectoryThemselvesStillRefuseLinks(bool worker)
+    {
+        if (OperatingSystem.IsWindows()) return; // Link creation needs privileges not assumed by the test runner.
+        string target = Path.Combine(home, "target");
+        Directory.CreateDirectory(target);
+        string local = Path.Combine(home, "local");
+        if (worker) Directory.CreateDirectory(local);
+        Directory.CreateSymbolicLink(worker ? Path.Combine(local, "worker") : local, target);
+        var store = new WorkerConfigurationStore(local);
+        Assert.Throws<ProviderRefusedException>(() => store.ReadWorkspaceRoot());
+        Assert.Throws<ProviderRefusedException>(() => store.WriteWorkspaceRoot(Path.Combine(home, "runs")));
+        Assert.Throws<ProviderRefusedException>(() => store.Read(new CodexLauncher()));
+        Assert.Throws<ProviderRefusedException>(() => store.Write(new CodexLauncher(), new("model-a", "high")));
+        Assert.Empty(Directory.EnumerateFileSystemEntries(target));
+    }
+
     private static void AssertOwnerOnly(string path)
     {
         if (OperatingSystem.IsWindows())

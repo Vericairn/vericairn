@@ -7,20 +7,22 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The 0.7.0 code adds hand-over and resume from retained records, worker observations of commands, token
-rates and repeated calls, personal communication settings and delegation, measured context packages with
+The code being prepared for 0.7.1 includes hand-over and resume from retained records, worker observations of
+commands, token rates and repeated calls, personal communication settings and delegation, measured context packages with
 explicit withheld lists and pinned retrieval, and explicit model, effort and environment admission for each
 agent run. Human-authorized harness requalification pins one exact version and its probe digests. Workbench
 adds communication settings and hand-over/resume views. The [0.7.0 documentation set](docs/releases/0.7.0/README.md)
-describes these features, the COMMS-02 qualification evidence and the limits below.
+describes these features, the COMMS-02 qualification evidence and the limits below; that candidate was withdrawn.
 
 The last published release is [0.6.1](https://github.com/Vericairn/vericairn/releases/tag/v0.6.1), published on
-October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. Release 0.7.0 also carries
+October 16, 2026; its [frozen set](docs/releases/0.6.1/README.md) stays unchanged. The 0.7.0 candidate also carries
 FIX-09's bounded loopback authentication and recoverable notes window, and FIX-10's deterministic permitted-path
 matching and independent audit checks. FIX-11 adds machine-local worker configuration, restricts harness
 qualification to the runtime's own machine and completes the generated CLI option reference.
-NuGet installation goes live only after the operator publishes 0.7.0
-and its Trusted Publishing workflow succeeds; this documentation does not claim those packages are already available.
+FIX-12 adds a machine-local workspace root, enforces hand-over for explicit worker runs, and keeps validated
+public keys and signatures out of credential-pattern matching. NuGet installation goes live only after the operator
+publishes a release and its Trusted Publishing workflow succeeds; this documentation does not claim those
+packages are already available.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
 needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,
@@ -29,6 +31,10 @@ configure that machine's worker with `vericairn worker configure --launcher code
 options narrow the permitted choices and never widen the qualified harness inventory. Configuration is per
 machine and is never recorded in the estate. Its Vericairn home must be outside every Git repository and estate;
 if your home directory is a repository, set `VERICAIRN_HOME` elsewhere for the CLI and daemon before starting them.
+If your home holds `.claude` or `.codex` settings, move workspaces outside it with
+`vericairn worker configure --workspaces <absolute-directory>`; `vericairn worker configure` shows the root.
+The root applies to every launcher, must be outside repositories, estates and configured ancestors, and is
+reread by the CLI and daemon for each run. New roots are owner-only. The harness configuration scan remains strict.
 Harness qualification is machine-local too: paired local-network devices are refused. The
 [software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes the setup and
 admission checks. The efficiency Adapter
@@ -131,7 +137,9 @@ Commands written as `vericairn ...` in the archive documentation take the same a
   smallest form of Community's conductor, for an operator, the goal's sponsor when a person, or a principal holding
   `local-engineering`: an agent's run starts through the worker, its assignment recorded only with the run's intent,
   a person's step is assigned and asked, and a step nobody is available for is asked of the sponsor; `vericairn work
-  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent. Multi-step planning and scheduling are outside this Community implementation.
+  takeover` hands a step an agent holds over to a person, a hand-over only a person records, never an agent.
+  Explicit and routed runs on the old assignment are then refused before intent, without a charge. Multi-step
+  planning and scheduling are outside this Community implementation.
   `vericairn devices pair` issues a short-lived pairing
   code under an administrator's authority, `vericairn connections add` pairs another machine with the runtime over
   the local network, and `vericairn connections list` shows each connection's state; a revoked device is refused at

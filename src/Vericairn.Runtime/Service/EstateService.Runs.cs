@@ -156,9 +156,13 @@ public sealed partial class EstateService
         PreparedWorkspace workspace;
         WorkspaceSnapshot baseline;
         string brief;
+        string? configuredRoot;
         try
         {
-            workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces", Slug(plan.Branch)));
+            configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
+            string root = configuredRoot ?? Path.Combine(VericairnHome.Path(), "estates", plan.Estate, "workspaces");
+            string path = configuredRoot is null ? Path.Combine(root, Slug(plan.Branch)) : Path.Combine(root, plan.Estate, Slug(plan.Branch));
+            workspace = workspaces.Prepare(plan.ClonePath, plan.Branch, request.Base, path, root);
             brief = WorkspaceMetadata.Write(workspace.Path, plan.Brief);
             baseline = workspaces.Capture(workspace);
         }
@@ -232,12 +236,13 @@ public sealed partial class EstateService
         Excepted? excepted = null;
         lock (gate)
         {
+            if (WorkspaceRootProblem(configuredRoot) is string rootProblem)
+                return RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded.");
             EstateModel model = LoadWith(carried);
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
-            if (routed is not null && WorkView.OrderOfAssignment(model, routed.Envelope) is RecordEnvelope routedOrder
-                && Routing.Assignments(model, model.Latest(routedOrder)).FirstOrDefault(a => a.Id != routed.Envelope.Id) is RecordEnvelope meanwhile)
+            if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
-                return RunProblem(pending, "not-started", "refused", $"Work order {plan.Key} was assigned meanwhile, by assignment {meanwhile.Id}; its step goes on from that assignment. Nothing was recorded.");
+                return RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded.");
             }
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -368,6 +373,7 @@ public sealed partial class EstateService
             // or expires between this judgment and the start: one that lapsed since the intent, or a key that arrived, launches nothing.
             lock (gate)
             {
+                if (WorkspaceRootProblem(configuredRoot) is string rootProblem) throw new ProviderRefusedException(rootProblem);
                 EstateModel dispatchModel = session.Load();
                 RecordEnvelope? dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
                 if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
@@ -376,6 +382,7 @@ public sealed partial class EstateService
                 }
                 RunPreflight dispatchPreflight = launcher.Probe(launch);
                 // Probes start subprocesses and can take time. Judge authority again from the records after they finish.
+                if (WorkspaceRootProblem(configuredRoot) is string changedRoot) throw new ProviderRefusedException(changedRoot);
                 dispatchModel = session.Load();
                 dispatchGoal = AgentRuns.GoalAt(dispatchModel, plan.Goal);
                 if (dispatchGoal is null || !SelectionStillCurrent(dispatchModel, dispatchGoal, plan, configuration, launcher, request))
@@ -680,6 +687,29 @@ public sealed partial class EstateService
         && DateTimeOffset.TryParseExact(beat, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset last)
         && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
+    private static string? WorkspaceRootProblem(string? expected)
+    {
+        try
+        {
+            return new WorkerConfigurationStore().ReadWorkspaceRoot() == expected ? null
+                : "The workspace root changed during preparation; start a newly prepared run. No harness was dispatched.";
+        }
+        catch (ProviderRefusedException exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    private static string? AssignmentRefusal(EstateModel model, RecordEnvelope assignment, string key)
+    {
+        RecordEnvelope current = model.Latest(assignment);
+        IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
+            ? Routing.Assignments(model, model.Latest(order)) : [];
+        return holders.Count > 0 && holders[^1].Id != current.Id
+            ? $"Work order {key} is held by assignment {holders[^1].Id}; its step goes on from that assignment."
+            : null;
+    }
+
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
     private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, IReadOnlyList<RecordFile> files, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
     {
@@ -696,6 +726,11 @@ public sealed partial class EstateService
         }
 
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
+        if (AssignmentRefusal(model, assignment, key) is string assignmentRefusal)
+        {
+            return (null, assignmentRefusal, null);
+        }
+
         string? contributor = EstateModel.BodyString(assignment, "contributor");
         if (request.Agent != contributor)
         {

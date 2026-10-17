@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 
 namespace Vericairn.Records.Estate;
 
@@ -168,6 +169,8 @@ public static partial class EstateChecks
             findings.Warning("layout.line-endings", relative, "Use LF line endings so files are byte-identical on every platform.");
         }
 
+        bool record = relative.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal) && relative.EndsWith(".json", StringComparison.Ordinal);
+        string[] credentialLines = (record ? WithoutSigningValues(bytes, text) : text).Split('\n');
         int lineNumber = 0;
         foreach (string line in text.Split('\n'))
         {
@@ -177,13 +180,13 @@ public static partial class EstateChecks
                 findings.Error("portability.absolute-path", $"{relative}:{lineNumber}", "Machine-specific absolute path. Use repository-relative paths or placeholders.");
             }
 
-            if (SecretPattern().IsMatch(line))
+            if (SecretPattern().IsMatch(credentialLines[lineNumber - 1]))
             {
                 findings.Error("secrets.pattern", $"{relative}:{lineNumber}", "Looks like a credential. Credentials never enter the estate; reference them by purpose instead.");
             }
         }
 
-        if (relative.StartsWith(EstateLayout.RecordsDirectory + "/", StringComparison.Ordinal) && relative.EndsWith(".json", StringComparison.Ordinal))
+        if (record)
         {
             ScanRecordKeys(bytes, relative, findings);
             ScanRecordProse(bytes, relative, findings);
@@ -191,6 +194,46 @@ public static partial class EstateChecks
         else if (relative.EndsWith(".md", StringComparison.Ordinal) && (relative.StartsWith(EstateLayout.DocsDirectory + "/", StringComparison.Ordinal) || relative.StartsWith(EstateLayout.DesignDirectory + "/", StringComparison.Ordinal)))
         {
             ScanProse(text, relative, findings);
+        }
+    }
+
+    // Mask only exact, format-validated encoding values, preserving every other byte and every line number.
+    // A property with the same name elsewhere, or an invalid encoding in the right place, is still scanned.
+    private static string WithoutSigningValues(byte[] bytes, string original)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            JsonElement root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object) return original;
+            bool device = root.TryGetProperty("type", out JsonElement type) && type.ValueKind == JsonValueKind.String && type.GetString() == "device";
+            bool signatures = root.TryGetProperty("signatures", out JsonElement entries) && entries.ValueKind == JsonValueKind.Array;
+            byte[]? masked = null;
+            string? top = null;
+            var reader = new Utf8JsonReader(bytes);
+            while (reader.Read())
+            {
+                if (reader.TokenType != JsonTokenType.PropertyName) continue;
+                if (reader.CurrentDepth == 1)
+                {
+                    top = reader.GetString();
+                    continue;
+                }
+
+                bool key = device && top == "body" && reader.CurrentDepth == 2 && reader.ValueTextEquals("publicKey");
+                bool signature = signatures && top == "signatures" && reader.CurrentDepth == 3 && reader.ValueTextEquals("signature");
+                if ((!key && !signature) || !reader.Read() || reader.TokenType != JsonTokenType.String) continue;
+                string? value = reader.GetString();
+                if (!(key ? RecordSigning.IsPublicKey(value) : RecordSigning.IsSignature(value))) continue;
+                masked ??= (byte[])bytes.Clone();
+                masked.AsSpan((int)reader.TokenStartIndex, (int)(reader.BytesConsumed - reader.TokenStartIndex)).Fill((byte)' ');
+            }
+            return masked is null ? original : Encoding.UTF8.GetString(masked);
+        }
+        catch (JsonException)
+        {
+            // The loader reports malformed records; their complete raw text still gets the credential scan.
+            return original;
         }
     }
 

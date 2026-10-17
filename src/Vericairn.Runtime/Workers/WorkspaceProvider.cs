@@ -43,6 +43,9 @@ public interface IWorkspaceProvider
     /// </summary>
     PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory);
 
+    /// <summary>Prepares at the requested directory, or reuses this branch's existing worktree only within the selected workspace root.</summary>
+    PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot) => Prepare(clone, branch, baseReference, directory);
+
     /// <summary>Captures the workspace before launch, including ignored files, for the settlement's scope audit.</summary>
     WorkspaceSnapshot Capture(PreparedWorkspace workspace) => new(new Dictionary<string, string>(StringComparer.Ordinal), "This workspace provider supplies no file inventory.");
 

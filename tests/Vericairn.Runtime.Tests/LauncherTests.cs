@@ -310,8 +310,10 @@ public class LauncherTests
         Assert.False(WorkerEnvironment.IsCredential("CLAUDE_CONFIG_DIR"));
     }
 
-    [Fact]
-    public void AGitWorktreeIsTheWorkspaceAndTheSharedCloneNeverChanges()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AGitWorktreeIsTheWorkspaceAndTheSharedCloneNeverChanges(bool alternateSpelling)
     {
         string root = Path.Combine(Path.GetTempPath(), "vericairn-worktree-" + Ulid.NewUlid().Value);
         string clone = Path.Combine(root, "clone");
@@ -340,6 +342,23 @@ public class LauncherTests
             Assert.Equal("main", Git(clone, "symbolic-ref", "--short", "HEAD"));
             Assert.Equal(head, Git(clone, "rev-parse", "HEAD"));
             Assert.Empty(Git(clone, "status", "--porcelain"));
+
+            string relocated = Path.Combine(root, "workspaces", "relocated");
+            Git(clone, "worktree", "move", first.Path, relocated);
+            string canonical = Path.GetFullPath(HarnessWorkspace.Canonical(relocated));
+            if (alternateSpelling)
+            {
+                // Git preserves this valid spelling in its inventory. It exercises normalization on Unix as well as Windows.
+                string metadata = Path.GetFullPath(Git(relocated, "rev-parse", "--absolute-git-dir"));
+                File.WriteAllText(Path.Combine(metadata, "gitdir"), canonical.Replace('\\', '/') + "/./.git\n");
+            }
+            PreparedWorkspace reused = workspaces.Prepare(clone, "work/w-1", null, first.Path, Path.Combine(root, "workspaces"));
+            Assert.True(reused.Reused);
+            Assert.Equal(canonical, Path.GetFullPath(reused.Path));
+            Assert.True(File.Exists(Path.Combine(reused.Path, "widget.txt")));
+            string refused = Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-1", null, Path.Combine(root, "other", "work-w-1"), Path.Combine(root, "other"))).Message;
+            Assert.Contains($"at '{canonical}'", refused, StringComparison.Ordinal);
+            Assert.Contains("git worktree remove", refused, StringComparison.Ordinal);
 
             string occupied = Path.Combine(root, "occupied");
             Directory.CreateDirectory(occupied);

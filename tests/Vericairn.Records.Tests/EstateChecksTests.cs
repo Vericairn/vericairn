@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
@@ -9,6 +13,52 @@ namespace Vericairn.Records.Tests;
 
 public class EstateChecksTests
 {
+    // A P-256 point constructed to put credential-shaped text in its X coordinate; no private key is held.
+    private static readonly string CredentialShapedPublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE-sk-" + new string('A', 38) + "DZrnyCellqU8jjRt1fHctacx_j8F9Xxky9PbD1b4SpNg";
+    private static readonly string CredentialShapedSignature = "-sk-" + new string('A', 82);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OnlyValidatedRecordKeyAndSignatureValuesAreExemptFromCredentialScanning(bool indented)
+    {
+        Assert.True(RecordSigning.IsPublicKey(CredentialShapedPublicKey));
+        Assert.True(RecordSigning.IsSignature(CredentialShapedSignature));
+        var record = new JsonObject
+        {
+            ["type"] = "device",
+            ["body"] = new JsonObject { ["publicKey"] = CredentialShapedPublicKey },
+            ["signatures"] = new JsonArray(new JsonObject { ["signature"] = CredentialShapedSignature }),
+        };
+        byte[] Bytes() => Encoding.UTF8.GetBytes(record.ToJsonString(new JsonSerializerOptions { WriteIndented = indented }));
+        const string Location = "records/device/2026-10/test.json";
+        Assert.DoesNotContain(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+
+        // Even on the same line, ordinary values and similarly named fields remain scanned.
+        foreach (string value in new[] { CredentialShapedPublicKey, CredentialShapedSignature })
+        {
+            foreach (JsonObject target in new[] { record, record["body"]!.AsObject(), record["signatures"]![0]!.AsObject() })
+            {
+                target["note"] = value;
+                Assert.Contains(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+                target.Remove("note");
+            }
+            record["body"]!["nested"] = new JsonObject { ["publicKey"] = value, ["signature"] = value };
+            Assert.Contains(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+            record["body"]!.AsObject().Remove("nested");
+        }
+
+        Assert.Contains(EstateChecks.Content("docs/example.json", Bytes()), f => f.Code == "secrets.pattern");
+        record["type"] = "work-order";
+        Assert.Contains(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+        record["type"] = "device";
+        record["body"]!["publicKey"] = CredentialShapedSignature;
+        Assert.Contains(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+        record["body"]!["publicKey"] = CredentialShapedPublicKey;
+        record["signatures"]![0]!["signature"] = CredentialShapedPublicKey;
+        Assert.Contains(EstateChecks.Content(Location, Bytes()), f => f.Code == "secrets.pattern");
+    }
+
     [Fact]
     public void CleanEstatePassesChecks()
     {
