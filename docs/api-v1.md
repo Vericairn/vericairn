@@ -808,7 +808,10 @@ reads and add no write-ledger entry.
 
 `GET /v1/progress` adds `json.agentClaims`, the latest claim per attempt: `attempt`, `by`, `phase`, `note`, `at`, `completed`, and optional `record`. Its text and Workbench show the same labelled claims. Interim notes are local live state and are not worker observations; recorded completions provide the fallback on another machine. These additions do not change any existing field.
 
-`GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields.
+`GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields. FIX-18 adds the `attempt-missing` warning at settlement
+when the agent recorded no new attempt on its exact assignment during the run. It is also retained in
+operation evidence and shown by CLI settlement and status attention, without changing `observed-success`
+or CLI exit-code semantics.
 
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
 
@@ -967,7 +970,9 @@ API v1 adds optional fields to `RunStartRequest` and to an agent's `GoalStepRequ
 `dataBoundaries`, `providerDefault` and `closedEnvironment` capabilities. It is absent for other provider
 kinds. `RunRow.execution` exposes the immutable intent snapshot and `RunRow.executionObserved` exposes
 settled actual reports, discrepancies and unknowns. Both are absent on older runs with no such record;
-absence is not an inferred choice. The OpenAPI document includes these additive properties.
+absence is not an inferred choice. FIX-18 reads Codex's run-owned rollout after exit to observe model
+and effort; missing or unreadable rollout facts stay unknown, and mismatches remain in `discrepancies`.
+The OpenAPI document includes these additive properties.
 
 Selection precedence is launcher configuration, roster and its role, goal and its role, assignment, then
 explicit run choices. Every contributing record id and exact hash is retained, together with overwritten
@@ -1009,13 +1014,14 @@ local run custody; no context objects are added to the estate. The CLI accepts t
 The inventory uses portable ids and hashes, environment-variable names, dependency ids and logical routes;
 secret values and machine paths are never returned in these fields. Settlement adds reports of actual
 model/revision, effort, provider, destination, harness version, tools and complete inventory hash when the
-harness supplies them. Missing fields stay unknown. Differences are preserved and signal WATCH-01 through
+harness supplies them. Missing fields stay unknown. Differences reported while the harness runs are preserved and signal WATCH-01 through
 `execution`; a tool invocation outside the admitted inventory signals `tool-inventory`. Both are critical
 and use the existing attention/stop behavior. No original command audit is filtered.
 
 Codex and Claude Code qualify only for the exact versions and isolation evidence documented in the
 [software guide](software.md#native-inventory-qualification-run-02-and-run-03). A different exact version requires a current human qualification with matching local probes;
-the generic launcher and versions without such admission refuse. These contracts are tested with stand-ins; no live coding agent is launched.
+the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
+records the builder's first live Codex observation and the required rerun.
 The efficiency Adapter is unsupported (EFF-01, 0.8.0); only `disabled` is allowed. Remote is not built.
 These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).

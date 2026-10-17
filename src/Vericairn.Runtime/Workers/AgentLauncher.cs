@@ -104,6 +104,9 @@ public interface IAgentLauncher
     /// <summary>Reported execution facts, without inferring them from usage, prose or the requested values.</summary>
     HarnessExecution? ReadExecution(string line) => null;
 
+    /// <summary>Execution facts from this run's local artifacts after the whole harness boundary exits. Missing or unreadable artifacts report no facts; never infer the requested values.</summary>
+    IReadOnlyList<HarnessExecution> ReadExecutionArtifacts(string runDirectory) => [];
+
     /// <summary>The command line that starts the harness on the assignment: the executable first, then its arguments.</summary>
     IReadOnlyList<string> Command(LaunchContext context);
 

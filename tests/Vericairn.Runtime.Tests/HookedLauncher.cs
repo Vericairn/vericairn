@@ -27,6 +27,7 @@ internal sealed class HookedLauncher(IAgentLauncher inner, Func<string?>? verify
         return result;
     }
     public HarnessExecution? ReadExecution(string line) => inner.ReadExecution(line);
+    public IReadOnlyList<HarnessExecution> ReadExecutionArtifacts(string runDirectory) => inner.ReadExecutionArtifacts(runDirectory);
 
     public ProviderDescriptor Descriptor => inner.Descriptor;
 

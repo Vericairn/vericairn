@@ -116,14 +116,14 @@ public class GoalStepTests
         Assert.Contains("the estate's roster names no principal for the planner role", EstateModel.BodyString(sponsorAsk, "question"), StringComparison.Ordinal);
         Assert.StartsWith("Name a principal for the planner role in the roster", EstateModel.BodyString(sponsorAsk, "recommendation"), StringComparison.Ordinal);
 
-        // Every eligible step is held now; nothing is dispatched, and both asks wait on the operator.
+        // Every eligible step is held now; both routing asks and the two missing-attempt warnings wait on the operator.
         GoalStepResponse fifth = run.Service.GoalStep(run.Goal, new GoalStepRequest(op));
         Assert.True(fifth.Ok);
         Assert.Equal("none", fifth.Outcome);
         Assert.Contains("W-1 is review", fifth.Message, StringComparison.Ordinal);
         Assert.Contains("W-3 is assigned", fifth.Message, StringComparison.Ordinal);
         Assert.Contains("W-4 is asked", fifth.Message, StringComparison.Ordinal);
-        Assert.Equal(2, Assert.Single(run.Service.Asks(op).Json.GetProperty("principals").EnumerateArray()).GetProperty("waiting").GetInt32());
+        Assert.Equal(4, Assert.Single(run.Service.Asks(op).Json.GetProperty("principals").EnumerateArray()).GetProperty("waiting").GetInt32());
         Assert.Empty(run.Service.Records("acceptance"));
         Assert.Equal(0, run.Service.Check().Errors);
     }

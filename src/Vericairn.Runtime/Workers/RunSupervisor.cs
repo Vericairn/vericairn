@@ -301,6 +301,12 @@ public sealed class RunSupervisor
 
         lock (gate)
         {
+            // The boundary has exited. Artifact discrepancies remain observations, not a new stop of an exited process.
+            foreach (HarnessExecution report in launcher.ReadExecutionArtifacts(directory.Path))
+            {
+                _ = watch.Reported(report);
+            }
+            state.Execution = watch.ExecutionObserved;
             for (int retry = 0; retry < 3; retry++)
             {
                 PublishSignals();

@@ -216,7 +216,7 @@ public class WorkerTests
         Assert.NotNull(settled.Stop!.ContainedAt);
         AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
         Assert.Equal(["not-started", "dispatched", "known-failure"], recorded.Revisions.Select(r => EstateModel.BodyString(r, "status")));
-        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(2, run.Service.Records("ask").Count);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -419,7 +419,7 @@ public class WorkerTests
         Assert.NotNull(settled.Liveness!.AttentionAt);
         Assert.NotNull(settled.Liveness.Attention);
         Assert.Null(settled.Liveness.StoppedAt);
-        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(2, run.Service.Records("ask").Count);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 

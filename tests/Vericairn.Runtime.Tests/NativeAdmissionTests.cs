@@ -44,6 +44,7 @@ public class NativeAdmissionTests
                 Configurations = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal),
             };
             if (refuseAtLaunch) fixture.Probe.Behavior("refuseEffort", "max");
+            else fixture.Probe.Behavior("rollout", "match");
             RunResponse started = fixture.Start();
             Assert.True(started.Ok, started.Message);
             RunRow settled = fixture.Run.Settled(started.Run);
@@ -60,6 +61,12 @@ public class NativeAdmissionTests
                 Assert.Contains("exited with code 2", records.Latest.Body.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
                 Assert.Contains("effort", settled.ExecutionObserved!.Value.GetProperty("unknown").EnumerateArray().Select(v => v.GetString()));
                 Assert.Equal(1000, settled.Charged.GetProperty("tokens").GetInt64());
+            }
+            else
+            {
+                JsonElement actual = Assert.Single(settled.ExecutionObserved!.Value.GetProperty("reports").EnumerateArray());
+                Assert.Equal("gpt-6-astra", actual.GetProperty("model").GetString());
+                Assert.Equal("max", actual.GetProperty("effort").GetString());
             }
             Assert.Equal(0, fixture.Run.Service.Check().Errors);
         }
@@ -158,7 +165,7 @@ public class NativeAdmissionTests
         }
         else
         {
-            Assert.Empty(settled.Signals!);
+            Assert.Equal("attempt-missing", Assert.Single(settled.Signals!).Code);
             Assert.Empty(settled.ExecutionObserved!.Value.GetProperty("discrepancies").EnumerateArray());
         }
         var custody = new RunDirectory(fixture.Run.Service.Session.Manifest.Estate, started.Run);

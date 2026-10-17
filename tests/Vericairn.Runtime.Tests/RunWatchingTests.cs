@@ -75,7 +75,7 @@ public class RunWatchingTests
         Assert.Equal(signal.Attention, run.Service.Progress().Json.GetProperty("runSignals")[0].GetProperty("signals")[0].GetProperty("attention").GetString());
         Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in test.", 1)).Ok);
         Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
-        Assert.Single(run.Service.Records("ask"));
+        Assert.Equal(2, run.Service.Records("ask").Count);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -165,8 +165,8 @@ public class RunWatchingTests
         RunRow settled = run.Settled(started.Run);
         Assert.Equal("observed-success", settled.Status);
         Assert.Null(settled.Stop);
-        Assert.NotNull(Assert.Single(settled.Signals!).Attention);
-        Assert.Single(run.Service.Records("ask"));
+        Assert.NotNull(Assert.Single(settled.Signals!, s => s.Code == "audit-unverified").Attention);
+        Assert.Equal(2, run.Service.Records("ask").Count);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -227,7 +227,7 @@ public class RunWatchingTests
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);
         Assert.Equal(125, settled.Usage!.Value.GetProperty("tokens").GetInt64());
-        Assert.Empty(settled.Signals!);
+        Assert.Equal("attempt-missing", Assert.Single(settled.Signals!).Code);
         Assert.Equal(0, run.Service.Check().Errors);
     }
 
@@ -256,7 +256,7 @@ public class RunWatchingTests
         RunResponse started = run.Start(launcher, scenario, run.Report("audit"));
         Assert.True(started.Ok, started.Message);
         RunRow settled = run.Settled(started.Run);
-        Assert.Equal(launcher == "codex" ? ["credentials", "network", "scope", "tool-inventory"] : ["credentials", "network", "scope"], settled.Signals!.Select(s => s.Code).Order(StringComparer.Ordinal));
+        Assert.Equal(launcher == "codex" ? ["attempt-missing", "credentials", "network", "scope", "tool-inventory"] : ["attempt-missing", "credentials", "network", "scope"], settled.Signals!.Select(s => s.Code).Order(StringComparer.Ordinal));
         Assert.All(settled.Signals!, s => Assert.Equal(1, s.Count));
         Assert.All(settled.Signals!, s => Assert.NotNull(s.Attention));
         Assert.Equal("known-failure", settled.Status);
@@ -268,7 +268,7 @@ public class RunWatchingTests
         Assert.DoesNotContain("I claim", record, StringComparison.Ordinal);
         Assert.Equal(0, run.Service.Check().Errors);
         run.Reopen();
-        Assert.Equal(launcher == "codex" ? 4 : 3, run.Row(started.Run).Signals!.Count);
+        Assert.Equal(launcher == "codex" ? 5 : 4, run.Row(started.Run).Signals!.Count);
     }
 
     private static void WaitUntil(Func<bool> condition) => Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(20)), "The worker observation did not arrive.");

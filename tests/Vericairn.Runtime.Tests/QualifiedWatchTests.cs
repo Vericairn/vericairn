@@ -32,7 +32,7 @@ public class QualifiedWatchTests
         }
         else
         {
-            Assert.Empty(settled.Signals!);
+            Assert.Equal("attempt-missing", Assert.Single(settled.Signals!).Code);
             Assert.Empty(settled.ExecutionObserved!.Value.GetProperty("discrepancies").EnumerateArray());
         }
         JsonElement execution = AgentRuns.Find(fixture.Run.Estate.Load(), started.Run)!.Intent.Body.GetProperty("execution");

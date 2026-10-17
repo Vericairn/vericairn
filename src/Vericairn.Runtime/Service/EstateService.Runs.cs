@@ -364,6 +364,7 @@ public sealed partial class EstateService
         // The MCP server configured for the agent's principal, and the run's own files, outside the workspace; then the launch, and the
         // dispatch recorded. A harness that cannot start is a known failure that spent nothing.
         RunSupervisor? supervisor = null;
+        HashSet<string> priorAttempts = new(StringComparer.Ordinal);
         IReadOnlyList<(string Device, string Reason)> lapsed = [];
         try
         {
@@ -403,6 +404,8 @@ public sealed partial class EstateService
                 lapsed = Lapsed(dispatchModel, plan.Goal, plan.Agent);
                 if (lapsed.Count == 0)
                 {
+                    // Record timestamps have second precision. Keep identities too, so an earlier attempt in the same second cannot count.
+                    priorAttempts = dispatchModel.OfType("attempt").Select(a => a.Id).ToHashSet(StringComparer.Ordinal);
                     supervisor = RunSupervisor.Start(run, command, workspace.Path, environment, launcher, directory, WorkerOptions, AgentRuns.Amount(Element(plan.Cap), "wallMinutes") ?? 1, AgentRuns.Amount(Element(plan.Cap), "tokens"), limits, TimeSpan.FromSeconds(plan.StallSeconds), liveness => RecordStall(run, request.By, plan.Goal, liveness), Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), plan.Watch, plan.HistoryRate, signal => RecordSignal(run, request.By, plan.Goal, signal), Element(plan.Selection));
                 }
             }
@@ -456,7 +459,7 @@ public sealed partial class EstateService
         }
 
         var abandon = new CancellationTokenSource();
-        supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), abandon.Token)), abandon);
+        supervisions[run] = (Task.Run(() => Supervise(run, request.By, plan.Goal, supervisor, workspaces, workspace, baseline, Strings(plan.Assignment.Body.GetProperty("brief"), "permittedChanges"), priorAttempts, abandon.Token)), abandon);
         string generic = launcher.Generic ? $" The {launcher.Launcher} launcher is labeled: {IAgentLauncher.GenericLabel}." : string.Empty;
         if (excepted is not null)
         {
@@ -1039,7 +1042,7 @@ public sealed partial class EstateService
         }
     }
 
-    private string? RecordSignal(string run, string by, string goalId, RunSignal signal)
+    private string? RecordSignal(string run, string by, string goalId, RunSignal signal, bool settled = false)
     {
         try
         {
@@ -1069,7 +1072,9 @@ public sealed partial class EstateService
                     ["state"] = "open",
                     ["question"] = $"{prefix} needs attention at {signal.At}: {signal.Summary} Inspect the run?",
                     ["recommendation"] = "Inspect the worker's observation, the locally retained output and the assignment before deciding on another attempt.",
-                    ["consequence"] = signal.Severity == "critical"
+                    ["consequence"] = settled
+                        ? "The run has exited. Its observation remains for review; another run needs fresh admission."
+                        : signal.Severity == "critical"
                         ? "The worker asks the existing stop path to contain this run. Its allowance remains reserved until the whole boundary is observed exited."
                         : "This warning does not stop the run. The observation remains for review; continued looping or abnormal spending may reach a critical threshold.",
                 };
@@ -1084,7 +1089,7 @@ public sealed partial class EstateService
     }
 
     /// <summary>Observes a run until its exit, then records its settlement, and marks its goal budget-limited when it crossed a cap.</summary>
-    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, CancellationToken abandon)
+    private void Supervise(string run, string by, string goalId, RunSupervisor supervisor, IWorkspaceProvider workspaces, PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted, HashSet<string> priorAttempts, CancellationToken abandon)
     {
         RunOutcome? outcome;
         try
@@ -1123,7 +1128,17 @@ public sealed partial class EstateService
         {
             lock (gate)
             {
-                if (AgentRuns.Find(session.Load(), run) is { Status: "not-started" })
+                EstateModel model = session.Load();
+                AgentRuns.Run? found = AgentRuns.Find(model, run);
+                if (found is not null && !model.OfType("attempt").Any(a => a.Subject?.Id == found.Assignment && a.By == found.Principal
+                    && !priorAttempts.Contains(a.Id) && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.LaunchedAt)) >= 0
+                    && string.CompareOrdinal(a.At, RecordParser.FormatTimestamp(outcome.ExitedAt)) <= 0))
+                {
+                    var signal = new RunSignal("attempt-missing", "warning", RecordParser.FormatTimestamp(outcome.ExitedAt),
+                        "The run settled without the agent's attempt on its assignment during the run. A clean harness exit does not establish that the agent did the work.");
+                    outcome = outcome with { Signals = [.. outcome.Signals ?? [], signal with { Attention = RecordSignal(run, by, goalId, signal, settled: true) }] };
+                }
+                if (found is { Status: "not-started" })
                 {
                     WriteOutcome recovered = RecordDispatch(run, by, outcome.LaunchedAt);
                     if (!recovered.Ok)
@@ -1227,6 +1242,10 @@ public sealed partial class EstateService
         }
 
         JsonArray evidence = body["evidence"] as JsonArray ?? [];
+        foreach (RunSignal signal in outcome.Signals?.Where(s => s.Code == "attempt-missing") ?? [])
+        {
+            evidence.Add(new JsonObject { ["summary"] = signal.Summary });
+        }
         evidence.Add(new JsonObject { ["summary"] = $"Observed by the worker on the machine that ran it at {outcome.Heartbeats.ToString(CultureInfo.InvariantCulture)} heartbeats every {WorkerOptions.Heartbeat.TotalSeconds.ToString(CultureInfo.InvariantCulture)} seconds, from {RecordParser.FormatTimestamp(outcome.LaunchedAt)} to its exit at {RecordParser.FormatTimestamp(outcome.ExitedAt)}; its output is kept on that machine." });
         if (outcome.EscalationFailure is string failure)
         {

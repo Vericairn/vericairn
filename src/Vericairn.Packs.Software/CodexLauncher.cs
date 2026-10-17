@@ -38,6 +38,9 @@ public sealed class CodexLauncher : IAgentLauncher
     public HarnessExecution? ReadExecution(string line) => HarnessSelection.Read(line, "thread.started");
 
     /// <inheritdoc />
+    public IReadOnlyList<HarnessExecution> ReadExecutionArtifacts(string runDirectory) => CodexRollout.Read(runDirectory);
+
+    /// <inheritdoc />
     public IReadOnlyList<HarnessAction> ReadActions(string line) => HarnessActions.Codex(line);
 
     /// <inheritdoc />

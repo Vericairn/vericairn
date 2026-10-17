@@ -185,6 +185,28 @@ internal static class FakeHarness
             File.WriteAllText(report + ".stdin", eof ? "eof" : "open");
             return eof ? 0 : 2;
         }
+        if (behavior["hold"]?.GetValue<string>() == "exit")
+        {
+            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(10);
+            while (!File.Exists(report + ".continue") && DateTimeOffset.UtcNow < until) Thread.Sleep(10);
+        }
+        if (codex && behavior["rollout"]?.GetValue<string>() is string rollout)
+        {
+            string directory = Path.Combine(Environment.GetEnvironmentVariable("CODEX_HOME")!, "sessions", "2026", "10", "17");
+            Directory.CreateDirectory(directory);
+            string path = Path.Combine(directory, "rollout-stand-in.jsonl");
+            string model = arguments[Array.IndexOf(arguments, "--model") + 1];
+            string effort = JsonSerializer.Deserialize<string>(arguments.Single(a => a.StartsWith("model_reasoning_effort=", StringComparison.Ordinal)).Split('=', 2)[1])!;
+            string Context(string m, string e) => JsonSerializer.Serialize(new { type = "turn_context", payload = new { model = m, effort = e } }) + "\n";
+            string text = Context(rollout is "model" or "changed-back" ? "unexpected-model" : model, rollout == "effort" ? "low" : effort);
+            if (rollout == "changed-back") text += Context(model, effort);
+            if (rollout == "malformed") text += "{truncated";
+            if (rollout == "unreadable") Directory.CreateDirectory(path);
+            else File.WriteAllText(path, text);
+            // Stdout intentionally has no model or effort; only the run-owned rollout does.
+            Console.WriteLine("{\"type\":\"thread.started\",\"thread_id\":\"stand-in\"}");
+            return 0;
+        }
         if (codex && behavior["refuseEffort"]?.GetValue<string>() is string refusedEffort
             && arguments.Contains("model_reasoning_effort=" + JsonSerializer.Serialize(refusedEffort)))
         {
@@ -735,6 +757,7 @@ internal static class FakeHarness
 /// <summary>A qualified synthetic inventory around an existing command adapter; production launchers never use this declaration.</summary>
 internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher inner) : Vericairn.Runtime.Workers.IAgentLauncher
 {
+    public IReadOnlyList<Vericairn.Runtime.Workers.HarnessExecution> ReadExecutionArtifacts(string runDirectory) => inner.ReadExecutionArtifacts(runDirectory);
     public string Launcher => inner.Launcher;
     public Vericairn.Runtime.Providers.ProviderDescriptor Descriptor => inner.Descriptor;
     public string? Harness => inner.Harness;

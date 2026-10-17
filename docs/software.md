@@ -493,6 +493,10 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
 6. Settles the operation with the observed effect and usage: `observed-success` when the harness exited 0, which says
    only that it ran to its end, and `known-failure` when it failed or was stopped. The worker accepts nothing: the agent's
    result is a claim another principal reviews, and the goal's evaluation and acceptance stay theirs.
+   If the agent recorded no new attempt on this exact assignment during the run, settlement adds
+   `attempt-missing` evidence and a warning with an attention ask. The CLI settlement and status attention
+   say that it settled without the agent's attempt; an earlier attempt does not satisfy this check.
+   The operation's status and the CLI exit-code meaning are unchanged.
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
@@ -1032,7 +1036,15 @@ Settlement's `executionObserved` keeps distinct harness reports, discrepancies a
 The worker never fills missing actual model, effort, revision, provider, destination, version or inventory
 facts from its request. Reports are bounded and portable; unsafe or excessive reports leave an explicit
 incomplete-report observation. A discrepancy remains even if a later report returns to the requested
-choice. WATCH-01 receives the admitted selection and inventory: execution discrepancies and unadmitted
+choice. After Codex exits, the launcher reads `turn_context` model and effort from the run home's
+`sessions/<yyyy>/<MM>/<dd>/rollout-*.jsonl` files. Missing, unreadable, malformed or over-limit rollouts
+supply no facts; the admitted selection is never substituted. The scan is limited to 4,096 entries,
+64 MiB and 128 distinct reports, and does not follow links. Only model and effort are read from these
+entries; other fields remain unknown unless separately reported. A discrepancy discovered after exit
+is retained in `executionObserved` without pretending to stop an exited process. The additive
+`IAgentLauncher.ReadExecutionArtifacts(runDirectory)` hook supplies these post-exit facts; existing
+launchers default to no artifact reports.
+WATCH-01 receives the admitted selection and inventory: live execution discrepancies and unadmitted
 tool invocations produce critical signals and use its existing attention and stop path. All original
 command, credentials, network, scope, loop and burn-rate auditing remains in place.
 Codex's `command_execution` and `file_change` events are matched to its qualified `exec_command` and
@@ -1124,11 +1136,11 @@ It includes native MCP discovery and the model-conditional clock and user-input 
 can hide their schemas on a particular turn. The inventory identifies the built-in capabilities, not a guarantee that
 every tool is callable on every turn. See the [Codex tool registry](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/spec_plan.rs).
 The launcher requires
-`goals`, `shell_tool`, `unified_exec` and `view_image` enabled, disables web search, ignores exec-policy rules, and
+`goals`, `shell_tool`, `unified_exec`, `view_image` and `code_mode_host` enabled, disables web search, ignores exec-policy rules, and
 explicitly disables these extension/tool features:
 
 `apps`, `plugins`, `remote_plugin`, `hooks`, `multi_agent`, `multi_agent_v2`, `browser_use`, `browser_use_external`,
-`browser_use_full_cdp_access`, `computer_use`, `in_app_browser`, `image_generation`, `code_mode`, `code_mode_host`,
+`browser_use_full_cdp_access`, `computer_use`, `in_app_browser`, `image_generation`, `code_mode`,
 `code_mode_only`, `memories`, `workspace_dependencies`, `skill_search`, `skill_mcp_dependency_install`, `tool_suggest`,
 `sleep_tool`, `shell_snapshot`.
 
