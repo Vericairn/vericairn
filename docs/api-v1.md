@@ -1,6 +1,8 @@
 # API version 1
 
-This maintained document describes published 0.7.2 and labels main's unreleased changes for planned 0.7.3. FIX-13 adds exact-commit release document checks
+This maintained document describes published 0.7.2 and labels main's unreleased changes for planned 0.7.3.
+Main is 0.7.3-dev, carrying FIX-19, UPDATE-01, FIX-20 and FIX-21; none is in a published release.
+FIX-13 adds exact-commit release document checks
 and settlement of process attention asks; FIX-15 claims dispatch identities before provider effects;
 FIX-16 validates before publishing records and exposes unreadable recovery journals; FIX-18 adds
 Codex max effort, run-owned execution observations and corrected worker signals. FIX-14 hardens the
@@ -189,6 +191,13 @@ made, accepts that certificate and no other, and consults no trust store, so a l
 rotation refuses the new certificate on its next connection and is made again from the endpoint file, as every
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
+
+**On main for planned 0.7.3 (FIX-21, unreleased).** Before a loaded or replacement certificate is made
+available to either TLS listener, its managed extensions are decoded on the loading thread. Concurrent first
+handshakes therefore read complete usage values, including Server Authentication. When `DaemonOptions.Log`
+is configured, server-side handshake exceptions are reported with only the exception type and message,
+without exception stacks, inner exceptions, peer certificates or request data. This preparation and handshake
+logging are absent from published 0.7.2.
 
 Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
 are refused during the handshake, before any HTTP request is read.
@@ -843,7 +852,7 @@ when the agent recorded no new attempt on its exact assignment during the run. I
 operation evidence and shown by CLI settlement and status attention, without changing `observed-success`
 or CLI exit-code semantics.
 
-FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
+In published 0.7.2, FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
 attention without requesting a stop. Reads inside the workspace do not require change permission.
 Confidently identified write targets outside the workspace and launch-supplied temporary directory retain critical
 `scope` signals. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified`
@@ -851,6 +860,13 @@ warnings, without a stop. Changes inside the workspace are checked against the b
 detections remain critical for reads and writes. Run admission refuses a brief with no
 interpretable repository-relative `permittedChanges` pattern, explaining forms such as `path:NOTES.md`;
 prose can remain beside a pattern. No request or response fields change.
+
+**On main for planned 0.7.3 (FIX-20, unreleased).** The audit recognizes the Vericairn home's credential
+stores, token-output commands and more outside-write forms, including literal targets in interpreter code.
+Interpreter input retains `audit-unverified` alongside any independently recognized critical signal; a warning
+alone does not request a stop. Null-device output is exempt from outside-write classification. These changes
+reuse the existing signal codes and API fields. [Command observations](software.md#command-observations-070)
+lists the recognized forms and remaining limits; observation is not credential isolation.
 
 Rate signals describe the observed sample, launcher reference, historical median, multiplier and reported tokens against the cap. Loop signals include the triggering occurrence count and an input fingerprint. Neither signal is derived from `work_progress` claims.
 

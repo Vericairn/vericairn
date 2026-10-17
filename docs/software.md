@@ -69,10 +69,11 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This maintained document covers published 0.7.2, carrying FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
-Main also carries FIX-19's independent workspace repositories and UPDATE-01's newer-release notice for
-planned 0.7.3. Those changes are unreleased and are labeled below; the [frozen 0.7.2 guide](releases/0.7.2/software.md)
-describes the published workspace behavior. FIX-20's further audit corrections are planned, not implemented here.
+This maintained document describes published 0.7.2, carrying FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
+Main is now 0.7.3-dev and also carries FIX-19's independent workspace repositories, UPDATE-01's newer-release
+notice, FIX-20's command-audit corrections and FIX-21's concurrent TLS handshake correction for planned 0.7.3.
+These changes are unreleased and are labeled below or in [the API guide](api-v1.md#transports); the
+[frozen 0.7.2 guide](releases/0.7.2/software.md) describes the published workspace and audit behavior.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
 0.7.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts. It corrects identifier ordering, release gates and dispatch, notes and attention,
@@ -883,26 +884,57 @@ resume reports a newly completed phase as an added record.
 
 ## Command observations (0.7.0)
 
+**On main for planned 0.7.3, unreleased.** The audit below includes FIX-20's corrections. Published 0.7.2
+retains the two warnings from its independent candidate review: incomplete recognition of the Vericairn
+home's credential reads and several write forms, and null-device redirection that can wrongly stop a run.
+The [frozen 0.7.2 guide](releases/0.7.2/software.md#command-observations-070) describes that earlier audit.
+FIX-20 corrects the recognized cases below on main; it does not change any published release.
+
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
 
 Recognizable network commands, structured network URLs and web tools produce warnings; `dotnet restore` is one such
-network attempt. Recognized credential paths, common secret environment variables and secret-store commands remain critical
-for reads and writes alike. Classified read-only invocations inside the workspace raise no scope signal, even for
-a file outside the brief's permitted changes, such
-as reading `README.md` when only `path:NOTES.md` is permitted. Reads outside the workspace raise `scope-read` at warning
-and continue; `pwd` followed by `rg --files --hidden -g AGENTS.md` on the workspace's parent is such a read.
-Critical `scope` requires a confidently identified outside write target: operands of known mutating commands
-(`cp`, `mv`, `rm`, `touch`, `mkdir`, `rmdir`, `ln`, `tee`, `truncate`, `chmod`, `chown` and their PowerShell equivalents),
-output-redirection targets, `apply_patch` and structured file-change paths, or Git `-C`, `--work-tree` and `--output`
-targets. An outside-looking operand of an unclassified invocation raises `audit-unverified` at warning, without a
-stop. Opaque programs cannot establish a confident change, even when code contains `open` with an outside filename.
-Unresolved variable targets and paths whose physical containment cannot be verified also warn rather than asserting
-an outside change. Changes inside this disposable workspace raise no event-stream scope signal, whether
-or not the brief permits them: the settlement audit checks actual changes against the brief's patterns. Thus
-`touch README.md` continues when only `path:NOTES.md` is permitted, but changing `README.md` is flagged at settlement.
-Input redirection is a read. Heredoc bodies (`<<`, `<<-`) and here-string operands (`<<<`) are input, never path
-operands. Interpreter input is scanned for recognizable network and credential patterns and raises `audit-unverified`,
-as inline `-c` code does. Redirections on the command line remain checked, including those beside a heredoc.
+network attempt. Credential access remains critical for reads, copies and listings as well as writes. FIX-20 recognizes
+the Vericairn home's `keys/` (file keys and the other stores' local handles), `connections/` (paired runtime and device
+state), and `estates/<estate>/<clone>/runtime-certificate.p12` and `runtime-identity.json`, including the identity's
+pending `.tmp` file. Listing the per-clone runtime directory itself also counts, including a listing or search with
+no path operand after a known directory change. These are the stores used by `VericairnHome`, `DeviceKeyStores`, `RuntimeConnections`,
+`EstateLocations`, `RuntimeCertificate` and `RuntimeIdentity`; pending pairing codes themselves exist only in daemon
+memory. Recognizable `.p8` and `.p12` operands, the existing credential paths and secret environment variables,
+secret-store commands, `gh auth token`, `gh auth status --show-token`/`-t` (including combined short flags),
+`git credential fill`, and `git credential-<helper> get` also produce critical `credentials` signals, including
+through wrappers and Git directory options. `gh auth status` without token display retains only its network
+warning; `git credential reject` does not produce a credential-output signal.
+
+The audit resolves absolute paths, traversal, `~`, simple `$NAME`, `${NAME}`, `$env:NAME` and `%NAME%` substitutions
+from the captured launch environment, and simple assignments and exports visible within the reported command.
+It derives the default Vericairn home from those captured platform home/configuration variables when no override is
+supplied. It reads no credential content and does not consult an ambient environment to resolve a reported path.
+An unresolved expansion cannot establish its target and raises `audit-unverified`; independently recognizable
+credential names remain critical. `VERICAIRN_HOME` remains in the launch environment so the estate MCP server can
+find the agent's key. Observing attempted access does not prevent a process running as the same user from reading it.
+
+Classified reads inside the workspace raise no scope signal, even when the brief permits changes only elsewhere.
+Reads outside raise `scope-read` at warning and continue. Critical `scope` requires a confidently identified outside
+write target. This includes known mutators (`cp`, `mv`, `rm`, `touch`, `mkdir`, `rmdir`, `ln`, `tee`, `truncate`, `chmod`,
+`chown` and their PowerShell equivalents), output redirection, patches and structured file changes. FIX-20 adds:
+
+- `sed -i`/`--in-place` and `perl -i`, including backup suffixes and common combined flags;
+- `rsync` and `install` destinations, including `install -d` and target-directory options;
+- `tar` extraction directories (`-C`/`--directory`) and archive output files, `unzip -d`, and `patch` directories,
+  original files, output files and reject files;
+- `dd of=`, Git worktree-add, init and clone destinations, alongside Git `-C`, `--work-tree` and `--output` targets;
+- recognizable literal interpreter writes: `open` with a write/append/create/update mode, `Path(...).write_text`,
+  `write_bytes`, `touch`, `mkdir`, `unlink` and `rmdir`; `writeFile[Sync]`, `appendFile[Sync]`, `mkdir[Sync]`,
+  `unlink[Sync]`, `rmSync`, and Ruby `File.write`/`File.delete`. Here `[Sync]` means either spelling. Interpreter code still raises `audit-unverified` alongside
+  any recognized credential, network or scope signal. Calls inside common string literals and comments are not
+  classified as writes; the audit does not evaluate the program or its control flow.
+
+Changes inside the disposable workspace raise no event-stream scope signal, whether or not the brief permits them;
+the settlement audit checks actual changes against the brief's patterns. Thus `touch README.md` continues when only
+`path:NOTES.md` is permitted, but changing `README.md` is flagged at settlement. A redirect or write to `/dev/null`,
+or to `NUL` or `$null` on Windows, is exempt from outside-write classification. Other device paths retain their
+previous treatment. Input redirection is a read. Heredoc bodies (`<<`, `<<-`) and here-strings (`<<<`) are input, never
+filesystem operands; interpreter bodies are scanned as code. Redirections beside them remain checked.
 
 The audit also permits the temporary directory actually supplied in the harness's launch environment: `TMPDIR`
 on Unix, and supplied `TMPDIR`, `TEMP` or `TMP` on Windows. The shipped launchers preserve these admitted variables;
@@ -911,23 +943,25 @@ recognizes those variables in path operands, and checks traversal against the re
 a system temporary directory or take a boundary from tool-event input; system `/tmp` is permitted only when the
 run's supplied temporary variable names it.
 
-Common `env` and `sudo` wrapper options do not hide the command. Quoted shell operators and literal variable names
-are not treated as executable operations. Path checks normalize traversal and do not assume links or expansions
-remain inside the workspace. Git message values (`-m`, `--message`, `--message=…`) for commit, tag, merge, revert,
-notes and stash are text, not paths. Git show, log, diff, blame, cat-file, ls-tree, ls-files, rev-parse and status
-are classified as reads; their `rev:path` operands, such as `HEAD:README.md`, name Git objects rather than filesystem
-paths. Read classification also covers common file readers, searches and structured read tools; mutating or
-helper-executing options, such as `find -delete`, `rg --pre` and `git diff --output`, are not classified as reads.
-An outside-looking operand of an unclassified helper raises uncertainty; the explicit Git output target remains a known write target.
-Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
+Common options of `env`, `sudo`, `nohup`, `time`, `nice`, `timeout`, `command`, `exec` and `busybox`, including
+nested wrappers, do not hide the inner command. Known `cd`/`chdir`/`Set-Location` targets and wrapper directory options
+supply the base for subsequent relative operands. Child shells and pipelines do not change the parent's base;
+a failure branch does not assume a preceding directory change succeeded. Quoted operators and message text remain
+text. Git message values (`-m`, `--message`, `--message=…`) for commit, tag, merge, revert, notes and stash are not paths.
+Git show, log, diff, blame, cat-file, ls-tree, ls-files, rev-parse and status are reads; `rev:path` selectors name Git
+objects. A directory supplied to a classified Git read is a read target, and copy/install/rsync sources are reads.
+`rsync -n`/`--dry-run` and `patch --dry-run` targets are classified as reads.
+Mutating or helper-executing options such as `find -delete`, `rg --pre` and `git diff --output` are not reads.
 
-Published 0.7.2 and current main retain the two warnings from the independent candidate review: the audit
-does not reliably recognize reads of the Vericairn home's key store, runtime certificates, connection or pairing
-state, or `gh auth token`; several write forms are unrecognized or only warn, and null-device redirection can
-wrongly stop a run. FIX-20 is planned for 0.7.3 to stop those credential reads, recognize the reviewed write
-forms and never classify the null device as a write outside the workspace. It is not implemented on this main
-snapshot. Even after that change, the audit remains an observation of harness-reported commands, not an
-enforcement boundary.
+The remaining warning-only cases are ordinary outside reads (`scope-read`), recognizable network attempts (`network`),
+and uncertainty (`audit-unverified`): unresolved variables or command substitutions; unclassified outside-looking
+operands, including helper-executing forms; unknown working directories; paths whose physical containment cannot be
+verified; remote `rsync` operands; opaque interpreter input (including `osascript`); and `xargs`, whose input-supplied
+operands or replacements are not visible in the invocation. An independently recognized literal outside write or
+credential target in any of these still produces its critical signal. Archive contents, patch bodies, arbitrary
+scripts, computed filenames, aliases, every command option and shell expansion are not interpreted. A missing or
+unrecognized effect cannot be inferred absent from an emitted command.
+Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.
 
@@ -1390,6 +1424,13 @@ Round three normalizes the comparisons, explicitly enables long paths in isolate
 link-safe cleanup for product scratch repositories and test workspaces. Main includes subsequent Windows path
 and cleanup corrections. The macOS observations listed here alone do not establish their Windows behavior.
 FIX-19 is now on main after 0.7.2's publication; it remains unreleased, planned for 0.7.3.
+FIX-20, also on main and unreleased for planned 0.7.3, adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
+write forms through every supported wrapper, directory changes, opaque inputs and null devices. Stand-in worker
+runs check that credential and outside-write signals request containment, while null redirects and opaque warnings
+settle without a scope stop. These tests run no reported credential or outside-write command and establish no new
+live-harness or platform qualification. Release qualification requires three-platform checks on the exact candidate. The command audit
+remains a signal over harness reports, which can arrive after execution; the sandbox and settlement audit remain the
+boundaries. FIX-20 adds no public CLI, API, SDK, record type, signal code, package or lock-file change.
 Observed-success and live qualification do not accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.

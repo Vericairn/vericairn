@@ -19,7 +19,8 @@ Each worker run gets a workspace repository of its own, so a worker-launched Cod
 changes. The command line and Workbench show a newer-release notice with release notes and upgrade
 guidance. The check runs at most once a day, can be switched off, works offline and never installs
 anything. Worker command auditing recognizes credential access and more write forms, and handles
-null-device output correctly.
+null-device output correctly. Connections stay reliable when several clients connect at once, and status
+shows only what still needs attention, with compact, current items.
 
 ## 0.8.0 — planned
 

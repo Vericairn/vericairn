@@ -27,9 +27,10 @@ public keys and signatures. Its earlier frozen set remains unchanged. All eight 
 packages are available at 0.7.2 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
 records publication and the earlier 0.7.1 recovery.
 
-Main is ahead of the release. Its independent worker workspace repositories (FIX-19) and newer-release notice
-(UPDATE-01) are implemented for planned 0.7.3 and are not in any published release. The maintained guides label
-that unreleased behavior; use the frozen 0.7.2 set for the published build.
+Main is ahead of the release at 0.7.3-dev. Its independent worker workspace repositories (FIX-19), newer-release
+notice (UPDATE-01), command-audit corrections (FIX-20) and concurrent TLS handshake correction (FIX-21) are
+implemented for planned 0.7.3 and are not in any published release. The maintained guides label that unreleased
+behavior; use the frozen 0.7.2 set for the published build.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
 needs a person's authorized RUN-03 qualification. Generic worker dispatch is refused. Before a native run,

@@ -4,8 +4,9 @@ The current published release is **0.7.2**, published on October 17, 2026 at 20:
 with tag `v0.7.2` at `d1363d92f3cc5cae84a65787326897929582fce9`
 (estate release record `01M55S0Q6H5ZFNA4DG3JDBCEE3`). Its [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
-Main's independent worker workspace repositories and newer-release notice are unreleased work for planned
-0.7.3; they are not part of this frozen set.
+Main's independent worker workspace repositories, newer-release notice, command-audit corrections and
+concurrent TLS handshake correction are unreleased work for planned 0.7.3, on main at 0.7.3-dev; they are not
+part of this frozen set.
 
 The [0.7.2 set](0.7.2/README.md) documents FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18 after published 0.7.1: ordered identifiers, exact-commit release document checks, grouped notes, settled worker attention, workflow policy checks and a bounded Workbench first screen; inventory-bound export restore (F-01); claimed release dispatch and bounded Git/gh processes; validation before record publication and visible unreadable journals; and the corrected Codex worker path at max effort. Its notes render the estate's records with `--from 0.7.1 --to 0.7.2 --since 2026-10-17T05:25:00Z`, with the operator's approved Security section on F-01 first. The estate's release record establishes publication and qualification; this set does not. Earlier sets and their checksums remain unchanged. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`.
 
