@@ -3,8 +3,10 @@
 
 using System.Text.Json;
 using Vericairn.Cli;
+using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
 
@@ -55,6 +57,16 @@ internal static class CliHarness
         Outcome outcome = Run(args);
         Assert.True(outcome.Code == 0, $"vericairn {string.Join(' ', args)} exited {outcome.Code}\n{outcome.Out}\n{outcome.Err}");
         return outcome;
+    }
+
+    /// <summary>Revoke after this journey's signed history using an explicit record time, without a wall-clock sleep.</summary>
+    public static RecordWritten RevokeAfterRecords(string root, RevokeRequest request)
+    {
+        using EstateService service = EstateService.Open(root);
+        DateTimeOffset at = service.Session.Load().Records.Max(r => r.AtTime).AddSeconds(1);
+        WriteOutcome revoked = service.DeviceRevoke(request, at);
+        Assert.True(revoked.Ok, revoked.Problem?.Message);
+        return revoked.Written!;
     }
 
     /// <summary>Runs a command with the text as its standard input.</summary>

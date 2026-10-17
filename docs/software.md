@@ -274,7 +274,11 @@ declares the same settings and simulates GitHub in memory for the conformance su
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
-earlier release reads none.
+earlier release reads none. From 0.7.2, `ResolveCommit` resolves the requested build ref at the provider to an
+exact commit for the living-document gate. Its default returns unknown, so an older provider can still dispatch
+releases without repository document checks, but cannot bypass those checks. GitHub resolves through its commits
+API; the runtime compares the registered clone at that commit and refuses with fetch guidance if it is absent.
+The actual run commit is checked again before a candidate is recorded, since a branch can move after submission.
 
 The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
 and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream
@@ -402,10 +406,11 @@ Only current results in that window are listed: a result superseded by a later r
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
 that result's exact hash or its work order's current revision and hash. This includes another principal's results with
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
-work-order revision does not count for the current revision. Every remaining current result appears only under **Work
-recorded, not yet accepted**. Each current result of an accepted work order is listed separately, without
-consolidation by work order or contributor; an earlier partial or failed result can therefore appear alongside
-a completed one. Classification reads current estate state, not an acceptance snapshot at the window's end.
+work-order revision does not count for the current revision. From 0.7.2, **Work accepted** has one entry per work order,
+naming its latest accepted current result in the window (by recorded time, then identifier) and its acceptance. Earlier
+results and attempts are reachable from the entry with `vericairn work observe <key>`. Later unaccepted results and results
+of other unaccepted work appear under **Work recorded, not yet accepted**. Frozen sets remain unchanged.
+Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
 ## Vericairn's NuGet publication
@@ -804,9 +809,11 @@ Attention writes are retried while observing and at settlement. A failed attenti
 
 `vericairn worker runs`, `vericairn progress`, their API responses and Workbench show the worker signals and attention references. Workbench polls the progress and attention views every five seconds while open. A recorded signal remains visible after the runtime restarts.
 
-Attention asks pin the run's original intent. Once settlement supersedes that operation, a current ask is
-reported as `record.subject-stale`; the worker does not revise or answer it. Inspect the settled run before
-answering through the existing decision path. The warning does not reopen the settled run or its reservation.
+Attention asks initially pin the run's original intent. From 0.7.2, settlement withdraws its still-waiting attention
+asks as no longer needed. Each withdrawal is authored by the asker, pins the exact settlement, and preserves the
+question and the original observation. An ask already answered by a person's decision stays answered. Settled,
+closed asks no longer produce stale-subject warnings; observations remain available for review. Settlement and
+withdrawals are validated together and journaled; an interrupted write remains a reconciliation task.
 
 ## Recorded watching settings (0.7.0)
 

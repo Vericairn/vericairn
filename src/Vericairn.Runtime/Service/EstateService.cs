@@ -105,7 +105,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
             List<WorkProgressClaim> claims = ProgressClaims(model);
             json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
-            List<RunRow> watched = Runs().Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
+            List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
             json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
             string text = ProgressReport.Render(model, checks);
             if (claims.Count > 0)
@@ -162,7 +162,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return null;
             }
 
-            RecordFile? file = session.Files().FirstOrDefault(f => f.Path == record.ExpectedPath);
+            RecordFile? file = session.LoadedFile(record.ExpectedPath);
             using JsonDocument document = JsonDocument.Parse(file?.Bytes ?? []);
             return new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, model.IsCurrent(record), document.RootElement.Clone());
         }
@@ -175,11 +175,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            Dictionary<string, RecordFile> files = session.Files().ToDictionary(f => f.Path, f => f, StringComparer.Ordinal);
             var rows = new List<RecordResponse>();
             foreach (RecordEnvelope record in model.Current(type).OrderBy(r => r.Id, StringComparer.Ordinal))
             {
-                using JsonDocument document = JsonDocument.Parse(files.TryGetValue(record.ExpectedPath, out RecordFile? file) ? file.Bytes : []);
+                using JsonDocument document = JsonDocument.Parse(session.LoadedFile(record.ExpectedPath)?.Bytes ?? []);
                 rows.Add(new RecordResponse(record.ExpectedPath, record.Id, record.Type, record.ComputedHash, true, document.RootElement.Clone()));
             }
 
@@ -603,7 +602,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRevoke(RevokeRequest request)
+    public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevoke(request, null);
+
+    // A supplied time lets journeys put revocation after signed history without waiting for the next wall-clock second.
+    internal WriteOutcome DeviceRevoke(RevokeRequest request, DateTimeOffset? at)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!Ulid.IsValid(request.By))
@@ -626,9 +628,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return Refuse($"Device {request.Device} has no current admission to revoke.");
             }
 
-            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+            DateTimeOffset revokedAt = at ?? DateTimeOffset.UtcNow;
+            var body = new JsonObject { ["principal"] = EstateModel.BodyString(device, "principal"), ["status"] = "revoked", ["note"] = request.Reason, ["revokedAt"] = RecordParser.FormatTimestamp(revokedAt) };
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id);
+            var draft = new RecordDraft("admission", request.By, document.RootElement, device.Reference, admission.Id, At: revokedAt);
             return request.Recovery is null ? WriteLocked(draft, model) : WriteWithRecovery(draft, model, request.Recovery, request.Passphrase);
         }
     }
@@ -1232,12 +1235,31 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// release would build, where a clone of it is registered here: those whose bytes differ from their latest review, and what was
     /// compared or could not be.
     /// </summary>
-    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, string product, string reference)
+    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, string commit)
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in LivingDocuments.Derive(model).Where(d => d.Repository is not null && d.DeclaresRefuse && LivingDocuments.NamesProduct(model, d.Declaration, product)))
+        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && d.DeclaresRefuse))
         {
+            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
+            string? resolved = source?.Resolve(model, document.Declaration, commit);
+            if (resolved != commit)
+            {
+                RecordEnvelope? repository = model.ById.GetValueOrDefault(document.Repository!);
+                bool registered = repository is not null && model.Manifest is not null &&
+                    model.Chain(model.Latest(repository)).Any(id => RepositoryClones.Find(model.Manifest.Estate, id) is not null);
+                if (registered || source?.Head(model, document.Declaration) is not null)
+                {
+                    changed.Add($"{document.Path}: the registered clone of {EstateModel.BodyString(repository!, "name")} ({document.Repository}) does not contain release commit {commit}; fetch that repository's clone, then retry");
+                }
+                else
+                {
+                    compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at release commit {commit}");
+                }
+
+                continue;
+            }
+
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
             string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
@@ -1247,15 +1269,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 continue;
             }
 
-            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
-            string? commit = source?.Resolve(model, document.Declaration, reference);
-            if (source is null || commit is null)
-            {
-                compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at the release commit");
-                continue;
-            }
-
-            byte[]? bytes = source.Read(model, document.Declaration, commit);
+            byte[]? bytes = source!.Read(model, document.Declaration, commit);
             string? now = bytes is null ? null : ContentHash.Sha256(bytes);
             if (now == clearedHash)
             {
@@ -1271,6 +1285,26 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         return (changed, compared);
     }
+
+    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit)
+    {
+        // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
+        if (commit is null && NeedsReleaseCommit(model, product))
+        {
+            return (["The exact release commit is unavailable for the product's living documents; resolve it at the build provider before submitting again"], []);
+        }
+
+        IReadOnlyList<LivingDocuments.State> documents = commit is null
+            ? LivingDocuments.Derive(model).Where(d => LivingDocuments.NamesProduct(model, d.Declaration, product)).ToList()
+            : LivingDocuments.AtReleaseCommit(model, product, commit);
+        (List<string> changed, List<string> compared) = commit is null ? ([], []) : CompareLivingDocuments(model, documents, commit);
+        changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
+        return (changed, compared);
+    }
+
+    private static bool NeedsReleaseCommit(EstateModel model, string product) =>
+        model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is not null &&
+            LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
 
     /// <summary>
     /// The reviewer's independence of the content, as the record's rules judge it from the estate's records: self when it revised the
@@ -1381,6 +1415,32 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         string destination = destinationSetting is null ? providerId : settings[destinationSetting];
         string identity = ReleaseFlow.Identity(providerId, destination, request.Version);
+        bool needsCommit;
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            needsCommit = NeedsReleaseCommit(model, request.Product);
+        }
+
+        // Resolve at the build provider, not at a potentially stale clone. Provider I/O never holds the service gate.
+        string? releaseCommit = null;
+        if (needsCommit)
+        {
+            try
+            {
+                releaseCommit = provider.ResolveCommit(destination, settings);
+            }
+            catch (ProviderRefusedException exception)
+            {
+                return ReleaseProblem(identity, "not-started", "refused", exception.Message);
+            }
+
+            if (releaseCommit is null || !Patterns.Commit.IsMatch(releaseCommit))
+            {
+                return ReleaseProblem(identity, "not-started", "refused", $"The provider '{providerId}' could not resolve the release's exact commit at {destination}; its living documents cannot be compared. Nothing was recorded or dispatched.");
+            }
+        }
+
         string previousId;
         JsonElement previousBody;
         // Checking the identity and recording its claim are one admission boundary. The claim survives a restart.
@@ -1407,15 +1467,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             // The living-document gate: the product's documents due at level refuse, or unavailable while they declare it, refuse the
             // submission before any intent is recorded, all named at once, so a refused release costs no build.
-            IReadOnlyList<LivingDocuments.State> closing = LivingDocuments.Gate(session.Load(), request.Product);
-            if (closing.Count > 0)
-            {
-                return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", closing.Select(d => d.Describe()))}. Revise each or record a document review (vericairn docs review), then submit again; nothing was recorded.");
-            }
-
-            // The content rule: records cannot see a repository, so each cleared document of another repository is read at the commit
-            // being released, where this machine has a clone of it; a document whose bytes differ from its review refuses the submission.
-            (List<string> changed, List<string> compared) = CompareLivingDocuments(session.Load(), request.Product, settings.TryGetValue("ref", out string? reference) ? reference : "HEAD");
+            (List<string> changed, List<string> compared) = ReleaseDocumentChecks(session.Load(), request.Product, releaseCommit);
             if (changed.Count > 0)
             {
                 return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each again at that commit, then submit again; nothing was recorded.");
@@ -1616,6 +1668,26 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                             : run is null ? "no run is identified and no release is observed yet" : $"run {run.RunId} completed and no draft {tag} is observed yet";
                     string recordedNow = recovered is null ? "Nothing recorded" : "The missing receipt was recorded as uncertain";
                     return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({waiting}). {recordedNow}; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Operation: recovered, Pending: waiting, Run: run?.RunId, Url: run?.Url ?? release?.Url);
+                }
+
+                // A branch may move after submission. Judge the commit actually built before recording success or a candidate,
+                // so a failed document check can be reviewed and observed again without losing the dispatched operation.
+                if (revisionBody["status"]?.GetValue<string>() == "observed-success")
+                {
+                    string? built = run?.HeadSha ?? release?.TargetCommit;
+                    if (built is null || !Patterns.Commit.IsMatch(built))
+                    {
+                        return ReleaseProblem(identity, status, "refused", "The release was observed but its exact commit is unknown; the candidate record needs the commit the run built.");
+                    }
+
+                    lock (gate)
+                    {
+                        (List<string> changed, _) = ReleaseDocumentChecks(session.Load(), product, built);
+                        if (changed.Count > 0)
+                        {
+                            return ReleaseProblem(identity, status, "refused", $"Release {request.Version} waits for its living documents at built commit {built}: {string.Join(" | ", changed)}. Review at that commit, then observe again; no candidate was recorded.");
+                        }
+                    }
                 }
 
                 WriteOutcome revision = NewRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
@@ -2530,9 +2602,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
             RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
             string status = order is null ? "planned" : EstateStatus.WorkItems(model).FirstOrDefault(i => i.Id == order.Id)?.Status ?? "planned";
-            bool moot = stored.Count == 0 || missing.Count == 0
-                || stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
-                || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"));
+            bool routing = journal.Records.Any(r => r.Type == "assignment");
+            bool moot = stored.Count == 0 || missing.Count == 0 || (routing &&
+                (stored.All(r => r.Type != "assignment" || !Routing.Stranded(model, model.ById[r.Id]))
+                 || (order is not null && (Routing.Assignments(model, order).Count > 0 || status != "planned"))));
             if (moot)
             {
                 journal.Close();
@@ -2540,7 +2613,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             string step = order is null ? "its step" : $"the step of work order {EstateModel.BodyString(order, "key") ?? order.Id}";
-            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned.");
+            string consequence = routing
+                ? $"The stored assignment holds nothing of {step} without the record it was routed with, so routing takes the step again; nothing stored is removed, and this task ends once the step is held again or is no longer planned."
+                : "Reconcile the missing records from the stored evidence; nothing stored is removed, and the task remains until the batch is complete.";
+            findings.Warning("batch.incomplete", stored[0].Path, $"A batch this machine began at {journal.StartedAt} stopped part-way: {journal.Purpose}. Stored: {Listed(stored)}. Not stored: {Listed(missing)}. {consequence}");
         }
 
         return findings;

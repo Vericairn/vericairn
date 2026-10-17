@@ -136,6 +136,23 @@ public class WorkRecordsTests
         Assert.Contains("this result; it is not a self-acceptance.", answered.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-60)]
+    public void AnExactAcceptanceAnswersTheResultDespiteAnEarlierIdOrClock(int seconds)
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope attempt = StartAttempt(estate, OrdinaryBody);
+        RecordEnvelope result = estate.Add("result", estate.BuilderId, """{"outcome":"completed","summary":"Built.","outputs":[],"evidence":[],"checks":[{"name":"tests","outcome":"failed","summary":"One test fails."}],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""", attempt.Reference, id: "01K00000000000000000000002");
+        estate.SetClock(result.AtTime.AddSeconds(seconds - 1));
+        RecordEnvelope acceptance = estate.Add("acceptance", estate.OperatorId, """{"statement":"Accepted the exact result.","basis":[],"self":false}""", result.Reference, id: "01K00000000000000000000001");
+
+        EstateModel model = estate.Load();
+        Assert.False(model.Findings.HasErrors, string.Join("\n", model.Findings));
+        Assert.DoesNotContain(model.Findings, f => f.Code == "result.checks");
+        Assert.Contains(acceptance.Id, Assert.Single(model.Findings, f => f.Code == "result.checks-accepted").Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ResultsTowardMilestonesAreAcceptedByTheOperatorOnly()
     {

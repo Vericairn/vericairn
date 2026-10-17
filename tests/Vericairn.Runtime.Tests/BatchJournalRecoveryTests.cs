@@ -16,6 +16,31 @@ namespace Vericairn.Runtime.Tests;
 public class BatchJournalRecoveryTests
 {
     [Fact]
+    public void AnIncompleteBatchWithoutAnAssignmentStaysVisibleUntilItsRecordsAreStored()
+    {
+        using var estate = new TestEstate();
+        using JsonDocument firstBody = JsonDocument.Parse("""{"kind":"human","name":"First person","roles":[]}""");
+        using JsonDocument secondBody = JsonDocument.Parse("""{"kind":"human","name":"Second person","roles":[]}""");
+        AuthoredRecord first = RecordAuthor.Create(new RecordDraft("principal", estate.OperatorId, firstBody.RootElement));
+        AuthoredRecord second = RecordAuthor.Create(new RecordDraft("principal", estate.OperatorId, secondBody.RootElement));
+        string journalPath;
+        using (EstateService service = EstateService.Open(estate.Root))
+        {
+            BatchJournal journal = BatchJournal.Begin(service.Session, "A grouped change without a routing assignment.", null, [first, second]);
+            journalPath = Path.Combine(BatchJournal.Directory(service.Session), journal.Id + ".json");
+            RecordAuthor.Write(estate.Root, first);
+            Assert.Contains(service.Check().Findings, f => f.Code == "batch.incomplete");
+        }
+
+        using EstateService reopened = EstateService.Open(estate.Root);
+        Assert.Contains(reopened.Check().Findings, f => f.Code == "batch.incomplete");
+        Assert.True(File.Exists(journalPath));
+        RecordAuthor.Write(estate.Root, second);
+        Assert.DoesNotContain(reopened.Check().Findings, f => f.Code == "batch.incomplete");
+        Assert.False(File.Exists(journalPath));
+    }
+
+    [Fact]
     public void ReadableJournalsAndDiagnosticsAreReturnedSeparatelyWithoutRemovingEitherFile()
     {
         using var estate = new TestEstate();

@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
@@ -17,6 +18,110 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class EstateSessionTests
 {
+    [Fact]
+    public void UnchangedHistoryIsParsedOnceWhileEveryLoadRevalidatesItsReferences()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope order = estate.Add("work-order", estate.BuilderId, """{"key":"W-1","kind":"ordinary","title":"Task","intent":"Cache.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["y"]}""");
+        using EstateSession session = EstateSession.Open(estate.Root);
+        EstateModel first = session.Load();
+        EstateModel second = session.Load();
+        Assert.NotSame(first, second);
+        Assert.Same(first.ById[order.Id], second.ById[order.Id]);
+        Assert.Equal(first.Findings, second.Findings);
+
+        // Reusing parsed bytes must not reuse semantic verdicts. The author disappears while the order is unchanged.
+        File.Delete(Path.Combine(estate.Root, estate.Builder.ExpectedPath));
+        EstateModel missingAuthor = session.Load();
+        Assert.Same(first.ById[order.Id], missingAuthor.ById[order.Id]);
+        Assert.True(missingAuthor.Findings.HasErrors);
+        Assert.Equal(estate.Load().Findings, missingAuthor.Findings);
+    }
+
+    [Fact]
+    public void RewrittenRecordsAndParseFailuresReplaceTheCachedOriginalAndItsFindings()
+    {
+        using var estate = new TestEstate();
+        using EstateSession session = EstateSession.Open(estate.Root);
+        EstateModel original = session.Load();
+        string path = Path.Combine(estate.Root, estate.Builder.ExpectedPath);
+        byte[] bytes = File.ReadAllBytes(path);
+        File.WriteAllText(path, "not JSON");
+        EstateModel broken = session.Load();
+        Assert.Contains(broken.Findings, f => f.Code == "record.json");
+        Assert.Equal(broken.Findings, session.Load().Findings);
+        Assert.Equal(4, session.ParsedFiles);
+        File.WriteAllBytes(path, bytes);
+        EstateModel restored = session.Load();
+        Assert.Equal(original.Findings, restored.Findings);
+        Assert.Equal(5, session.ParsedFiles);
+
+        // Same-size tampering must be rehashed, not mistaken for the original because it occupies the same path.
+        DateTime timestamp = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, System.Text.Encoding.UTF8.GetString(bytes).Replace("Test Builder", "Fake Builder", StringComparison.Ordinal));
+        File.SetLastWriteTimeUtc(path, timestamp.AddSeconds(2));
+        EstateModel changed = session.Load();
+        Assert.Equal(estate.Load().Findings, changed.Findings);
+        Assert.Contains(changed.Findings, f => f.Code == "record.hash-mismatch");
+        Assert.Equal(6, session.ParsedFiles);
+    }
+
+    [Fact]
+    public void CachedParsingStillReadsTheManifestAndChecksCurrentOutputBytes()
+    {
+        using var estate = new TestEstate();
+        RecordEnvelope order = estate.Add("work-order", estate.BuilderId, """{"key":"W-1","kind":"ordinary","title":"Task","intent":"Cache.","scope":["x"],"exitQuestion":"?","inputs":[],"deliverables":["y"]}""");
+        const string brief = """{"outcome":"An output.","sources":[],"permittedChanges":["docs"],"prohibitedEffects":[],"workspace":["a local clone"],"limits":[],"expectedOutputs":["output"],"reviewCriteria":["hash checked"],"recovery":"Read the result."}""";
+        RecordEnvelope assignment = estate.Add("assignment", estate.OperatorId, $$"""{"contributor":"{{estate.BuilderId}}","brief":{{brief}}}""", order.Reference);
+        RecordEnvelope attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"a local clone","note":"Build."}""", assignment.Reference);
+        estate.WriteFile("docs/output.txt", "original");
+        string path = Path.Combine(estate.Root, "docs", "output.txt");
+        string hash = ContentHash.Sha256File(path);
+        RecordEnvelope result = estate.Add("result", estate.BuilderId, $$"""{"outcome":"completed","summary":"Built.","outputs":[{"name":"output","hash":"{{hash}}","location":"docs/output.txt"}],"evidence":[],"checks":[],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""", attempt.Reference);
+        using EstateSession session = EstateSession.Open(estate.Root);
+        EstateModel first = session.Load();
+        Assert.False(first.Findings.HasErrors, string.Join('\n', first.Findings));
+        Assert.DoesNotContain(first.Findings, f => f.Code == "result.output-changed");
+        DateTime timestamp = File.GetLastWriteTimeUtc(path);
+        File.WriteAllText(path, "modified");
+        File.SetLastWriteTimeUtc(path, timestamp);
+        EstateModel changed = session.Load();
+        Assert.Same(first.ById[result.Id], changed.ById[result.Id]);
+        Assert.Contains(changed.Findings, f => f.Code == "result.output-changed");
+        Assert.Equal(estate.Load().Findings, changed.Findings);
+        estate.MoveTo(2);
+        Assert.Equal(2, session.Load().Manifest!.RecordFormat);
+    }
+
+    [Fact]
+    public void LiveSnapshotsNoticeOtherConnectionsAndKeepPublicFileBuffersIndependent()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "vericairn-snapshot-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(directory);
+        try
+        {
+            using var live = new LiveStore(Path.Combine(directory, "live.db"));
+            using var other = new LiveStore(live.Path);
+            live.Put("one", [1, 2, 3]);
+            LiveStore.FileSnapshot first = live.Snapshot();
+            Assert.Same(first, live.Snapshot());
+            live.Files()[0].Bytes[0] = 9;
+            Assert.Equal(new byte[] { 1, 2, 3 }, first.Files[0].Bytes);
+            other.Put("one", [4, 5, 6]);
+            LiveStore.FileSnapshot second = live.Snapshot();
+            Assert.NotSame(first, second);
+            Assert.Equal(new byte[] { 4, 5, 6 }, second.Files[0].Bytes);
+            other.Remove("one");
+            Assert.Empty(live.Snapshot().Files);
+            live.Put("two", [7]);
+            Assert.Equal("two", Assert.Single(live.Snapshot().Files).Path);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [Fact]
     public void RepositorySyncedSessionMirrorsTheRecordFilesAndNeverWritesIntoTheRepository()
     {

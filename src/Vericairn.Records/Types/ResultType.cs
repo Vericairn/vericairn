@@ -84,7 +84,7 @@ public sealed class ResultType : IRecordType
         body.NoOtherKeys();
         if (outcome == "completed" && failedCheck)
         {
-            // The reviewer's decision is an acceptance: once one is recorded after the result, the failed check has its answer.
+            // The reviewer's acceptance answers the failed check, through its causal pin or its recorded order.
             RecordEnvelope? acceptance = AcceptanceAfter(context.Model, context.Record);
             if (acceptance is null)
             {
@@ -94,7 +94,7 @@ public sealed class ResultType : IRecordType
             {
                 string accepted = acceptance.Subject!.Id == context.Record.Id ? "this result" : $"its work order {EstateModel.BodyString(context.Model.ById[acceptance.Subject.Id], "key")}";
                 bool self = acceptance.Body.TryGetProperty("self", out JsonElement flag) && flag.ValueKind == JsonValueKind.True;
-                context.Findings.Info("result.checks-accepted", context.Location, $"The result claims completed while a check failed, and acceptance {acceptance.Id}, recorded after it, accepts {accepted}; it is {(self ? "a self-acceptance" : "not a self-acceptance")}.");
+                context.Findings.Info("result.checks-accepted", context.Location, $"The result claims completed while a check failed, and acceptance {acceptance.Id} accepts {accepted}; it is {(self ? "a self-acceptance" : "not a self-acceptance")}.");
             }
         }
 
@@ -122,16 +122,19 @@ public sealed class ResultType : IRecordType
     }
 
     /// <summary>
-    /// The latest current acceptance recorded after the result, by time and then by id, that accepts the result itself or its work
-    /// order (any revision of the order its attempt and assignment lead to); null when there is none.
+    /// An exact hash pin establishes that the acceptance saw the result, regardless of clocks or identifier order. An acceptance
+    /// of its work order instead uses recorded time with the identifier as a deterministic tie-break. The latest qualifying
+    /// current acceptance is selected by that same deterministic ordering; null when there is none.
     /// </summary>
     private static RecordEnvelope? AcceptanceAfter(EstateModel model, RecordEnvelope result)
     {
         RecordEnvelope? order = WorkView.OrderOfResult(model, result);
         IReadOnlyList<string> orders = order is null ? [] : model.Chain(model.Latest(order));
         return model.Current("acceptance")
-            .Where(a => a.Subject is { } subject && ((subject.Id == result.Id && subject.Hash == result.ComputedHash) || (subject.Type == "work-order" && orders.Contains(subject.Id, StringComparer.Ordinal))))
-            .Where(a => string.CompareOrdinal(a.At, result.At) > 0 || (a.At == result.At && string.CompareOrdinal(a.Id, result.Id) > 0))
+            .Where(a => a.Subject is { } subject &&
+                ((subject.Id == result.Id && subject.Hash == result.ComputedHash) ||
+                 (subject.Type == "work-order" && orders.Contains(subject.Id, StringComparer.Ordinal) &&
+                  (string.CompareOrdinal(a.At, result.At) > 0 || (a.At == result.At && string.CompareOrdinal(a.Id, result.Id) > 0)))))
             .OrderBy(a => a.At, StringComparer.Ordinal).ThenBy(a => a.Id, StringComparer.Ordinal)
             .LastOrDefault();
     }

@@ -10,6 +10,20 @@ namespace Vericairn.Runtime.Tests;
 public sealed class ProviderProcessTests
 {
     [Theory]
+    [InlineData("main")]
+    [InlineData("release/1.0")]
+    public void GitHubResolvesTheBuildRefAtTheProvider(string reference)
+    {
+        const string commit = "0123456789abcdef0123456789abcdef01234567";
+        var provider = new GitHubReleaseProvider(info =>
+        {
+            Assert.Equal(["api", $"repos/Example/widget/commits/{Uri.EscapeDataString(reference)}", "--jq", ".sha"], info.ArgumentList);
+            return new(ProcessOutcome.Exited, true, 0, commit + "\n", string.Empty);
+        });
+        Assert.Equal(commit, provider.ResolveCommit("Example/widget", new Dictionary<string, string> { ["ref"] = reference }));
+    }
+
+    [Theory]
     [InlineData("NotStarted", false)]
     [InlineData("TimedOut", true)]
     [InlineData("Canceled", true)]

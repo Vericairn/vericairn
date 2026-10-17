@@ -10,7 +10,7 @@ namespace Vericairn.Records.Estate;
 /// release's notes and the progress report lists for each published release. A window holds the records dated after its beginning and
 /// up to its end, so consecutive windows share no record and leave none out. A result of the window is part of what the release is known
 /// to contain when its exact revision or its work order's current revision is accepted. Superseded results are omitted;
-/// any other current result is a claim to inspect.
+/// accepted work is grouped under its latest accepted result, with earlier attempts available through the work order's history.
 /// </summary>
 public static class ReleaseContents
 {
@@ -40,7 +40,10 @@ public static class ReleaseContents
             .ToList();
     }
 
-    /// <summary>The current results of a window: those whose exact revision or current work order is accepted, and the others, each in the window's order.</summary>
+    /// <summary>
+    /// One accepted entry per work order in the window, naming its latest accepted current result by time and then identifier.
+    /// Earlier results belong to that work's history. Other current results, including later claims not yet accepted, remain separate.
+    /// </summary>
     public static (IReadOnlyList<Accepted> Accepted, IReadOnlyList<RecordEnvelope> NotAccepted) Results(EstateModel model, IReadOnlyList<RecordEnvelope> window)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -68,7 +71,13 @@ public static class ReleaseContents
             }
         }
 
-        return (accepted, notAccepted);
+        List<Accepted> grouped = accepted.GroupBy(a => a.Order?.Id ?? a.Result.Id, StringComparer.Ordinal)
+            .Select(g => g.OrderBy(a => a.Result.At, StringComparer.Ordinal).ThenBy(a => a.Result.Id, StringComparer.Ordinal).Last())
+            .OrderBy(a => a.Result.At, StringComparer.Ordinal).ThenBy(a => a.Result.Id, StringComparer.Ordinal).ToList();
+        Dictionary<string, RecordEnvelope> latestAccepted = grouped.Where(a => a.Order is not null).ToDictionary(a => a.Order!.Id, a => a.Result, StringComparer.Ordinal);
+        notAccepted.RemoveAll(result => OrderOf(model, result) is RecordEnvelope order && latestAccepted.TryGetValue(model.Latest(order).Id, out RecordEnvelope? latest) &&
+            (string.CompareOrdinal(result.At, latest.At) < 0 || (result.At == latest.At && string.CompareOrdinal(result.Id, latest.Id) < 0)));
+        return (grouped, notAccepted);
     }
 
     /// <summary>The work order a result is toward, following its attempt and that attempt's assignment, at the revision they name; null when the chain is broken.</summary>

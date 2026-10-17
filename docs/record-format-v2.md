@@ -76,9 +76,12 @@ recorded step.
   authority validation; supersession does not repair an invalid pinned hash. FIX-05's replacement acceptance of
   its current work-order revision therefore answers the superseded acceptance of the earlier revision.
 - A new estate starts at the newest format its build writes.
-- A record's `at` is in whole seconds, and its identifier keeps the milliseconds of the moment it was made. Records of
-  one second are ordered by identifier, so a build that writes them sorts them in the order they were made; records a
-  build of 0.4.2 or earlier wrote within one second sort in no particular order among themselves.
+- A record's `at` is in whole seconds. From 0.7.2, generated identifiers increase in one process's generation order,
+  across threads and within a millisecond. A repeated or backwards clock retains the last millisecond and increments
+  the suffix. This does not establish causal order across processes or machines. An exact result acceptance's hash pin
+  establishes that it saw the result; judgments without such a reference use recorded time, with the identifier only
+  a deterministic tie-break. Earlier builds did not guarantee identifier order within a millisecond (0.4.2 and earlier,
+  within a second). Explicitly supplied identifiers carry no generation-order guarantee.
 
 ## Moving an estate to format 2
 
@@ -238,7 +241,10 @@ Release notes and the progress report omit superseded results. They list a curre
 accepted work when a current acceptance pins the result's exact hash or the current revision and hash of its work
 order, following the attempt and assignment. The latter includes results written by another principal, without
 creating an acceptance of those results or changing who may accept them. Acceptance of an earlier work-order revision
-does not count for its current revision; every other current result in the window is listed as recorded, not yet accepted.
+does not count for its current revision. From 0.7.2, accepted results are grouped by work order, with one entry naming
+the latest accepted current result in the window, ordered by recorded time and then identifier. Earlier results remain
+reachable through `vericairn work observe <key>`. Later unaccepted results and results of other unaccepted work remain
+listed as recorded, not yet accepted. Frozen documentation sets are unchanged.
 
 A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
 `design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any
@@ -321,8 +327,11 @@ level among its reasons: `remind` shows in status; `warn` is also a `document.du
 `refuse` also refuses the next `vericairn release submit` of the product, before any intent is recorded, naming every
 such document at once. `vericairn release submit` also refuses, before any intent is recorded, when a cleared document
 of another repository that declares `refuse` and whose `release` trigger names the product differs, at the commit being
-released, from the content its latest review cleared; it makes that comparison only where a clone of that repository is
-registered here. A declaration that names a source, trigger, check or generator no installed pack provides is shown as
+released, from the content its latest review cleared. From 0.7.2 the build provider resolves that commit at the destination;
+both document bytes and repository `covers` checks use that exact commit. An unresolved commit refuses submission.
+The comparison runs where a clone is registered; if that clone lacks the commit, the refusal names the repository to
+fetch. It never substitutes the clone's HEAD. Observation checks the actual built commit again before recording a
+candidate, including when the branch moved after submission. A declaration that names a source, trigger, check or generator no installed pack provides is shown as
 unavailable (`document.unavailable`) and, when it declares a `refuse` trigger, closes its product's release gate until
 the pack is installed or the declaration is revised. Status in JSON lists every declared document with its state,
 reasons and latest clearance.
@@ -605,6 +614,13 @@ attention write is retried and does not prevent containment. Settlement records 
 `lastEventAt`, optional `attentionAt`, `attention` (the ask id), and `stoppedAt`; run-list responses expose the same
 `liveness`, observed locally while in flight and recorded after settlement. A lost observer certifies neither liveness
 nor containment.
+
+From 0.7.2, settlement withdraws the still-open or notified asks named by its `liveness.attention` and
+`signals[].attention`. The asker authors the withdrawal, whose subject pins the exact settlement and whose
+recommendation records that attention is no longer needed. The original ask and observation remain in history.
+An ask a person already answered stays answered; unrelated questions about the run stay open. Closed asks about
+the settled run no longer need reconsideration merely because settlement superseded its intent. Settlement and
+withdrawals are validated together and journaled, so a partial storage failure remains visible for reconciliation.
 
 At settlement the worker compares a physical file inventory captured after brief export and before launch with the
 workspace after the whole process boundary exits. Enumeration does not consult agent-writable Git configuration or

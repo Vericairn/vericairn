@@ -222,7 +222,7 @@ public sealed partial class ShellViewModel : Observable
         if (connection.Api is null)
         {
             Status = "No daemon answers for this estate; starting the runtime.";
-            await StartRuntimeAsync().ConfigureAwait(true);
+            await StartRuntimeCoreAsync().ConfigureAwait(true);
         }
 
         preferences.Remember(root);
@@ -271,7 +271,6 @@ public sealed partial class ShellViewModel : Observable
             // The asks a delivery carries come first among the decisions needed: each with its recommendation, at most three a principal.
             AsksResponse? asks = Try(() => connection.Api.Asks());
             Replace(Attention, [.. AskAttention.From(asks?.Json ?? default, now), .. estate.Attention]);
-            FillProgress(Try(() => connection.Api.Progress()));
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
                 if (page.HasPackage)
@@ -321,10 +320,14 @@ public sealed partial class ShellViewModel : Observable
                 choosingActing = false;
             }
 
-            DescribeActing();
-            RefreshCommunication();
-            FillProgress(Try(() => connection.Api.Progress()));
-            AddCommunicationAttention();
+            RecordResponse? principal = DescribeActing();
+            string? recipient = HumanRecipient(principal);
+            RefreshCommunication(response, recipient);
+            // Home and required attention use the same observation, including its failure. A second fetch used to repeat
+            // the full estate load just to present the same report under the now-known communication settings.
+            var progress = new Lazy<ProgressResponse>(connection.Api.Progress);
+            FillProgress(Try(() => progress.Value));
+            AddCommunicationAttention(recipient, () => progress.Value);
             Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
@@ -341,22 +344,23 @@ public sealed partial class ShellViewModel : Observable
         }
     }
 
-    private void DescribeActing()
+    private RecordResponse? DescribeActing()
     {
         string? id = ActingPrincipalId;
         if (id is null)
         {
             ActingPrincipal = "read-only: no admitted device on this machine";
             actingRole = string.Empty;
-            return;
+            return null;
         }
 
         string name = ActingCandidates.FirstOrDefault(d => d.Principal == id)?.PrincipalName ?? id;
         actingRole = string.Empty;
+        RecordResponse? principal = null;
         try
         {
             // A principal is identified by its first record; its name and roles are those of its current revision.
-            RecordResponse? principal = connection?.Api is IEstateApi api ? CurrentPrincipal(api, id) : null;
+            principal = connection?.Api is IEstateApi api ? CurrentPrincipal(api, id) : null;
             if (principal is not null && principal.Envelope.TryGetProperty("body", out JsonElement body))
             {
                 name = body.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? name : name;
@@ -377,6 +381,7 @@ public sealed partial class ShellViewModel : Observable
                 ? $"{name} (named with --as; no admitted device of this principal is held here, so writes will be refused)"
                 : $"{name} (named with --as; no device of this principal is held here, so its records will be unsigned)";
         Raise(nameof(ActingPrincipalId));
+        return principal;
     }
 
     /// <summary>Whether the estate's current policy requires every record to be signed, read as the runtime reads it.</summary>
@@ -429,6 +434,12 @@ public sealed partial class ShellViewModel : Observable
     /// <summary>Starts the daemon through the runtime manager and reconnects.</summary>
     public async Task StartRuntimeAsync()
     {
+        await StartRuntimeCoreAsync().ConfigureAwait(true);
+        Refresh();
+    }
+
+    private async Task StartRuntimeCoreAsync()
+    {
         if (connection is null)
         {
             return;
@@ -436,7 +447,6 @@ public sealed partial class ShellViewModel : Observable
 
         RuntimeOutcome outcome = await runtime.StartAsync(connection.Root).ConfigureAwait(true);
         Log($"runtime start: {(outcome.Ok ? "answered" : "did not answer")}: {outcome.Output}");
-        Refresh();
     }
 
     /// <summary>Asks the daemon to stop and refreshes.</summary>
@@ -551,7 +561,8 @@ public sealed partial class ShellViewModel : Observable
     {
         if (connection?.Api is IEstateApi api)
         {
-            ProgressResponse? progress = Try(api.Progress);
+            var observedProgress = new Lazy<ProgressResponse>(api.Progress);
+            ProgressResponse? progress = Try(() => observedProgress.Value);
             RefreshCommunication();
             FillProgress(progress, onDemand: false);
             if (Try(() => api.Asks()) is AsksResponse asks)
@@ -560,7 +571,7 @@ public sealed partial class ShellViewModel : Observable
                 Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
             }
 
-            AddCommunicationAttention();
+            AddCommunicationAttention(CommunicationRecipient(), () => observedProgress.Value);
             if (progress is null)
             {
                 Attention.Add(new AttentionItem("unknown-check", "Progress unavailable", "The runtime did not answer the progress read.", "unknown",

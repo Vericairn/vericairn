@@ -199,6 +199,7 @@ public class LivingDocumentJourneyTests
             CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "The source change does not touch the README.", "--commit", second);
 
             // Release 0.2.0: the intent records that the README at the commit being released is what its review cleared.
+            provider.HeadSha = second;
             string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
             string intent = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Select(File.ReadAllText).Single(t => t.Contains("\"not-started\"", StringComparison.Ordinal));
             Assert.Contains($"README.md at {second[..12]} is the content its review", intent, StringComparison.Ordinal);
@@ -217,6 +218,7 @@ public class LivingDocumentJourneyTests
             File.AppendAllText(Path.Combine(repo, "README.md"), "Now with a claim nobody reviewed.\n");
             Git(repo, "commit", "-q", "-am", "Edit the README");
             string third = GitOutput(repo, "rev-parse", "HEAD");
+            provider.HeadSha = third;
             CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
             Assert.Contains($"README.md changed after its review at {second[..12]}: at {third[..12]}", held.Out + held.Err, StringComparison.Ordinal);
@@ -269,6 +271,7 @@ public class LivingDocumentJourneyTests
                 CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, title + ".json", $$"""{"path":"{{path}}","repository":"{{resource}}","title":"{{title}}","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"clearedBy":"{{clearedBy}}","summary":"Follows the releases."}"""));
             }
 
+            provider.HeadSha = GitOutput(repo, "rev-parse", "HEAD");
             Publish(root, scratch, provider, op, builder, product, "0.2.0");
             JsonElement due = CliHarness.Ok("--estate", root, "--json", "status").Json.GetProperty("documents");
             Assert.Equal(2, due.EnumerateArray().Count(d => d.GetProperty("state").GetString() == "due" && d.GetProperty("reasons")[0].GetProperty("summary").GetString()!.StartsWith("release 0.2.0 was published", StringComparison.Ordinal)));
@@ -295,6 +298,7 @@ public class LivingDocumentJourneyTests
             Assert.Equal(CliHarness.Ok("--estate", root, "--json", "docs", "living").Out, CliHarness.Ok("--estate", second, "--json", "docs", "living").Out);
 
             // The next release passes, with both documents compared at the commit it builds.
+            provider.HeadSha = GitOutput(repo, "rev-parse", "HEAD");
             Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
         }
         finally

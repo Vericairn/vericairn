@@ -48,6 +48,16 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
         ["github"]);
 
     /// <inheritdoc />
+    public string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+        ArgumentNullException.ThrowIfNull(settings);
+        string reference = settings.TryGetValue("ref", out string? named) ? named : "main";
+        return Gh(out string output, "api", $"repos/{destination}/commits/{Uri.EscapeDataString(reference)}", "--jq", ".sha") == 0
+            ? output.Trim() : null;
+    }
+
+    /// <inheritdoc />
     public DispatchReceipt Dispatch(DispatchRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);

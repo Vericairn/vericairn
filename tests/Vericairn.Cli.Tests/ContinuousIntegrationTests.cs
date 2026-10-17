@@ -17,6 +17,44 @@ public class ContinuousIntegrationTests
     private const string GitleaksSha256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb";
 
     [Fact]
+    public void PullRequestsCheckAllowedActionsAndTheirFullCommitPins()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        Assert.True(File.Exists(Path.Combine(workflows, "actions.allow")));
+        string ci = Read(Path.Combine(workflows, "ci.yml"));
+        string policy = Block(ci, "workflow-policy:", 2);
+        Assert.Contains("ruby .github/scripts/check-workflow-actions.rb", policy, StringComparison.Ordinal);
+        Assert.Contains("ruby .github/scripts/test-workflow-actions.rb", policy, StringComparison.Ordinal);
+        Assert.Contains("python3 -m unittest discover", policy, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", policy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PullRequestsVerifyBuiltNugetPackagesWithoutPublication()
+    {
+        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "nuget.yml"));
+        Assert.Contains("\n  pull_request:\n", Block(workflow, "on:", 0), StringComparison.Ordinal);
+        Assert.DoesNotContain("id-token", Block(workflow, "permissions:", 0), StringComparison.Ordinal);
+        string verify = Block(workflow, "verify:", 2);
+        Assert.Contains("if: github.event_name == 'pull_request'", verify, StringComparison.Ordinal);
+        Assert.Contains("dotnet restore --locked-mode", verify, StringComparison.Ordinal);
+        Assert.Contains("dotnet pack --no-restore --configuration Release --output packages -warnaserror", verify, StringComparison.Ordinal);
+        Assert.Contains("SHA256SUMS", verify, StringComparison.Ordinal);
+        Assert.Contains("hashlib.file_digest(content, \"sha256\")", verify, StringComparison.Ordinal);
+        const string verifier = "python3 .github/scripts/verify-packages.py packages";
+        Assert.Contains(verifier, verify, StringComparison.Ordinal);
+        Assert.DoesNotContain("NuGet/login", verify, StringComparison.Ordinal);
+        Assert.DoesNotContain("nuget push", verify, StringComparison.Ordinal);
+        Assert.DoesNotContain("id-token", verify, StringComparison.Ordinal);
+        string publish = Block(workflow, "publish:", 2);
+        Assert.Contains("if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'", publish, StringComparison.Ordinal);
+        Assert.Contains("id-token: write", publish, StringComparison.Ordinal);
+        Assert.Contains(verifier, publish, StringComparison.Ordinal);
+        Assert.True(publish.IndexOf(verifier, StringComparison.Ordinal) < publish.IndexOf("NuGet/login@", StringComparison.Ordinal));
+        Assert.DoesNotContain("dotnet pack", publish, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryBranchPushAndPullRequestIsScannedForSecretsByAPinnedAndVerifiedGitleaks()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
