@@ -94,6 +94,9 @@ public sealed class ReleaseDispatchTests
         ReleaseResponse observed = fixture.Service.ReleaseObserve(new ReleaseObserveRequest("1.0.0", "Example/widget", fixture.Estate.OperatorId));
         Assert.True(observed.Ok, observed.Message);
         Assert.Equal("uncertain", observed.Status);
+        Assert.NotNull(observed.Operation);
+        Assert.DoesNotContain("Nothing recorded", observed.Message, StringComparison.Ordinal);
+        Assert.Equal(observed.Operation.Id, Assert.Single(fixture.Service.Session.Load().Current("operation")).Id);
         Assert.Contains("no run is identified", observed.Pending, StringComparison.Ordinal);
         Assert.Equal(0, fixture.Provider.Calls);
         ReleaseResponse canceled = fixture.Service.ReleaseObserve(new ReleaseObserveRequest("1.0.0", "Example/widget", fixture.Estate.OperatorId, Cancel: "The provider confirms no run or release exists."));

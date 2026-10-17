@@ -1516,6 +1516,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         string providerId;
         JsonElement target;
         string product;
+        RecordWritten? recovered = null;
         lock (gate)
         {
             (current, string? problem) = FindReleaseOperation(request);
@@ -1558,6 +1559,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
                 current = CurrentOperation(identity)!;
                 status = "uncertain";
+                recovered = uncertain.Written;
             }
         }
 
@@ -1610,7 +1612,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                         : release is not null
                             ? $"draft {tag} lacks checksums for {string.Join(", ", profile.Missing(release, request.Version, checksums))}"
                             : run is null ? "no run is identified and no release is observed yet" : $"run {run.RunId} completed and no draft {tag} is observed yet";
-                    return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({waiting}). Nothing recorded; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Pending: waiting, Run: run?.RunId, Url: run?.Url ?? release?.Url);
+                    string recordedNow = recovered is null ? "Nothing recorded" : "The missing receipt was recorded as uncertain";
+                    return new ReleaseResponse(identity, status, $"{identity}: {status}, pending ({waiting}). {recordedNow}; observe again later{(status == "uncertain" ? ", or cancel once reconciliation shows no effect" : string.Empty)}.", true, Operation: recovered, Pending: waiting, Run: run?.RunId, Url: run?.Url ?? release?.Url);
                 }
 
                 WriteOutcome revision = NewRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
