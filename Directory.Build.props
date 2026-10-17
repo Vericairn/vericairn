@@ -32,7 +32,7 @@
     <DebugType>portable</DebugType>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <VersionPrefix>0.6.1</VersionPrefix>
+    <VersionPrefix>0.7.0</VersionPrefix>
     <VersionSuffix>dev</VersionSuffix>
   </PropertyGroup>
   <ItemGroup>

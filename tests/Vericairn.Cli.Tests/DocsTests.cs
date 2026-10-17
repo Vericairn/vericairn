@@ -64,6 +64,20 @@ public class DocsTests
     }
 
     [Fact]
+    public void AnOptionsNoteFollowsAWholeSentence()
+    {
+        string output = CliHarness.TempDirectory("docs-sentences");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            // The built-in help option's description ends without a full stop of its own.
+            Assert.All(File.ReadAllLines(Path.Combine(output, "cli-reference.md")),
+                line => Assert.DoesNotMatch(@"[\p{L}\p{N})\]`'""] (Applies to subcommands\.|Required\.|Default: )", line));
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
+
+    [Fact]
     public void TheBuildToolingWritesTheReferencesAndTheManifestFromThisBuild()
     {
         string output = CliHarness.TempDirectory("docs-generate");

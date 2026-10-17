@@ -40,10 +40,10 @@ The runtime records the exact source hash and checks the recipient, authorship,
 delegation and format before it writes. Readers, builds and previews author
 nothing and do not infer personal settings from prose or defaults.
 
-Deployment boundary: the coding assignment permits estate writes only for
-Codex's own attempt and result. The connected 0.6.1 estate reader does not
-recognize the new record types. This command is a tested adoption procedure,
-not a claim that a typed preference has already been written to that estate.
-The existing decision remains its recorded instruction until an authorized
-person applies this procedure with the updated reader. No other person's
-preference is created. Remote is not built.
+Deployment boundary: use a 0.7.0-capable reader and an estate at record format 2 before this write;
+a 0.6.1 reader does not recognize these record types. The commands are a tested adoption procedure,
+not evidence that a typed preference was written to the first-party estate. Inspect its current records
+before acting: `--expected absent` deliberately refuses an existing setting, including a reset.
+If the decision has changed, review its current revision instead of silently reusing this basis.
+An authorized person applies the procedure; installing or building 0.7.0 never performs it automatically.
+No other person's preference is created. Remote is not built.

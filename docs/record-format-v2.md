@@ -6,9 +6,10 @@ it was written under. A record states the format it was written in, and an estat
 carries the records goals need, the additions milestone M3 adopted, and the living-document records; releases 0.5.0 and
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
-publication. This draft describes 0.6.1 with the unreleased FIX-09 corrections; 0.6.1 carries those additions with
-FIX-08's corrections and continues to read formats 1 and 2 and write at most format 2. The additions and corrections do not require another format change;
-validation and the run ledger nevertheless need a build that understands their rules.
+publication. This draft describes 0.7.0, which follows published 0.6.1 and reads formats 1 and 2, writing at most
+format 2. It adds work-progress, communication-setting, communication-delegation and harness-qualification types,
+estate observations, watching settings and execution admission fields. These additions require a 0.7.0-capable
+reader before authoring them, but no format-3 migration; older records retain their original bytes and rules.
 
 ## Derived context artifacts (0.7.0)
 
@@ -172,6 +173,10 @@ list. An estate created at format 2 has no list, and in it no unsigned admission
   also state `self` (see Living documents due). `independent-agent` needs an agent principal and `operator` the operator
   role. A clearance meets the declaration's `clearedBy`, and a `self` review does not clear a document whose
   `clearedBy` is `independent`.
+
+The 0.7.0 additions are `work-progress` ([completed phase claims](#work-progress-claims-070)),
+`communication-setting` and `communication-delegation` ([personal settings and consent](#communication-configuration-comms-01)),
+and `harness-qualification` ([exact installed harness admission](#harness-qualifications-run-03)).
 
 ## Fields new in format 2
 
@@ -473,7 +478,7 @@ anything is written; `vericairn goal show <goal>` says whether the goal is ready
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.6.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -513,7 +518,9 @@ records written before it (so a later record never unmakes it):
 - no charged unit is spent, and each is capped within what remains (`operation.budget`);
 - fewer of the goal's runs are in flight than its `concurrency`, one when the budget states none, since an absent cap is
   not an unlimited one (`operation.budget`);
-- the step, the assignment, has had fewer runs than the goal's `attemptsPerStep` (`operation.budget`).
+- the step, the assignment, has had fewer runs than the goal's `attemptsPerStep` (`operation.budget`);
+- no prior run of that assignment remains uncertain without reconciliation under its original identity. A new branch
+  or spare budget does not authorize retry. A later reconciliation does not retroactively admit an earlier retry.
 
 The worker takes a run's cap from the goal's budget: the wall minutes asked for or what remains, whichever is less, the
 goal's attempts per step, and what remains of `tokens` and `currency` where the budget states them. A cap is reserved as
@@ -868,3 +875,29 @@ WATCH-01 `signals` additionally admit `execution` and `tool-inventory` codes. Th
 execution discrepancies or invocations outside the admitted tool inventory; existing command audit
 signals remain intact. The efficiency Adapter stays disabled and absent; enabling it is unsupported.
 Remote is not built. A native launcher without complete inventory qualification cannot dispatch.
+
+## Harness qualifications (RUN-03)
+
+`harness-qualification` is an additive format-2 type with no subject. Its required body is `launcher`
+(`codex` or `claude-code`), one exact `version`, `status` (`qualified` initially), and `probes`, an object
+containing exactly six SHA-256 digests: `version`, `flags`, `tools`, `configuration`, `login` and `mcp`.
+A version is a bounded token starting with a digit and containing a dot, with ASCII letters, digits, dots,
+hyphens and plus signs only; it expresses no range. Raw output, machine bindings and credential material are
+not fields. The runtime's `worker qualify` operation signs the record with the actual author's admitted device.
+
+Only a human operator or a human with the operator's explicit `qualify` grant may qualify or revoke.
+`administer` and `local-engineering` do not confer that scope; an agent or service cannot use it. Historical
+validation checks authority at authorship, including grant expiry and supersession. A later grant does not
+authorize an earlier act; withdrawing a grant does not erase a qualification legitimately written before it.
+
+A superseding record may only revoke a qualified record, with `status: revoked` and identical launcher,
+version and probe digests. Requalification creates a new record from fresh probes. This differs from the
+existing release/platform `qualification` type, whose subject is a release and which feeds the MCP matrix.
+
+The worker admits the compiled codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296` baselines or another
+exact version whose local probe digests match a current unrevoked qualification. Its immutable
+`execution.harnessAdmission` contains `kind` (`baseline` or `qualification`), launcher, version and probes;
+a qualification admission also pins `record` and `hash`. The runtime rechecks admission after the dispatch
+probes. Revoking a qualification preserves historical run evidence and does not withdraw a compiled baseline.
+Qualification does not supply RUN-01's model configuration or environment policy and never authorizes work,
+proves vendor provenance, qualifies live inference or accepts a result. Generic dispatch remains refused.
