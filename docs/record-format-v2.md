@@ -241,7 +241,10 @@ Release notes and the progress report omit superseded results. They list a curre
 accepted work when a current acceptance pins the result's exact hash or the current revision and hash of its work
 order, following the attempt and assignment. The latter includes results written by another principal, without
 creating an acceptance of those results or changing who may accept them. Acceptance of an earlier work-order revision
-does not count for its current revision; every other current result in the window is listed as recorded, not yet accepted.
+does not count for its current revision. From 0.7.2, accepted results are grouped by work order, with one entry naming
+the latest accepted current result in the window, ordered by recorded time and then identifier. Earlier results remain
+reachable through `vericairn work observe <key>`. Later unaccepted results and results of other unaccepted work remain
+listed as recorded, not yet accepted. Frozen documentation sets are unchanged.
 
 A work order's `after` and `blockedBy` order the work, and the next eligible work is derived from them (the estate's
 `design/goals.md` § 7): the planned work orders that nothing holds. A work order it starts after (`after`, by any

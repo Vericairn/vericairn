@@ -249,14 +249,16 @@ public class DocsTests
             // A format-2 admission has no legacy scope; its notes must not invent an empty scope label.
             string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Notes device", "--custody", "file").Id;
             string admission = CliHarness.Ok("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Admission for the notes.").Id;
-            Thread.Sleep(1100); // Pre-publication notes end at the second before generation.
+            DateTimeOffset reading = DateTimeOffset.UtcNow.AddSeconds(2);
 
             // The previous set records the window of its notes: these begin at its end, so W-1 is in them, and they record their own.
             string sets = Path.Combine(scratch, "releases");
             Directory.CreateDirectory(Path.Combine(sets, "0.1.0"));
             File.WriteAllText(Path.Combine(sets, "0.1.0", "manifest.json"), """{"format":"vericairn.docs/1","version":"0.1.0","notes":{"from":"2026-08-01T00:00:00Z","to":"2026-09-01T00:30:00Z"}}""");
             string output = Path.Combine(sets, "0.2.0");
-            CliHarness.Outcome written = CliHarness.Ok("--estate", root, "--json", "docs", "notes", "--from", "0.1.0", "--to", "0.2.0", "--out", output);
+            (int code, string text) = Tool(() => Docs.Notes(root, "0.1.0", "0.2.0", output, null, json: true, at: reading));
+            Assert.Equal(0, code);
+            var written = new CliHarness.Outcome(code, text, string.Empty);
             Assert.Equal("2026-09-01T00:30:00Z", written.Json.GetProperty("window").GetProperty("from").GetString());
             string notes = File.ReadAllText(Path.Combine(output, "release-notes.md"));
             Assert.Contains("from the estate's records since the end of the notes of 0.1.0 (2026-09-01 00:30 UTC) up to ", notes, StringComparison.Ordinal);
@@ -271,7 +273,7 @@ public class DocsTests
             JsonElement window = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))).RootElement.GetProperty("notes");
             Assert.Equal("2026-09-01T00:30:00Z", window.GetProperty("from").GetString());
             Assert.True(string.CompareOrdinal(window.GetProperty("to").GetString(), "2026-09-01T02:00:00Z") >= 0);
-            Assert.True(string.CompareOrdinal(window.GetProperty("to").GetString(), Vericairn.Records.Model.RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)) < 0);
+            Assert.Equal(RecordParser.FormatTimestamp(reading.AddSeconds(-1)), window.GetProperty("to").GetString());
 
             // The build tooling, generating the set's references again, keeps the window the notes recorded.
             Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);

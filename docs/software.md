@@ -406,10 +406,11 @@ Only current results in that window are listed: a result superseded by a later r
 result is outside the window. A current result appears under **Work accepted** when a current acceptance pins either
 that result's exact hash or its work order's current revision and hash. This includes another principal's results with
 no acceptance of their own; it classifies the work and does not accept those result records. An acceptance of an earlier
-work-order revision does not count for the current revision. Every remaining current result appears only under **Work
-recorded, not yet accepted**. Each current result of an accepted work order is listed separately, without
-consolidation by work order or contributor; an earlier partial or failed result can therefore appear alongside
-a completed one. Classification reads current estate state, not an acceptance snapshot at the window's end.
+work-order revision does not count for the current revision. From 0.7.2, **Work accepted** has one entry per work order,
+naming its latest accepted current result in the window (by recorded time, then identifier) and its acceptance. Earlier
+results and attempts are reachable from the entry with `vericairn work observe <key>`. Later unaccepted results and results
+of other unaccepted work appear under **Work recorded, not yet accepted**. Frozen sets remain unchanged.
+Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
 
 ## Vericairn's NuGet publication
