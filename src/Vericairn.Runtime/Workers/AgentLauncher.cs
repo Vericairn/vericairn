@@ -7,7 +7,7 @@ using System.Text.Json;
 namespace Vericairn.Runtime.Workers;
 
 /// <summary>What a launcher is given to start a coding agent on one assignment; every path is on the machine that runs it.</summary>
-/// <param name="Workspace">The prepared workspace: the harness's working directory, a worktree on the run's work branch.</param>
+/// <param name="Workspace">The prepared workspace: the harness's working directory, a repository on the run's work branch.</param>
 /// <param name="Condition">The condition the harness's own /goal runs with: the work order's exit question with its checks and constraints, on one line.</param>
 /// <param name="Brief">The brief exported into the workspace.</param>
 /// <param name="McpConfiguration">The MCP configuration the worker wrote outside the workspace: one server, vericairn, serving the estate for the agent's principal.</param>
