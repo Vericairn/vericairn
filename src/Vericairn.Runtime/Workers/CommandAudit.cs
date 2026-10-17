@@ -30,7 +30,7 @@ public static partial class CommandAudit
         { "commit", "tag", "merge", "revert", "notes", "stash" };
 
     private enum PathAccess { Read, Write, Unknown }
-    private sealed record InvocationPath(string Path, PathAccess Access);
+    private sealed record InvocationPath(string Path, PathAccess Access, string? WorkingDirectory = null);
     private static readonly IReadOnlyDictionary<string, string> NoEnvironment = new Dictionary<string, string>();
 
     /// <summary>A stable action fingerprint, independent of event id and JSON property order.</summary>
@@ -85,7 +85,21 @@ public static partial class CommandAudit
         }
         else
         {
+            string? working = workspace;
+            foreach (string field in new[] { "cwd", "workdir", "working_directory" })
+            {
+                string? cwd = null;
+                if (!Check(() => cwd = StringField(action.Input, field), codes)) working = null;
+                else if (cwd is not null)
+                {
+                    working = null;
+                    Check(() => working = ResolvePath(ExpandPath(cwd, environment), workspace), codes);
+                }
+            }
+
             Check(() => GatherPaths(action.Input, paths, structured), codes);
+            for (int i = 0; i < paths.Count; i++)
+                paths[i] = paths[i] with { Path = ExpandPath(paths[i].Path, environment), WorkingDirectory = working };
             if (action.Tool is "WebFetch" or "WebSearch" or "web_search" || action.Tool.Contains("__web", StringComparison.OrdinalIgnoreCase))
             {
                 codes.Add("network");
@@ -110,7 +124,7 @@ public static partial class CommandAudit
                 if (command is not null)
                 {
                     bool commandReads = false;
-                    Check(() => commandReads = InspectCommand(command, paths, codes, isReadOnly, 0), codes);
+                    Check(() => commandReads = InspectCommand(command, paths, codes, isReadOnly, new CommandContext(working, environment), 0), codes);
                     readOnly = (!sawCommand || readOnly) && commandReads && paths.All(p => p.Access == PathAccess.Read);
                     sawCommand = true;
                 }
@@ -122,39 +136,18 @@ public static partial class CommandAudit
                 {
                     foreach (Match match in PatchPaths().Matches(patch))
                     {
-                        paths.Add(new InvocationPath(match.Groups[1].Value, PathAccess.Write));
+                        paths.Add(new InvocationPath(match.Groups[1].Value, PathAccess.Write, working));
                     }
                 }
             }, codes);
 
-            string? working = workspace;
-            foreach (string field in new[] { "cwd", "workdir", "working_directory" })
+            if (working is not null)
             {
-                string? cwd = null;
-                if (!Check(() => cwd = StringField(action.Input, field), codes))
+                Check(() =>
                 {
-                    working = null;
-                }
-                else if (cwd is not null)
-                {
-                    // A failed resolution leaves no base for relative paths. A failed permission check does not
-                    // erase a successfully resolved base, so other paths can still be checked independently.
-                    working = null;
-                    Check(() => working = Path.GetFullPath(ExpandTemporaryPath(cwd, environment), workspace), codes);
-                    if (working is not null)
-                    {
-                        Check(() =>
-                        {
-                            // The worktree contains local changes; settlement checks them against the brief.
-                            // During execution, only crossing its boundary requires scope attention.
-                            if (!InsideBoundary(working, workspace, environment))
-                            {
-                                // The working directory alone does not attribute an outside change.
-                                codes.Add(readOnly ? "scope-read" : "audit-unverified");
-                            }
-                        }, codes);
-                    }
-                }
+                    // A working directory alone does not attribute an outside change.
+                    if (!InsideBoundary(working, workspace, environment)) codes.Add(readOnly ? "scope-read" : "audit-unverified");
+                }, codes);
             }
 
             foreach (InvocationPath invocation in paths)
@@ -162,27 +155,28 @@ public static partial class CommandAudit
                 string path = invocation.Path;
                 Check(() =>
                 {
-                    if (SecretPath().IsMatch(path.Replace('\\', '/')))
+                    if (CredentialPath(path, invocation.WorkingDirectory, environment))
                     {
                         codes.Add("credentials");
                     }
                 }, codes);
                 Check(() =>
                 {
-                    string normalized = ExpandTemporaryPath(path, environment).Replace('\\', '/');
-                    if (normalized.IndexOfAny(['~', '$', '`']) >= 0)
+                    if (NullDevice(path)) return;
+                    string normalized = path.Replace('\\', '/');
+                    if (Unresolved(normalized))
                     {
                         // An unresolved expansion cannot establish which boundary a write would cross.
                         codes.Add("audit-unverified");
                         return;
                     }
-                    if (working is null && !Path.IsPathFullyQualified(normalized))
+                    if (invocation.WorkingDirectory is null && !Path.IsPathFullyQualified(normalized))
                     {
                         codes.Add("audit-unverified");
                         return;
                     }
 
-                    string resolved = Path.IsPathFullyQualified(normalized) ? Path.GetFullPath(normalized) : Path.GetFullPath(normalized, working!);
+                    string resolved = ResolvePath(normalized, invocation.WorkingDirectory)!;
                     if (!InsideBoundary(resolved, workspace, environment))
                     {
                         codes.Add(PossiblyInsideBoundary(resolved, workspace, environment) ? "audit-unverified" : invocation.Access switch
@@ -226,23 +220,6 @@ public static partial class CommandAudit
     {
         string relative = Path.GetRelativePath(root, path).Replace('\\', '/');
         return !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith("../", StringComparison.Ordinal);
-    }
-
-    private static string ExpandTemporaryPath(string path, IReadOnlyDictionary<string, string> environment)
-    {
-        // Only the environment actually passed at launch supplies a temporary boundary. No ambient
-        // lookup, default system temporary directory, or path claimed in a tool event can grant one.
-        foreach (string name in TemporaryNames)
-        {
-            if (!environment.TryGetValue(name, out string? root) || !Path.IsPathFullyQualified(root)) continue;
-            foreach (string prefix in new[] { "$" + name, "${" + name + "}", "$env:" + name, "%" + name + "%" })
-            {
-                if (path.StartsWith(prefix, StringComparison.Ordinal) && (path.Length == prefix.Length || path[prefix.Length] is '/' or '\\'))
-                    return root.TrimEnd('/', '\\') + path[prefix.Length..];
-            }
-        }
-
-        return path;
     }
 
     private static bool Check(Action check, HashSet<string> codes)
@@ -297,287 +274,6 @@ public static partial class CommandAudit
         }
     }
 
-    private static bool InspectCommand(string command, List<InvocationPath> paths, HashSet<string> codes, Func<string, bool> isReadOnly, int depth)
-    {
-        if (depth > 3)
-        {
-            codes.Add("audit-unverified");
-            return false;
-        }
-
-        ShellToken[] shellTokens = [];
-        if (!Check(() => shellTokens = ShellTokens(command, codes), codes))
-        {
-            return false;
-        }
-
-        string[] words = shellTokens.Select(t => t.Text).ToArray();
-        string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
-        bool first = true;
-        bool redirect = false;
-        bool inputRedirect = false;
-        bool descriptorRedirect = false;
-        bool reads = false;
-        bool allReadOnly = true;
-        string? wrapper = null;
-        string executable = "";
-        string? gitCommand = null;
-        int gitCommandIndex = -1;
-        bool textArgument = false;
-        bool gitPathsOnly = false;
-        int operand = 0;
-        for (int i = 0; i < tokens.Length; i++)
-        {
-            string token = tokens[i];
-            bool quoted = words[i].StartsWith('"') || words[i].StartsWith('\'');
-            if (shellTokens[i].Input is string input)
-            {
-                if (Interpreter(executable)) InspectCode(input, paths, codes);
-                else if (shellTokens[i].ExpandInput)
-                {
-                    Check(() => { if (SecretEnvironment().IsMatch(input)) codes.Add("credentials"); }, codes);
-                }
-
-                continue;
-            }
-            Check(() =>
-            {
-                if (!words[i].StartsWith('\'') && SecretEnvironment().IsMatch(words[i]))
-                {
-                    codes.Add("credentials");
-                }
-            }, codes);
-
-            if (!quoted && token is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n")
-            {
-                first = true;
-                wrapper = null;
-                reads = false;
-                textArgument = false;
-                gitPathsOnly = false;
-                continue;
-            }
-
-            if (!quoted && (token.Contains('>', StringComparison.Ordinal) || token == "<"))
-            {
-                redirect = true;
-                inputRedirect = token == "<";
-                descriptorRedirect = token.Contains('&', StringComparison.Ordinal);
-                allReadOnly &= inputRedirect;
-                continue;
-            }
-
-            if (redirect)
-            {
-                if (!descriptorRedirect || !(token == "-" || token.All(char.IsAsciiDigit)))
-                {
-                    paths.Add(new InvocationPath(token, inputRedirect ? PathAccess.Read : PathAccess.Write));
-                }
-
-                redirect = false;
-                continue;
-            }
-
-            if (textArgument)
-            {
-                // Message/content text is not a path. Secret environment expansion was still checked above.
-                textArgument = false;
-                continue;
-            }
-
-            if (first)
-            {
-                if (wrapper is not null && token.StartsWith('-'))
-                {
-                    if (token is "-u" or "--user" or "-g" or "--group" or "--unset" or "-C" or "--chdir" && i + 1 < tokens.Length)
-                    {
-                        string argument = tokens[++i];
-                        if (token is "-C" or "--chdir")
-                        {
-                            paths.Add(new InvocationPath(argument, PathAccess.Unknown));
-                        }
-                    }
-
-                    continue;
-                }
-
-                if (token.Contains('=', StringComparison.Ordinal) || token is "sudo" or "env" or "command" or "exec")
-                {
-                    if (token is "sudo" or "env" or "command" or "exec")
-                    {
-                        wrapper = token;
-                    }
-
-                    if (token == "env" && i == tokens.Length - 1)
-                    {
-                        codes.Add("credentials");
-                    }
-
-                    continue;
-                }
-
-                executable = token.Replace('\\', '/').Split('/')[^1];
-                executable = executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? executable[..^4] : executable;
-                first = false;
-                operand = 0;
-                int end = i + 1;
-                while (end < words.Length && !Separator(words[end])) end++;
-                gitCommandIndex = executable.Equals("git", StringComparison.OrdinalIgnoreCase) ? GitSubcommand(tokens, i + 1, end) : -1;
-                gitCommand = gitCommandIndex >= 0 ? tokens[gitCommandIndex] : null;
-                reads = false;
-                Check(() => reads = isReadOnly(string.Join(" ", words[i..end])), codes);
-                bool shell = executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd"
-                    && i + 2 < end && tokens[i + 1] is "-c" or "-lc" or "-Command" or "/c";
-                allReadOnly &= reads || shell;
-                if (NetworkCommands.Contains(executable))
-                {
-                    codes.Add("network");
-                }
-
-                if (Interpreter(executable) && !shell) codes.Add("audit-unverified");
-
-                if (executable is "printenv" or "cmdkey" or "secret-tool" or "Get-StoredCredential"
-                    || executable == "security"
-                    || executable == "op"
-                    || executable == "pass"
-                    || executable == "gpg" && command.Contains("--export-secret", StringComparison.Ordinal))
-                {
-                    codes.Add("credentials");
-                }
-
-                continue;
-            }
-
-            if (executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd" && token is "-c" or "-lc" or "-Command" or "/c" && i + 1 < tokens.Length)
-            {
-                string nested = tokens[++i];
-                bool nestedReads = false;
-                Check(() => nestedReads = InspectCommand(nested, paths, codes, isReadOnly, depth + 1), codes);
-                allReadOnly &= nestedReads;
-                continue;
-            }
-
-            if (i == gitCommandIndex && token is "fetch" or "pull" or "push" or "clone" or "ls-remote"
-                || executable is "npm" or "pnpm" or "yarn" or "pip" or "pip3" && token is "install" or "ci" or "add"
-                || executable == "dotnet" && token == "restore")
-            {
-                codes.Add("network");
-            }
-
-            if (gitCommand is not null)
-            {
-                if (i > gitCommandIndex && token == "--") gitPathsOnly = true;
-                if (i > gitCommandIndex && !gitPathsOnly && GitMessageCommands.Contains(gitCommand))
-                {
-                    if (token is "-m" or "--message")
-                    {
-                        textArgument = true;
-                        continue;
-                    }
-
-                    if (token.StartsWith("--message=", StringComparison.Ordinal)) continue;
-                }
-
-                // A revision:path expression names an object in Git, not a filesystem operand.
-                if (i > gitCommandIndex && !gitPathsOnly && GitReadCommands.Contains(gitCommand))
-                {
-                    if (!token.StartsWith('-') && GitObjectPath(token))
-                    {
-                        // Object names are not filesystem paths, but reading a credential object is still audited.
-                        Check(() =>
-                        {
-                            if (SecretPath().IsMatch(token[(token.IndexOf(':', StringComparison.Ordinal) + 1)..].Replace('\\', '/')))
-                                codes.Add("credentials");
-                        }, codes);
-                        continue;
-                    }
-                }
-
-                if (token.Contains("credential", StringComparison.Ordinal)) codes.Add("credentials");
-            }
-
-            if (executable.Equals("git", StringComparison.OrdinalIgnoreCase) && !gitPathsOnly)
-            {
-                if (token is "-C" or "--work-tree" or "--output" && i + 1 < tokens.Length && !Separator(words[i + 1]))
-                {
-                    paths.Add(new InvocationPath(tokens[++i], PathAccess.Write));
-                    allReadOnly = false;
-                    continue;
-                }
-
-                string? target = token.StartsWith("--work-tree=", StringComparison.Ordinal) ? token["--work-tree=".Length..]
-                    : token.StartsWith("--output=", StringComparison.Ordinal) ? token["--output=".Length..]
-                    : token.StartsWith("-C", StringComparison.Ordinal) && token.Length > 2 ? token[2..] : null;
-                if (target is not null)
-                {
-                    paths.Add(new InvocationPath(target.Trim('"', '\''), PathAccess.Write));
-                    allReadOnly = false;
-                    continue;
-                }
-            }
-
-            if (Interpreter(executable) && i > 0 && tokens[i - 1] is "-c" or "-e")
-            {
-                InspectCode(token, paths, codes);
-                continue;
-            }
-
-            if (executable.EndsWith("-Content", StringComparison.OrdinalIgnoreCase) && token.Equals("-Value", StringComparison.OrdinalIgnoreCase))
-            {
-                textArgument = true;
-                continue;
-            }
-
-            if (executable is "rg" or "grep" && token is "-g" or "--glob" or "--iglob" or "-e" or "--regexp" or "-t" or "--type" or "-T" or "--type-not" && i + 1 < tokens.Length)
-            {
-                i++;
-                continue;
-            }
-
-            if (token.StartsWith('-') || token.Contains("://", StringComparison.Ordinal) || executable is "echo" or "printf")
-            {
-                continue;
-            }
-
-            operand++;
-            bool pattern = executable is "rg" or "grep" or "sed" or "awk" && operand == 1
-                && !tokens.Contains("--files", StringComparer.Ordinal)
-                && !tokens.Any(t => t is "-e" or "--regexp" or "-f" or "--file" || t.StartsWith("--regexp=", StringComparison.Ordinal));
-            if (!pattern && ((reads && executable is not ("pwd" or "Get-Location")) || MutatingCommands.Contains(executable) || token.Contains('/', StringComparison.Ordinal) || token.Contains('\\', StringComparison.Ordinal)
-                || token.Contains('.', StringComparison.Ordinal) || token.StartsWith('~') || token.Contains('$', StringComparison.Ordinal) || token.Contains('`', StringComparison.Ordinal)))
-            {
-                paths.Add(new InvocationPath(token, reads ? PathAccess.Read : MutatingCommands.Contains(executable) ? PathAccess.Write : PathAccess.Unknown));
-            }
-        }
-
-        return allReadOnly;
-    }
-
-    private static bool Separator(string word) => word is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n";
-
-    private static bool Interpreter(string executable) => executable is "python" or "python3" or "node" or "ruby" or "perl" or "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd";
-
-    private static void InspectCode(string code, List<InvocationPath> paths, HashSet<string> codes)
-    {
-        codes.Add("audit-unverified");
-        Check(() => { if (NetworkCode().IsMatch(code)) codes.Add("network"); }, codes);
-        Check(() => { if (SecretEnvironment().IsMatch(code)) codes.Add("credentials"); }, codes);
-        Check(() =>
-        {
-            foreach (Match word in ShellWords().Matches(code))
-            {
-                string text = word.Value.Trim('"', '\'');
-                if (NetworkCommands.Contains(text)) codes.Add("network");
-                if (SecretPath().IsMatch(text.Replace('\\', '/'))) codes.Add("credentials");
-            }
-        }, codes);
-        Check(() =>
-        {
-            foreach (Match match in CodePaths().Matches(code))
-                paths.Add(new InvocationPath(match.Groups[1].Value, PathAccess.Unknown));
-        }, codes);
-    }
-
     private static int GitSubcommand(string[] tokens, int start, int end)
     {
         for (int i = start; i < end; i++)
@@ -621,7 +317,7 @@ public static partial class CommandAudit
     [GeneratedRegex(@"\A[0-9]+(?:,[0-9]+)?p\z", RegexOptions.CultureInvariant, 100)]
     private static partial Regex SedPrint();
 
-    [GeneratedRegex(@"(?:^|/)(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.docker|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.env(?:\.[^/]*)?|\.credentials(?:\.json)?|auth\.json|credentials(?:\.json)?|id_rsa|id_ed25519|Keychains|keyrings|Credentials)(?:/|$)|(?:^|/)\.config/(?:gcloud|gh)(?:/|$)|(?:^|/)run/secrets(?:/|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex(@"(?:^|/)(?:\.ssh|\.aws|\.azure|\.gnupg|\.kube|\.docker|\.netrc|\.npmrc|\.pypirc|\.git-credentials|\.env(?:\.[^/]*)?|\.credentials(?:\.json)?|auth\.json|credentials(?:\.json)?|id_rsa|id_ed25519|Keychains|keyrings|Credentials)(?:/|$)|(?:^|/)\.config/(?:gcloud|gh)(?:/|$)|(?:^|/)run/secrets(?:/|$)|\.(?:p8|p12)(?:$|/)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 100)]
     private static partial Regex SecretPath();
 
     [GeneratedRegex(@"(?<!\\)\$(?:\{)?(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|OPENAI_API_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN|GH_TOKEN|AZURE_CLIENT_SECRET)(?:\}|\b)", RegexOptions.CultureInvariant, 100)]
@@ -629,9 +325,6 @@ public static partial class CommandAudit
 
     [GeneratedRegex(@"(?:requests|httpx)\.(?:get|post|put|delete|request)\s*\(|socket\.(?:socket|create_connection)\s*\(|urllib\.request\.urlopen\s*\(|\bfetch\s*\(", RegexOptions.CultureInvariant, 100)]
     private static partial Regex NetworkCode();
-
-    [GeneratedRegex("(?:open|readFileSync|writeFileSync)\\s*\\(\\s*['\"]([^'\"]+)['\"]", RegexOptions.CultureInvariant, 100)]
-    private static partial Regex CodePaths();
 
     [GeneratedRegex(@"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): ([^\r\n]+)\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant, 100)]
     private static partial Regex PatchPaths();
