@@ -24,7 +24,7 @@ public interface IEstateApi
     WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) =>
         WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication delegation.", []));
 
-    /// <summary>Current status with compact current attention references in its canonical JSON.</summary>
+    /// <summary>Current status as human text and canonical JSON, identical on every machine for the same records. Attention is derived from records alone.</summary>
     StatusResponse Status();
 
     /// <summary>Record that a person explicitly observed this estate's status; ordinary reads never advance this timestamp.</summary>

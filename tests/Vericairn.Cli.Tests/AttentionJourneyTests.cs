@@ -5,14 +5,87 @@ using System.Text;
 using System.Text.Json;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Model;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Cli.Tests;
 
 [Collection("cli")]
 public class AttentionJourneyTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void TwoRuntimesWithTheSameRecordsHaveByteIdenticalStatusWhileProgressKeepsLocalWorkerConcerns(bool settled)
+    {
+        _ = CliHarness.Run("--help");
+        string? originalHome = Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable);
+        string withoutObservations = CliHarness.TempDirectory("attention-records-only");
+        string withObservations = CliHarness.TempDirectory("attention-local-worker");
+        using var estate = new HandoffEstate();
+        RecordEnvelope goal = estate.Add("goal", estate.OperatorId, $$"""{"title":"Check attention","objective":"Keep status portable.","completion":[{"evidence":"Regression tests","check":"Run them."}],"constraints":[],"kind":"finite","sponsor":"{{estate.OperatorId}}","budget":{"wallMinutes":60,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""");
+        estate.Add("goal-status", estate.OperatorId, """{"status":"active","note":"Exercise the worker view."}""", subject: goal.Reference);
+        RecordEnvelope order = estate.Add("work-order", estate.OperatorId, $$"""{"key":"LOCAL","kind":"ordinary","title":"Local observations","intent":"Keep status portable.","scope":["tests"],"exitQuestion":"Portable?","inputs":[{"type":"goal","id":"{{goal.Id}}"}],"deliverables":["evidence"]}""");
+        RecordEnvelope assignment = estate.Add("assignment", estate.OperatorId, $$$"""{"contributor":"{{{estate.BuilderId}}}","brief":{"outcome":"Check attention.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":[],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["portable"],"recovery":"Inspect the records."}}""", subject: order.Reference);
+        string Body(string status, string extra = "") => $$"""{"provider":"generic","action":"agent-run","identity":"attention-test","intent":"Check attention.","target":{"assignment":"{{assignment.Id}}","principal":"{{estate.BuilderId}}","workspace":"widget, branch work/local","goal":"{{goal.Id}}"},"status":"{{status}}","cap":{"wallMinutes":5,"attemptsPerStep":3},"evidence":[]{{extra}}}""";
+        RecordEnvelope intent = estate.Add("operation", estate.OperatorId, Body("not-started"));
+        string dispatched = $$""","dispatchedAt":"{{intent.At}}" """;
+        RecordEnvelope latest = estate.Add("operation", estate.OperatorId, Body("dispatched", dispatched), supersedes: intent.Id);
+        if (settled)
+        {
+            latest = estate.Add("operation", estate.OperatorId, Body("observed-success", dispatched + $$""","observed":{"summary":"The stand-in exited.","at":"{{latest.At}}"},"usage":{"wallMinutes":1,"unreported":[]}"""), supersedes: latest.Id);
+        }
+        int recordCount = estate.Load().Records.Count;
+        try
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, withoutObservations);
+            using EstateService remote = EstateService.Open(estate.Root);
+            Assert.Equal(0, remote.Validate().Errors);
+            byte[] portable = CanonicalJson.SerializePrettyUtf8(remote.Status().Json);
+            string remoteCli = CliHarness.Ok("--estate", estate.Root, "--json", "status").Out;
+            Assert.Empty(remote.Progress().Json.GetProperty("runSignals").EnumerateArray());
+            Assert.DoesNotContain(remote.Progress().Json.GetProperty("attention").EnumerateArray(), a => a.GetProperty("kind").GetString() == "incident");
+
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, withObservations);
+            using EstateService local = EstateService.Open(estate.Root);
+            var directory = new RunDirectory(local.Session.Manifest.Estate, intent.Id);
+            directory.Create();
+            const string concern = "The worker observed a local concern awaiting reconciliation.";
+            directory.Write(new RunObservedState
+            {
+                Run = intent.Id,
+                Signals = settled ? [] : [new("scope-read", "warning", latest.At, concern)],
+                Settled = settled ? "observed-success" : null,
+                Problem = settled ? concern : null,
+                ExitedAt = settled ? latest.At : null,
+            });
+            Assert.Equal(portable, CanonicalJson.SerializePrettyUtf8(local.Status().Json));
+            Assert.Equal(remoteCli, CliHarness.Ok("--estate", estate.Root, "--json", "status").Out);
+            Assert.Equal(portable, CanonicalJson.SerializePrettyUtf8(JsonSerializer.Deserialize<JsonElement>(new ToolRegistry(local, null).Call("estate_status", new()).Text)));
+            ProgressResponse progress = local.Progress();
+            Assert.Contains(concern, progress.Text, StringComparison.Ordinal);
+            JsonElement incident = Assert.Single(progress.Json.GetProperty("attention").EnumerateArray(), a => a.GetProperty("kind").GetString() == "incident");
+            Assert.Equal(latest.Id, incident.GetProperty("record").GetString());
+            Assert.Equal(latest.ComputedHash, incident.GetProperty("hash").GetString());
+            Assert.Contains("Local worker observations:", incident.GetProperty("text").GetString()!, StringComparison.Ordinal);
+            foreach (string command in new[] { "status", "progress" })
+            {
+                string human = CliHarness.Ok("--estate", estate.Root, "--depth", "short", command).Out;
+                Assert.Contains("Local worker observations:", human, StringComparison.Ordinal);
+                Assert.Contains("vericairn worker runs", human, StringComparison.Ordinal);
+            }
+            Assert.Equal(recordCount, estate.Load().Records.Count);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, originalHome);
+            CliHarness.Delete(withoutObservations, withObservations);
+        }
+    }
+
     [Fact]
     public void LongResolvedHistoryKeepsStatusSmallAndEverySurfaceKeepsExactOpenReferences()
     {

@@ -409,7 +409,7 @@ public static class OpenApiDocument
         ("POST", "/v1/communication") => "Replace or reset one scoped communication profile with its expected prior hash. Only its owner or an explicit delegate may change it; stale edits return conflict.",
         ("POST", "/v1/communication/delegations") => "A person grants or revokes permission to change one scope of their communication setting, with the expected prior hash.",
         ("GET", "/v1/health") => "The daemon's identity and what it serves.",
-        ("GET", "/v1/status") => "Current status: human text and canonical JSON with compact current attention references. Record-derived fields agree for the same records; worker attention can differ by runtime.",
+        ("GET", "/v1/status") => "Current status: human text and canonical JSON, identical on every machine for the same records. Its compact attention references are derived from records alone.",
         ("POST", "/v1/status/observations") => "Record a person's explicit observation of estate status, with runtime-supplied timestamp and hashes of the record set, pin and status. Agents cannot author it; ordinary reads remain read-only.",
         ("POST", "/v1/resume") => "Compare a retained hand-over with current records, including every addition and supersession, missing or changed originals, the full estate pin and observed state. The world may have moved; grants no authority and restarts nothing.",
         ("GET", "/v1/handoff") => "HandoffResponse: a complete deterministic hand-over and measured package, or a problem naming every missing or invalid source. Read-only; all records retained; no synthesis or authority. Optional maxBytes refuses overflow.",

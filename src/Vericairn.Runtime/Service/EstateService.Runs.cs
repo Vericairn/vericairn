@@ -481,17 +481,17 @@ public sealed partial class EstateService
         }
     }
 
-    // Caller holds the service gate; progress uses its already loaded model and still reads current worker observations.
-    private RunsResponse Runs(EstateModel model)
+    // Caller holds the service gate. Canonical status uses records alone; progress also reads this worker's observations.
+    private RunsResponse Runs(EstateModel model, bool includeLocalObservations = true)
     {
         string estate = session.Manifest.Estate;
         IReadOnlyList<AgentRuns.Run> runs = AgentRuns.All(model);
         var rows = new List<RunRow>();
         foreach (AgentRuns.Run run in runs)
         {
-            var directory = new RunDirectory(estate, run.Id);
-            RunObservedState? observed = directory.Read();
-            RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory.ReadStop()) : null);
+            RunDirectory? directory = includeLocalObservations ? new RunDirectory(estate, run.Id) : null;
+            RunObservedState? observed = directory?.Read();
+            RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory?.ReadStop()) : null);
             IReadOnlyList<RunSignal>? signals = run.Latest.Body.TryGetProperty("signals", out JsonElement recordedSignals)
                 ? JsonSerializer.Deserialize<RunSignal[]>(recordedSignals, ProtocolJson.Options) : observed?.Signals;
             if (!run.InFlight && observed is { Settled: not null, Problem: string problem })
@@ -515,7 +515,7 @@ public sealed partial class EstateService
                 stop,
                 run.InFlight ? observed?.Heartbeat : null,
                 run.InFlight && Fresh(observed),
-                run.Launcher == "generic" || Providers.Launcher(run.Launcher)?.Generic == true,
+                run.Launcher == "generic" || (includeLocalObservations && Providers.Launcher(run.Launcher)?.Generic == true),
                 run.Latest.Body.TryGetProperty("liveness", out JsonElement liveness) ? JsonSerializer.Deserialize<RunLiveness>(liveness, ProtocolJson.Options) : observed?.Liveness,
                 run.Latest.Body.TryGetProperty("scope", out JsonElement scope) ? JsonSerializer.Deserialize<RunScope>(scope, ProtocolJson.Options) : null,
                 signals,

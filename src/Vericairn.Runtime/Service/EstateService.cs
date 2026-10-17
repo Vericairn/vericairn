@@ -92,7 +92,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             EstateModel model = session.Load();
             FindingList checks = ChecksWithBatches(model);
             JsonObject json = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
-            json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => ProgressCore(model, checks)), ProtocolJson.Options);
+            // Status is portable: neither the progress projection nor the run projection may read local worker state.
+            json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model,
+                () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
+                includeLocalObservations: false), ProtocolJson.Options);
             return new StatusResponse(EstateStatus.Render(model, checks), Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
@@ -134,7 +137,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     // Use the already loaded model for all exact record references in this refresh. No per-item store reloads.
-    private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress)
+    private IReadOnlyList<CommunicationAttention> RequiredAttention(EstateModel model, Func<ProgressResponse> progress, bool includeLocalObservations = true)
     {
         var cache = new Dictionary<string, RecordResponse>(StringComparer.Ordinal);
         RecordResponse Response(RecordEnvelope record)
@@ -153,7 +156,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             progress,
             recipient => new AsksResponse(Vericairn.Records.Estate.Asks.RenderText(model, recipient), JsonSerializer.Deserialize<JsonElement>(Vericairn.Records.Estate.Asks.RenderJson(model, recipient))),
             () => GoalView.Rows(model).Select(r => new GoalRow(r.Id, r.Hash, r.Title, r.Status, r.Sponsor, r.SponsorName)).ToList(),
-            () => Runs(model)).Derive(null);
+            () => Runs(model, includeLocalObservations)).Derive(null);
     }
 
     /// <inheritdoc />

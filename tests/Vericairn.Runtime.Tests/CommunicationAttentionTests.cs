@@ -337,6 +337,7 @@ public class CommunicationAttentionTests
         Assert.Equal(new[] { ("required-decision", "ask"), ("incident", "run"), ("exhausted-budget", "goal") }, attention.Select(a => (a.Kind, a.Record!)));
         Assert.All(attention, a => Assert.NotNull(a.Hash));
         Assert.Contains("1 worker signals", attention[1].Text, StringComparison.Ordinal);
+        Assert.Contains("Local worker observations:", attention[1].Text, StringComparison.Ordinal);
         Assert.Equal("vericairn worker runs", attention[1].Command);
         Assert.DoesNotContain("Full", CommunicationPresentation.RenderAttention(attention), StringComparison.Ordinal);
         f.AskPrincipals.Clear();
@@ -344,6 +345,24 @@ public class CommunicationAttentionTests
         f.Ledgers.Clear();
         f.Revise(operation, "settled-run", """{"status":"observed-success"}""");
         Assert.Empty(f.Attention());
+    }
+
+    [Fact]
+    public void RecordedWorkerSignalsArePortableAndOnlyAdditionalObservationsAreLabelledLocal()
+    {
+        var f = new Fixture();
+        var signal = new RunSignal("scope-read", "warning", "2026-10-13T12:00:01Z", "A recorded observation.");
+        RecordResponse operation = f.Add("operation", "run", JsonSerializer.Serialize(new { status = "observed-success", signals = new[] { signal } }, ProtocolJson.Options));
+        var run = new RunRow(operation.Id, "identity", "generic", null, null, null, null, "observed-success", JsonSerializer.Deserialize<JsonElement>("{}"), null, JsonSerializer.Deserialize<JsonElement>("{}"), null, null, false, true, Signals: [signal]);
+        f.RunRows.Add(run);
+        CommunicationAttention recorded = Assert.Single(f.Attention());
+        Assert.Equal("incident", recorded.Kind);
+        Assert.DoesNotContain("Local worker observations:", recorded.Text, StringComparison.Ordinal);
+        f.RunRows[0] = run with { Signals = [signal, new("audit-unverified", "warning", signal.At, "A local retention failure.")] };
+        CommunicationAttention local = Assert.Single(f.Attention());
+        Assert.Equal(operation.Hash, local.Hash);
+        Assert.Contains("Local worker observations:", local.Text, StringComparison.Ordinal);
+        Assert.Contains("2 worker signals", local.Text, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -52,7 +52,7 @@ internal static partial class CliApp
         root.Subcommands.Add(ContextFamily(estateOption, jsonOption));
         root.Subcommands.Add(UpdatesFamily(jsonOption));
 
-        var status = new Command("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command; --json includes complete attention references. " + UpdateHelp);
+        var status = new Command("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command. --json is identical on every machine for the same records and includes complete record-derived attention references. Human status also shows labelled local worker concerns. " + UpdateHelp);
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         status.Options.Add(observeStatus);

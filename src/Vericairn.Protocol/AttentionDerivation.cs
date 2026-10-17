@@ -294,8 +294,16 @@ internal sealed class AttentionDerivation(
         RunsResponse runs = readRuns();
         foreach (RunRow run in runs.Runs.Where(r => r.Signals is { Count: > 0 } || r.Scope?.Problem is not null || r.Scope?.OutsideCount > 0))
         {
-            Read("run", () => Add("incident", Latest(Required(run.Run, "operation")), run.Status,
-                $"Run {run.Status}; {run.Signals?.Count ?? 0} worker signals, {run.Scope?.OutsideCount ?? 0} changes outside scope{(run.Scope?.Problem is null ? string.Empty : "; scope inspection unavailable")}; inspect worker observations.", command: "vericairn worker runs"), reference: new("operation", run.Run, null));
+            Read("run", () =>
+            {
+                RecordResponse record = Latest(Required(run.Run, "operation"));
+                IReadOnlyList<RunSignal> recorded = Body(record).TryGetProperty("signals", out JsonElement signals)
+                    ? signals.Deserialize<RunSignal[]>(ProtocolJson.Options) ?? [] : [];
+                bool local = run.Signals?.Except(recorded).Any() == true;
+                Add("incident", record, run.Status,
+                    (local ? "Local worker observations: " : string.Empty) +
+                    $"Run {run.Status}; {run.Signals?.Count ?? 0} worker signals, {run.Scope?.OutsideCount ?? 0} changes outside scope{(run.Scope?.Problem is null ? string.Empty : "; scope inspection unavailable")}; inspect worker observations.", command: "vericairn worker runs");
+            }, reference: new("operation", run.Run, null));
         }
         foreach (LedgerRow ledger in runs.Goals.Where(g => g.Status == "budget-limited" || g.Units.Any(u => u.Remaining <= 0)))
         {
