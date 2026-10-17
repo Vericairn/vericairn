@@ -19,6 +19,18 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## Required attention (0.7.3 addition)
+
+Status and progress JSON add a compact `attention` array, independent of response
+depth and recipient settings. Each item preserves the source type, id and complete
+hash, subject, current state, recorded freshness, reason and inspection command.
+It carries no envelope. Status JSON remains identical on every machine for the
+same records; its attention reads records alone. Progress additionally includes
+runtime-local worker concerns, labelled `Local worker observations`, as do human
+status and Workbench. API, SDK, MCP and CLI machine reads share these projections;
+record reads remain complete. [Required attention](required-attention.md) specifies
+the fields, resolution rules, unknown cases and compatibility boundaries.
+
 ## Record publication and recovery (0.7.2)
 
 Single and grouped writes judge the proposed estate, including content checks, before publishing any
@@ -846,7 +858,7 @@ reads and add no write-ledger entry.
 
 `GET /v1/runs` adds optional `signals` on each `RunRow`: worker observations with `code`, `severity`, `at`, `summary`, optional `fingerprint`, `count` and `attention`. The same observations are retained in the settled run record. No raw invocation input is exposed in these fields. FIX-18 adds the `attempt-missing` warning at settlement
 when the agent recorded no new attempt on its exact assignment during the run. It is also retained in
-operation evidence and shown by CLI settlement and status attention, without changing `observed-success`
+operation evidence and shown by CLI settlement and `worker runs`, with a compact reference in status attention, without changing `observed-success`
 or CLI exit-code semantics.
 
 FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises

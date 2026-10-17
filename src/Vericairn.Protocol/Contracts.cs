@@ -62,7 +62,7 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
 /// <param name="ProcessId">Process id.</param>
 public sealed record HealthResponse(string Api, string Vericairn, string Estate, string Root, string Profile, long RecordFormat, string StartedAt, int ProcessId);
 
-/// <summary>The estate's status: the human text and the canonical JSON that is identical on every machine.</summary>
+/// <summary>The estate's status: human text and canonical JSON, identical on every machine for the same records. Its compact attention references are derived from records alone.</summary>
 /// <param name="Text">Rendered status.</param>
 /// <param name="Json">Canonical status document.</param>
 /// <param name="HasErrors">Whether errors exist.</param>
@@ -72,6 +72,7 @@ public sealed record StatusResponse(string Text, JsonElement Json, bool HasError
 /// The progress report: where the estate stands, its work orders by state, each published release and
 /// what it contained, what comes next by release, the next eligible work and what waits on the operator. The same on every machine for
 /// the same records in its record-derived sections; agentClaims adds local contributor claims and runSignals adds worker observations.
+/// The attention array extends status's compact record-derived references with labelled runtime-local worker concerns.
 /// </summary>
 /// <param name="Text">The report as text, with agent claims and worker observations labelled separately.</param>
 /// <param name="Json">The report as canonical JSON (format vericairn.progress/1).</param>

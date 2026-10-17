@@ -88,7 +88,7 @@ internal static partial class Commands
     public static int Progress(string root, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         ProgressResponse progress = api.Progress();
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : ProtectedPresentation(api, "status", "estate progress", progress.Text, presentation) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, presentation?.Recipient)));
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : ProtectedPresentation(api, "status", "estate progress", progress.Text, presentation) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, presentation?.Recipient, () => progress)));
         return progress.HasErrors ? HasErrors : Clean;
     });
 

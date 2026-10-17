@@ -299,9 +299,7 @@ public sealed partial class ShellViewModel : Observable
             estate = EstateView.From(response, now);
             Freshness = $"current as of {now}";
 
-            // The asks a delivery carries come first among the decisions needed: each with its recommendation, at most three a principal.
-            AsksResponse? asks = Try(() => connection.Api.Asks());
-            Replace(Attention, [.. AskAttention.From(asks?.Json ?? default, now), .. estate.Attention]);
+            Replace(Attention, estate.Attention);
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
                 if (page.HasPackage)
@@ -596,11 +594,7 @@ public sealed partial class ShellViewModel : Observable
             ProgressResponse? progress = Try(() => observedProgress.Value);
             RefreshCommunication();
             FillProgress(progress, onDemand: false);
-            if (Try(() => api.Asks()) is AsksResponse asks)
-            {
-                string now = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
-                Replace(Attention, [.. AskAttention.From(asks.Json, now), .. estate.Attention]);
-            }
+            Replace(Attention, estate.Attention);
 
             AddCommunicationAttention(CommunicationRecipient(), () => observedProgress.Value);
             if (progress is null)

@@ -75,7 +75,7 @@ public class PresentationTests
         Assert.Equal("release 0.2.0", view.Pin);
         Assert.Equal(2, view.WorkOrders.Count);
         List<string> kinds = view.Attention.Select(a => a.Kind).ToList();
-        Assert.Equal(["decision needed", "decision needed", "decision needed", "blocked", "decision needed", "uncertain effect", "failed check", "information"], kinds);
+        Assert.Equal(["decision needed", "decision needed", "decision needed", "decision needed", "failed check", "information"], kinds);
         AttentionItem milestone = view.Attention[0];
         Assert.Equal("M9 A milestone", milestone.Subject);
         Assert.Contains("operator", milestone.Why, StringComparison.Ordinal);

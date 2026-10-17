@@ -7,7 +7,24 @@ using System.Text.Json;
 namespace Vericairn.Protocol;
 
 /// <summary>Required attention, kept complete regardless of optional delivery frequency.</summary>
-public sealed record CommunicationAttention(string Kind, string Text, string? Record = null, string? RecordType = null);
+public sealed record CommunicationAttention(string Kind, string Text, string? Record = null, string? RecordType = null)
+{
+    /// <summary>The complete source hash, never a shortened display hash.</summary>
+    public string? Hash { get; init; }
+    /// <summary>The source record's subject, at its recorded pin.</summary>
+    public AttentionReference? Subject { get; init; }
+    /// <summary>The current state, or unknown when its resolution cannot be established.</summary>
+    public string? State { get; init; }
+    /// <summary>The source's recorded timestamp; not a claim of live external health.</summary>
+    public string? AsOf { get; init; }
+    /// <summary>The command that opens the source or the subject that needs action.</summary>
+    public string? Command { get; init; }
+    /// <summary>The exact record to open in an interactive surface.</summary>
+    public AttentionReference? Target { get; init; }
+}
+
+/// <summary>An exact record reference. A missing hash is explicit, never inferred.</summary>
+public sealed record AttentionReference(string Type, string Id, string? Hash);
 
 /// <summary>Shared deterministic presentation and delivery policy, usable by every surface without changing a source payload.</summary>
 public static class CommunicationPresentation
@@ -116,93 +133,30 @@ public static class CommunicationPresentation
         return Attention(api, recipient, api.Progress);
     }
 
-    // A client already showing progress can share that exact response (or failure) for this refresh. Other sources stay fresh;
-    // this is not a retained cache and does not change the public API or suppress mandatory attention when a read failed.
+    // Use the runtime's compact projection when present, or derive it through the same rules for an older runtime.
+    // This observation is shared only within this refresh, including its failure; no retained client cache selects attention.
     internal static IReadOnlyList<CommunicationAttention> Attention(IEstateApi api, string? recipient, Func<ProgressResponse> readProgress)
     {
         ArgumentNullException.ThrowIfNull(api);
-        var attention = new List<CommunicationAttention>();
-        Read(() =>
+        ProgressResponse? progress = null;
+        Exception? unavailable = null;
+        try { progress = readProgress(); }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or JsonException or NotSupportedException) { unavailable = exception; }
+        var derivation = new AttentionDerivation(api.Records, api.Record, () => progress ?? throw new InvalidOperationException("Progress is unavailable.", unavailable), api.Asks, api.Goals, api.Runs);
+        if (progress?.Json.ValueKind == JsonValueKind.Object && progress.Json.TryGetProperty("attention", out JsonElement observed))
         {
-            AsksResponse asks = api.Asks(recipient);
-            if (Items(asks.Json, "principals").Any(p => p.TryGetProperty("waiting", out JsonElement n) && n.GetInt32() > 0))
+            try
             {
-                attention.Add(new("required-decision", asks.Text));
-            }
-        });
-        foreach (string type in new[] { "verification", "result", "review", "operation" })
-        {
-            Read(() =>
-            {
-                foreach (RecordResponse record in api.Records(type))
+                IReadOnlyList<CommunicationAttention>? attention = observed.Deserialize<List<CommunicationAttention>>(ProtocolJson.Options);
+                if (attention is not null && attention.All(a => a is not null && !string.IsNullOrWhiteSpace(a.Kind) && !string.IsNullOrWhiteSpace(a.Text) && a.State is not null && a.Command is not null))
                 {
-                    JsonElement body = record.Envelope.GetProperty("body");
-                    string? kind = type switch
-                    {
-                        "verification" when Str(body, "outcome") == "failed" => "failed-check",
-                        "verification" when Str(body, "outcome") != "passed" => "unknown-check",
-                        "result" when Str(body, "outcome") == "blocked" => "blocker",
-                        "result" when Items(body, "unresolvedEffects").Count > 0 => "uncertain-effect",
-                        "result" when Items(body, "checks").Any(c => Str(c, "outcome") == "failed") => "failed-check",
-                        "result" when Items(body, "checks").Any(c => Str(c, "outcome") is not ("pass" or "passed")) => "unknown-check",
-                        "review" when Str(body, "outcome") == "fail" => "failed-check",
-                        "review" when Str(body, "outcome") is not ("pass" or "passed") => "required-decision",
-                        "operation" when Str(body, "status") == "known-failure" => "incident",
-                        "operation" when Str(body, "status") is not ("observed-success" or "canceled" or "not-started") => "uncertain-effect",
-                        _ => null,
-                    };
-                    if (kind is not null)
-                    {
-                        attention.Add(new(kind, $"{type} {record.Id} at {record.Hash}\n" + record.Envelope.GetRawText() + "\n", record.Id, type));
-                    }
-                }
-            });
-        }
-
-        Read(() =>
-        {
-            ProgressResponse progress = readProgress();
-            if (progress.Json.TryGetProperty("eligible", out JsonElement eligible))
-            {
-                foreach (JsonElement held in Items(eligible, "held"))
-                {
-                    attention.Add(new("blocker", held.GetRawText() + "\n", Str(held, "id"), "work-order"));
+                    return recipient is null ? attention : [.. derivation.AskItems(recipient), .. attention.Where(a => a.RecordType != "ask")];
                 }
             }
-        });
-        Read(() =>
-        {
-            foreach (GoalRow goal in api.Goals().Where(g => g.Status is "blocked" or "budget-limited"))
-            {
-                GoalResponse? details = api.Goal(goal.Id);
-                attention.Add(details is null ? new("unknown-check", "The current goal details are unavailable.\n", goal.Id, "goal") :
-                    new(goal.Status == "blocked" ? "blocker" : "exhausted-budget", details.Text + details.Json.GetRawText() + "\n", goal.Id, "goal"));
-            }
-        });
-
-        Read(() =>
-        {
-            RunsResponse runs = api.Runs();
-            foreach (RunRow run in runs.Runs.Where(r => r.Signals is { Count: > 0 } || r.Scope?.Problem is not null || r.Scope?.OutsideCount > 0))
-            {
-                attention.Add(new("incident", JsonSerializer.Serialize(run, ProtocolJson.Options) + "\n", run.Run, "operation"));
-            }
-
-            foreach (LedgerRow ledger in runs.Goals.Where(g => g.Status == "budget-limited" || g.Units.Any(u => u.Remaining <= 0)))
-            {
-                attention.Add(new("exhausted-budget", JsonSerializer.Serialize(ledger, ProtocolJson.Options) + "\n", ledger.Goal, "goal"));
-            }
-        });
-        return attention;
-
-        void Read(Action read)
-        {
-            try { read(); }
-            catch (Exception exception) when (exception is IOException or InvalidOperationException or System.Net.Http.HttpRequestException or JsonException or NotSupportedException)
-            {
-                attention.Add(new("unknown-check", "Required attention source unavailable: " + exception.Message + "\n"));
-            }
+            catch (JsonException) { }
+            return [new CommunicationAttention("unknown-check", "Required attention projection unavailable; current state unknown.\n  vericairn status\n") { State = "unknown", Command = "vericairn status" }, .. derivation.Derive(recipient)];
         }
+        return derivation.Derive(recipient);
     }
 
     /// <summary>Render every attention item, independent of any frequency or depth.</summary>

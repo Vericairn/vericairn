@@ -24,13 +24,13 @@ public interface IEstateApi
     WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) =>
         WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support communication delegation.", []));
 
-    /// <summary>Current status.</summary>
+    /// <summary>Current status as human text and canonical JSON, identical on every machine for the same records. Attention is derived from records alone.</summary>
     StatusResponse Status();
 
     /// <summary>Record that a person explicitly observed this estate's status; ordinary reads never advance this timestamp.</summary>
     WriteOutcome ObserveEstate(EstateObserveRequest request);
 
-    /// <summary>The recorded progress report with the same checks as status, plus labelled local agent claims and worker observations.</summary>
+    /// <summary>The recorded progress report with the same checks and attention references as status, plus labelled local agent claims and worker observations.</summary>
     ProgressResponse Progress();
 
     /// <summary>Prepare a complete, portable hand-over from all records. A byte limit refuses overflow; nothing is truncated or authored.</summary>

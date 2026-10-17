@@ -57,7 +57,7 @@ public class CommunicationWatchInvariantTests
         foreach (RunSignal signal in signals)
         {
             Assert.Contains(signal.Summary, progress.Text, StringComparison.Ordinal);
-            Assert.Contains(signal.Summary, CommunicationPresentation.RenderAttention(attention), StringComparison.Ordinal);
+            Assert.Contains(attention, a => a.Kind == "incident" && a.Record == operation.Id);
             Assert.Contains(progress.Json.GetProperty("runSignals").EnumerateArray(), r => r.GetProperty("run").GetString() == started.Run &&
                 r.GetProperty("signals").EnumerateArray().Any(s => s.GetProperty("attention").GetString() == signal.Attention));
         }
