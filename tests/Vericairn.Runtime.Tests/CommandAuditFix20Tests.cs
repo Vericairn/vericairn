@@ -13,7 +13,7 @@ public class CommandAuditFix20Tests
         "timeout -s TERM -k 2s 10s ", "command -- ", "busybox ", "exec ", "/usr/bin/env ", "env MODE=test nohup nice -n 5 timeout 10s busybox "];
 
     private static readonly string[] Writes = [
-        "sed -i 's/a/b/' {target}", "sed -i '' 's/a/b/' {target}", "sed -i.bak -e 's/a/b/' {target}", "sed --in-place=.bak 's/a/b/' {target}",
+        "sed -i 's/a/b/' {target}", "sed -ri 's/a/b/' {target}", "sed -Ei 's/a/b/' {target}", "sed -i '' 's/a/b/' {target}", "sed -i.bak -e 's/a/b/' {target}", "sed --in-place=.bak 's/a/b/' {target}",
         "perl -pi -e 's/a/b/' {target}", "perl -i.bak -pe 's/a/b/' {target}",
         "rsync -a source/ {target}", "rsync -t source/ {target}", "rsync -av --exclude cache source/ {target}",
         "tar -xf archive.tar -C {target}", "tar xf archive.tar --directory={target}", "tar -cf {target} source",
@@ -243,6 +243,19 @@ public class CommandAuditFix20Tests
     [InlineData("node -e '/* fs.writeFileSync(\"/etc/x\", \"x\") */'")]
     public void InterpreterCommentsAndSampleCodeDoNotInventOutsideWrites(string command) => Assert.Equal("audit-unverified", Assert.Single(Inspect(command)).Code);
 
+    [Theory]
+    [InlineData("perl -eprint(1)")]
+    [InlineData("perl -MFile::Find -e 'print(1)'")]
+    [InlineData("perl -e '-i' source")]
+    [InlineData("sed -e '-i' ../source")]
+    [InlineData("sed -es/i/o/ ../source")]
+    public void EditorProgramAndModuleNamesAreNotInPlaceFlags(string command)
+    {
+        IReadOnlyList<RunSignal> signals = Inspect(command);
+        Assert.Contains(signals, s => s.Code == "audit-unverified");
+        Assert.DoesNotContain(signals, s => s.Code == "scope");
+    }
+
     public static IEnumerable<object[]> NullDeviceMatrix()
     {
         foreach (string target in OperatingSystem.IsWindows() ? new[] { "/dev/null", "NUL", "nul", "$null", "$NULL" } : ["/dev/null"])
@@ -275,6 +288,14 @@ public class CommandAuditFix20Tests
             Assert.Empty(Inspect("echo x > /dev/./null"));
             Assert.Empty(Inspect("cd /dev && echo x > null"));
         }
+    }
+
+    [Fact]
+    public void RedirectDescriptorsAreNotFilesAndSeparatedNumericFilenamesRemainFiles()
+    {
+        Assert.Contains(Inspect("cd .. && rm 2 > /dev/null"), s => s.Code == "scope");
+        Assert.Empty(Inspect($"cd .. && rm \"{Workspace().Replace('\\', '/')}/inside\" 2>/dev/null"));
+        if (OperatingSystem.IsWindows()) Assert.Empty(Inspect($"cd .. && Remove-Item \"{Workspace().Replace('\\', '/')}/inside\" *>NUL"));
     }
 
     [Theory]

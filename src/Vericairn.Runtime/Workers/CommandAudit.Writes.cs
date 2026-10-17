@@ -12,8 +12,7 @@ public static partial class CommandAudit
         {
             case "sed":
             case "perl":
-                if (!values.Any(v => v.StartsWith("--in-place", StringComparison.Ordinal) || v.StartsWith('-') && !v.StartsWith("--", StringComparison.Ordinal)
-                    && (executable == "sed" ? v.StartsWith("-i", StringComparison.Ordinal) : v.Contains('i', StringComparison.Ordinal)))) return false;
+                if (!InPlaceEditor(executable, values)) return false;
                 bool script = values.Any(v => v is "-e" or "--expression" or "-f" or "--file" || v.StartsWith("--expression=", StringComparison.Ordinal)
                     || v.StartsWith("--file=", StringComparison.Ordinal) || v.StartsWith("-e", StringComparison.Ordinal) && v.Length > 2);
                 bool files = false;
@@ -122,6 +121,31 @@ public static partial class CommandAudit
     }
 
     private static bool RemotePath(string path) => path.Contains(':', StringComparison.Ordinal) && !Path.IsPathFullyQualified(path);
+
+    private static bool InPlaceEditor(string executable, string[] values)
+    {
+        for (int i = 0; i < values.Length; i++)
+        {
+            string value = values[i];
+            if (value == "--") break;
+            if (executable == "sed" && (value == "--in-place" || value.StartsWith("--in-place=", StringComparison.Ordinal))) return true;
+            if (value is "--expression" or "--file") { i++; continue; }
+            if (!value.StartsWith('-') || value.StartsWith("--", StringComparison.Ordinal)) continue;
+            for (int flag = 1; flag < value.Length; flag++)
+            {
+                char option = value[flag];
+                if (option == 'i') return true;
+                // Do not mistake the text of an attached expression, filename or module for flags.
+                if (option is 'e' or 'f' || executable == "perl" && option is 'E' or 'I' or 'M' or 'm' or 'F')
+                {
+                    if (flag == value.Length - 1) i++;
+                    break;
+                }
+                if (!(executable == "sed" ? "nEruzsbl" : "panlwUTSWXcd").Contains(option, StringComparison.Ordinal)) break;
+            }
+        }
+        return false;
+    }
 
     private static void InspectTar(string[] args, List<InvocationPath> paths, HashSet<string> codes, CommandContext context)
     {

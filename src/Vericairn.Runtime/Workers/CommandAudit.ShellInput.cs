@@ -8,7 +8,7 @@ namespace Vericairn.Runtime.Workers;
 
 public static partial class CommandAudit
 {
-    private sealed record ShellToken(string Text, string? Input = null, bool ExpandInput = false);
+    private sealed record ShellToken(string Text, string? Input = null, bool ExpandInput = false, int Start = -1, int End = -1);
     private sealed record HereDocument(int Token, string Delimiter, bool StripTabs, bool Expand);
 
     // Consume input bodies before tokenizing any of their contents. A body can contain shell-looking
@@ -77,7 +77,7 @@ public static partial class CommandAudit
             }
             else
             {
-                tokens.Add(new ShellToken(word));
+                tokens.Add(new ShellToken(word, Start: match.Index, End: cursor));
             }
         }
 

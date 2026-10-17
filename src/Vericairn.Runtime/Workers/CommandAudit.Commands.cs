@@ -64,7 +64,10 @@ public static partial class CommandAudit
             if (!word.StartsWith('\'') && (word.Contains("$(", StringComparison.Ordinal) || word.Contains('`', StringComparison.Ordinal))) codes.Add("audit-unverified");
             if (word is ">" or ">>" or ">|" or "&>" or "&>>" or ">&" or "<" or "<&")
             {
-                if (arguments.Count > 0 && arguments[^1].All(char.IsAsciiDigit)) arguments.RemoveAt(arguments.Count - 1);
+                // Only an adjacent descriptor belongs to the redirect. A separated number can be
+                // a real filename (rm 2 > sink); PowerShell also uses an adjacent * for all streams.
+                if (i > 0 && input[i - 1].End == item.Start && arguments.Count > 0
+                    && (arguments[^1].All(char.IsAsciiDigit) || OperatingSystem.IsWindows() && arguments[^1] == "*")) arguments.RemoveAt(arguments.Count - 1);
                 if (++i >= input.Length) { codes.Add("audit-unverified"); break; }
                 string target = input[i].Text;
                 if (!(word.EndsWith('&') && (target == "-" || target.All(char.IsAsciiDigit))))
@@ -158,13 +161,20 @@ public static partial class CommandAudit
                 if (executable is "npm" or "pnpm" or "yarn" or "pip" or "pip3" && token is "install" or "ci" or "add"
                     || executable == "dotnet" && token == "restore") codes.Add("network");
                 if (Interpreter(executable) && i > 0 && values[i - 1] is "-c" or "-e" or "-Command") continue;
+                if (executable == "sed" && token is "-e" or "--expression") { i++; continue; }
+                if (executable == "sed" && token is "-f" or "--file")
+                {
+                    if (++i < args.Length) AddShellPath(paths, args[i], PathAccess.Read, local);
+                    continue;
+                }
                 if (executable.EndsWith("-Content", StringComparison.OrdinalIgnoreCase) && token.Equals("-Value", StringComparison.OrdinalIgnoreCase)) { i++; continue; }
                 if (executable is "rg" or "grep" && token is "-g" or "--glob" or "--iglob" or "-e" or "--regexp" or "-t" or "--type" or "-T" or "--type-not") { i++; continue; }
                 if (token.StartsWith('-') || token.Contains("://", StringComparison.Ordinal) || executable is "echo" or "printf") continue;
                 operand++;
                 bool pattern = executable is "rg" or "grep" or "sed" or "awk" && operand == 1
                     && !values.Contains("--files", StringComparer.Ordinal)
-                    && !values.Any(t => t is "-e" or "--regexp" or "-f" or "--file" || t.StartsWith("--regexp=", StringComparison.Ordinal));
+                    && !values.Any(t => t is "-e" or "--regexp" or "--expression" or "-f" or "--file" || t.StartsWith("--regexp=", StringComparison.Ordinal)
+                        || executable == "sed" && (t.StartsWith("-e", StringComparison.Ordinal) || t.StartsWith("-f", StringComparison.Ordinal) || t.StartsWith("--expression=", StringComparison.Ordinal) || t.StartsWith("--file=", StringComparison.Ordinal)));
                 if (!pattern && (reads && executable is not ("pwd" or "Get-Location") || MutatingCommands.Contains(executable) || PathLike(token)))
                     AddShellPath(paths, args[i], reads ? PathAccess.Read : MutatingCommands.Contains(executable) ? PathAccess.Write : PathAccess.Unknown, local);
             }
