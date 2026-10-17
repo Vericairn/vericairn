@@ -102,6 +102,26 @@ public sealed class ReleaseDispatchTests
         Assert.Equal(1, fixture.Provider.Calls);
     }
 
+    [Theory]
+    [InlineData("known-failure")]
+    [InlineData("canceled")]
+    public void AReconciledRetryRecordsItsActualSettingsBeforeTheProviderRuns(string previous)
+    {
+        using var fixture = new ReleaseFixture(previous);
+        fixture.Provider.OnDispatch = _ =>
+        {
+            RecordEnvelope claim = Assert.Single(fixture.Service.Session.Load().Current("operation"));
+            Assert.Equal("uncertain", claim.Body.GetProperty("status").GetString());
+            Assert.Equal("release-fix", claim.Body.GetProperty("target").GetProperty("ref").GetString());
+            Assert.Equal("fixed-release.yml", claim.Body.GetProperty("target").GetProperty("workflow").GetString());
+            Assert.Contains("release-fix", claim.Body.GetProperty("intent").GetString(), StringComparison.Ordinal);
+        };
+
+        ReleaseResponse result = fixture.Service.ReleaseSubmit(fixture.Request with { Ref = "release-fix", Workflow = "fixed-release.yml" });
+        Assert.True(result.Ok, result.Message);
+        Assert.Equal(1, fixture.Provider.Calls);
+    }
+
     private sealed class ReleaseFixture : IDisposable
     {
         public TestEstate Estate { get; } = new(recordFormat: 2);

@@ -1419,14 +1419,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each again at that commit, then submit again; nothing was recorded.");
             }
 
+            JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
+            if (compared.Count > 0)
+            {
+                intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at the commit being released: " + string.Join("; ", compared) + "." });
+            }
+
             if (current is null)
             {
-                JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
-                if (compared.Count > 0)
-                {
-                    intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at the commit being released: " + string.Join("; ", compared) + "." });
-                }
-
                 WriteOutcome intent = NewRecord(new NewRecordRequest("operation", request.By, Element(intentBody), $"product:{request.Product}"));
                 if (!intent.Ok)
                 {
@@ -1440,7 +1440,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 // A reconciled retry also needs a durable claim: leaving the old failure or cancellation current
                 // would authorize another dispatch if this process stopped before storing the receipt.
-                JsonObject retry = ReleaseFlow.RetryIntent(current.Body, request.Reconciliation!);
+                JsonObject retry = ReleaseFlow.RetryIntent(current.Body, intentBody, request.Reconciliation!);
                 WriteOutcome claim = NewRecord(new NewRecordRequest("operation", request.By, Element(retry), $"product:{request.Product}", current.Id));
                 if (!claim.Ok)
                 {
