@@ -8,7 +8,7 @@
 
 ## Tools
 
-For 0.7.1, carrying the withdrawn 0.7.0 candidate's additions, `context_prepare` computes the same context package as
+For 0.7.2, retaining the context contract shipped in 0.7.1, `context_prepare` computes the same context package as
 `vericairn context prepare <work-order>`. `context_read` takes `pin`, the
 self-contained `vc1_` identity in a source entry, and returns the same identity
 and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
@@ -51,7 +51,7 @@ Every tool description describes and never directs: nothing a tool returns, and 
 
 ## Running it
 
-After 0.7.1's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.7.2's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
 dotnet tool install --global dotnet-vc
@@ -139,14 +139,24 @@ retain the existing human authority checks.
 
 `estate_check` keeps signature verification and machine-path checks. FIX-12 exempts only validated device
 public-key and envelope signature values from credential-pattern matching, not other fields or invalid
-encodings. A worker attention ask still pins the run's original intent and can be reported stale after
-settlement supersedes it; inspecting it or completing the run does not answer it.
+encodings. Settlement withdraws still-waiting process attention asks and pins those withdrawals to the exact
+settlement, preserving observations and leaving answered asks answered. Closed asks no longer report a stale
+subject. New `attempt-missing` and `scope-settlement` asks remain open for review at that exact settlement;
+reads and progress claims never answer them. An unreadable recovery journal appears as `batch.unreadable`
+and holds record writes, including these MCP writes, with `reconcile-required`; interim live progress stays
+available. Single records are judged before publication, just as grouped records are.
 
 Only portable identities, hashes and variable names enter these records; MCP configuration paths and
 secret values stay local. CONTEXT-01 owns the context package; RUN-01 records its identity and allocation.
 The efficiency Adapter is disabled and unsupported until the planned EFF-01 work in 0.8.0. Native worker
 dispatch requires a complete inventory and either the exact codex-cli `0.159.0-alpha.12.1` or Claude Code
 `2.1.296` baseline, or a current matching human RUN-03 qualification. This harness admission is separate from
-the release-specific MCP matrix above; it establishes no live-agent or sign-in qualification. The stock
+the release-specific MCP matrix above; the admission protocol alone establishes no live-agent or sign-in
+qualification. FIX-18's five live Codex runs exercised max effort, tools and corrected audits; the fifth
+recorded its cap, execution, usage, signed attempt/result and permitted file change through estate-only MCP
+pre-approval. The baseline's MCP list omits approvals and tool lists, so that approval check rests on the exact
+generated configuration and isolation checks. Other accounts, versions and platforms remain unqualified
+by these runs. The worker's linked worktree keeps Git metadata outside the Codex sandbox, so changes stay
+uncommitted for review; FIX-19 makes the workspace a repository of its own. The stock
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not built or qualified by these features.

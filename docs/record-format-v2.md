@@ -7,7 +7,7 @@ carries the records goals need, the additions milestone M3 adopted, and the livi
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
 publication. The 0.7.0 candidate was also withdrawn before publication; 0.7.1 carries its work with FIX-12.
-This draft describes 0.7.1, which follows published 0.6.1 and reads formats 1 and 2, writing at most
+This draft describes 0.7.2, which follows published 0.7.1 and reads formats 1 and 2, writing at most
 format 2. The additions first present in 0.7.0 are work-progress, communication-setting, communication-delegation and harness-qualification types,
 estate observations, watching settings and execution admission fields. These additions require a 0.7.0-capable
 reader before authoring them, but no format-3 migration; older records retain their original bytes and rules.
@@ -51,6 +51,12 @@ it does not authorize, and a revision of a decision keeps the operator's words. 
 written before it existed, so the rules follow the format each record states (except whether an unsigned admission
 counts, which follows the estate's format; see Rules enforced in format 2), and an estate moves to format 2 by one
 recorded step.
+
+FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18 change validation, runtime behavior and worker observations
+within the existing formats. They introduce no format-3 migration. Restore's inventory and filesystem
+limits are in [record-format-v1.md](record-format-v1.md#export-and-restore). Single-record publication
+now judges the proposed estate before storage; an unreadable local recovery journal holds record
+writes with `reconcile-required`, without becoming a portable record or changing existing bytes.
 
 ## The envelope and the estate
 
@@ -488,7 +494,7 @@ anything is written; `vericairn goal show <goal>` says whether the goal is ready
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -760,7 +766,7 @@ and its key is the only one whose custody is `offline` (`device.recovery`).
 
 `work-progress` has an exact-hash `attempt` subject and body `{phase, note, completedAt}`. Only the attempt's author writes it. `phase` is a stable lower-case name (up to 100 characters), `note` a portable claim (up to 2000 characters), and `completedAt` a UTC timestamp. There is at most one record per attempt and phase, including superseded records; a completion cannot be superseded. The claim establishes neither liveness nor acceptance. Active notes replace local live state and create no records.
 
-Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `scope-read`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded. `scope-read` warns about a read outside the workspace and does not stop the run; `scope` remains critical for confidently identified write targets outside the workspace and launch-supplied temporary directory. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified` warnings without a stop. Changes inside the workspace are checked against the brief at settlement. Network detections warn; credential detections remain critical for reads and writes alike.
+Agent-run operations may carry `signals`, a bounded array with one entry per code and severity: `code` (`network`, `credentials`, `scope`, `scope-read`, `audit-unverified`, `burn-rate`, `loop`, `stall`, `scope-settlement`, `attempt-missing`), `severity` (`warning` or `critical`), `at`, `summary`, optional SHA-256 `fingerprint`, positive `count`, and `attention` (an ask id). These are worker observations; raw commands, machine paths and secret values are excluded. `scope-read` warns about a read outside the workspace and does not stop the run; `scope` remains critical for confidently identified write targets outside the workspace and launch-supplied temporary directory. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified` warnings without a stop. Changes inside the workspace are checked against the brief at settlement. Network detections warn; credential detections remain critical for reads and writes alike.
 
 A watched run's immutable `target.watch` is a JSON-encoded string of its resolved thresholds, and `target.watchHistoryTokensPerMinute` pins the recent historical median or `unavailable`. History uses only fully reported successful runs of that goal and launcher; no current run reports its own baseline.
 
