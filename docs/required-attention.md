@@ -38,8 +38,9 @@ than `pass` or `passed` remain failed or unknown, including skipped and unperfor
 checks. A later result can replace the old result's attention while introducing
 attention of its own.
 
-A review's withdrawal rule reads release `status: withdrawn`, ask
-`state: withdrawn`, goal `abandoned`, and work-order `retired`. The current record
+A review's withdrawal rule reads its direct subject: release `status: withdrawn`,
+ask `state: withdrawn`, goal `abandoned`, and work-order `retired`. Retiring a work
+order does not withdraw a result that a review judges. The current record
 formats have no `failed` work-order status; failed result checks remain their
 own attention. The dependency reader also recognizes `failed` and `withdrawn`
 when supplied by a progress source. Waiting on a planned, active or submitted
@@ -80,6 +81,8 @@ reads. The array is independent of recipient settings and depth. Record-derived
 items agree for the same records; worker concerns can differ by runtime. Existing fields
 and complete original-record reads are unchanged. Human delivery may address a
 recipient's asks without changing canonical JSON.
+The status hash in an estate observation still covers its existing record-derived
+snapshot; the added attention projection does not alter that record contract.
 
 `CommunicationAttention` keeps its existing `kind`, `text`, `record` and
 `recordType` fields and adds `hash`, `subject`, `state`, `asOf`, `command` and

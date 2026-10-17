@@ -184,9 +184,10 @@ internal sealed class AttentionDerivation(
             {
                 RecordResponse record = SubjectRecord(review);
                 return !record.Current || Str(Body(record), "status") == "withdrawn" || (record.Type == "ask" && Str(Body(record), "state") == "withdrawn")
+                    || (record.Type == "work-order" && Orders().Any(o => Str(o, "id") == record.Id && Str(o, "status") == "retired"))
                     || (record.Type == "goal" && Goals().Any(g => g.Id == record.Id && g.Status == "abandoned"));
             },
-            () => OrderAccepted(SubjectRecord(review), withdrawn: true));
+            () => OrderAccepted(SubjectRecord(review)));
     }
 
     // Any sufficient resolution wins even if another route is unavailable. Otherwise uncertainty is retained on the item.
@@ -204,7 +205,7 @@ internal sealed class AttentionDerivation(
         return false;
     }
 
-    private bool OrderAccepted(RecordResponse record, bool withdrawn = false)
+    private bool OrderAccepted(RecordResponse record)
     {
         var seen = new HashSet<string>(StringComparer.Ordinal);
         while (record.Type != "work-order")
@@ -216,10 +217,7 @@ internal sealed class AttentionDerivation(
 
         // Only acceptance of the current work-order revision closes its work. An earlier pin remains historical.
         record = Latest(record);
-        if (Accepted(record)) { return true; }
-        if (!withdrawn) { return false; }
-        // Work orders are withdrawn using work-status 'retired' in record formats 1 and 2.
-        return Orders().Any(o => Str(o, "id") == record.Id && Str(o, "status") == "retired");
+        return Accepted(record);
     }
 
     private IReadOnlyList<GoalRow> Goals() => goals ??= readGoals();

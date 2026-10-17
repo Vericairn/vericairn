@@ -795,6 +795,9 @@ the pin hash covers the canonical compact JSON serialization of `EstateManifest`
 (including artifacts and storage profile); the status hash covers the canonical
 compact status document with its checks. These are snapshot identities, not
 claims of live external health. The write observes and accepts nothing else.
+The compact `attention` projection added to runtime status responses in 0.7.3 is
+not part of this recorded `statusHash`; the record-derived snapshot and existing
+observation records keep their prior meaning.
 
 Status derives `lastObservedByPerson` from current valid estate observations
 about this charter or a predecessor, ordered by `asOf`, authoring time and id.

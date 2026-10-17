@@ -168,11 +168,11 @@ public class CommunicationAttentionTests
     [InlineData("supersession")]
     [InlineData("withdrawal")]
     [InlineData("work-order")]
-    [InlineData("retired-order")]
+    [InlineData("retired-subject")]
     public void EachReviewResolutionClearsItsFinding(string resolution)
     {
         var f = new Fixture();
-        RecordResponse subject = resolution is "work-order" or "retired-order" ? f.Result("subject", "passed") : f.Add("release", "subject", "{}");
+        RecordResponse subject = resolution == "work-order" ? f.Result("subject", "passed") : f.Add(resolution == "retired-subject" ? "work-order" : "release", "subject", "{}");
         f.Add("review", "review", """{"outcome":"findings","findings":[{}]}""", subject);
         switch (resolution)
         {
@@ -181,9 +181,19 @@ public class CommunicationAttentionTests
             case "supersession": f.Revise(subject, "revision", "{}"); break;
             case "withdrawal": f.Replace(subject with { Envelope = JsonSerializer.SerializeToElement(new { at = "2026-10-13T12:00:01Z", body = new { status = "withdrawn" } }) }); break;
             case "work-order": f.Add("acceptance", "acceptance", "{}", f.Api.Record("subject-order")); break;
-            case "retired-order": f.OrderStates.Add(new { id = "subject-order", status = "retired" }); break;
+            case "retired-subject": f.OrderStates.Add(new { id = subject.Id, status = "retired" }); break;
         }
         Assert.Empty(f.Attention());
+    }
+
+    [Fact]
+    public void RetiringAWorkOrderDoesNotWithdrawTheResultItsReviewJudges()
+    {
+        var f = new Fixture();
+        RecordResponse subject = f.Result("subject", "passed");
+        RecordResponse review = f.Add("review", "review", """{"outcome":"findings","findings":[{}]}""", subject);
+        f.OrderStates.Add(new { id = "subject-order", status = "retired" });
+        Assert.Equal(review.Id, Assert.Single(f.Attention()).Record);
     }
 
     [Fact]
