@@ -1,6 +1,22 @@
 # Workbench
 
-`vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; everything it shows comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings).
+`vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; estate state comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings). The shell also shows separately labelled machine-local release information.
+
+## Release notices (0.7.3)
+
+The shell discloses a check for newer published Vericairn releases, including before an estate is open.
+At opening and while it stays open, Workbench shares the CLI's cache and limit of one unauthenticated
+GitHub request per rolling 24 hours, including failed attempts. The request sends no identifiers,
+installed version, estate data or usage telemetry. Network failures are silent and retain cached
+knowledge; drafts and prereleases do not count. The check runs asynchronously without blocking the UI.
+
+A newer-release notice gives its version, release-notes link, NuGet tool command, archive download page
+and estate upgrade command. Nothing installs or upgrades automatically. Disable requests for both clients
+with `vericairn updates configure --enabled false` (or `dotnet vc updates configure --enabled false`).
+Use `--enabled true` to re-enable, or omit the option to show the setting. Both clients read the same
+machine-local setting under the Vericairn home before checking; cached notices can remain when disabled.
+The setting is reread at Workbench's next hourly check or when it is reopened. See the
+[operator guide](operator-guide.md) and [installation guide](install.md#release-check-and-upgrades-073).
 
 ## What exists
 
