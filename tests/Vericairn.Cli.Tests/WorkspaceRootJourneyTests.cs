@@ -38,19 +38,19 @@ public class WorkspaceRootJourneyTests
         Success(await journey.Binary("worker", "configure", "--workspaces", journey.Workspaces));
         Assert.Equal(Path.Combine(journey.CanonicalScratch, "workspaces"), Success(await journey.Binary("--json", "worker", "configure")).Json.GetProperty("root").GetString());
 
-        // The refused default run left its worktree for inspection. A new root never silently takes it over outside that root.
-        string previous = Directory.EnumerateFiles(Path.Combine(journey.Home, "estates"), ".git", SearchOption.AllDirectories).Single();
+        // The refused default run left its workspace repository for inspection. A new root never silently takes it over outside that root.
+        string previous = Directory.EnumerateDirectories(Path.Combine(journey.Home, "estates"), ".git", SearchOption.AllDirectories).Single();
         string oldWorkspace = Path.GetDirectoryName(previous)!;
         string canonicalWorkspace = Path.GetFullPath(Git(oldWorkspace, "rev-parse", "--show-toplevel"));
         refused = await journey.Run();
         Assert.Equal(2, refused.Code);
         Assert.Contains($"at '{canonicalWorkspace}'", refused.Err, StringComparison.Ordinal);
-        Assert.Contains("worktree remove", refused.Err, StringComparison.Ordinal);
-        Git(journey.Clone, "worktree", "remove", "--force", oldWorkspace);
+        Assert.Contains("remove that workspace directory", refused.Err, StringComparison.Ordinal);
+        CliHarness.Delete(oldWorkspace);
 
         Success(await journey.Run());
         Assert.True(File.Exists(journey.Report));
-        string workspace = Path.GetDirectoryName(Directory.EnumerateFiles(journey.Workspaces, ".git", SearchOption.AllDirectories).Single())!;
+        string workspace = Path.GetDirectoryName(Directory.EnumerateDirectories(journey.Workspaces, ".git", SearchOption.AllDirectories).Single())!;
         Assert.EndsWith("work-w-1", workspace, StringComparison.Ordinal);
         Assert.Equal("work/w-1", Git(workspace, "symbolic-ref", "--short", "HEAD"));
         JsonElement recorded = Assert.Single(Success(await journey.Binary("--json", "worker", "runs")).Json.GetProperty("runs").EnumerateArray());
@@ -58,7 +58,7 @@ public class WorkspaceRootJourneyTests
         Assert.DoesNotContain(journey.Scratch, recorded.GetRawText(), StringComparison.Ordinal);
         Success(await journey.Binary("worker", "configure", "--workspaces", journey.Scratch));
         Success(await journey.Run());
-        Assert.True(File.Exists(Path.Combine(workspace, ".git")));
+        Assert.True(Directory.Exists(Path.Combine(workspace, ".git")));
         Assert.Equal(2, Success(await journey.Binary("--json", "worker", "runs")).Json.GetProperty("runs").GetArrayLength());
         AssertNoRecordedPaths(journey);
         Success(await journey.Binary("estate", "check"));

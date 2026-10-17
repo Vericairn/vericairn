@@ -557,6 +557,13 @@ internal static class FakeHarness
             case "codex-broken" when listing:
                 Console.Error.WriteLine("error: unrecognized subcommand 'features'");
                 return 2;
+            case "workspace-commit":
+                if (!Directory.Exists(".git")) return 2;
+                Directory.CreateDirectory("widget");
+                File.WriteAllText("widget/permitted.txt", "permitted work\n");
+                Git("add", "widget/permitted.txt");
+                Git("commit", "-q", "-m", "Commit inside the workspace");
+                return 0;
             case "scope-edits":
                 Directory.CreateDirectory("src");
                 Directory.CreateDirectory("docs");

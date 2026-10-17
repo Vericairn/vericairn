@@ -26,6 +26,7 @@ internal static class WorkspaceScopeAudit
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
         string? identity = null;
+        string? head = null;
         var watch = Stopwatch.StartNew();
         var committed = new HashSet<string>(StringComparer.Ordinal);
         long bytes = 0;
@@ -46,7 +47,7 @@ internal static class WorkspaceScopeAudit
             }
             else
             {
-                WorkspaceGitScope.Changes(gitDirectory, branch, baseline, deadline - watch.Elapsed, committed);
+                head = WorkspaceGitScope.Changes(gitDirectory, branch, baseline, deadline - watch.Elapsed, committed);
             }
             if (identity != DirectoryIdentity(workspace))
             {
@@ -58,7 +59,7 @@ internal static class WorkspaceScopeAudit
             problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
         }
 
-        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray());
+        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray()) { Head = head };
 
         void CheckDeadline()
         {

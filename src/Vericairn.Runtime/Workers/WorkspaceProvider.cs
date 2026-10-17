@@ -19,7 +19,11 @@ public sealed record PreparedWorkspace(string Path, string Branch, string Commit
 /// <param name="Identity">An opaque local fingerprint of the physical workspace directory, when supplied by the provider.</param>
 /// <param name="GitDirectory">The original Git object and reference directory, local only, pinned before launch.</param>
 /// <param name="CommittedPaths">Paths changed in the run branch's head or any commit since its baseline.</param>
-public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null, string? Identity = null, string? GitDirectory = null, IReadOnlyList<string>? CommittedPaths = null);
+public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files, string? Problem = null, string? Identity = null, string? GitDirectory = null, IReadOnlyList<string>? CommittedPaths = null)
+{
+    /// <summary>The exact run-branch head inspected by the committed scope audit, local only.</summary>
+    public string? Head { get; init; }
+}
 
 /// <summary>
 /// The workspace contract, version 1 (vericairn.workspace/1): an isolated working tree of a repository on a work branch, made from this
@@ -43,7 +47,7 @@ public interface IWorkspaceProvider
     /// </summary>
     PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory);
 
-    /// <summary>Prepares at the requested directory, or reuses this branch's existing worktree only within the selected workspace root.</summary>
+    /// <summary>Prepares at the requested directory, or reuses this branch's existing workspace only within the selected workspace root.</summary>
     PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot) => Prepare(clone, branch, baseReference, directory);
 
     /// <summary>Captures the workspace before launch, including ignored files, for the settlement's scope audit.</summary>
@@ -52,4 +56,6 @@ public interface IWorkspaceProvider
     /// <summary>Compares changes since launch with the assignment's permitted repository-relative paths.</summary>
     RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => new(0, 0, [], "This workspace provider cannot verify assignment scope.");
 
+    /// <summary>After settlement, retains the audited branch in the registered clone for review. Returns a path-free refusal, or null.</summary>
+    string? RetainForReview(PreparedWorkspace workspace) => null;
 }
