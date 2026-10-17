@@ -69,7 +69,7 @@ public sealed partial class EstateService
         }
         finally
         {
-            if (scratch is not null) Directory.Delete(scratch, recursive: true);
+            if (scratch is not null) WorkspaceCleanup.Delete(scratch);
         }
     }
 }

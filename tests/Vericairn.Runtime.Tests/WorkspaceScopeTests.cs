@@ -49,9 +49,9 @@ public class WorkspaceScopeTests
 
         // Neither a redirected worktree nor a hostile diff driver can hide committed paths or execute a command.
         string marker = Path.Combine(run.Scratch, "diff-driver-ran");
-        RunEstate.Git(run.Clone, "config", "core.worktree", run.Clone);
-        RunEstate.Git(run.Clone, "config", "diff.external", "touch " + marker);
-        RunEstate.Git(run.Clone, "config", "core.repositoryformatversion", "999");
+        RunEstate.Git(workspace.Path, "config", "core.worktree", run.Clone);
+        RunEstate.Git(workspace.Path, "config", "diff.external", "touch " + marker);
+        RunEstate.Git(workspace.Path, "config", "core.repositoryformatversion", "999");
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
         Assert.Null(scope.Problem);
         Assert.Equal(["README.md", "transient.txt"], scope.Outside);
@@ -86,7 +86,7 @@ public class WorkspaceScopeTests
         RunEstate.Git(workspace.Path, "add", ".");
         RunEstate.Git(workspace.Path, "commit", "-q", "-m", "An outside change");
         RunEstate.Git(workspace.Path, "restore", "--source=" + workspace.Commit, "--worktree", ".");
-        RunEstate.Git(run.Clone, "pack-refs", "--all");
+        RunEstate.Git(workspace.Path, "pack-refs", "--all");
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
         Assert.Null(scope.Problem);
         Assert.Equal(["README.md"], scope.Outside);
@@ -101,7 +101,7 @@ public class WorkspaceScopeTests
         var provider = new GitWorktreeWorkspaces(FakeHarness.ScopeCommand());
         PreparedWorkspace workspace = provider.Prepare(run.Clone, "work/ref-fifo", null, Path.Combine(run.Scratch, "worktree"));
         WorkspaceSnapshot before = provider.Capture(workspace);
-        string reference = Path.Combine(run.Clone, ".git", "refs", "heads", "work", "ref-fifo");
+        string reference = Path.Combine(workspace.Path, ".git", "refs", "heads", "work", "ref-fifo");
         File.Delete(reference);
         Assert.Equal(0, mkfifo(reference, 384));
         try
@@ -137,7 +137,7 @@ public class WorkspaceScopeTests
         Directory.Move(workspace.Path, displaced);
         Directory.CreateDirectory(workspace.Path);
         File.Copy(Path.Combine(displaced, "README.md"), Path.Combine(workspace.Path, "README.md"));
-        File.Copy(Path.Combine(displaced, ".git"), Path.Combine(workspace.Path, ".git"));
+        Directory.Move(Path.Combine(displaced, ".git"), Path.Combine(workspace.Path, ".git"));
         File.WriteAllText(Path.Combine(displaced, "forbidden.txt"), "The agent's original workspace was moved.");
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
         Assert.NotNull(scope.Problem);
@@ -153,17 +153,17 @@ public class WorkspaceScopeTests
         WorkspaceSnapshot before = provider.Capture(workspace);
         Assert.Null(before.Problem);
         string administration = Path.Combine(workspace.Path, ".git");
-        // Git for Windows can mark this file hidden; CREATE_ALWAYS cannot overwrite an existing hidden file.
+        // Git for Windows can mark administration hidden; preserve it without writing through the replacement.
         if (OperatingSystem.IsWindows())
         {
             File.SetAttributes(administration, File.GetAttributes(administration) | FileAttributes.Hidden);
         }
 
-        File.Delete(administration);
+        Directory.Move(administration, Path.Combine(run.Scratch, "retained-git"));
         File.WriteAllText(administration, "gitdir: missing-administration\n");
         File.WriteAllText(Path.Combine(workspace.Path, "forbidden.txt"), "outside scope");
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["src/**"]);
-        Assert.Null(scope.Problem);
+        Assert.NotNull(scope.Problem);
         Assert.Contains("forbidden.txt", scope.Outside);
     }
 
@@ -371,7 +371,7 @@ public class WorkspaceScopeTests
         Protocol.RunScope scope = provider.CheckScope(workspace, before, ["../**", "/**"]);
         Assert.Equal(["outside.txt"], scope.Outside);
         Assert.NotNull(scope.Problem);
-        File.Move(Path.Combine(workspace.Path, ".git"), Path.Combine(workspace.Path, ".git-missing"));
+        Directory.Move(Path.Combine(workspace.Path, ".git"), Path.Combine(workspace.Path, ".git-missing"));
         scope = provider.CheckScope(workspace, before, ["**"]);
         Assert.NotNull(scope.Problem);
         Assert.Contains("unverified", scope.Problem, StringComparison.Ordinal);

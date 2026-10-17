@@ -40,7 +40,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -70,7 +70,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -154,7 +154,7 @@ public class LauncherTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 
@@ -336,7 +336,7 @@ public class LauncherTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public void AGitWorktreeIsTheWorkspaceAndTheSharedCloneNeverChanges(bool alternateSpelling)
+    public void ARepositoryIsTheWorkspaceAndTheSharedCloneNeverChanges(bool alternateSpelling)
     {
         string root = Path.Combine(Path.GetTempPath(), "vericairn-worktree-" + Ulid.NewUlid().Value);
         string clone = Path.Combine(root, "clone");
@@ -366,37 +366,25 @@ public class LauncherTests
             Assert.Equal(head, Git(clone, "rev-parse", "HEAD"));
             Assert.Empty(Git(clone, "status", "--porcelain"));
 
-            string relocated = Path.Combine(root, "workspaces", "relocated");
-            Git(clone, "worktree", "move", first.Path, relocated);
-            string canonical = Path.GetFullPath(HarnessWorkspace.Canonical(relocated));
-            if (alternateSpelling)
-            {
-                // Git preserves this valid spelling in its inventory. It exercises normalization on Unix as well as Windows.
-                string metadata = Path.GetFullPath(Git(relocated, "rev-parse", "--absolute-git-dir"));
-                File.WriteAllText(Path.Combine(metadata, "gitdir"), canonical.Replace('\\', '/') + "/./.git\n");
-            }
-            PreparedWorkspace reused = workspaces.Prepare(clone, "work/w-1", null, first.Path, Path.Combine(root, "workspaces"));
+            string canonical = Path.GetFullPath(HarnessWorkspace.Canonical(first.Path));
+            string requested = alternateSpelling ? Path.Combine(root, "workspaces", ".", "work-w-1") : Path.Combine(root, "workspaces", "another-name");
+            PreparedWorkspace reused = new GitWorktreeWorkspaces().Prepare(clone, "work/w-1", null, requested, Path.Combine(root, "workspaces"));
             Assert.True(reused.Reused);
             Assert.Equal(canonical, Path.GetFullPath(reused.Path));
             Assert.True(File.Exists(Path.Combine(reused.Path, "widget.txt")));
             string refused = Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-1", null, Path.Combine(root, "other", "work-w-1"), Path.Combine(root, "other"))).Message;
             Assert.Contains($"at '{canonical}'", refused, StringComparison.Ordinal);
-            Assert.Contains("git worktree remove", refused, StringComparison.Ordinal);
+            Assert.Contains("remove that workspace directory", refused, StringComparison.Ordinal);
 
             string occupied = Path.Combine(root, "occupied");
             Directory.CreateDirectory(occupied);
-            Assert.Contains("is not a worktree of the clone on that branch", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-2", null, occupied)).Message, StringComparison.Ordinal);
+            Assert.Contains("is not an independent repository of the clone on that branch", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/w-2", null, occupied)).Message, StringComparison.Ordinal);
             Assert.Contains("is not a branch name git accepts", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(clone, "work/../w", null, Path.Combine(root, "bad"))).Message, StringComparison.Ordinal);
             Assert.Contains("is not a git repository", Assert.Throws<ProviderRefusedException>(() => workspaces.Prepare(occupied, "work/w-3", null, Path.Combine(root, "none"))).Message, StringComparison.Ordinal);
         }
         finally
         {
-            foreach (string path in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(path, FileAttributes.Normal);
-            }
-
-            Directory.Delete(root, recursive: true);
+            WorkspaceCleanup.Delete(root);
         }
     }
 

@@ -1,40 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
-using System.ComponentModel;
-using System.Diagnostics;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Packs.Software;
 
 /// <summary>
-/// Workspaces as git worktrees (vericairn.workspace/1): a worktree of this machine's registered clone on the run's work branch, made
-/// from the base when the branch does not exist yet, beside the estate's per-machine state. The clone's own working tree, index and
-/// checked-out branch never change, and the worktree stays after the run for review.
+/// Workspaces with their own Git administration and read-only object alternates from the registered clone. The historical
+/// provider name is retained for compatibility. No agent-controlled Git configuration is loaded by the worker.
 /// </summary>
 public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
 {
     private readonly IReadOnlyList<string>? auditCommand;
+    private readonly Action? beforeReferenceUpdate;
+    private readonly ConditionalWeakTable<PreparedWorkspace, Review> reviews = new();
 
     /// <summary>Uses the installed Vericairn command as the isolated scope observer.</summary>
-    public GitWorktreeWorkspaces()
-    {
-    }
+    public GitWorktreeWorkspaces() { }
 
-    internal GitWorktreeWorkspaces(IReadOnlyList<string> auditCommand) => this.auditCommand = auditCommand;
+    internal GitWorktreeWorkspaces(IReadOnlyList<string> auditCommand, Action? beforeReferenceUpdate = null)
+    {
+        this.auditCommand = auditCommand;
+        this.beforeReferenceUpdate = beforeReferenceUpdate;
+    }
 
     /// <inheritdoc />
     public ProviderDescriptor Descriptor { get; } = new(
-        "git-worktree",
-        IWorkspaceProvider.Contract,
-        "implemented",
-        ["prepare"],
+        "git-worktree", IWorkspaceProvider.Contract, "implemented", ["prepare"],
         [
-            "Requires git on the PATH.",
-            "Adds a worktree of this machine's registered clone on the work branch, making the branch from the base when it does not exist; the clone's own working tree, index and checked-out branch never change.",
-            "Takes up again the worktree an earlier run of the branch left, so a later attempt continues where the last one stopped; the worktree stays after the run, and removing it is the person's.",
+            "Requires git on the PATH. The historical provider id is retained; new workspaces are independent repositories.",
+            "Keeps index, references and new objects inside the workspace, borrowing the registered clone's objects read-only. The clone's working tree and index never change; the audited branch is fetched into it after settlement, with a guarded reference update.",
+            "Reuses a branch's workspace only inside the selected root. Workspaces stay for review; preserve work before deleting an independent workspace directory or removing a legacy linked worktree with git worktree remove.",
         ]);
 
     /// <inheritdoc />
@@ -48,76 +51,200 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         if (Git(clone, out string common, "rev-parse", "--path-format=absolute", "--git-common-dir") != 0)
-        {
             throw new ProviderRefusedException("The registered clone is not a git repository with this git.");
-        }
-        common = Path.GetFullPath(common.TrimEnd('\r', '\n'));
-
-        if (Git(clone, out _, "check-ref-format", "--branch", branch) != 0)
-        {
+        common = HarnessWorkspace.Canonical(common.TrimEnd('\r', '\n'));
+        if (Git(clone, out _, "check-ref-format", "refs/heads/" + branch) != 0 || branch.StartsWith('-'))
             throw new ProviderRefusedException($"'{branch}' is not a branch name git accepts.");
-        }
 
         string root = CanonicalRoot(workspaceRoot);
-        if (Git(clone, out string inventory, "worktree", "list", "--porcelain", "-z") != 0)
-            throw new ProviderRefusedException("git could not inspect the branch's existing worktrees.");
-        string? existing = null;
-        foreach (string field in inventory.Split('\0'))
+        RefuseCheckedOut(clone, branch, root);
+        string registration = Registration(common, branch);
+        Location? registered = null;
+        if (File.Exists(registration))
         {
-            if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = Path.GetFullPath(field[9..]);
-            else if (field == "branch refs/heads/" + branch && existing is not null)
+            try
             {
-                string physical = Directory.Exists(existing) ? HarnessWorkspace.Canonical(existing) : Path.GetFullPath(existing);
-                if (Same(physical, HarnessWorkspace.Canonical(clone)))
-                    throw new ProviderRefusedException($"Branch {branch} is checked out in the registered clone at '{existing}'; choose a work branch so the shared clone stays unchanged.");
-                if (!Within(root, physical))
-                    throw new ProviderRefusedException($"Branch {branch} already has a worktree at '{existing}', outside the selected workspace root. Preserve its work, then use git worktree remove with that path from the registered clone, or configure a root containing it.");
-                directory = physical;
-                break;
+                registered = JsonSerializer.Deserialize<Location>(WorkspaceGitScope.Read(registration, 65536))
+                    ?? throw new JsonException();
+                if (string.IsNullOrWhiteSpace(registered.Path) || !Path.IsPathFullyQualified(registered.Path)
+                    || registered.CloneHead is not null && !WorkspaceGitScope.ObjectId(registered.CloneHead)) throw new JsonException();
             }
+            catch (JsonException exception)
+            {
+                throw new ProviderRefusedException("The local workspace registration is unreadable; preserve the workspace and repair its registration before retrying.", exception);
+            }
+            if (Directory.Exists(registered.Path)) directory = registered.Path;
         }
 
-        if (Directory.Exists(directory))
+        string? expected = CloneHead(clone, branch);
+        RefuseLink(directory);
+        bool reused = Directory.Exists(directory);
+        if (reused)
         {
             directory = HarnessWorkspace.Canonical(directory);
-            if (!Within(root, directory)) throw new ProviderRefusedException("The workspace resolves outside the selected workspace root.");
-            bool same = Git(directory, out string own, "rev-parse", "--path-format=absolute", "--git-common-dir") == 0 && Same(Path.GetFullPath(own.TrimEnd('\r', '\n')), common);
-            if (same && Git(directory, out string current, "symbolic-ref", "--short", "-q", "HEAD") == 0 && current.Trim() == branch)
-            {
-                return new PreparedWorkspace(directory, branch, Head(directory), true);
-            }
-
-            throw new ProviderRefusedException($"The workspace of branch {branch} exists on this machine and is not a worktree of the clone on that branch; remove it, or name another branch.");
+            if (!Within(root, directory))
+                throw new ProviderRefusedException($"Branch {branch} already has a workspace at '{directory}', outside the selected workspace root. Preserve its work, then remove that workspace directory, or configure a root containing it.");
+            OwnRepository(directory, common, branch);
         }
-
-        Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
-        string parent = HarnessWorkspace.Canonical(Path.GetDirectoryName(directory)!);
-        if (!Within(root, parent) && !Same(root, parent)) throw new ProviderRefusedException("The workspace parent resolves outside the selected workspace root.");
-        bool exists = Git(clone, out _, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch) == 0;
-        string output;
-        int code = exists
-            ? Git(clone, out output, "worktree", "add", directory, branch)
-            : Git(clone, out output, "worktree", "add", "-b", branch, directory, string.IsNullOrWhiteSpace(baseReference) ? "HEAD" : baseReference);
-        if (code != 0)
+        else
         {
-            throw new ProviderRefusedException($"git could not add the worktree of {branch}: {output.Trim()}");
+            // Check the eventual physical parent before creating any directories, including dangling-link destinations.
+            string planned = CanonicalRoot(Path.GetFullPath(directory));
+            if (!Within(root, planned)) throw new ProviderRefusedException("The workspace resolves outside the selected workspace root.");
+            Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
+            string parent = HarnessWorkspace.Canonical(Path.GetDirectoryName(directory)!);
+            if (!Within(root, parent) && !Same(root, parent)) throw new ProviderRefusedException("The workspace parent resolves outside the selected workspace root.");
+            string baseline = expected ?? WorkspaceGitCommand.Require(clone, "rev-parse", "--verify", "--end-of-options",
+                (string.IsNullOrWhiteSpace(baseReference) ? "HEAD" : baseReference) + "^{commit}");
+            if (!WorkspaceGitScope.ObjectId(baseline)) throw new ProviderRefusedException("The prepared baseline is not a commit.");
+
+            // Equivalent object sharing to clone --shared, without importing remotes, templates or repository configuration.
+            // Publish only a complete checkout, so a failed preparation cannot be mistaken for a reusable workspace.
+            // Only this fresh, worker-created repository is ever passed to Git as a working repository.
+            string preparing = Path.Combine(parent, ".vericairn-preparing-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                WorkspaceGitCommand.Require(parent, "init", "--quiet", "--template=", "--object-format=" + (baseline.Length == 64 ? "sha256" : "sha1"), preparing);
+                File.WriteAllText(Path.Combine(preparing, ".git", "objects", "info", "alternates"), Path.Combine(common, "objects").Replace('\\', '/') + "\n");
+                WorkspaceGitCommand.Require(preparing, "update-ref", "refs/heads/" + branch, baseline);
+                WorkspaceGitCommand.Require(preparing, "symbolic-ref", "HEAD", "refs/heads/" + branch);
+                WorkspaceGitCommand.Require(preparing, "reset", "--hard", baseline);
+                Directory.Move(preparing, directory);
+            }
+            finally
+            {
+                if (Directory.Exists(preparing)) WorkspaceCleanup.Delete(preparing);
+            }
+            directory = HarnessWorkspace.Canonical(directory);
         }
 
-        return new PreparedWorkspace(directory, branch, Head(directory), false);
+        string git = Path.Combine(directory, ".git");
+        string head = WorkspaceGitScope.Head(git, "refs/heads/" + branch);
+        if (reused && registered is not null && Same(registered.Path, directory) && registered.CloneHead != expected && expected != head)
+            throw new ProviderRefusedException("The branch in the registered clone moved unexpectedly since this workspace was prepared or retained. Preserve the workspace and reconcile the branch before retrying.");
+        using (var view = new WorkspaceGitView(Path.Combine(git, "objects"), head))
+            WorkspaceGitCommand.Require(view.Path, "cat-file", "-e", head + "^{commit}");
+        Register(registration, new Location(directory, expected));
+        var workspace = new PreparedWorkspace(directory, branch, head, reused);
+        reviews.Add(workspace, new Review(clone, expected, git, registration));
+        return workspace;
     }
 
     /// <inheritdoc />
     public WorkspaceSnapshot Capture(PreparedWorkspace workspace) => WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand);
 
     /// <inheritdoc />
-    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => WorkspaceScopeAudit.Compare(baseline,
-        WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory), permitted);
+    public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted)
+    {
+        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory);
+        RunScope scope = WorkspaceScopeAudit.Compare(baseline, after, permitted);
+        if (reviews.TryGetValue(workspace, out Review? review))
+            review.Head = scope.Problem is null && Same(review.GitDirectory, baseline.GitDirectory ?? string.Empty) ? after.Head : null;
+        return scope;
+    }
+
+    /// <inheritdoc />
+    public string? RetainForReview(PreparedWorkspace workspace)
+    {
+        if (!reviews.TryGetValue(workspace, out Review? review) || review.Head is null)
+            return "The workspace branch was not fetched: its committed scope audit is unavailable or incomplete. Preserve the workspace for review.";
+        try
+        {
+            // Never fetch from the agent's repository itself: upload-pack would load its configuration. The disposable
+            // source exposes only the audited object id and object storage, never hooks, includes, remotes or helpers.
+            if (WorkspaceGitScope.Head(review.GitDirectory, "refs/heads/" + workspace.Branch) != review.Head)
+                return "The workspace branch was not fetched: its head changed after the scope audit. Preserve the workspace for review.";
+            if (CloneHead(review.Clone, workspace.Branch) != review.Expected)
+                return "The workspace branch was not fetched: the branch in the registered clone moved unexpectedly after preparation. Preserve the workspace and reconcile the branch before retrying.";
+            RefuseCheckedOut(review.Clone, workspace.Branch, null);
+            using var view = new WorkspaceGitView(Path.Combine(review.GitDirectory, "objects"), review.Head);
+            WorkspaceGitCommand.Require(review.Clone, "fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", "--no-auto-maintenance", "--", view.Path, "refs/heads/review");
+            // Fetch objects first, then compare-and-swap the destination ref. A concurrent move, creation or deletion
+            // cannot be overwritten, including a move to a descendant of the expected head.
+            RefuseCheckedOut(review.Clone, workspace.Branch, null);
+            beforeReferenceUpdate?.Invoke();
+            if (Git(review.Clone, out _, "update-ref", "--no-deref", "refs/heads/" + workspace.Branch, review.Head,
+                review.Expected ?? new string('0', review.Head.Length)) != 0)
+                return "The workspace branch was not retained: the registered clone refused the guarded branch update, possibly because the branch moved during the fetch. Preserve the workspace and reconcile the branch.";
+            review.Expected = review.Head;
+            try { Register(review.Registration, new Location(workspace.Path, review.Head)); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return "The workspace branch was fetched, but its local recovery registration could not be saved. Preserve the workspace; preparation can recover when the clone still has this head.";
+            }
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+        {
+            // Git diagnostics may contain local paths or configuration. This message is safe for the existing run signal.
+            return "The workspace branch was not fetched: Git could not safely read its objects or update the registered clone; the branch may be checked out there. Preserve the workspace for review.";
+        }
+    }
+
+    private static void OwnRepository(string directory, string common, string branch)
+    {
+        string git = Path.Combine(directory, ".git");
+        if (File.Exists(git) && Same(WorkspaceGitScope.DirectoryOf(directory), common))
+            throw new ProviderRefusedException($"Branch {branch} has a legacy linked worktree at '{directory}'. Preserve its committed and uncommitted work, then use git worktree remove with that path from the registered clone. Retry to prepare an independent workspace repository.");
+        if (!Directory.Exists(git) || (File.GetAttributes(git) & FileAttributes.ReparsePoint) != 0 || Path.Exists(Path.Combine(git, "commondir")))
+            throw new ProviderRefusedException($"The workspace of branch {branch} exists and is not an independent repository of the clone on that branch; preserve it, then remove it or name another branch.");
+        string alternate = WorkspaceGitScope.Read(Path.Combine(git, "objects", "info", "alternates"), 32768).TrimEnd('\r', '\n');
+        if (!Same(Path.GetFullPath(alternate), Path.Combine(common, "objects"))
+            || WorkspaceGitScope.Read(Path.Combine(git, "HEAD"), 4096).Trim() != "ref: refs/heads/" + branch)
+            throw new ProviderRefusedException($"The workspace of branch {branch} is not an independent repository of the clone on that branch; preserve it, then remove it or name another branch.");
+    }
+
+    private static void RefuseCheckedOut(string clone, string branch, string? root)
+    {
+        string inventory = WorkspaceGitCommand.Require(clone, "worktree", "list", "--porcelain", "-z");
+        string? existing = null;
+        foreach (string field in inventory.Split('\0'))
+        {
+            if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = Path.GetFullPath(field[9..]);
+            else if (field == "branch refs/heads/" + branch && existing is not null)
+            {
+                string physical = Directory.Exists(existing) ? HarnessWorkspace.Canonical(existing) : existing;
+                if (Same(physical, HarnessWorkspace.Canonical(clone)))
+                    throw new ProviderRefusedException($"Branch {branch} is checked out in the registered clone; choose a work branch so its working tree stays unchanged.");
+                string where = root is not null && !Within(root, physical) ? ", outside the selected workspace root" : string.Empty;
+                throw new ProviderRefusedException($"Branch {branch} has a legacy linked worktree at '{physical}'{where}. Preserve its committed and uncommitted work, then use git worktree remove with that path from the registered clone. Retry to prepare an independent workspace repository.");
+            }
+        }
+    }
+
+    private static string? CloneHead(string clone, string branch) => Git(clone, out string head, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch) == 0 ? head.Trim() : null;
+
+    private static string Registration(string common, string branch) => Path.Combine(VericairnHome.Path(), "workspaces",
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes((OperatingSystem.IsLinux() ? common : common.ToUpperInvariant()) + "\n" + branch))) + ".json");
+
+    private static void Register(string registration, Location location)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(registration)!);
+        // Replace rather than opening an existing entry for writing; the catalogue is outside every agent workspace.
+        string temporary = registration + "." + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temporary, JsonSerializer.Serialize(location));
+            File.Move(temporary, registration, overwrite: true);
+        }
+        finally { File.Delete(temporary); }
+    }
 
     private static bool Within(string root, string path)
     {
         string relative = Path.GetRelativePath(root, path);
-        return relative != "." && !Path.IsPathRooted(relative) && relative != ".."
-            && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+        return relative != "." && !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static void RefuseLink(string path)
+    {
+        try
+        {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                throw new ProviderRefusedException("The workspace is a symbolic link or reparse point; no repository was prepared through it.");
+        }
+        catch (FileNotFoundException) { }
+        catch (DirectoryNotFoundException) { }
     }
 
     private static string CanonicalRoot(string directory)
@@ -126,6 +253,7 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         var parent = new DirectoryInfo(Path.GetFullPath(directory));
         while (!parent.Exists)
         {
+            RefuseLink(parent.FullName);
             missing.Push(parent.Name);
             parent = parent.Parent ?? throw new ProviderRefusedException("The workspace root could not be canonicalized.");
         }
@@ -134,37 +262,17 @@ public sealed class GitWorktreeWorkspaces : IWorkspaceProvider
         return path;
     }
 
-    private static string Head(string directory) => Git(directory, out string head, "rev-parse", "HEAD") == 0 ? head.Trim() : "unknown";
+    private static bool Same(string a, string b) => string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    private static int Git(string directory, out string output, params string[] arguments) => WorkspaceGitCommand.Run(directory, out output, arguments);
 
-    private static bool Same(string a, string b) =>
-        string.Equals(Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+    private sealed record Location(string Path, string? CloneHead);
 
-    private static int Git(string directory, out string output, params string[] arguments)
+    private sealed class Review(string clone, string? expected, string gitDirectory, string registration)
     {
-        var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = directory };
-        foreach (string argument in arguments)
-        {
-            info.ArgumentList.Add(argument);
-        }
-
-        info.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        try
-        {
-            using Process process = Process.Start(info) ?? throw new ProviderRefusedException("git did not start.");
-            Task<string> standardOutput = process.StandardOutput.ReadToEndAsync();
-            Task<string> standardError = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(TimeSpan.FromMinutes(2)))
-            {
-                process.Kill(entireProcessTree: true);
-                throw new ProviderRefusedException($"git {arguments[0]} did not answer within two minutes.");
-            }
-
-            output = process.ExitCode == 0 ? standardOutput.GetAwaiter().GetResult() : standardError.GetAwaiter().GetResult() + standardOutput.GetAwaiter().GetResult();
-            return process.ExitCode;
-        }
-        catch (Win32Exception exception)
-        {
-            throw new ProviderRefusedException("git is not on the PATH; install it to prepare workspaces.", exception);
-        }
+        internal string Clone { get; } = clone;
+        internal string? Expected { get; set; } = expected;
+        internal string GitDirectory { get; } = gitDirectory;
+        internal string Registration { get; } = registration;
+        internal string? Head { get; set; }
     }
 }

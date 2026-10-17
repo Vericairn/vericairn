@@ -172,7 +172,7 @@ foundation libraries introduced in 0.7.0. Ecosystem contribution packaging remai
 |---|---|---|
 | The git adapter (`vericairn.adapter.git`) | `Vericairn.Adapters.Git` | `GitCommandAdapter`: read-only observation of a repository over the git command; also `GitFileSource`, the software pack's living-document source `vericairn.software/git-file` |
 | The GitHub provider | `Vericairn.Providers.GitHub` | `GitHubReleaseProvider`: releases built by a dispatched GitHub Actions workflow, observed as runs and drafts through the user's own GitHub CLI login |
-| The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence, and from 0.6.0 the coding-agent launchers (Claude Code, Codex and the generic one) and git worktrees as the workspaces agents work in |
+| The Software Domain Pack (`vericairn.software`) | `Vericairn.Packs.Software` | Repositories as resources and observations, build and test checks as verification evidence, and from 0.6.0 the coding-agent launchers (Claude Code, Codex and the generic one) and Git workspaces agents work in |
 
 The command line is the host that registers them: being available selects nothing. A release goes through
 the provider its product declares or its request names, and a provider with no implementation on the
@@ -476,12 +476,12 @@ toward its work order's exit question. It lives in the runtime; the launchers th
 `vericairn.launcher.agent/1`, `IAgentLauncher`) and the workspaces it works in (contract `vericairn.workspace/1`,
 `IWorkspaceProvider`) are providers the host registers, listed as the release providers are: `vericairn worker
 launchers` lists the launchers, and `vericairn release providers` lists them with every other implementation. The
-Software Domain Pack ships three launchers and the git worktree workspace:
+Software Domain Pack ships three launchers and the Git workspace provider (whose historical id remains `git-worktree`):
 
 | Launcher | Runs |
 |---|---|
 | `claude-code` | `claude -p "/goal <condition>" --output-format stream-json --verbose --permission-mode auto --mcp-config <the worker's MCP configuration> --strict-mcp-config --setting-sources "" --settings '{"hooks":{},"enabledPlugins":{}}' --tools Bash,Read,Write,Edit,Glob,Grep,TaskOutput,TaskStop,EndConversation`, in the workspace, with a fresh configuration directory and only its approved login imported. It watches provisional message tokens and settles tokens from the stream's complete final result. |
-| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
+| `codex` | `codex exec --json --cd <canonical workspace> --sandbox workspace-write -c 'mcp_servers={vericairn={...}}' -c 'projects={"<canonical workspace>"={trust_level="untrusted"}}' -c 'sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}' --ignore-rules <qualified feature overrides> "/goal <condition>"`, with a fresh configuration home. Before a run is recorded, `codex features list` must show `goals` enabled. Before launch, an effective `codex mcp list --json` probe must match exactly the approved server and transport. It adds up the input and output tokens of each completed turn. |
 | `generic` | Describes the command its `command` setting names, then the arguments its `arguments` setting names (a JSON array) with `{condition}`, `{brief}`, `{mcp-config}` and `{workspace}` replaced. Worker dispatch remains refused because the generic launcher has no complete inventory qualification. |
 
 The condition is the work order's exit question, with the assignment's review criteria and an attempt and its result
@@ -508,10 +508,22 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    the goal `budget-limited`; a branch another run in flight works on; a repository with no clone registered here
    (`vericairn sources clone`); the custody precondition, below; and a launcher that cannot run, such as Codex without
    its goals feature.
-2. Prepares the workspace: a git worktree of the repository's registered clone on the work branch (`work/` and the work
-   order's key unless `--branch` names another, made from `--base` or the clone's HEAD). Its location is selected by the
-   machine's workspace configuration below and is never the clone's own working tree. A later run reuses the branch's
-   existing worktree only when it lies under the selected root; otherwise refusal names its location and removal command. The brief, as
+2. Prepares the workspace: a repository with its own `.git` directory on the work branch (`work/` and the work
+   order's key unless `--branch` names another). It starts at the registered clone's existing work branch, or at
+   `--base` or the clone's HEAD for a new branch. Its index, refs, logs and new objects are inside the workspace;
+   an object alternate borrows the registered clone's objects read-only, as with `git clone --shared`. No remote,
+   repository configuration or hook template is imported. Codex explicitly adds only the workspace's own `.git`
+   as a writable root, because its sandbox otherwise protects that directory even inside the workspace. The clone's
+   `.git` is never added. The location is selected by the machine's workspace configuration below and is never the clone's own
+   working tree. Preparation installs the directory only after checkout completes; a failed preparation removes
+   its temporary repository so a retry starts cleanly. A later run reuses the branch's workspace only inside the
+   selected root; otherwise refusal names its location and cleanup guidance. Legacy linked worktrees must be
+   preserved and removed before a new launch. Worker Git commands explicitly enable `core.longpaths`, so isolating
+   configuration does not impose Git for Windows' short-path limit during staging or recovery. Object alternates
+   use Git's forward-slash path form on Windows. Temporary-repository cleanup removes Windows read-only objects
+   through handles opened without following links; directory links are removed themselves, and read-only hard links
+   are unlinked without changing their other names' attributes. Unix cleanup unlinks files without changing modes.
+   The brief, as
    `vericairn work brief` gives it, is exported into the workspace as `.vericairn/brief.md`, in a directory that ignores
    itself so that nothing in it is committed.
 3. Records the intent, the `agent-run` operation with the run's cap from the goal's budget, before anything starts.
@@ -535,6 +547,17 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    `attempt-missing` evidence and a warning with an attention ask. The CLI settlement and status attention
    say that it settled without the agent's attempt; an earlier attempt does not satisfy this check.
    The operation's status and the CLI exit-code meaning are unchanged.
+7. After settlement is recorded, fetches the exact audited run-branch head into the registered clone for review.
+   The fetch source is a disposable bare view of that head and the workspace's objects, so Git never loads the
+   workspace's configuration, hooks, includes, fsmonitor, diff drivers, filters, pager or SSH command. Worker Git
+   commands also disable hooks, ambient Git configuration, non-file transports and automatic maintenance. The
+   worker never pushes from a workspace. It fetches objects first, then updates the clone's branch only if its
+   previous head still equals the value observed during preparation (including an absent branch). An unexpected
+   move, deletion or creation refuses the update; a branch checked out in the clone or another worktree is refused
+   too. The clone's working tree and index stay unchanged. An incomplete audit or a workspace branch changed since
+   that audit also refuses transfer. Outside-scope commits are retained for review with their scope warning.
+   A transfer refusal leaves the workspace intact and appears as a local `audit-unverified` warning in worker
+   run/status output, with its reason; it does not rewrite the immutable settlement or accept the agent's work.
 
 Without `--detach` the command waits until the run settles, and Ctrl+C asks for its stop; with it, the daemon that serves
 the estate launches and observes the run, and the command returns.
@@ -698,6 +721,23 @@ the path as a TOML key, so dots or quotes in it are not interpreted as CLI key s
 The baseline routes ordinary shell and MCP tools through `code_mode_host`, so FIX-18 enables that host.
 `code_mode` and `code_mode_only` remain disabled; the admitted tool inventory is unchanged.
 
+Codex's `workspace-write` sandbox makes `.git` read-only even beneath its writable workspace. FIX-19 gives each
+workspace its own repository; round two adds exactly that directory through
+`sandbox_workspace_write={writable_roots=["<canonical workspace>/.git"]}` in both the generated home and the fixed
+launch and probe overrides. No clone path, other extra writable root, approval reviewer or sandbox bypass is added.
+Preparation and preflight refuse a `.git` file, symbolic link/junction or a directory with `commondir`, so this
+permission cannot point at a linked worktree's shared administration. Qualification's empty scratch workspace may
+have no `.git` yet. The configuration probe checks the complete generated file before and after its subprocesses;
+a changed, missing, duplicated or additional writable root refuses launch. Its portable configuration digest names
+the workspace-relative permission without recording the machine path.
+
+The installed `0.159.0-alpha.12.1` executable's generated schema declares `SandboxWorkspaceWrite.writable_roots`.
+A local, model-free app-server `command/exec` probe confirmed its behavior: the control failed to create
+`.git/index.lock`; adding only the workspace `.git` allowed `git add` and `git commit`. The synthetic clone's `.git`
+and the workspace's `.codex` and `.agents` stayed unwritable. That probe used an empty login-free home and excluded
+temporary-directory allowances to keep its temporary fixtures outside those unrelated grants. It establishes this
+local sandbox mechanism. The builder's seventh live run subsequently committed successfully, as recorded below.
+
 The generated configuration and launch override set `mcp_servers.vericairn.default_tools_approval_mode = "approve"`.
 This pre-approves the agent's calls to the estate server so noninteractive `exec` can read the brief and record the
 agent's attempt and result. It applies only to `vericairn`; no global or other-server approval is granted, and
@@ -786,7 +826,7 @@ are compared, including deletions, renames, untracked files and ignored files. F
 run branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
 including side branches of merges. The union of all changed paths counts, even when the worktree or a later commit
 restored a path, or the worktree checked out a different head. It pins the original Git object/reference directory
-before launch and reads objects through isolated Git metadata, without loading agent-writable Git configuration,
+before launch and reads the run branch and objects from the workspace's own repository through isolated Git metadata, without loading agent-writable Git configuration,
 replacement refs, grafts, attributes or external diff drivers. Missing history or an unreadable branch marks the
 audit incomplete. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
@@ -847,7 +887,7 @@ output-redirection targets, `apply_patch` and structured file-change paths, or G
 targets. An outside-looking operand of an unclassified invocation raises `audit-unverified` at warning, without a
 stop. Opaque programs cannot establish a confident change, even when code contains `open` with an outside filename.
 Unresolved variable targets and paths whose physical containment cannot be verified also warn rather than asserting
-an outside change. Changes inside this disposable worktree raise no event-stream scope signal, whether
+an outside change. Changes inside this disposable workspace raise no event-stream scope signal, whether
 or not the brief permits them: the settlement audit checks actual changes against the brief's patterns. Thus
 `touch README.md` continues when only `path:NOTES.md` is permitted, but changing `README.md` is flagged at settlement.
 Input redirection is a read. Heredoc bodies (`<<`, `<<-`) and here-string operands (`<<<`) are input, never path
@@ -1078,9 +1118,22 @@ existing default. Without a configured root the location stays
 `<VericairnHome>/estates/<estate>/workspaces/<branch-slug>`. The stock CLI and daemon reread the setting for
 every run, including host-configured launchers, and recheck it before intent and immediately before dispatch.
 A change before intent records nothing. A change after intent refuses dispatch and settles as an uncharged
-known failure. No restart is needed. A branch's existing worktree elsewhere under the selected root is reused;
-one outside it is refused with its location and `git worktree remove` guidance. The person preserves any work
-and removes it, or chooses a root containing it; setting a root never moves or deletes an existing worktree.
+known failure. No restart is needed. A machine-local catalogue under `<VericairnHome>/workspaces` remembers each
+clone/branch's workspace directory and expected clone-branch head. It is outside the agent workspace and never
+enters a record. A later worker instance reuses that workspace, including its commits, index and uncommitted files.
+A clone branch moved unexpectedly between attempts refuses reuse; a completed transfer whose catalogue update
+was interrupted can be recovered when the clone still has the workspace's head.
+
+A workspace elsewhere under the selected root is reused; one outside it is refused with its location and cleanup
+guidance. To clean up an independent workspace, first preserve any uncommitted files and confirm its branch was
+retained, then remove its directory. No `git worktree remove` is needed. The next preparation replaces the stale
+catalogue entry and creates a repository from the branch retained in the clone. Preserve the clone's borrowed
+objects while a workspace depends on them; pruning needed history makes its audit and transfer incomplete.
+
+Older releases' linked worktrees are still recognized, including ones outside the selected root. They are preserved
+and refused for a new launch, with `git worktree remove` guidance: preserve committed and uncommitted work, remove
+the old worktree from the registered clone, then retry. The branch remains in the clone and supplies the new
+workspace's baseline. Setting a root never moves or deletes an existing workspace.
 
 This lets native runs use a workspace outside a home holding ordinary Claude Code or Codex configuration.
 The native scan is unchanged. Its ancestor-configuration refusal names `worker configure --workspaces` as
@@ -1302,9 +1355,22 @@ The fifth live run of `531d169` recorded its cap before launch, observed the adm
 3 wall minutes and 205,767 tokens. The agent authored its signed attempt and result through the estate MCP server
 and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-only pre-approval under `exec` and
 the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
-sandbox. A worker-launched Codex run cannot yet commit; its changes stay uncommitted in the worktree for
-review. FIX-19 makes the workspace a repository of its own. Observed-success and live qualification do not
-accept the agent's work.
+sandbox. FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
+branch. The sixth live run of `eb12a8e` recorded its cap, the observed model at `max`, usage and the signed attempt
+and result, and changed exactly `NOTES.md`. Its commit still failed: Codex protects `.git` even inside a writable
+workspace. Round two adds only the independent workspace's `.git` as an explicit writable root, verified by the
+installed schema and the local sandbox probe described above. Tests cover the exact generated permission, the
+fake harness's probe and dispatch, refusal of other writable roots and shared Git administration, hostile workspace
+configuration, scope violations, concurrent branch moves, recovery and both cleanup layouts. The seventh live
+run of `36c90ba` committed exactly the permitted `NOTES.md` in its own workspace repository; settlement audited
+the commit and fetched its branch into the registered clone, whose `.git` the agent could not write.
+Three-platform CI on `c400386` passed on macOS and Linux. Its Windows failures exposed native-versus-Git path
+comparisons, a staging ref lock beyond Git's default path limit, and read-only objects left for assembly cleanup.
+Round three normalizes the comparisons, explicitly enables long paths in isolated Git commands, and uses the same
+link-safe cleanup for product scratch repositories and test workspaces. Windows verification of those fixes remains
+the builder's; local macOS tests cannot establish the Windows behavior.
+FIX-19 targets 0.7.3 and merges only after 0.7.2 publishes.
+Observed-success and live qualification do not accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the

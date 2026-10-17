@@ -10,7 +10,7 @@ namespace Vericairn.Cli;
 
 /// <summary>
 /// What this distribution ships beside the foundation: the GitHub provider, the git adapter, and the software pack's git-file source
-/// for living documents of other repositories, its coding-agent launchers (Claude Code, Codex and the generic one) and its git worktree
+/// for living documents of other repositories, its coding-agent launchers (Claude Code, Codex and the generic one) and its Git repository
 /// workspaces, registered as available. Being
 /// available selects nothing: a release goes through the provider its product declares or its request names, and a provider with
 /// no implementation here is refused. Registration keeps an implementation already registered (tests register in-memory ones).
