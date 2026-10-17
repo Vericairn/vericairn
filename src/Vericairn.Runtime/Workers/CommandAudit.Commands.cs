@@ -183,8 +183,12 @@ public static partial class CommandAudit
     private static string ShellPath(string word, CommandContext context) => word.StartsWith('\'') && word.EndsWith('\'')
         ? Value(word) : ExpandPath(word.Replace("\"", "", StringComparison.Ordinal), context.ExpansionEnvironment ?? context.Environment);
 
-    private static string ShellCode(string word, CommandContext context) => word.StartsWith('\'') && word.EndsWith('\'')
-        ? Value(word) : ExpandPath(Value(word), context.ExpansionEnvironment ?? context.Environment);
+    private static string ShellCode(string word, CommandContext context)
+    {
+        if (word.StartsWith('\'') && word.EndsWith('\'')) return Value(word);
+        string expanded = ExpandPath(Value(word), context.ExpansionEnvironment ?? context.Environment);
+        return word.StartsWith('"') && word.EndsWith('"') ? DoubleQuotedEscape().Replace(expanded, "$1") : expanded;
+    }
 
     private static string? ResolveDirectory(string word, CommandContext context, HashSet<string> codes)
     {

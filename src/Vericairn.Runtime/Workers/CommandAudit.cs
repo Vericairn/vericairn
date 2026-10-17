@@ -320,6 +320,9 @@ public static partial class CommandAudit
     [GeneratedRegex("(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>\"'])+|<<<|<<-|[;&|<>]+|\\r?\\n", RegexOptions.CultureInvariant, 100)]
     private static partial Regex ShellWords();
 
+    [GeneratedRegex("\\\\([$`\"\\\\])", RegexOptions.CultureInvariant, 100)]
+    private static partial Regex DoubleQuotedEscape();
+
     [GeneratedRegex(@"\A[0-9]+(?:,[0-9]+)?p\z", RegexOptions.CultureInvariant, 100)]
     private static partial Regex SedPrint();
 

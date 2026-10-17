@@ -218,6 +218,7 @@ public class CommandAuditFix20Tests
 
     [Theory]
     [InlineData("python3 -c \"open('{target}', 'w').write('x')\"")]
+    [InlineData("python3 -c \"open(\\\"{target}\\\", \\\"w\\\").write(\\\"x\\\")\"")]
     [InlineData("python3 -c \"Path('{target}').write_text('x')\"")]
     [InlineData("node -e \"fs.writeFileSync('{target}', 'x')\"")]
     [InlineData("ruby -e \"File.write('{target}', 'x')\"")]
@@ -232,6 +233,15 @@ public class CommandAuditFix20Tests
             Assert.Equal("audit-unverified", Assert.Single(Inspect(wrapper + template.Replace("{target}", "inside", StringComparison.Ordinal))).Code);
         }
     }
+
+    [Theory]
+    [InlineData("python3 -c \"print(\\\"open('/etc/x', 'w')\\\")\"")]
+    [InlineData("python3 - <<'PY'\n# open('/etc/x', 'w')\nprint(1)\nPY")]
+    [InlineData("python3 - <<'PY'\nexample = '''open('/etc/x', 'w')'''\nprint(example)\nPY")]
+    [InlineData("node -e 'console.log(\"fs.writeFileSync(\\\"/etc/x\\\", \\\"x\\\")\")'")]
+    [InlineData("node -e '// fs.writeFileSync(\"/etc/x\", \"x\")'")]
+    [InlineData("node -e '/* fs.writeFileSync(\"/etc/x\", \"x\") */'")]
+    public void InterpreterCommentsAndSampleCodeDoNotInventOutsideWrites(string command) => Assert.Equal("audit-unverified", Assert.Single(Inspect(command)).Code);
 
     public static IEnumerable<object[]> NullDeviceMatrix()
     {

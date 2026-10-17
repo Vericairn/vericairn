@@ -907,7 +907,8 @@ write target. This includes known mutators (`cp`, `mv`, `rm`, `touch`, `mkdir`, 
 - recognizable literal interpreter writes: `open` with a write/append/create/update mode, `Path(...).write_text`,
   `write_bytes`, `touch`, `mkdir`, `unlink` and `rmdir`; `writeFile[Sync]`, `appendFile[Sync]`, `mkdir[Sync]`,
   `unlink[Sync]`, `rmSync`, and Ruby `File.write`/`File.delete`. Here `[Sync]` means either spelling. Interpreter code still raises `audit-unverified` alongside
-  any recognized credential, network or scope signal; the audit does not evaluate the program or its control flow.
+  any recognized credential, network or scope signal. Calls inside common string literals and comments are not
+  classified as writes; the audit does not evaluate the program or its control flow.
 
 Changes inside the disposable workspace raise no event-stream scope signal, whether or not the brief permits them;
 the settlement audit checks actual changes against the brief's patterns. Thus `touch README.md` continues when only
