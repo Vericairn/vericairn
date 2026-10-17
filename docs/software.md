@@ -659,13 +659,25 @@ the path as a TOML key, so dots or quotes in it are not interpreted as CLI key s
 The baseline routes ordinary shell and MCP tools through `code_mode_host`, so FIX-18 enables that host.
 `code_mode` and `code_mode_only` remain disabled; the admitted tool inventory is unchanged.
 
+The generated configuration and launch override set `mcp_servers.vericairn.default_tools_approval_mode = "approve"`.
+This pre-approves the agent's calls to the estate server so noninteractive `exec` can read the brief and record the
+agent's attempt and result. It applies only to `vericairn`; no global or other-server approval is granted, and
+`approval_policy` remains unset, leaving `exec`'s `never` policy in place. The server acts only as the run's principal.
+Every call still passes the runtime's authority checks; pre-approval grants no additional authority and cannot accept
+the agent's own work. No user approval policy or reviewer is imported.
+
 Codex merges configuration tables across layers; a complete `mcp_servers` override alone cannot remove ambient
 servers. The launcher therefore probes the effective configuration with `mcp list --json` and refuses unless it
 contains exactly the enabled `vericairn` stdio server with the approved command, arguments and environment, no inherited
 environment-variable list and no changed working directory. Extra entries, even disabled ones, merged transport
 settings, and incompatible managed policy refuse launch. Project trust is set to untrusted using the canonical
 workspace key. FIX-18 accepts the baseline's absent or null `startup_timeout_sec` and `tool_timeout_sec`
-metadata; configured timeouts, duplicate fields and unaccounted controls still refuse launch.
+metadata; configured timeouts, duplicate fields and unaccounted controls still refuse launch. If the list reports
+`default_tools_approval_mode`, only `"approve"` on the sole `vericairn` server is accepted; other values and per-tool
+overrides refuse. The installed baseline omits approval settings from both `mcp list --json` and `mcp get --json`.
+Approval verification therefore rests on the exact generated home, fixed launch overrides and exclusion of other
+configuration sources, not a claim that the list reports it. The probes do not discover the server's tools, so the
+launcher does not invent an `enabled_tools` allowlist.
 The probe does not start a coding agent or an MCP server. See the [Codex configuration
 documentation](https://learn.chatgpt.com/docs/config-file/config-basic).
 
@@ -1134,7 +1146,7 @@ MCP server. The signed `harness-qualification` record uses record format 2 and h
 | `tools` | The closed built-in tool list, executable and entry-file content identities; Codex also includes its complete observed feature listing. |
 | `configuration` | The isolated configuration policy and platform identity, including disabled extensions and normalized command bindings. |
 | `login` | The permitted login boundary: presence for Codex, unmanaged subscription class for Claude Code. No credential content or credential digest. |
-| `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests its reported authentication status. |
+| `mcp` | The checked single-server transport, server code identities and environment variable names; Codex also digests the estate-only approval policy, whether it was reported, and reported authentication status. |
 
 Raw probe output, command bindings, machine paths and credential values never enter the qualification record.
 The MCP check first compares the actual local command, arguments and environment to the generated configuration;
@@ -1238,8 +1250,12 @@ possible changes outside the workspace, and refuses briefs with no interpretable
 Changes inside the worktree are checked against the brief at settlement. The third live run of `42f989d` passed
 its worktree `rg --files` search and `cat .vericairn/brief.md`, then stopped when the old audit mistook a Python
 heredoc's division operator for an outside write path. FIX-18 now reserves scope stops for confidently identified
-write targets and treats interpreter input as unverified code. A further live run is needed to qualify work beyond
-brief access and MCP attempt/result authoring. Neither observed-success nor these partial live observations accept the work.
+write targets and treats interpreter input as unverified code. The fourth live run of `8e272de` passed that audit,
+with only `audit-unverified` for the Python heredoc, and settled observed-success with 2 wall minutes and 95,406 tokens.
+It raised the missing-attempt signal correctly, but Codex refused the estate MCP calls because they required approval
+under `exec`'s `never` policy. The agent changed nothing. FIX-18 now pre-approves only the estate server's tools.
+A further live run is needed to verify those calls under `exec`, work beyond brief access and MCP attempt/result
+authoring. Neither observed-success nor these partial live observations accept the work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
