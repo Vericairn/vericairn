@@ -234,10 +234,9 @@ public sealed partial class EstateService
         {
             EstateModel model = LoadWith(carried);
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
-            if (routed is not null && WorkView.OrderOfAssignment(model, routed.Envelope) is RecordEnvelope routedOrder
-                && Routing.Assignments(model, model.Latest(routedOrder)).FirstOrDefault(a => a.Id != routed.Envelope.Id) is RecordEnvelope meanwhile)
+            if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
-                return RunProblem(pending, "not-started", "refused", $"Work order {plan.Key} was assigned meanwhile, by assignment {meanwhile.Id}; its step goes on from that assignment. Nothing was recorded.");
+                return RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded.");
             }
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -680,6 +679,16 @@ public sealed partial class EstateService
         && DateTimeOffset.TryParseExact(beat, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset last)
         && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
+    private static string? AssignmentRefusal(EstateModel model, RecordEnvelope assignment, string key)
+    {
+        RecordEnvelope current = model.Latest(assignment);
+        IReadOnlyList<RecordEnvelope> holders = WorkView.OrderOfAssignment(model, current) is RecordEnvelope order
+            ? Routing.Assignments(model, model.Latest(order)) : [];
+        return holders.Count > 0 && holders[^1].Id != current.Id
+            ? $"Work order {key} is held by assignment {holders[^1].Id}; its step goes on from that assignment."
+            : null;
+    }
+
     /// <summary>The preflight of a run, before anything is prepared or recorded: every refusal that needs only the records and this machine's keys.</summary>
     private (RunPlan? Plan, string? Refusal, RecordEnvelope? Limited) Plan(EstateModel model, IReadOnlyList<RecordFile> files, RunStartRequest request, IAgentLauncher launcher, RunConfiguration configuration)
     {
@@ -696,6 +705,11 @@ public sealed partial class EstateService
         }
 
         string key = EstateModel.BodyString(order, "key") ?? order.Id;
+        if (AssignmentRefusal(model, assignment, key) is string assignmentRefusal)
+        {
+            return (null, assignmentRefusal, null);
+        }
+
         string? contributor = EstateModel.BodyString(assignment, "contributor");
         if (request.Agent != contributor)
         {

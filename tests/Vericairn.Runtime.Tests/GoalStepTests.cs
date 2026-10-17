@@ -157,6 +157,35 @@ public class GoalStepTests
         Assert.Equal(assignments, run.Service.Records("assignment").Count);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AnExplicitRunOfAHandedOverAssignmentRecordsAndChargesNothing(bool duringPreflight)
+    {
+        using var run = new RunEstate();
+        TakeoverResponse? taken = null;
+        int records = 0;
+        void TakeOver()
+        {
+            taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, run.Estate.OperatorId));
+            Assert.True(taken.Ok, taken.Message);
+            records = run.Estate.Load().Records.Count;
+        }
+
+        if (duringPreflight) HookedLauncher.Install(run, verify: () => { TakeOver(); return null; });
+        else TakeOver();
+        RunResponse refused = run.Start("claude-code", "claude", run.Report("handed-over"));
+        Assert.False(refused.Ok, refused.Message);
+        Assert.Contains(taken!.Assignment!.Id, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("its step goes on from that assignment", refused.Message, StringComparison.Ordinal);
+        Assert.Equal(records, run.Estate.Load().Records.Count);
+        Assert.Empty(run.Service.Records("operation"));
+        Assert.False(File.Exists(run.Report("handed-over")));
+        AgentRuns.Ledger ledger = AgentRuns.Of(run.Estate.Load(), run.Estate.Load().ById[run.Goal]);
+        Assert.Empty(ledger.Runs);
+        Assert.All(ledger.Spent.Values, spent => Assert.Equal(0, spent));
+    }
+
     [Fact]
     public void APersonTakesOverAStepAnAgentHoldsAndItsRunInFlightIsAskedToStop()
     {
