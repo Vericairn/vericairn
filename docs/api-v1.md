@@ -648,8 +648,10 @@ changed transport settings refuse launch. Claude Code excludes user, project and
 and enables no plugins, alongside strict MCP configuration. Detected managed settings and known organization logins
 refuse launch; remote or undetected managed policy is not qualified and managed accounts are unsupported. A
 configuration refusal after intent but before process launch settles as an uncharged known failure. These controls
-do not isolate same-user files or keychains, and no live coding agent or live sign-in has been qualified; see
-[software.md](software.md#harness-configuration-and-workspace-exports).
+do not isolate same-user files or keychains. FIX-18's five live Codex runs qualify only the reported run
+path; they do not qualify other accounts, versions or platforms, or Claude Code live sign-in. See
+[software.md](software.md#native-inventory-qualification-run-02-and-run-03) for those observations and
+[the configuration limits](software.md#harness-configuration-and-workspace-exports).
 
 A state or dispatch write failure after launch keeps the allowance reserved. The worker retries state writes and
 recovers an observed dispatch before recording settlement; an unavailable recovery leaves the intent in flight. An

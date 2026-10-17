@@ -449,8 +449,8 @@ the same verifier used by publication, without a NuGet login, identity-token per
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
-returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the workflow never
-rebuilds the packages. It checks out the verification script from the workflow ref. It pushes the verified
+returns the short-lived key used by `dotnet nuget push`. No stored API key is used, and the publication job
+never rebuilds the packages. It checks out the verification script from the workflow ref. It pushes the verified
 package files and then their verified symbol files. Both pushes use `--skip-duplicate`, so an operator's rerun can finish a partly completed publication
 without replacing an existing version. A failed or partial publication still needs inspection: a skipped duplicate
 is not a new verification of the bytes already held by nuget.org. See the [operator setup note](https://github.com/Vericairn/vericairn/blob/4ac21bc/docs/releases/README.md#nuget-publication-setup).
