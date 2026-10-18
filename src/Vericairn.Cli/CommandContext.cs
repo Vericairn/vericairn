@@ -9,6 +9,7 @@ using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Store;
 using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
@@ -139,6 +140,17 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
     {
         Error.WriteLine("error: " + message);
         return Failed;
+    }
+
+    public static EstateModel LoadCopy(string root)
+    {
+        if (!IsEstate(root))
+        {
+            return EstateLoader.Load(root);
+        }
+
+        using EstateSession session = EstateSession.Open(root);
+        return session.Load();
     }
 
     public static bool IsEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath));

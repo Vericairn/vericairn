@@ -37,7 +37,7 @@ internal static partial class CliApp
         root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
         root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
-        root.Subcommands.Add(RecoverFamily(estateOption));
+        root.Subcommands.Add(new RecoverCommand(context));
         root.Subcommands.Add(new ObjectsCommand(context));
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
@@ -473,19 +473,6 @@ internal static partial class CliApp
         return check;
     }
 
-    private static Command RecoverFamily(Option<string> estateOption)
-    {
-        var recover = new Command("recover", "After an interruption or a move: inspect what this copy holds and compare it with another.");
-        var inspect = new Command("inspect", "What this copy knows, which devices can author from here, work in progress, unresolved effects and reconcile tasks.");
-        inspect.SetAction(parseResult => Commands.RecoverInspect(parseResult.GetValue(estateOption)!));
-        recover.Subcommands.Add(inspect);
-        var withOption = new Option<string>("--with") { Description = "Root of the other copy.", Required = true };
-        var compare = new Command("compare", "Records only in this copy, only in the other, or (never expected) differing in content.");
-        compare.Options.Add(withOption);
-        compare.SetAction(parseResult => Commands.RecoverCompare(parseResult.GetValue(estateOption)!, parseResult.GetValue(withOption)!));
-        recover.Subcommands.Add(compare);
-        return recover;
-    }
 
 
     private static Command ConnectionsFamily(Option<bool> jsonOption)

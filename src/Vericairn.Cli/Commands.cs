@@ -1369,24 +1369,7 @@ internal static partial class Commands
         return tasks.Count == 0 ? Clean : HasErrors;
     });
 
-    public static int RecoverInspect(string root) => WithApi(root, api =>
-    {
-        Console.Out.Write(api.RecoverInspect());
-        return Clean;
-    });
 
-    public static int RecoverCompare(string root, string other)
-    {
-        try
-        {
-            Console.Out.Write(Recovery.Compare(LoadCopy(root), "this copy", LoadCopy(other), "the other copy"));
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return Fail(exception.Message);
-        }
-    }
 
 
 
@@ -2521,16 +2504,7 @@ internal static partial class Commands
     private static int WithBody(string bodyPath, Func<JsonElement, int> operation) =>
         Context.WithBody(bodyPath, operation);
 
-    internal static EstateModel LoadCopy(string root)
-    {
-        if (!IsEstate(root))
-        {
-            return EstateLoader.Load(root);
-        }
-
-        using EstateSession session = EstateSession.Open(root);
-        return session.Load();
-    }
+    internal static EstateModel LoadCopy(string root) => CommandContext.LoadCopy(root);
 
     private static bool IsEstate(string root) => CommandContext.IsEstate(root);
 
