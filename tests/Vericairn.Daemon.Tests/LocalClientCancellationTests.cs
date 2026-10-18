@@ -41,7 +41,8 @@ public sealed class LocalClientCancellationTests
             Exception failure = cancel
                 ? await Assert.ThrowsAsync<ClientCancelledException>(() => operation)
                 : await Assert.ThrowsAsync<ClientTimeoutException>(() => operation);
-            Assert.Equal(pairing, ((IClientOperationFailure)failure).OutcomeUnknown);
+            // Neither a silent handshake nor a read-only probe has sent a pairing confirmation or another effect.
+            Assert.False(((IClientOperationFailure)failure).OutcomeUnknown);
             Assert.Equal(cancel ? "cancelled" : "timed-out", ClientFailure.FromException(failure)?.Code);
         }
         finally { Directory.Delete(home, recursive: true); }

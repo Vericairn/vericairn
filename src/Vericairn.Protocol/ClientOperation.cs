@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Net;
+using System.Security.Authentication;
 using System.Text.Json;
 
 namespace Vericairn.Protocol;
@@ -13,7 +14,7 @@ public interface IClientOperationLifetime
     IDisposable RetainClientOperation();
 }
 
-/// <summary>A client stopped observing an operation; this does not establish whether its effect happened.</summary>
+/// <summary>A client operation failed; its cause alone does not establish whether an effect happened.</summary>
 public interface IClientOperationFailure
 {
     /// <summary>True when the operation may have taken effect. Reconcile before any retry.</summary>
@@ -44,6 +45,14 @@ public sealed class ClientUnavailableException(bool outcomeUnknown, Exception in
     public bool OutcomeUnknown { get; } = outcomeUnknown;
 }
 
+/// <summary>A definite refusal, before dispatch or in the runtime's answer; no effect is uncertain.</summary>
+public sealed class ClientRefusedException(string message, Exception? innerException = null, HttpStatusCode? statusCode = null)
+    : HttpRequestException(message, innerException, statusCode), IClientOperationFailure
+{
+    /// <inheritdoc />
+    public bool OutcomeUnknown => false;
+}
+
 /// <summary>The shared CLI, MCP and Workbench interpretation of an interrupted request.</summary>
 public sealed record ClientFailure(string Code, string Message, bool OutcomeUnknown, int ExitCode)
 {
@@ -52,6 +61,7 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
     /// <summary>Maps transport failures without changing the wire shape of successful responses.</summary>
     public static ClientFailure? FromException(Exception exception)
     {
+        if (Refusal(exception) is Exception refusal) return new("refused", refusal.Message, false, 2);
         bool unknown = exception is IClientOperationFailure { OutcomeUnknown: true };
         return exception switch
         {
@@ -60,6 +70,19 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
             HttpRequestException => new("unavailable", UnavailableMessage(unknown), unknown, 2),
             _ => null,
         };
+    }
+
+    internal static Exception? Refusal(Exception exception)
+    {
+        // An explicit interruption already carries its outcome. Its cause is retained only for diagnosis.
+        if (exception is IClientOperationFailure && exception is not ClientRefusedException) return null;
+        for (Exception? cause = exception; cause is not null; cause = cause.InnerException)
+        {
+            if (cause is ClientRefusedException or AuthenticationException) return cause;
+            if (cause is HttpRequestException { HttpRequestError: HttpRequestError.SecureConnectionError }) return cause;
+        }
+
+        return exception is HttpRequestException { StatusCode: not null } ? exception : null;
     }
 
     internal static string CancelledMessage(bool unknown) => "The request was cancelled." + (unknown ? Uncertain : string.Empty);
@@ -96,10 +119,16 @@ public static class ClientOperation
         }, mayHaveEffect, cancellationToken: cancellationToken);
 
     /// <summary>Runs one operation with an explicit deadline and preserves uncertainty if observation is interrupted.</summary>
-    public static async Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, bool mayHaveEffect,
+    public static Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, bool mayHaveEffect,
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+        RunAsync(operation, action, () => mayHaveEffect, timeout, cancellationToken);
+
+    /// <summary>Runs a staged operation whose possible effect begins only after its read-only preparation.</summary>
+    public static async Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, Func<bool> mayHaveEffect,
         TimeSpan? timeout = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(mayHaveEffect);
         if (cancellationToken.IsCancellationRequested)
         {
             throw new ClientCancelledException(false, cancellationToken);
@@ -117,27 +146,33 @@ public static class ClientOperation
         {
             if (cancellationToken.IsCancellationRequested)
             {
-                throw new ClientCancelledException(mayHaveEffect, cancellationToken, exception);
+                throw new ClientCancelledException(mayHaveEffect(), cancellationToken, exception);
             }
 
-            if (deadline.IsCancellationRequested) throw new ClientTimeoutException(mayHaveEffect, exception);
+            if (deadline.IsCancellationRequested) throw new ClientTimeoutException(mayHaveEffect(), exception);
             if (exception is ClientCancelledException) throw;
             // An unrelated transport cancellation is neither proof of a deadline nor a person's cancellation.
-            throw new ClientUnavailableException(mayHaveEffect, exception);
+            throw new ClientUnavailableException(mayHaveEffect(), exception);
         }
         catch (TimeoutException exception) when (exception is not ClientTimeoutException)
         {
-            throw new ClientTimeoutException(mayHaveEffect, exception);
+            throw new ClientTimeoutException(mayHaveEffect(), exception);
         }
-        catch (HttpRequestException exception) when (exception.StatusCode is null && exception is not ClientUnavailableException)
+        catch (HttpRequestException exception) when (exception is not IClientOperationFailure &&
+            exception.StatusCode is null && ClientFailure.Refusal(exception) is Exception refusal)
         {
-            throw new ClientUnavailableException(mayHaveEffect, exception);
+            throw new ClientRefusedException(refusal.Message, exception);
         }
-        catch (HttpRequestException exception) when (mayHaveEffect && exception.StatusCode >= HttpStatusCode.InternalServerError)
+        catch (HttpRequestException exception) when (exception.StatusCode is null && exception is not IClientOperationFailure)
+        {
+            bool dispatched = exception.HttpRequestError is not (HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError);
+            throw new ClientUnavailableException(mayHaveEffect() && dispatched, exception);
+        }
+        catch (HttpRequestException exception) when (exception is not IClientOperationFailure && mayHaveEffect() && exception.StatusCode >= HttpStatusCode.InternalServerError)
         {
             throw new ClientUnavailableException(true, exception);
         }
-        catch (Exception exception) when (mayHaveEffect && exception is (IOException or JsonException))
+        catch (Exception exception) when (mayHaveEffect() && exception is (IOException or JsonException))
         {
             throw new ClientUnavailableException(true, exception);
         }

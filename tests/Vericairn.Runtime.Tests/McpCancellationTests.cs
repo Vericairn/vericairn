@@ -14,6 +14,21 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class McpCancellationTests
 {
+    [Fact]
+    public async Task ADefiniteRuntimeRefusalNeverBecomesAnUnavailableOrUnknownToolResult()
+    {
+        const string message = "The runtime refuses this write and writes nothing.";
+        using var client = Client((request, _) => Task.FromResult(request.RequestUri!.AbsolutePath == "/v1/devices" ? Devices() :
+            new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = JsonContent.Create(new Problem("refused", message, []), options: ProtocolJson.Options),
+            }));
+        ToolCallResult result = await new ToolRegistry(client, "contributor").CallAsync("work_attempt", AttemptArguments(), TestContext.Current.CancellationToken);
+        Assert.True(result.IsError);
+        Assert.False(result.Unknown);
+        Assert.Equal(message, result.Text);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

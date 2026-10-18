@@ -14,10 +14,17 @@ public sealed partial class VericairnClient
     public VericairnClient(HttpClient http)
     {
         this.http = http ?? throw new ArgumentNullException(nameof(http));
+        asyncHttp = http;
         http.Timeout = Timeout.InfiniteTimeSpan;
         Endpoint = new DaemonEndpoint("http", string.Empty, 0, string.Empty, string.Empty, ApiVersion.Current);
         Transport = "http";
     }
+
+    // Legacy calls keep HttpClient's timeout and exact exceptions; async calls use per-operation deadlines.
+    // The synchronous client owns this shared handler. Local-network clients use separate pools so that an
+    // async handshake's refusal classification can never change a concurrent synchronous request's failure.
+    private static HttpClient AsyncTransport(HttpMessageHandler handler, Uri address) =>
+        new(handler, disposeHandler: false) { BaseAddress = address, Timeout = Timeout.InfiniteTimeSpan };
 
     /// <summary>Optional deadline override by operation name; null uses that operation's standard deadline.</summary>
     public Func<string, TimeSpan?>? OperationTimeout { get; init; }
@@ -313,8 +320,9 @@ public sealed partial class VericairnClient
     public Task<string> RecoverInspectAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<string>(nameof(RecoverInspect), async token =>
         {
-            using HttpResponseMessage response = await http.GetAsync(new Uri("/v1/recover/inspect", UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            return await response.EnsureSuccessStatusCode().Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri("/v1/recover/inspect", UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            await EnsureSuccessAsync(response, token).ConfigureAwait(false);
+            return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
         }, false, OperationTimeout?.Invoke(nameof(RecoverInspect)), cancellationToken);
 
     /// <summary>The cancellable Objects operation, with a deadline covering the complete response.</summary>
@@ -327,7 +335,8 @@ public sealed partial class VericairnClient
         {
             using var content = new ByteArrayContent(bytes);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-            using HttpResponseMessage response = await http.PostAsync(new Uri("/v1/objects", UriKind.Relative), content, token).ConfigureAwait(false);
+            using HttpResponseMessage response = await asyncHttp.PostAsync(new Uri("/v1/objects", UriKind.Relative), content, token).ConfigureAwait(false);
+            if (response.StatusCode >= HttpStatusCode.InternalServerError) await EnsureSuccessAsync(response, token).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? (await response.Content.ReadFromJsonAsync<ObjectStored>(ProtocolJson.Options, token).ConfigureAwait(false), null)
                 : (null, await ReadProblemAsync(response, token).ConfigureAwait(false));
@@ -337,8 +346,10 @@ public sealed partial class VericairnClient
     public Task<byte[]?> ObjectGetAsync(string hash, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<byte[]?>(nameof(ObjectGet), async token =>
         {
-            using HttpResponseMessage response = await http.GetAsync(new Uri("/v1/objects/" + Uri.EscapeDataString(hash), UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            return response.StatusCode == HttpStatusCode.NotFound ? null : await response.EnsureSuccessStatusCode().Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+            using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri("/v1/objects/" + Uri.EscapeDataString(hash), UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound) return null;
+            await EnsureSuccessAsync(response, token).ConfigureAwait(false);
+            return await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
         }, false, OperationTimeout?.Invoke(nameof(ObjectGet)), cancellationToken);
 
     /// <summary>The cancellable ObjectsVerify operation, with a deadline covering the complete response.</summary>
@@ -349,8 +360,8 @@ public sealed partial class VericairnClient
     public Task ShutdownAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<bool>(nameof(Shutdown), async token =>
         {
-            using HttpResponseMessage response = await http.PostAsync(new Uri("/v1/shutdown", UriKind.Relative), null, token).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
+            using HttpResponseMessage response = await asyncHttp.PostAsync(new Uri("/v1/shutdown", UriKind.Relative), null, token).ConfigureAwait(false);
+            await EnsureSuccessAsync(response, token).ConfigureAwait(false);
             return true;
         }, true, OperationTimeout?.Invoke(nameof(Shutdown)), cancellationToken);
 
@@ -374,20 +385,21 @@ public sealed partial class VericairnClient
     public Task<string> OpenApiAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<string>(nameof(OpenApi), async token =>
         {
-            using HttpResponseMessage response = await http.GetAsync(new Uri(OpenApiDocument.Path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            return await response.EnsureSuccessStatusCode().Content.ReadAsStringAsync(token).ConfigureAwait(false);
+            using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri(OpenApiDocument.Path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            await EnsureSuccessAsync(response, token).ConfigureAwait(false);
+            return await response.Content.ReadAsStringAsync(token).ConfigureAwait(false);
         }, false, OperationTimeout?.Invoke(nameof(OpenApi)), cancellationToken);
 
     private async Task<T?> GetAsync<T>(string path, bool allowNotFound = false, CancellationToken cancellationToken = default)
         where T : class
     {
-        using HttpResponseMessage response = await http.GetAsync(new Uri(path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri(path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
         {
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<T>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
             ?? throw new JsonException("The runtime returned no result.");
     }
@@ -395,20 +407,30 @@ public sealed partial class VericairnClient
     private async Task<TResponse?> PostAsync<TRequest, TResponse>(string path, TRequest request, CancellationToken cancellationToken)
         where TResponse : class
     {
-        using HttpResponseMessage response = await http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await asyncHttp.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode is not (HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK or HttpStatusCode.Conflict))
         {
-            response.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         }
 
-        return await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
-            ?? throw new JsonException("The runtime returned no result.");
+        try
+        {
+            TResponse result = await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
+                ?? throw new JsonException("The runtime returned no result.");
+            if (result is WriteOutcome { Written: null, Problem: null } or WriteOutcome { Written: not null, Problem: not null })
+                throw new JsonException("The runtime returned no definite write outcome.");
+            return result;
+        }
+        catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))
+        {
+            throw UnreadableRefusal(response, exception);
+        }
     }
 
     private async Task<(TResponse? Response, Problem? Problem)> PostOrProblemAsync<TRequest, TResponse>(string path, TRequest request, CancellationToken cancellationToken)
         where TResponse : class
     {
-        using HttpResponseMessage response = await http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+        using HttpResponseMessage response = await asyncHttp.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
             return (await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
@@ -420,9 +442,37 @@ public sealed partial class VericairnClient
             return (null, await ReadProblemAsync(response, cancellationToken).ConfigureAwait(false));
         }
 
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, cancellationToken).ConfigureAwait(false);
         return (null, null);
     }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (response.IsSuccessStatusCode) return;
+        // A server error alone says nothing about an effect, but an explicit refusal does. Preserve that answer
+        // even when (for example) the runtime uses 503 because it cannot safely keep the write's device ledger.
+        try
+        {
+            Problem? problem = await response.Content.ReadFromJsonAsync<Problem>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+            if (problem is { Code: "refused" or "denied", Message: not null })
+                throw new ClientRefusedException(problem.Message, statusCode: response.StatusCode);
+        }
+        catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))
+        {
+            throw UnreadableRefusal(response, exception);
+        }
+        catch (JsonException)
+        {
+            // A missing or unreadable error body cannot establish that an effect did not happen.
+        }
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    private static bool IsRejection(HttpResponseMessage response) => response.StatusCode >= HttpStatusCode.BadRequest && response.StatusCode < HttpStatusCode.InternalServerError;
+
+    private static ClientRefusedException UnreadableRefusal(HttpResponseMessage response, Exception exception) =>
+        new($"The runtime refused the request with HTTP {(int)response.StatusCode} ({response.ReasonPhrase}); its diagnostic could not be read.", exception, response.StatusCode);
 
     private static async Task<Problem> ReadProblemAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
@@ -433,6 +483,10 @@ public sealed partial class VericairnClient
         catch (JsonException)
         {
             return new Problem("refused", response.ReasonPhrase ?? "refused", []);
+        }
+        catch (Exception exception) when (IsRejection(response) && exception is (IOException or OperationCanceledException))
+        {
+            throw UnreadableRefusal(response, exception);
         }
     }
 }

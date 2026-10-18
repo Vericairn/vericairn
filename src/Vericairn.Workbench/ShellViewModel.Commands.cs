@@ -19,7 +19,7 @@ public sealed partial class ShellViewModel
     /// <summary>Whether an application command is waiting for the runtime. Editing and cancellation remain available.</summary>
     public bool IsBusy { get => isBusy; private set { if (Set(ref isBusy, value)) { RefreshCommand.NotifyCanExecuteChanged(); CancelCommand.NotifyCanExecuteChanged(); } } }
 
-    /// <summary>idle, busy, cancelled, timed-out or unavailable; separate from the runtime's last observed state.</summary>
+    /// <summary>idle, busy, cancelled, timed-out, unavailable or refused; separate from the runtime's last observed state.</summary>
     public string RequestState { get => requestState; private set => Set(ref requestState, value); }
 
     /// <summary>The last interrupted observation, retaining its cause and whether an effect is uncertain.</summary>

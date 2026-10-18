@@ -3,6 +3,7 @@
 
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Json;
 using Vericairn.Cli;
 using Vericairn.Protocol;
 using Vericairn.Sdk;
@@ -11,6 +12,27 @@ namespace Vericairn.Workbench.Tests;
 
 public sealed class CliBoundaryTests
 {
+    [Fact]
+    public void ADefiniteRefusalKeepsItsDiagnosticAndNeverClaimsAnUnknownEffect()
+    {
+        const string message = "The runtime refuses this write and writes nothing.";
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+        {
+            Content = JsonContent.Create(new Problem("refused", message, []), options: ProtocolJson.Options),
+        }))) { BaseAddress = new Uri("http://localhost") };
+        using var client = new VericairnClient(http);
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var context = new CommandContext(output, error, TestContext.Current.CancellationToken);
+        Assert.Equal(2, context.Invoke(() =>
+        {
+            new CancellationBoundApi(client, context.CancellationToken).Attempt(new("assignment", "contributor", "workspace", "note"));
+            return 0;
+        }));
+        Assert.Equal("error: " + message + error.NewLine, error.ToString());
+        Assert.Empty(output.ToString());
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]

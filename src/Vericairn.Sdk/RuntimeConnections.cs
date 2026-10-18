@@ -38,13 +38,22 @@ public sealed class RuntimeConnections
     /// does not complete. Pairing again replaces the earlier connections to the same estate that pin another runtime identity, which
     /// the runtime replaced, or that are for the same principal: their devices stay admitted until an administrator revokes them.
     /// </summary>
-    public RuntimeConnection Add(string address, string code, PairingOptions options) => AddAsync(address, code, options).GetAwaiter().GetResult();
+    public RuntimeConnection Add(string address, string code, PairingOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return Keep(RuntimePairing.Pair(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys }));
+    }
 
     /// <summary>Pairs and keeps a connection asynchronously. Interruption does not claim that a remote admission was undone.</summary>
     public async Task<RuntimeConnection> AddAsync(string address, string code, PairingOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
         PairedRuntime paired = await RuntimePairing.PairAsync(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys }, cancellationToken).ConfigureAwait(false);
+        return Keep(paired);
+    }
+
+    private RuntimeConnection Keep(PairedRuntime paired)
+    {
         var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         Save(connection);
         foreach (RuntimeConnection earlier in List().Where(c => c.Id != connection.Id && c.Estate == connection.Estate && (c.Identity != connection.Identity || c.Principal == connection.Principal)))
@@ -143,12 +152,12 @@ public sealed class RuntimeConnections
             try
             {
                 using VericairnClient client = VericairnClient.LocalNetwork(connection, signer, timeout ?? DefaultTimeout);
-                HealthResponse health = await client.HealthAsync(cancellationToken).ConfigureAwait(false);
+                HealthResponse health = preserveInterruption ? await client.HealthAsync(cancellationToken).ConfigureAwait(false) : client.Health();
                 answered = true;
                 message = $"Vericairn {health.Vericairn} serving {connection.EstateName ?? health.Estate} at {connection.Address}; the runtime proved its identity.";
                 try
                 {
-                    _ = await client.StatusAsync(cancellationToken).ConfigureAwait(false);
+                    _ = preserveInterruption ? await client.StatusAsync(cancellationToken).ConfigureAwait(false) : client.Status();
                     complete = true;
                 }
                 catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
@@ -156,10 +165,20 @@ public sealed class RuntimeConnections
                     denied = true;
                     message = $"The runtime refused device {connection.Device} while it was being read.";
                 }
-                catch (Exception exception) when ((exception is HttpRequestException or IOException or TimeoutException or OperationCanceledException or JsonException) && (!preserveInterruption || exception is not (TimeoutException or OperationCanceledException)))
+                catch (Exception exception) when (preserveInterruption && ClientFailure.FromException(exception) is { Code: "refused" } refusal)
+                {
+                    denied = true;
+                    message = refusal.Message;
+                }
+                catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException || (!preserveInterruption && exception is TaskCanceledException))
                 {
                     message = $"The runtime proved its identity and accepted device {connection.Device}, but did not answer every read: {exception.Message}";
                 }
+            }
+            catch (Exception exception) when (preserveInterruption && ClientFailure.FromException(exception) is { Code: "refused" } refusal)
+            {
+                denied = true;
+                message = refusal.Message;
             }
             catch (Exception exception) when (Refusal(exception) is RuntimeConnectionException refusal)
             {
@@ -171,7 +190,7 @@ public sealed class RuntimeConnections
                 denied = true;
                 message = $"The runtime refused device {connection.Device}.";
             }
-            catch (Exception exception) when ((exception is HttpRequestException or IOException or SocketException or TimeoutException or OperationCanceledException or AuthenticationException or JsonException) && (!preserveInterruption || exception is not (TimeoutException or OperationCanceledException)))
+            catch (Exception exception) when (exception is HttpRequestException or IOException or SocketException or AuthenticationException or JsonException || (!preserveInterruption && exception is TaskCanceledException))
             {
                 message = $"No answer from the runtime at {connection.Address}: {exception.Message}";
             }

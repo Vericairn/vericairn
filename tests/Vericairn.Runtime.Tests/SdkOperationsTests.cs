@@ -4,6 +4,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Reflection;
+using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Sdk;
 
@@ -11,6 +12,118 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class SdkOperationsTests
 {
+    [Theory]
+    [InlineData("transport")]
+    [InlineData("response")]
+    [InlineData("cancelled")]
+    [InlineData("json")]
+    [InlineData("io")]
+    public void EverySynchronousRequestPreservesTheOriginalException(string kind)
+    {
+        Exception original = kind switch
+        {
+            "transport" => new HttpRequestException("connection failed"),
+            "response" => new HttpRequestException("runtime refused the request", null, HttpStatusCode.ServiceUnavailable),
+            "cancelled" => new TaskCanceledException("legacy timeout"),
+            "json" => new JsonException("unreadable response"),
+            _ => new IOException("response ended"),
+        };
+        int calls = 0;
+        using var client = Client((_, _) => { calls++; throw original; }, TimeSpan.Zero);
+        MethodInfo[] methods = typeof(VericairnClient).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(method => !method.IsSpecialName && !method.Name.EndsWith("Async", StringComparison.Ordinal) && method.Name != "Dispose").ToArray();
+        foreach (MethodInfo method in methods)
+        {
+            object?[] arguments = method.GetParameters().Select(parameter => parameter.HasDefaultValue ? parameter.DefaultValue :
+                parameter.ParameterType == typeof(string) ? (object)"argument" : parameter.ParameterType == typeof(byte[]) ? new byte[] { 1 } : null).ToArray();
+            TargetInvocationException reflected = Assert.Throws<TargetInvocationException>(() => method.Invoke(client, arguments));
+            Assert.Same(original, reflected.InnerException);
+        }
+        Assert.Equal(methods.Length, calls);
+    }
+
+    [Fact]
+    public async Task LegacyNullResultsRemainNullWhileAnAsyncWriteWithoutAResultIsUncertain()
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("null") }));
+        Assert.Null(client.Health());
+        Assert.Null(client.Attempt(new("assignment", "contributor", "workspace", "note")));
+        Assert.True((await Assert.ThrowsAsync<ClientUnavailableException>(() =>
+            client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken))).OutcomeUnknown);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.BadRequest)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    public async Task ADefiniteRuntimeRefusalIsNeverUnavailableOrUncertain(HttpStatusCode status)
+    {
+        const string message = "The runtime cannot keep which paired device asks for this write, so it writes nothing.";
+        using var client = Client((_, _) => Task.FromResult(Json(new Problem("refused", message, []), status)));
+        ClientRefusedException refused = await Assert.ThrowsAsync<ClientRefusedException>(() =>
+            client.NewRecordAsync(null!, TestContext.Current.CancellationToken));
+        Assert.Equal(status, refused.StatusCode);
+        Assert.False(refused.OutcomeUnknown);
+        Assert.Equal(new ClientFailure("refused", message, false, 2), ClientFailure.FromException(refused));
+        // The synchronous method still exposes HttpClient's exact status exception and message.
+        using var response = new HttpResponseMessage(status);
+        HttpRequestException original = Assert.Throws<HttpRequestException>(() => response.EnsureSuccessStatusCode());
+        HttpRequestException legacy = Assert.Throws<HttpRequestException>(() => client.NewRecord(null!));
+        Assert.Equal(original.Message, legacy.Message);
+        Assert.Equal(original.StatusCode, legacy.StatusCode);
+    }
+
+    [Fact]
+    public async Task ATlsRefusalRetainsItsDiagnosticWithoutImplyingAnEffect()
+    {
+        var original = new HttpRequestException(HttpRequestError.SecureConnectionError, "TLS peer refused", new System.Security.Authentication.AuthenticationException("The certificate was refused."));
+        using var client = Client((_, _) => throw original);
+        Assert.Same(original, Assert.Throws<HttpRequestException>(() => client.NewRecord(null!)));
+        ClientRefusedException refused = await Assert.ThrowsAsync<ClientRefusedException>(() => client.NewRecordAsync(null!, TestContext.Current.CancellationToken));
+        Assert.False(refused.OutcomeUnknown);
+        Assert.Equal("refused", ClientFailure.FromException(refused)!.Code);
+        Assert.DoesNotContain("unknown", refused.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(HttpRequestError.NameResolutionError)]
+    [InlineData(HttpRequestError.ConnectionError)]
+    public async Task AConnectionThatNeverOpenedHasNoUncertainWrite(HttpRequestError error)
+    {
+        using var client = Client((_, _) => throw new HttpRequestException(error, "connection failed"));
+        Assert.False((await Assert.ThrowsAsync<ClientUnavailableException>(() => client.NewRecordAsync(null!, TestContext.Current.CancellationToken))).OutcomeUnknown);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AStagedOperationBecomesUncertainOnlyWhenItsEffectBegins(bool confirm)
+    {
+        var prepared = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var proceed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        bool dispatched = false;
+        using var stop = new CancellationTokenSource();
+        Task<bool> pending = ClientOperation.RunAsync("Pair", async token =>
+        {
+            prepared.SetResult();
+            await proceed.Task.WaitAsync(token);
+            Volatile.Write(ref dispatched, true);
+            sent.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return true;
+        }, () => Volatile.Read(ref dispatched), cancellationToken: stop.Token);
+        await prepared.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        if (confirm)
+        {
+            proceed.SetResult();
+            await sent.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+        stop.Cancel();
+        ClientCancelledException failure = await Assert.ThrowsAsync<ClientCancelledException>(() => pending);
+        Assert.Equal(confirm, failure.OutcomeUnknown);
+    }
+
     [Fact]
     public async Task CancelledPairingAndConnectionProbeStopBeforeOpeningAConnection()
     {
@@ -148,6 +261,8 @@ public sealed class SdkOperationsTests
     [Theory]
     [InlineData("invalid-json")]
     [InlineData("null")]
+    [InlineData("empty-outcome")]
+    [InlineData("conflicting-outcome")]
     [InlineData("body-lost")]
     [InlineData("server-error")]
     public async Task AnUnusableWriteResponseNeverBecomesAKnownFailure(string response)
@@ -159,7 +274,13 @@ public sealed class SdkOperationsTests
             if (response == "body-lost") throw new IOException("response ended after the effect");
             return Task.FromResult(new HttpResponseMessage(response == "server-error" ? HttpStatusCode.InternalServerError : HttpStatusCode.OK)
             {
-                Content = new StringContent(response == "null" ? "null" : "incomplete response"),
+                Content = new StringContent(response switch
+                {
+                    "null" => "null",
+                    "empty-outcome" => "{}",
+                    "conflicting-outcome" => """{"written":{"path":"record.json","id":"record","hash":"hash"},"problem":{"code":"refused","message":"refused","findings":[]}}""",
+                    _ => "incomplete response",
+                }),
             });
         });
         ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
@@ -167,6 +288,20 @@ public sealed class SdkOperationsTests
         Assert.True(failure.OutcomeUnknown);
         Assert.Equal(1, effects);
         Assert.Contains("reconcile", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    [InlineData(HttpStatusCode.Conflict)]
+    public async Task AnUnreadableRejectionCannotBecomeAnUncertainWrite(HttpStatusCode status)
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("incomplete response") }));
+        ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() =>
+            client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
+        Assert.Equal(status, failure.StatusCode);
+        Assert.Equal("refused", ClientFailure.FromException(failure)!.Code);
     }
 
     [Fact]

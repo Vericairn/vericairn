@@ -15,6 +15,23 @@ namespace Vericairn.Workbench.Tests;
 [Collection("workbench")]
 public class ClientCommandTests(HeadlessFixture fixture)
 {
+    [Fact]
+    public async Task ARefusedEffectLeavesTheEditorAvailableAndDoesNotAddUncertainty()
+    {
+        string root = Seed.Temp("command-refusal");
+        string person = Seed.Init(root);
+        using var connection = new ControlledConnection(root);
+        (ShellViewModel shell, AssignmentComposer page) = await CreateComposerAsync(connection, person);
+        connection.Control.Refused = true;
+        await fixture.UiAsync(() => shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken));
+        Assert.Equal("refused", shell.RequestState);
+        Assert.Equal("The runtime refuses this write and writes nothing.", shell.Status);
+        Assert.False(shell.IsBusy);
+        Assert.False(shell.HasUncertainOutcomes);
+        Assert.Null(page.UncertainEffect);
+        Assert.Equal(0, connection.Control.AssignCalls);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -198,6 +215,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
         public bool StallStatus { get; set; }
         public bool StallAssign { get; set; }
         public bool Unavailable { get; set; }
+        public bool Refused { get; set; }
         public int AssignCalls { get; private set; }
         public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -206,6 +224,8 @@ public class ClientCommandTests(HeadlessFixture fixture)
 
         protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
         {
+            if (Refused && targetMethod!.Name == nameof(IEstateApi.AssignAsync))
+                throw new ClientRefusedException("The runtime refuses this write and writes nothing.");
             if (targetMethod!.Name == nameof(IEstateApi.StatusAsync))
             {
                 if (Unavailable) throw new HttpRequestException("fixture unavailable");
