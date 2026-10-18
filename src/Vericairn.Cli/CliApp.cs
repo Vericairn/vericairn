@@ -35,7 +35,7 @@ internal static partial class CliApp
         root.Subcommands.Add(ConnectionsFamily(jsonOption));
         root.Subcommands.Add(new ReleaseCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
-        root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new CheckCommand(context));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(new RecoverCommand(context));
         root.Subcommands.Add(new ObjectsCommand(context));
@@ -277,59 +277,6 @@ internal static partial class CliApp
 
 
 
-    private static Command CheckFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var check = new Command("check", "Run a check and record its evidence as a verification of the exact commit, or observe a workflow run.");
-        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
-        var resourceOption = new Option<string>("--resource") { Description = "Resource record id of the repository checked.", Required = true };
-        var inOption = new Option<string>("--in") { Description = "Working tree the command runs in.", DefaultValueFactory = _ => Directory.GetCurrentDirectory() };
-        var roleOption = new Option<string>("--role") { Description = "self, independent-agent, operator or automation.", DefaultValueFactory = _ => "self" };
-        var summaryOption = new Option<string?>("--summary") { Description = "What the check establishes, in your words; the observed exit and duration are recorded regardless." };
-        var timeoutOption = new Option<int>("--timeout") { Description = "Seconds after which the command is stopped and its result recorded as unknown.", DefaultValueFactory = _ => 3600 };
-        var commandArgument = new Argument<string[]>("command") { Description = "The command and its arguments; put -- before it.", Arity = ArgumentArity.OneOrMore };
-        var run = new Command("run", "Run a command in a repository and record a verification: commit, command, environment, exit code, duration and output as evidence.");
-        run.Options.Add(resourceOption);
-        run.Options.Add(byOption);
-        run.Options.Add(inOption);
-        run.Options.Add(roleOption);
-        run.Options.Add(summaryOption);
-        run.Options.Add(timeoutOption);
-        run.Arguments.Add(commandArgument);
-        run.SetAction(parseResult => Commands.CheckRun(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(resourceOption)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(inOption)!,
-            parseResult.GetValue(roleOption)!,
-            parseResult.GetValue(summaryOption),
-            parseResult.GetValue(timeoutOption),
-            parseResult.GetValue(commandArgument)!,
-            parseResult.GetValue(jsonOption)));
-        check.Subcommands.Add(run);
-
-        var repositoryOption = new Option<string?>("--repository") { Description = "Where the run is (for GitHub, owner/name); the resource's recorded location when omitted." };
-        var providerOption = new Option<string?>("--provider") { Description = "The provider that observes the run; the one serving the resource's recorded location when omitted." };
-        var runOption = new Option<string>("--run") { Description = "Workflow run id.", Required = true };
-        var workflowOption = new Option<string>("--workflow") { Description = "Workflow file the run belongs to.", DefaultValueFactory = _ => "ci.yml" };
-        var observe = new Command("observe", "Observe a workflow run at its host and record it as automation's verification of the commit it built.");
-        observe.Options.Add(resourceOption);
-        observe.Options.Add(repositoryOption);
-        observe.Options.Add(providerOption);
-        observe.Options.Add(runOption);
-        observe.Options.Add(workflowOption);
-        observe.Options.Add(byOption);
-        observe.SetAction(parseResult => Commands.CheckObserve(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(resourceOption)!,
-            parseResult.GetValue(repositoryOption),
-            parseResult.GetValue(providerOption),
-            parseResult.GetValue(runOption)!,
-            parseResult.GetValue(workflowOption)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(jsonOption)));
-        check.Subcommands.Add(observe);
-        return check;
-    }
 
 
 
