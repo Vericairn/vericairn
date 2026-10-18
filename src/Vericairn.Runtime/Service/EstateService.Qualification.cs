@@ -10,6 +10,7 @@ using Vericairn.Records.Hashing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 

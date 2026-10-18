@@ -237,5 +237,5 @@ trust, authentication and transport failures remain possible. FIX-22 shows curre
 every surface, with unknown resolution visible. A fix in prose or unavailable evidence cannot close an item;
 see [required attention](required-attention.md).
 
-The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
+The efficiency Adapter is absent until the planned 0.8.1 work; enabling it is refused. Remote is not built.
 Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

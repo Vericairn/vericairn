@@ -6,6 +6,8 @@
     <IsTestProject>true</IsTestProject>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <!-- Exercise evaluator contracts against real cultures, independently of the product's invariant host. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>$(NoWarn);CA1707;CA2007;CA1515</NoWarn>
   </PropertyGroup>
 

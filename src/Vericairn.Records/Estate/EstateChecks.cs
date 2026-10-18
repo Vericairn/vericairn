@@ -237,27 +237,10 @@ public static partial class EstateChecks
         }
     }
 
-    private static readonly HashSet<string> SpacingAllowlist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "base", "http", "https", "html", "python", "sqlite", "float", "uint", "utf", "unicode", "windows", "macos", "ipv", "mp", "ecdsa", "sha",
-    };
-
     /// <summary>Flags a word run into a number ("October13", "checkpoint2693") outside code spans, identifiers and paths.</summary>
     private static void ScanProse(string text, string location, FindingList findings)
     {
-        int lineNumber = 0;
-        foreach (string rawLine in text.Split('\n'))
-        {
-            lineNumber++;
-            string line = CodeSpan().Replace(rawLine, " ");
-            foreach (Match match in WordRunIntoNumber().Matches(line))
-            {
-                if (!SpacingAllowlist.Contains(match.Groups["word"].Value))
-                {
-                    findings.Warning("writing.spacing", $"{location}:{lineNumber}", $"'{match.Value}': put a space between the word and the number.");
-                }
-            }
-        }
+        foreach (SpacingOccurrence occurrence in WritingScanner.Scan(text, location)) findings.Add(occurrence.Diagnostic);
     }
 
     private static void ScanRecordProse(byte[] bytes, string relative, FindingList findings)
@@ -453,12 +436,6 @@ public static partial class EstateChecks
             }
         }
     }
-
-    [GeneratedRegex("`[^`]*`")]
-    private static partial Regex CodeSpan();
-
-    [GeneratedRegex(@"(?<![A-Za-z0-9_./:\\-])(?<word>[A-Za-z][a-z]{3,})(?<number>[0-9]+)(?![A-Za-z0-9_/:-]|\.[0-9A-Za-z])")]
-    private static partial Regex WordRunIntoNumber();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
     private static partial Regex AbsolutePath();
