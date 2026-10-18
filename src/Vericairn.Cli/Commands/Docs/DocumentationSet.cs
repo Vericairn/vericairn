@@ -37,29 +37,32 @@ internal static partial class Docs
     /// output; one that records no window (0.5.2 and earlier) gives the end its notes state; a time named with --since overrides
     /// either only when it is no later than that end; and with no previous set the notes begin at the earlier publication.
     /// </summary>
-    public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null)
+    public static int Notes(string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null) =>
+        Notes(new CommandContext(), root, fromVersion, toVersion, output, since, json, at);
+
+    public static int Notes(CommandContext context, string root, string fromVersion, string toVersion, string output, string? since, bool json, DateTimeOffset? at = null)
     {
         try
         {
             if (since is not null && !RecordParser.IsTimestamp(since))
             {
-                return Commands.Fail($"--since takes a record time such as 2026-10-15T12:06:00Z, not '{since}'.");
+                return context.Fail($"--since takes a record time such as 2026-10-15T12:06:00Z, not '{since}'.");
             }
 
             // The clock is read before the records: a record of the second the notes are made in can still be written after they read
             // the estate, so until the version's publication is recorded they end at the second before, and that record opens the next set.
             DateTimeOffset reading = at ?? DateTimeOffset.UtcNow;
-            EstateModel model = Commands.LoadCopy(root);
+            EstateModel model = CommandContext.LoadCopy(root);
             RecordEnvelope? from = Published(model, fromVersion);
             RecordEnvelope? to = Published(model, toVersion);
             if (from is null)
             {
-                return Commands.Fail($"No published release record for {fromVersion} in this estate.");
+                return context.Fail($"No published release record for {fromVersion} in this estate.");
             }
 
             if (Begin(model, from, fromVersion, output, since, out string? problem) is not Beginning beginning)
             {
-                return Commands.Fail(problem!);
+                return context.Fail(problem!);
             }
 
             string manifestPath = Path.Combine(output, "manifest.json");
@@ -74,18 +77,18 @@ internal static partial class Docs
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
             if (json)
             {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { output, from = fromVersion, to = toVersion, records = window.Count, published = to is not null, window = new { from = beginning.At, to = upper } }));
+                context.Output.WriteLine(JsonSerializer.Serialize(new { output, from = fromVersion, to = toVersion, records = window.Count, published = to is not null, window = new { from = beginning.At, to = upper } }));
             }
             else
             {
-                Console.Out.WriteLine($"{output}/release-notes.md: {window.Count} records between {fromVersion} and {(to is null ? $"now ({toVersion} not yet published)" : toVersion)}, {beginning.Says}; the window, after {beginning.At} up to {upper}, is recorded in {manifestPath}");
+                context.Output.WriteLine($"{output}/release-notes.md: {window.Count} records between {fromVersion} and {(to is null ? $"now ({toVersion} not yet published)" : toVersion)}, {beginning.Says}; the window, after {beginning.At} up to {upper}, is recorded in {manifestPath}");
             }
 
-            return Commands.Clean;
+            return CommandContext.Clean;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
         {
-            return Commands.Fail(exception.Message);
+            return context.Fail(exception.Message);
         }
     }
 
@@ -162,12 +165,12 @@ internal static partial class Docs
     /// operation or a record type its manifest lists, naming every gap at once. Whether the manifest matches a build is the
     /// product's own build tooling's question, asked where that build is (the release workflow asks it before any draft).
     /// </summary>
-    public static int Check(string directory, string? declaration, bool json)
+    public static int Check(CommandContext context, string directory, string? declaration, bool json)
     {
         var findings = new List<FindingDto>();
         if (!Directory.Exists(directory))
         {
-            return Commands.Fail($"{directory}: no such directory.");
+            return context.Fail($"{directory}: no such directory.");
         }
 
         string manifestPath = Path.Combine(directory, "manifest.json");
@@ -213,7 +216,7 @@ internal static partial class Docs
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
             {
-                return Commands.Fail($"{declaration}: not a readable JSON array of document names: {exception.Message}");
+                return context.Fail($"{declaration}: not a readable JSON array of document names: {exception.Message}");
             }
         }
 
@@ -245,7 +248,7 @@ internal static partial class Docs
         }
 
         int errors = findings.Count(f => f.Severity == "error");
-        return Commands.ReportFindings(new FindingsResponse(errors == 0 ? $"{directory}: complete" : $"{directory}: incomplete", errors, 0, findings), json);
+        return context.ReportFindings(new FindingsResponse(errors == 0 ? $"{directory}: complete" : $"{directory}: incomplete", errors, 0, findings), json);
     }
 
     private static void Covered(string directory, string file, List<string> expected, Func<string, string> heading, string code, List<FindingDto> findings)
