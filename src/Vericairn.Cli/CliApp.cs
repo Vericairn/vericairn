@@ -33,7 +33,7 @@ internal static partial class CliApp
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
         root.Subcommands.Add(ConnectionsFamily(jsonOption));
-        root.Subcommands.Add(ReleaseFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new ReleaseCommand(context));
         root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
         root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
@@ -275,80 +275,6 @@ internal static partial class CliApp
         return runtime;
     }
 
-    private static Command ReleaseFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var release = new Command("release", "Releases: list the records and the providers, submit a release through the provider its product declares or the request names as intent before effect, observe the run, the draft and the publication.");
-        var list = new Command("list", "List current release records: version, status, commit, id, signing.");
-        list.SetAction(parseResult => Commands.ReleaseList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        release.Subcommands.Add(list);
-
-        var providers = new Command("providers", "List the provider and adapter implementations available to the runtime, with the settings each declares and its defaults.");
-        providers.SetAction(parseResult => Commands.ReleaseProviders(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        release.Subcommands.Add(providers);
-
-        var byOption = new Option<string>("--by") { Description = "Principal id recording the operation (ULID).", Required = true };
-        var versionOption = new Option<string>("--version") { Description = "The version to release, for example 0.4.0.", Required = true };
-        var productOption = new Option<string>("--product") { Description = "Product record id the release belongs to; its declared release destination supplies the provider and settings the request does not name.", Required = true };
-        var providerOption = new Option<string?>("--provider") { Description = "The provider id, for example github-releases; the product's declared provider when omitted." };
-        var repositoryOption = new Option<string?>("--repository") { Description = "The setting repository (for GitHub, owner/name of the repository whose workflow builds the release)." };
-        var refOption = new Option<string?>("--ref") { Description = "The setting ref (the branch or tag to build from); the provider's default when omitted." };
-        var workflowOption = new Option<string?>("--workflow") { Description = "The setting workflow (the release workflow file); the provider's default when omitted." };
-        var settingOption = new Option<string[]>("--setting") { Description = "Any declared setting as name=value; repeatable.", AllowMultipleArgumentsPerToken = true };
-        var reconciliationOption = new Option<string?>("--reconciliation") { Description = "How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry." };
-        var submit = new Command("submit", "Record the intent, then dispatch the build through the provider; the run id and outcome are recorded as they are observed. Never publishes.");
-        submit.Options.Add(productOption);
-        submit.Options.Add(versionOption);
-        submit.Options.Add(byOption);
-        submit.Options.Add(providerOption);
-        submit.Options.Add(repositoryOption);
-        submit.Options.Add(refOption);
-        submit.Options.Add(workflowOption);
-        submit.Options.Add(settingOption);
-        submit.Options.Add(reconciliationOption);
-        submit.SetAction(parseResult => Commands.ReleaseSubmit(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(productOption)!,
-            parseResult.GetValue(versionOption)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(providerOption),
-            parseResult.GetValue(repositoryOption),
-            parseResult.GetValue(refOption),
-            parseResult.GetValue(workflowOption),
-            parseResult.GetValue(settingOption) ?? [],
-            parseResult.GetValue(reconciliationOption),
-            parseResult.GetValue(jsonOption)));
-        release.Subcommands.Add(submit);
-
-        var observeProductOption = new Option<string?>("--product") { Description = "Product record id, to find the operation by product and version." };
-        var qualifiedOption = new Option<string[]>("--qualified") { Description = "Platform whose qualification is recorded for the candidate; repeatable.", AllowMultipleArgumentsPerToken = true };
-        var limitationOption = new Option<string[]>("--limitation") { Description = "A known limitation of the candidate; repeatable.", AllowMultipleArgumentsPerToken = true };
-        var signingOption = new Option<string>("--signing") { Description = "Signing state recorded on the candidate.", DefaultValueFactory = _ => "unsigned developer build" };
-        var cancelOption = new Option<string?>("--cancel") { Description = "Settle an intent that was never dispatched, or an outcome reconciled as having had no effect, with this reason." };
-        var observe = new Command("observe", "Observe the run and the draft through the provider the operation records; record the outcome, the candidate release, and later the operator's manual publication.");
-        observe.Options.Add(versionOption);
-        observe.Options.Add(byOption);
-        observe.Options.Add(observeProductOption);
-        observe.Options.Add(providerOption);
-        observe.Options.Add(repositoryOption);
-        observe.Options.Add(qualifiedOption);
-        observe.Options.Add(limitationOption);
-        observe.Options.Add(signingOption);
-        observe.Options.Add(cancelOption);
-        observe.SetAction(parseResult => Commands.ReleaseObserve(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(versionOption)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(observeProductOption),
-            parseResult.GetValue(providerOption),
-            parseResult.GetValue(repositoryOption),
-            parseResult.GetValue(qualifiedOption) ?? [],
-            parseResult.GetValue(limitationOption) ?? [],
-            parseResult.GetValue(signingOption)!,
-            parseResult.GetValue(cancelOption),
-            parseResult.GetValue(jsonOption)));
-        release.Subcommands.Add(observe);
-        return release;
-    }
 
     private static Command SourcesFamily(Option<string> estateOption, Option<bool> jsonOption)
     {

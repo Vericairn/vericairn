@@ -1264,23 +1264,6 @@ internal static partial class Commands
         return Clean;
     });
 
-    public static int ReleaseList(string root, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<ReleaseRow> rows = api.Releases();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-        }
-        else
-        {
-            foreach (ReleaseRow row in rows)
-            {
-                Console.Out.WriteLine($"{row.Version}  {row.Status}  {row.Commit}  {row.Id}  {row.Signing}");
-            }
-        }
-
-        return Clean;
-    });
 
     public static int Export(string root, string output, string? by, bool json) => WithApi(root, api =>
     {
@@ -2330,96 +2313,11 @@ internal static partial class Commands
         });
     }
 
-    public static int ReleaseSubmit(string root, string product, string version, string by, string? provider, string? repository, string? reference, string? workflow, string[] settings, string? reconciliation, bool json)
-    {
-        Dictionary<string, string>? parsed = ParseSettings(settings, out string? problem);
-        return parsed is null
-            ? Fail(problem!)
-            : WithApi(root, api => ReportRelease(api.ReleaseSubmit(new ReleaseSubmitRequest(product, version, repository, by, reference, workflow, reconciliation, provider, parsed)), json));
-    }
 
-    public static int ReleaseObserve(string root, string version, string by, string? product, string? provider, string? repository, string[] qualified, string[] limitations, string signing, string? cancel, bool json) =>
-        WithApi(root, api => ReportRelease(api.ReleaseObserve(new ReleaseObserveRequest(version, repository, by, qualified, limitations, signing, cancel, product, provider)), json));
 
-    public static int ReleaseProviders(string root, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<ProviderRow> rows = api.Providers();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-            return Clean;
-        }
 
-        if (rows.Count == 0)
-        {
-            Console.Out.WriteLine("No provider or adapter is available to the runtime here.");
-            return Clean;
-        }
+    private static Dictionary<string, string>? ParseSettings(string[] settings, out string? problem) => CommandSettings.Parse(settings, out problem);
 
-        foreach (ProviderRow row in rows)
-        {
-            Console.Out.WriteLine($"{row.Provider}  {row.Kind}  {row.Implementation}  {row.Contract}  {row.Status}{(row.Locations.Count == 0 ? string.Empty : "  serves " + string.Join(", ", row.Locations))}");
-            foreach (ProviderSettingRow setting in row.Settings)
-            {
-                string marks = (setting.Name == row.Destination ? "destination, " : string.Empty) + (setting.Required ? "required" : setting.Default is null ? "optional" : "default " + setting.Default);
-                Console.Out.WriteLine($"  {setting.Name,-12} {marks}: {setting.Summary}");
-            }
-
-            foreach (string limitation in row.Limitations)
-            {
-                Console.Out.WriteLine($"  limitation: {limitation}");
-            }
-        }
-
-        return Clean;
-    });
-
-    private static Dictionary<string, string>? ParseSettings(string[] settings, out string? problem)
-    {
-        var parsed = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (string setting in settings)
-        {
-            int equals = setting.IndexOf('=', StringComparison.Ordinal);
-            if (equals <= 0)
-            {
-                problem = $"A setting is name=value; '{setting}' is not.";
-                return null;
-            }
-
-            parsed[setting[..equals].Trim()] = setting[(equals + 1)..].Trim();
-        }
-
-        problem = null;
-        return parsed;
-    }
-
-    /// <summary>Prints a release operation's outcome exactly as the runtime reported it: a problem fails, a rejected record lists its findings, and the exit code says whether the request advanced.</summary>
-    private static int ReportRelease(ReleaseResponse response, bool json)
-    {
-        if (response.Problem is not null)
-        {
-            return response.Problem.Findings.Count > 0 ? ReportOutcome(WriteOutcome.Fail(response.Problem), json) : Fail(response.Message);
-        }
-
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
-        }
-        else
-        {
-            foreach (RecordWritten? written in new[] { response.Operation, response.Candidate, response.Release })
-            {
-                if (written is not null)
-                {
-                    Console.Out.WriteLine($"{written.Path}  {written.Id}  {written.Hash}");
-                }
-            }
-
-            Console.Out.WriteLine(response.Message);
-        }
-
-        return response.Ok ? Clean : HasErrors;
-    }
 
     private static void PrintObservation(RepositoryObservation observation)
     {
