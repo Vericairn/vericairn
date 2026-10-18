@@ -20,14 +20,6 @@ namespace Vericairn.Workbench.Tests;
 [Collection("workbench")]
 public class GoalsTests(HeadlessFixture fixture)
 {
-    static GoalsTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task TheGoalsWorkspaceShowsAGoalAndItsAsksAreDecisionsNeededKeyboardOnly()
     {
@@ -53,7 +45,7 @@ public class GoalsTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
 
             // Each ask is a compact decision needed, first among them, with its exact source and state in the state language.
             List<AttentionItem> asks = shell.Attention.Where(a => a.SubjectType == "ask").ToList();
@@ -66,7 +58,11 @@ public class GoalsTests(HeadlessFixture fixture)
             Assert.Equal($"vericairn records show {asks[0].SubjectId}", asks[0].NextAction);
 
             // Ctrl+Shift+G opens the Goals workspace on the open goal.
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.G, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.G, null); });
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.G, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.G, null);
+                await shell.PendingOperation;
+            });
             GoalsWorkspace page = Assert.IsType<GoalsWorkspace>(shell.SelectedDocument);
             Assert.Equal(goal, page.Selected!.Id);
             Assert.Equal("Release the guide: active", page.Heading);
@@ -92,11 +88,12 @@ public class GoalsTests(HeadlessFixture fixture)
 
             // Enter on an ask's attention item opens its goal's workspace and explains the ask in the inspector.
             await fixture.Ui(() => shell.Close(page));
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.KeyPress(Key.D2, RawInputModifiers.Control, PhysicalKey.Digit2, null);
                 window.AttentionList.SelectedIndex = 0;
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             Assert.Equal(goal, Assert.IsType<GoalsWorkspace>(shell.SelectedDocument).Selected!.Id);
             Assert.StartsWith("decision needed", shell.Inspector, StringComparison.Ordinal);

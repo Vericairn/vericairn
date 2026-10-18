@@ -92,7 +92,19 @@ public sealed class PairingException : Exception
 public static class RuntimePairing
 {
     /// <summary>Pairs this machine with the runtime at an address using a code an administrator issued; throws <see cref="PairingException"/> when it does not complete, with nothing kept here.</summary>
-    public static PairedRuntime Pair(string address, string code, PairingOptions options)
+    public static PairedRuntime Pair(string address, string code, PairingOptions options) =>
+        PairWithKeysAsync(address, code, options, confirmationStarted: null, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>Pairs with cancellation and a deadline for the complete exchange; a lost confirmation preserves uncertainty.</summary>
+    public static Task<PairedRuntime> PairAsync(string address, string code, PairingOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        bool confirmationStarted = false;
+        return ClientOperation.RunAsync("Pair", token => PairWithKeysAsync(address, code, options,
+            () => Volatile.Write(ref confirmationStarted, true), token), () => Volatile.Read(ref confirmationStarted), options.Timeout, cancellationToken);
+    }
+
+    private static async Task<PairedRuntime> PairWithKeysAsync(string address, string code, PairingOptions options, Action? confirmationStarted, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (!RuntimeConnection.TryParseAddress(address, out _, out _))
@@ -113,7 +125,11 @@ public static class RuntimePairing
         (byte[] runtimeKey, byte[] deviceKey) = PairingProtocol.Keys(secret);
         try
         {
-            return PairAsync(address.Trim(), runtimeKey, deviceKey, options).GetAwaiter().GetResult();
+            try { return await PairExchangeAsync(address.Trim(), runtimeKey, deviceKey, options, confirmationStarted, cancellationToken).ConfigureAwait(false); }
+            catch (PairingException exception) when (confirmationStarted is not null)
+            {
+                throw new ClientRefusedException(exception.Message, exception);
+            }
         }
         finally
         {
@@ -122,32 +138,42 @@ public static class RuntimePairing
         }
     }
 
-    private static async Task<PairedRuntime> PairAsync(string address, byte[] runtimeKey, byte[] deviceKey, PairingOptions options)
+    private static async Task<PairedRuntime> PairExchangeAsync(string address, byte[] runtimeKey, byte[] deviceKey, PairingOptions options, Action? confirmationStarted, CancellationToken cancellationToken)
     {
         if (!RuntimeConnection.TryParseAddress(address, out string host, out int port))
         {
             throw new PairingException("refused", $"'{address}' is not an address and port.");
         }
 
-        using var timeout = new CancellationTokenSource(options.Timeout);
+        bool legacy = confirmationStarted is null;
+        using var timeout = legacy ? new CancellationTokenSource(options.Timeout) : null;
+        cancellationToken = timeout?.Token ?? cancellationToken;
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         byte[]? presented = null;
+        TlsScreenStream? screen = null;
         SslStream tls;
         try
         {
-            await socket.ConnectAsync(host, port, timeout.Token).ConfigureAwait(false);
+            await socket.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
             // The screen refuses a certificate that names an address to fetch before this machine's TLS reads it.
-            tls = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: false)), leaveInnerStreamOpen: false);
+            screen = new TlsScreenStream(new NetworkStream(socket, ownsSocket: false));
+            tls = new SslStream(screen, leaveInnerStreamOpen: false);
             await tls.AuthenticateAsClientAsync(
                 CreateAuthenticationOptions((_, certificate, _, _) =>
                 {
                     presented = certificate?.GetRawCertData();
                     return certificate is not null;
                 }),
-                timeout.Token).ConfigureAwait(false);
+                cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is SocketException or IOException or OperationCanceledException or System.Security.Authentication.AuthenticationException)
+        catch (Exception exception) when (exception is SocketException or IOException or System.Security.Authentication.AuthenticationException || (legacy && exception is OperationCanceledException))
         {
+            if (!legacy)
+            {
+                if (screen?.RefusedPeer == true || exception is System.Security.Authentication.AuthenticationException)
+                    throw new ClientRefusedException(exception.Message, exception);
+                throw new ClientUnavailableException(false, exception);
+            }
             throw new PairingException("unavailable", $"No runtime answered at {address}: {exception.Message}");
         }
 
@@ -156,7 +182,7 @@ public static class RuntimePairing
             string certificate = RuntimeIdentityScheme.CertificateFingerprint(presented ?? []);
             string nonce = PairingProtocol.NewNonce();
             var hello = new PairingHello(nonce, PairingProtocol.HelloMac(deviceKey, nonce, certificate));
-            PairingChallenge challenge = await SendAsync<PairingHello, PairingChallenge>(tls, address, "/v1/pairing/hello", hello, timeout.Token).ConfigureAwait(false);
+            PairingChallenge challenge = await SendAsync<PairingHello, PairingChallenge>(tls, address, "/v1/pairing/hello", hello, legacy, mayHaveEffect: false, cancellationToken).ConfigureAwait(false);
             if (!PairingProtocol.Matches(PairingProtocol.ChallengeMac(runtimeKey, hello, challenge), challenge.Mac) || challenge.DeviceNonce != nonce)
             {
                 throw new PairingException("denied", $"The runtime at {address} does not know this pairing code: something between this device and the runtime answered. Nothing was made or recorded here.");
@@ -182,10 +208,14 @@ public static class RuntimePairing
                 string signature = Base64Url.EncodeToString(store.Sign(challenge.Record, RecordSigning.Digest(hash)));
                 var confirm = new PairingConfirm(challenge.RuntimeNonce, device, signature, string.Empty);
                 confirm = confirm with { Mac = PairingProtocol.ConfirmMac(deviceKey, hello, challenge, confirm) };
-                PairingCompleted completed = await SendAsync<PairingConfirm, PairingCompleted>(tls, address, "/v1/pairing/confirm", confirm, timeout.Token).ConfigureAwait(false);
+                if (!legacy) cancellationToken.ThrowIfCancellationRequested();
+                confirmationStarted?.Invoke();
+                PairingCompleted completed = await SendAsync<PairingConfirm, PairingCompleted>(tls, address, "/v1/pairing/confirm", confirm, legacy, mayHaveEffect: true, cancellationToken).ConfigureAwait(false);
                 if (!PairingProtocol.Matches(PairingProtocol.CompletedMac(runtimeKey, hello, challenge, confirm, completed), completed.Mac) || completed.Device != challenge.Record || completed.Hash != hash)
                 {
-                    throw new PairingException("unavailable", $"The runtime's confirmation does not match this exchange, so this device keeps nothing of it; an administrator revokes device {challenge.Record} if it was recorded.");
+                    var exception = new PairingException("unavailable", $"The runtime's confirmation does not match this exchange, so this device keeps nothing of it; an administrator revokes device {challenge.Record} if it was recorded.");
+                    if (!legacy) throw new ClientUnavailableException(true, exception);
+                    throw exception;
                 }
 
                 return new PairedRuntime(address, challenge.Estate, challenge.EstateName, challenge.Identity, challenge.Certificate, challenge.Record, device.PublicKey, completed.Admission, challenge.Principal, challenge.PrincipalName, challenge.Profiles, store.Kind, device.Presence);
@@ -255,7 +285,7 @@ public static class RuntimePairing
             RemoteCertificateValidationCallback = validate,
         };
 
-    private static async Task<TResponse> SendAsync<TRequest, TResponse>(Stream tls, string address, string path, TRequest request, CancellationToken cancellationToken)
+    private static async Task<TResponse> SendAsync<TRequest, TResponse>(Stream tls, string address, string path, TRequest request, bool legacy, bool mayHaveEffect, CancellationToken cancellationToken)
         where TResponse : class
     {
         int status;
@@ -264,8 +294,9 @@ public static class RuntimePairing
         {
             (status, answer) = await RawHttp.PostJsonAsync(tls, address, path, request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is IOException or OperationCanceledException or RuntimeConnectionException)
+        catch (Exception exception) when (exception is IOException or RuntimeConnectionException || (legacy && exception is OperationCanceledException))
         {
+            if (!legacy) throw new ClientUnavailableException(mayHaveEffect, exception);
             throw new PairingException("unavailable", $"The runtime at {address} did not answer: {exception.Message}");
         }
 
@@ -273,16 +304,20 @@ public static class RuntimePairing
         {
             try
             {
-                return JsonSerializer.Deserialize<TResponse>(answer, ProtocolJson.Options) ?? throw new PairingException("unavailable", $"The runtime at {address} answered nothing readable.");
+                return JsonSerializer.Deserialize<TResponse>(answer, ProtocolJson.Options) ?? throw new JsonException();
             }
             catch (JsonException)
             {
-                throw new PairingException("unavailable", $"The runtime at {address} answered nothing readable.");
+                var exception = new PairingException("unavailable", $"The runtime at {address} answered nothing readable.");
+                if (!legacy) throw new ClientUnavailableException(mayHaveEffect, exception);
+                throw exception;
             }
         }
 
         Problem? problem = RawHttp.ProblemOf(answer);
         string findings = problem is { Findings.Count: > 0 } ? " " + string.Join(" ", problem.Findings.Select(f => $"{f.Code}: {f.Message}")) : string.Empty;
+        if (!legacy && status >= 500 && problem?.Code is not ("refused" or "denied"))
+            throw new ClientUnavailableException(mayHaveEffect, new PairingException("unavailable", (problem?.Message ?? $"The runtime at {address} answered {status}.") + findings));
         throw new PairingException(problem?.Code ?? "unavailable", (problem?.Message ?? $"The runtime at {address} answered {status}.") + findings);
     }
 }

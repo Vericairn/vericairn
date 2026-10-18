@@ -29,10 +29,7 @@ public sealed class HeadlessFixture : IDisposable
     /// </summary>
     public HeadlessFixture()
     {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-tests-home"));
-        }
+        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-tests-home"));
         new ReleaseUpdateStore().Configure(false);
     }
 
@@ -47,6 +44,14 @@ public sealed class HeadlessFixture : IDisposable
 
     /// <summary>Runs an asynchronous action on the UI thread, so that view models bound to controls are driven where the controls live.</summary>
     public Task UiAsync(Func<Task> action) => Session.Dispatch(async () => { await action().ConfigureAwait(true); Dispatcher.UIThread.RunJobs(); return true; }, TestContext.Current.CancellationToken);
+
+    /// <summary>Runs an asynchronous function on the UI thread and returns its result.</summary>
+    public Task<T> UiAsync<T>(Func<Task<T>> function) => Session.Dispatch(async () =>
+    {
+        T result = await function().ConfigureAwait(true);
+        Dispatcher.UIThread.RunJobs();
+        return result;
+    }, TestContext.Current.CancellationToken);
 
     /// <summary>
     /// Nothing to dispose: the session's loop runs on a thread-pool task, which never keeps the process alive, while

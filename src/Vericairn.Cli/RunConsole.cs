@@ -13,26 +13,19 @@ internal static class RunConsole
     /// Waits in the foreground until a run settles, or no worker observes it any longer, and returns its row; a Ctrl+C asks for its stop
     /// rather than abandoning it. The run is observed by the runtime, never by this wait.
     /// </summary>
-    public static RunRow? Follow(IEstateApi api, string run, string by)
+    public static RunRow? Follow(CommandContext context, IEstateApi api, string run, string by)
     {
-        int stopping = 0;
-        void Interrupt(object? sender, ConsoleCancelEventArgs e)
-        {
-            e.Cancel = true;
-            if (Interlocked.Exchange(ref stopping, 1) == 0)
-            {
-                ThreadPool.QueueUserWorkItem(_ => api.RunStop(run, new RunStopRequest(by, "interrupted at the command line")));
-            }
-        }
-
-        Console.CancelKeyPress += Interrupt;
+        Task? stopping = null;
+        using IDisposable interrupt = context.HandleInterrupt(() =>
+            stopping ??= api.RunStopAsync(run, new RunStopRequest(by, "interrupted at the command line"), context.CancellationToken));
         try
         {
             RunRow? row = null;
             int unobserved = 0;
             while (unobserved < 5)
             {
-                Thread.Sleep(1000);
+                Task.Delay(1000, context.CancellationToken).GetAwaiter().GetResult();
+                stopping?.GetAwaiter().GetResult();
                 row = api.Runs().Runs.FirstOrDefault(r => r.Run == run);
                 if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
                 {
@@ -46,7 +39,8 @@ internal static class RunConsole
         }
         finally
         {
-            Console.CancelKeyPress -= Interrupt;
+            // Observe a stop request even if the follow loop settles at the same moment.
+            stopping?.GetAwaiter().GetResult();
         }
     }
 

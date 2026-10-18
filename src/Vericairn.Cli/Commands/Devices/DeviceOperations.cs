@@ -78,7 +78,7 @@ internal sealed class DeviceOperations(CommandContext context)
     /// <summary>Issues a pairing code through the daemon serving the estate, which holds pending codes in its memory and serves the exchange.</summary>
     public int DevicesPair(string root, string principal, string by, string[] profiles, bool json) => context.WithDaemon(root, "pairing", client =>
     {
-        (PairingIssued? issued, Problem? problem) = client.IssuePairing(new PairingIssueRequest(principal, by, profiles.Length == 0 ? null : profiles));
+        (PairingIssued? issued, Problem? problem) = client.IssuePairingAsync(new PairingIssueRequest(principal, by, profiles.Length == 0 ? null : profiles), context.CancellationToken).GetAwaiter().GetResult();
         if (issued is null)
         {
             return context.Fail(problem?.Message ?? "No pairing code was issued.");

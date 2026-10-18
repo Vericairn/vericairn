@@ -159,6 +159,18 @@ public static class CommunicationPresentation
         return derivation.Derive(recipient);
     }
 
+    /// <summary>Reads required attention without blocking the caller, reusing one progress observation for this refresh.</summary>
+    public static Task<IReadOnlyList<CommunicationAttention>> AttentionAsync(IEstateApi api, string? recipient = null,
+        ProgressResponse? progress = null, bool progressObserved = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        return ClientOperation.RunAsync("Attention", token => Task.Run(() =>
+        {
+            var bound = new CancellationBoundApi(api, token);
+            return Attention(bound, recipient, () => progress ?? (progressObserved ? throw new InvalidOperationException("Progress was unavailable in this observation.") : bound.Progress()));
+        }, token), false, cancellationToken: cancellationToken);
+    }
+
     /// <summary>Render every attention item, independent of any frequency or depth.</summary>
     public static string RenderAttention(IReadOnlyList<CommunicationAttention> attention) => attention.Count == 0 ? string.Empty :
         "\nRequired attention (every frequency):\n" + string.Join('\n', attention.Select(a => a.Kind + ": " + a.Text));

@@ -41,7 +41,19 @@ public sealed class RuntimeConnections
     public RuntimeConnection Add(string address, string code, PairingOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
-        PairedRuntime paired = RuntimePairing.Pair(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys });
+        return Keep(RuntimePairing.Pair(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys }));
+    }
+
+    /// <summary>Pairs and keeps a connection asynchronously. Interruption does not claim that a remote admission was undone.</summary>
+    public async Task<RuntimeConnection> AddAsync(string address, string code, PairingOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        PairedRuntime paired = await RuntimePairing.PairAsync(address, code, keys is null || options.KeyStore is not null ? options : options with { KeyStore = keys }, cancellationToken).ConfigureAwait(false);
+        return Keep(paired);
+    }
+
+    private RuntimeConnection Keep(PairedRuntime paired)
+    {
         var connection = new RuntimeConnection(Ulid.NewUlid().Value, paired.Address, paired.Estate, paired.EstateName, paired.Identity, paired.Device, paired.DevicePublicKey, paired.Principal, paired.PrincipalName, paired.Profiles, RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
         Save(connection);
         foreach (RuntimeConnection earlier in List().Where(c => c.Id != connection.Id && c.Estate == connection.Estate && (c.Identity != connection.Identity || c.Principal == connection.Principal)))
@@ -114,9 +126,17 @@ public sealed class RuntimeConnections
     /// the check came to: current when the runtime proved the paired identity, accepted the device and answered its reads; partial
     /// when it answered some; denied when it refused the device; otherwise cached when an earlier check was current, or unavailable.
     /// </summary>
-    public ConnectionStatus Probe(RuntimeConnection connection, TimeSpan? timeout = null, Action<string>? progress = null)
+    public ConnectionStatus Probe(RuntimeConnection connection, TimeSpan? timeout = null, Action<string>? progress = null) =>
+        ProbeCoreAsync(connection, timeout, progress, preserveInterruption: false, CancellationToken.None).GetAwaiter().GetResult();
+
+    /// <summary>Checks a connection without blocking, distinguishing caller cancellation and deadline from a completed observation.</summary>
+    public Task<ConnectionStatus> ProbeAsync(RuntimeConnection connection, TimeSpan? timeout = null, Action<string>? progress = null, CancellationToken cancellationToken = default) =>
+        ProbeCoreAsync(connection, timeout, progress, preserveInterruption: true, cancellationToken);
+
+    private async Task<ConnectionStatus> ProbeCoreAsync(RuntimeConnection connection, TimeSpan? timeout, Action<string>? progress, bool preserveInterruption, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (cancellationToken.IsCancellationRequested) throw new ClientCancelledException(false, cancellationToken);
         progress?.Invoke(ConnectionStates.Connecting);
         bool answered = false;
         bool denied = false;
@@ -132,12 +152,12 @@ public sealed class RuntimeConnections
             try
             {
                 using VericairnClient client = VericairnClient.LocalNetwork(connection, signer, timeout ?? DefaultTimeout);
-                HealthResponse health = client.Health();
+                HealthResponse health = preserveInterruption ? await client.HealthAsync(cancellationToken).ConfigureAwait(false) : client.Health();
                 answered = true;
                 message = $"Vericairn {health.Vericairn} serving {connection.EstateName ?? health.Estate} at {connection.Address}; the runtime proved its identity.";
                 try
                 {
-                    _ = client.Status();
+                    _ = preserveInterruption ? await client.StatusAsync(cancellationToken).ConfigureAwait(false) : client.Status();
                     complete = true;
                 }
                 catch (HttpRequestException exception) when (exception.StatusCode == HttpStatusCode.Unauthorized)
@@ -145,10 +165,20 @@ public sealed class RuntimeConnections
                     denied = true;
                     message = $"The runtime refused device {connection.Device} while it was being read.";
                 }
-                catch (Exception exception) when (exception is HttpRequestException or IOException or TaskCanceledException or JsonException)
+                catch (Exception exception) when (preserveInterruption && ClientFailure.FromException(exception) is { Code: "refused" } refusal)
+                {
+                    denied = true;
+                    message = refusal.Message;
+                }
+                catch (Exception exception) when (exception is HttpRequestException or IOException or JsonException || (!preserveInterruption && exception is TaskCanceledException))
                 {
                     message = $"The runtime proved its identity and accepted device {connection.Device}, but did not answer every read: {exception.Message}";
                 }
+            }
+            catch (Exception exception) when (preserveInterruption && ClientFailure.FromException(exception) is { Code: "refused" } refusal)
+            {
+                denied = true;
+                message = refusal.Message;
             }
             catch (Exception exception) when (Refusal(exception) is RuntimeConnectionException refusal)
             {
@@ -160,7 +190,7 @@ public sealed class RuntimeConnections
                 denied = true;
                 message = $"The runtime refused device {connection.Device}.";
             }
-            catch (Exception exception) when (exception is HttpRequestException or IOException or SocketException or TaskCanceledException or AuthenticationException or JsonException)
+            catch (Exception exception) when (exception is HttpRequestException or IOException or SocketException or AuthenticationException or JsonException || (!preserveInterruption && exception is TaskCanceledException))
             {
                 message = $"No answer from the runtime at {connection.Address}: {exception.Message}";
             }

@@ -19,8 +19,41 @@ namespace Vericairn.Cli;
 /// The options, output and API lifetime shared by a command tree. An estate operation uses its daemon when available,
 /// otherwise the embedded runtime; both are disposed after the handler returns.
 /// </summary>
-internal sealed class CommandContext(TextWriter? output = null, TextWriter? error = null)
+internal sealed class CommandContext(TextWriter? output = null, TextWriter? error = null, CancellationToken cancellationToken = default)
 {
+    private ClientBoundary? boundary;
+
+    public bool UsingDaemon { get; private set; }
+
+    public CancellationToken CancellationToken => boundary?.Token ?? cancellationToken;
+
+    public int Invoke(Func<int> action)
+    {
+        using var invocation = new ClientBoundary(Error, cancellationToken);
+        boundary = invocation;
+        try { return invocation.Invoke(action); }
+        finally { boundary = null; }
+    }
+
+    public IDisposable HandleInterrupt(Action action) =>
+        (boundary ?? throw new InvalidOperationException("No command is running.")).HandleInterrupt(action);
+
+    public bool IsAlive(DaemonEndpoint endpoint)
+    {
+        try
+        {
+            using var client = new VericairnClient(endpoint);
+            return client.HealthAsync(CancellationToken).GetAwaiter().GetResult().Api == ApiVersion.Current;
+        }
+        // An unreachable or unanswering daemon is not alive, as before the client boundary wrapped transport failures: the command
+        // falls back to the embedded runtime. A person's cancellation still propagates.
+        catch (Exception exception) when (exception is HttpRequestException or IOException or System.Net.Sockets.SocketException or JsonException or UnauthorizedAccessException
+            or ClientUnavailableException or ClientTimeoutException)
+        {
+            return false;
+        }
+    }
+
     internal const int Clean = 0;
     internal const int HasErrors = 1;
     internal const int Failed = 2;
@@ -55,16 +88,18 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             }
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
+            if (endpoint is not null && IsAlive(endpoint))
             {
                 using var client = new VericairnClient(endpoint);
-                return operation(client);
+                UsingDaemon = true;
+                return operation(new CancellationBoundApi(client, CancellationToken));
             }
 
             using EstateService service = EstateService.Open(root);
-            return operation(service);
+            UsingDaemon = false;
+            return operation(new CancellationBoundApi(service, CancellationToken));
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException) && exception is not IClientOperationFailure)
         {
             return Fail(exception.Message);
         }
@@ -81,7 +116,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             }
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is null || !VericairnClient.IsAlive(endpoint))
+            if (endpoint is null || !IsAlive(endpoint))
             {
                 return Fail($"No daemon is serving this estate, and {purpose} needs one: configure the local-network profile with 'vericairn runtime configure --local-network <address:port>' and start the runtime with 'vericairn runtime start'.");
             }
@@ -89,7 +124,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             using var client = new VericairnClient(endpoint);
             return operation(client);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException) && exception is not IClientOperationFailure)
         {
             return Fail(exception.Message);
         }

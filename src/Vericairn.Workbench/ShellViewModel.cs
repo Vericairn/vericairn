@@ -49,6 +49,8 @@ public sealed partial class ShellViewModel : Observable
 
     internal ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences, ReleaseUpdates updates)
     {
+        RefreshCommand = new AsyncCommand(() => RefreshAsync(), () => !IsBusy);
+        CancelCommand = new AsyncCommand(() => { CancelCurrentRequest(); return Task.CompletedTask; }, () => IsBusy);
         this.connect = connect;
         this.runtime = runtime;
         this.preferences = preferences;
@@ -120,8 +122,7 @@ public sealed partial class ShellViewModel : Observable
                     ActingOverride = null;
                 }
 
-                DescribeActing();
-                RefreshCommunication();
+                _ = RefreshActingAsync();
             }
         }
     }
@@ -138,7 +139,7 @@ public sealed partial class ShellViewModel : Observable
             if (Set(ref selectedRegion, value) && value is not null)
             {
                 Raise(nameof(HomeSelected));
-                ShowRegion(value);
+                _ = SelectRegionAsync(value);
             }
         }
     }
@@ -232,7 +233,7 @@ public sealed partial class ShellViewModel : Observable
     public bool BottomVisible => layout.BottomVisible;
 
     /// <summary>Opens an estate: connects, starts the daemon when none answers, and refreshes.</summary>
-    public async Task OpenEstateAsync(string root)
+    private async Task OpenEstateCoreAsync(string root, CancellationToken cancellationToken = default)
     {
         root = root.Trim();
         if (string.IsNullOrEmpty(root))
@@ -249,11 +250,12 @@ public sealed partial class ShellViewModel : Observable
 
         connection?.Dispose();
         connection = connect(root);
+        await connection.RefreshAsync(cancellationToken).ConfigureAwait(true);
         Log($"opened {root}: {connection.Mode}");
         if (connection.Api is null)
         {
             Status = "No daemon answers for this estate; starting the runtime.";
-            await StartRuntimeCoreAsync().ConfigureAwait(true);
+            await StartRuntimeCoreAsync(cancellationToken).ConfigureAwait(true);
         }
 
         preferences.Remember(root);
@@ -262,25 +264,26 @@ public sealed partial class ShellViewModel : Observable
             Recent.Insert(0, root);
         }
 
-        Refresh();
+        await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
         Raise(nameof(HasEstate));
     }
 
     /// <summary>Refreshes every view from the runtime.</summary>
-    public void Refresh()
+    private async Task RefreshCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection is null)
         {
             return;
         }
 
-        connection.Refresh();
+        await connection.RefreshAsync(cancellationToken).ConfigureAwait(true);
         Raise(nameof(RuntimeMode));
         Raise(nameof(RuntimeLabel));
         Raise(nameof(RuntimeWhere));
         if (connection.Api is null)
         {
             Status = $"{connection.Root}: {StateLanguage.Label("runtime", "unavailable")}; the last view is kept as cached.";
+            RequestState = "unavailable";
             Freshness = "cached";
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
@@ -291,7 +294,7 @@ public sealed partial class ShellViewModel : Observable
 
         try
         {
-            StatusResponse response = connection.Api.Status();
+            StatusResponse response = (await connection.Api.StatusAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
             LastPersonObservation = response.Json.TryGetProperty("lastObservedByPerson", out JsonElement observed) && observed.ValueKind == JsonValueKind.Object
                 ? $"Last observed by a person: {Str(observed, "at")} · {Str(observed, "name") ?? Str(observed, "by")} · observation {Str(observed, "record")}."
                 : "Last observed by a person: unknown (no estate observation recorded).";
@@ -304,7 +307,7 @@ public sealed partial class ShellViewModel : Observable
             {
                 if (page.HasPackage)
                 {
-                    page.Compare();
+                    await page.CompareAsync(cancellationToken).ConfigureAwait(true);
                 }
             }
             Replace(WorkOrders, estate.WorkOrders);
@@ -312,24 +315,24 @@ public sealed partial class ShellViewModel : Observable
             Replace(Releases, estate.Releases);
             foreach (LivingDocumentsWorkspace page in Documents.OfType<LivingDocumentsWorkspace>().ToList())
             {
-                page.Fill(Try(() => connection.Api.Documents()) ?? []);
+                page.Fill((await TryAsync(async () => (await connection.Api.DocumentsAsync(cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true)) ?? []);
             }
 
             foreach (ReleaseWorkspace page in Documents.OfType<ReleaseWorkspace>().ToList())
             {
-                FillRelease(page);
+                await FillReleaseAsync(page, cancellationToken: cancellationToken).ConfigureAwait(true);
             }
 
             foreach (RuntimeDocument page in Documents.OfType<RuntimeDocument>().ToList())
             {
-                FillRuntime(page);
+                await FillRuntimeAsync(page, cancellationToken: cancellationToken).ConfigureAwait(true);
             }
 
             foreach (GoalsWorkspace page in Documents.OfType<GoalsWorkspace>().ToList())
             {
-                page.Fill();
+                await page.FillAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
             }
-            IReadOnlyList<DeviceRow> devices = connection.Api.Devices();
+            IReadOnlyList<DeviceRow> devices = (await connection.Api.DevicesAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
             List<DeviceRow> held = devices.Where(d => d.HeldHere && d.Admission.StartsWith("admitted", StringComparison.OrdinalIgnoreCase)).ToList();
             string? previous = selectedActing?.Id;
             choosingActing = true;
@@ -349,22 +352,23 @@ public sealed partial class ShellViewModel : Observable
                 choosingActing = false;
             }
 
-            RecordResponse? principal = DescribeActing();
+            RecordResponse? principal = (await DescribeActingAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
             string? recipient = HumanRecipient(principal);
-            RefreshCommunication(response, recipient);
+            await RefreshCommunicationAsync(response, recipient, cancellationToken: cancellationToken).ConfigureAwait(true);
             // Home and required attention use the same observation, including its failure. A second fetch used to repeat
             // the full estate load just to present the same report under the now-known communication settings.
-            var progress = new Lazy<ProgressResponse>(connection.Api.Progress);
-            FillProgress(Try(() => progress.Value));
-            AddCommunicationAttention(recipient, () => progress.Value);
+            ProgressResponse? progress = await TryAsync(() => connection.Api.ProgressAsync(cancellationToken)).ConfigureAwait(true);
+            FillProgress(progress);
+            await AddCommunicationAttentionAsync(recipient, progress, cancellationToken: cancellationToken).ConfigureAwait(true);
             Status = $"{estate.Name}: {estate.Records} records, {Attention.Count} attention items, {StateLanguage.Label("runtime", connection.Mode)}.";
             Raise(nameof(EstateName));
             Raise(nameof(Pin));
-            ShowRegion(SelectedRegion);
+            await ShowRegionAsync(SelectedRegion, cancellationToken: cancellationToken).ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Status = "The runtime did not answer: " + exception.Message;
+            RequestState = "unavailable";
             Freshness = "cached";
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
@@ -373,7 +377,7 @@ public sealed partial class ShellViewModel : Observable
         }
     }
 
-    private RecordResponse? DescribeActing()
+    private async Task<RecordResponse?> DescribeActingAsync(CancellationToken cancellationToken = default)
     {
         string? id = ActingPrincipalId;
         if (id is null)
@@ -389,7 +393,7 @@ public sealed partial class ShellViewModel : Observable
         try
         {
             // A principal is identified by its first record; its name and roles are those of its current revision.
-            principal = connection?.Api is IEstateApi api ? CurrentPrincipal(api, id) : null;
+            principal = connection?.Api is IEstateApi api ? (await CurrentPrincipalAsync(api, id, cancellationToken: cancellationToken).ConfigureAwait(true)) : null;
             if (principal is not null && principal.Envelope.TryGetProperty("body", out JsonElement body))
             {
                 name = body.TryGetProperty("name", out JsonElement n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? name : name;
@@ -399,14 +403,14 @@ public sealed partial class ShellViewModel : Observable
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("principal lookup failed: " + exception.Message);
         }
 
         ActingPrincipal = selectedActing is not null && selectedActing.Principal == id
             ? $"{name} (device {selectedActing.Name ?? selectedActing.Id})"
-            : SignaturesRequired()
+            : (await SignaturesRequiredAsync(cancellationToken: cancellationToken).ConfigureAwait(true))
                 ? $"{name} (named with --as; no admitted device of this principal is held here, so writes will be refused)"
                 : $"{name} (named with --as; no device of this principal is held here, so its records will be unsigned)";
         Raise(nameof(ActingPrincipalId));
@@ -414,11 +418,11 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Whether the estate's current policy requires every record to be signed, read as the runtime reads it.</summary>
-    private bool SignaturesRequired()
+    private async Task<bool> SignaturesRequiredAsync(CancellationToken cancellationToken = default)
     {
         try
         {
-            IReadOnlyList<RecordResponse> charters = connection?.Api?.Records("estate") ?? [];
+            IReadOnlyList<RecordResponse> charters = connection?.Api is IEstateApi current ? (await current.RecordsAsync("estate", cancellationToken).ConfigureAwait(true)) : [];
             RecordResponse? charter = charters.Count > 0 ? charters[0] : null;
             return charter is not null
                 && charter.Envelope.TryGetProperty("body", out JsonElement body)
@@ -427,7 +431,7 @@ public sealed partial class ShellViewModel : Observable
                 && policy.ValueKind == JsonValueKind.String
                 && policy.GetString() == "required";
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("estate policy lookup failed: " + exception.Message);
             return true;
@@ -435,9 +439,9 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>The current revision of the principal whose identity, the id of its first record, is given; or null.</summary>
-    internal static RecordResponse? CurrentPrincipal(IEstateApi api, string identity)
+    internal static async Task<RecordResponse?> CurrentPrincipalAsync(IEstateApi api, string identity, CancellationToken cancellationToken = default)
     {
-        foreach (RecordResponse candidate in api.Records("principal"))
+        foreach (RecordResponse candidate in (await api.RecordsAsync("principal", cancellationToken: cancellationToken).ConfigureAwait(true)))
         {
             string first = candidate.Id;
             string? earlier = Supersedes(candidate.Envelope);
@@ -445,7 +449,7 @@ public sealed partial class ShellViewModel : Observable
             while (earlier is not null && seen.Add(earlier))
             {
                 first = earlier;
-                earlier = api.Record(earlier) is RecordResponse previous ? Supersedes(previous.Envelope) : null;
+                earlier = (await api.RecordAsync(earlier, cancellationToken: cancellationToken).ConfigureAwait(true)) is RecordResponse previous ? Supersedes(previous.Envelope) : null;
             }
 
             if (first == identity)
@@ -461,45 +465,45 @@ public sealed partial class ShellViewModel : Observable
         envelope.TryGetProperty("supersedes", out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
 
     /// <summary>Starts the daemon through the runtime manager and reconnects.</summary>
-    public async Task StartRuntimeAsync()
+    private async Task StartRuntimeCommandCoreAsync(CancellationToken cancellationToken = default)
     {
-        await StartRuntimeCoreAsync().ConfigureAwait(true);
-        Refresh();
+        await StartRuntimeCoreAsync(cancellationToken).ConfigureAwait(true);
+        await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
-    private async Task StartRuntimeCoreAsync()
+    private async Task StartRuntimeCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection is null)
         {
             return;
         }
 
-        RuntimeOutcome outcome = await runtime.StartAsync(connection.Root).ConfigureAwait(true);
+        RuntimeOutcome outcome = await runtime.StartAsync(connection.Root, cancellationToken).ConfigureAwait(true);
         Log($"runtime start: {(outcome.Ok ? "answered" : "did not answer")}: {outcome.Output}");
     }
 
     /// <summary>Asks the daemon to stop and refreshes.</summary>
-    public async Task StopRuntimeAsync()
+    private async Task StopRuntimeCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection is null)
         {
             return;
         }
 
-        RuntimeOutcome outcome = await runtime.StopAsync(connection.Root).ConfigureAwait(true);
+        RuntimeOutcome outcome = await runtime.StopAsync(connection.Root, cancellationToken).ConfigureAwait(true);
         Log($"runtime stop: {outcome.Output}");
-        Refresh();
+        await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>Shows the install plan without installing; the runtime workspace, when open, records that the plan was shown.</summary>
-    public async Task ShowInstallPlanAsync()
+    private async Task ShowInstallPlanCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection is null)
         {
             return;
         }
 
-        RuntimeOutcome outcome = await runtime.InstallPlanAsync(connection.Root).ConfigureAwait(true);
+        RuntimeOutcome outcome = await runtime.InstallPlanAsync(connection.Root, cancellationToken).ConfigureAwait(true);
         if (Documents.OfType<RuntimeDocument>().FirstOrDefault() is RuntimeDocument page)
         {
             page.Plan = outcome.Output;
@@ -514,9 +518,9 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Installs the per-user service, after the plan was shown in the runtime workspace.</summary>
-    public async Task InstallRuntimeAsync()
+    private async Task InstallRuntimeCoreAsync(CancellationToken cancellationToken = default)
     {
-        RuntimeDocument page = OpenRuntime();
+        RuntimeDocument page = (await OpenRuntimeCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
         if (connection is null)
         {
             return;
@@ -529,16 +533,16 @@ public sealed partial class ShellViewModel : Observable
             return;
         }
 
-        RuntimeOutcome outcome = await runtime.InstallAsync(connection.Root).ConfigureAwait(true);
+        RuntimeOutcome outcome = await runtime.InstallAsync(connection.Root, cancellationToken).ConfigureAwait(true);
         page.Output = outcome.Output;
         Log($"runtime install: {(outcome.Ok ? "done" : "failed")}: {outcome.Output}");
-        Refresh();
+        await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>Removes the per-user service, after the plan was shown in the runtime workspace.</summary>
-    public async Task UninstallRuntimeAsync()
+    private async Task UninstallRuntimeCoreAsync(CancellationToken cancellationToken = default)
     {
-        RuntimeDocument page = OpenRuntime();
+        RuntimeDocument page = (await OpenRuntimeCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
         if (connection is null)
         {
             return;
@@ -551,52 +555,51 @@ public sealed partial class ShellViewModel : Observable
             return;
         }
 
-        RuntimeOutcome outcome = await runtime.UninstallAsync(connection.Root).ConfigureAwait(true);
+        RuntimeOutcome outcome = await runtime.UninstallAsync(connection.Root, cancellationToken).ConfigureAwait(true);
         page.Output = outcome.Output;
         Log($"runtime uninstall: {(outcome.Ok ? "done" : "failed")}: {outcome.Output}");
-        Refresh();
+        await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>Opens or refreshes the runtime workspace.</summary>
-    public RuntimeDocument OpenRuntime()
+    private async Task<RuntimeDocument> OpenRuntimeCoreAsync(CancellationToken cancellationToken = default)
     {
         RuntimeDocument page = Documents.OfType<RuntimeDocument>().FirstOrDefault() ?? new RuntimeDocument();
-        FillRuntime(page);
+        await FillRuntimeAsync(page, cancellationToken: cancellationToken).ConfigureAwait(true);
         Open(page);
         return page;
     }
 
-    private void FillRuntime(RuntimeDocument page)
+    private async Task FillRuntimeAsync(RuntimeDocument page, CancellationToken cancellationToken = default)
     {
         page.Label = RuntimeLabel;
         page.Where = RuntimeWhere;
         page.Acting = ActingPrincipal;
-        HealthResponse? health = connection?.Api is null ? null : Try(() => connection.Api.Health());
+        HealthResponse? health = connection?.Api is null ? null : (await TryAsync(async () => (await connection.Api.HealthAsync(cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true));
         page.Health = health is null ? "No daemon answers." : $"API {health.Api}; Vericairn {health.Vericairn}; estate {health.Estate}; profile {health.Profile}; record format {health.RecordFormat}; started {health.StartedAt}; process {health.ProcessId}.";
     }
 
     /// <summary>Opens or refreshes the whole progress report as the runtime renders it (GET /v1/progress), each line naming the records it rests on.</summary>
-    public ProgressDocument OpenProgress()
+    private async Task<ProgressDocument> OpenProgressCoreAsync(CancellationToken cancellationToken = default)
     {
         ProgressDocument page = Documents.OfType<ProgressDocument>().FirstOrDefault() ?? new ProgressDocument();
         Open(page);
-        FillProgress(connection?.Api is IEstateApi api ? Try(api.Progress) : null);
+        FillProgress(connection?.Api is IEstateApi api ? (await TryAsync(() => api.ProgressAsync(cancellationToken)).ConfigureAwait(true)) : null);
         Inspector = page.Text == ProgressDocument.Unavailable ? page.Text : "The estate's recorded progress and latest local agent claims, labelled separately from worker observations. F5 refreshes it.";
         return page;
     }
 
     /// <summary>Polls progress claims, worker observations and attention without replacing the user's open editing documents.</summary>
-    public void RefreshProgress()
+    private async Task RefreshProgressCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection?.Api is IEstateApi api)
         {
-            var observedProgress = new Lazy<ProgressResponse>(api.Progress);
-            ProgressResponse? progress = Try(() => observedProgress.Value);
-            RefreshCommunication();
+            ProgressResponse? progress = await TryAsync(() => api.ProgressAsync(cancellationToken)).ConfigureAwait(true);
+            await RefreshCommunicationAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
             FillProgress(progress, onDemand: false);
             Replace(Attention, estate.Attention);
 
-            AddCommunicationAttention(CommunicationRecipient(), () => observedProgress.Value);
+            await AddCommunicationAttentionAsync((await CommunicationRecipientAsync(cancellationToken: cancellationToken).ConfigureAwait(true)), progress, cancellationToken: cancellationToken).ConfigureAwait(true);
             if (progress is null)
             {
                 Attention.Add(new AttentionItem("unknown-check", "Progress unavailable", "The runtime did not answer the progress read.", "unknown",
@@ -606,13 +609,13 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Open the hand-over and resume page, preparing its first package only; reopening never replaces its retained basis.</summary>
-    public HandoffDocument OpenHandoff()
+    private async Task<HandoffDocument> OpenHandoffCoreAsync(CancellationToken cancellationToken = default)
     {
         HandoffDocument? page = Documents.OfType<HandoffDocument>().FirstOrDefault();
         if (page is null)
         {
             page = new HandoffDocument(() => connection?.Api, () => communication);
-            page.Prepare();
+            await page.PrepareAsync(cancellationToken).ConfigureAwait(true);
         }
 
         // The work page uses the full document area; Home's summary remains available through navigation.
@@ -627,7 +630,7 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Explicitly record an observation by the selected person, through the runtime; a refresh alone never does this.</summary>
-    public void ObserveEstate()
+    private async Task ObserveEstateCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection?.Api is not { } api || ActingPrincipalId is not { } by)
         {
@@ -635,11 +638,11 @@ public sealed partial class ShellViewModel : Observable
             return;
         }
 
-        WriteOutcome? result = Try(() => api.ObserveEstate(new EstateObserveRequest(by)));
+        WriteOutcome? result = (await TryAsync(async () => (await api.ObserveEstateAsync(new EstateObserveRequest(by), cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true));
         if (result?.Written is { } written)
         {
             Log("person observed estate: " + written.Id);
-            Refresh();
+            await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
             Status = "Observation recorded: " + written.Id
                 + (result.Problem is { } problem ? "\n" + problem.Message : string.Empty);
         }
@@ -664,37 +667,37 @@ public sealed partial class ShellViewModel : Observable
     /// verdicts, its plan and steps with the principal each reaches, spend against its budget, its asks and its evaluations. It shows;
     /// it activates, accepts, funds and answers nothing.
     /// </summary>
-    public GoalsWorkspace OpenGoals(string? goal = null)
+    private async Task<GoalsWorkspace> OpenGoalsCoreAsync(string? goal = null, CancellationToken cancellationToken = default)
     {
-        GoalsWorkspace page = Documents.OfType<GoalsWorkspace>().FirstOrDefault() ?? new GoalsWorkspace(() => connection?.Api);
-        page.Fill(goal);
+        GoalsWorkspace page = Documents.OfType<GoalsWorkspace>().FirstOrDefault() ?? new GoalsWorkspace(() => connection?.Api, action => RunCommandAsync("Read goal", action));
+        await page.FillAsync(goal, cancellationToken).ConfigureAwait(true);
         Open(page);
         Inspector = "The Goals workspace: each goal's objective, conditions, steps and the principal each reaches from the runtime's machine, spend, asks and evaluations. Activation, acceptance, funding and answers are the sponsor's or an operator's, through the command line. F5 refreshes it.";
         return page;
     }
 
     /// <summary>Opens or refreshes the Documents page: the declared living documents with their state and a review of one.</summary>
-    public LivingDocumentsWorkspace OpenLivingDocuments()
+    private async Task<LivingDocumentsWorkspace> OpenLivingDocumentsCoreAsync(CancellationToken cancellationToken = default)
     {
         LivingDocumentsWorkspace page = Documents.OfType<LivingDocumentsWorkspace>().FirstOrDefault() ?? new LivingDocumentsWorkspace();
-        page.Fill(Try(() => connection?.Api?.Documents() ?? []) ?? []);
+        page.Fill((await TryAsync(async () => connection?.Api is IEstateApi current ? (await current.DocumentsAsync(cancellationToken).ConfigureAwait(true)) : []).ConfigureAwait(true)) ?? []);
         Open(page);
         return page;
     }
 
     /// <summary>Opens or refreshes the release workspace.</summary>
-    public ReleaseWorkspace OpenRelease()
+    private async Task<ReleaseWorkspace> OpenReleaseCoreAsync(CancellationToken cancellationToken = default)
     {
-        ReleaseWorkspace page = Documents.OfType<ReleaseWorkspace>().FirstOrDefault() ?? new ReleaseWorkspace(ProductRows(), (Try(() => connection?.Api?.Providers() ?? []) ?? []).Where(p => p.Kind == "release").ToList());
-        FillRelease(page);
+        ReleaseWorkspace page = Documents.OfType<ReleaseWorkspace>().FirstOrDefault() ?? new ReleaseWorkspace((await ProductRowsAsync(cancellationToken: cancellationToken).ConfigureAwait(true)), ((await TryAsync(async () => connection?.Api is IEstateApi current ? (await current.ProvidersAsync(cancellationToken).ConfigureAwait(true)) : []).ConfigureAwait(true)) ?? []).Where(p => p.Kind == "release").ToList());
+        await FillReleaseAsync(page, cancellationToken: cancellationToken).ConfigureAwait(true);
         Open(page);
         return page;
     }
 
-    private void FillRelease(ReleaseWorkspace page)
+    private async Task FillReleaseAsync(ReleaseWorkspace page, CancellationToken cancellationToken = default)
     {
         var rows = new List<DestinationRow>();
-        foreach (RecordResponse operation in Try(() => connection?.Api?.Records("operation") ?? []) ?? [])
+        foreach (RecordResponse operation in (await TryAsync(async () => connection?.Api is IEstateApi current ? (await current.RecordsAsync("operation", cancellationToken).ConfigureAwait(true)) : []).ConfigureAwait(true)) ?? [])
         {
             JsonElement body = operation.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             if (Str(body, "action") != "dispatch-release-workflow")
@@ -743,10 +746,10 @@ public sealed partial class ShellViewModel : Observable
         page.Selected = rows.FirstOrDefault(r => r.Identity == selectedIdentity) ?? rows.LastOrDefault();
     }
 
-    private List<ProductRow> ProductRows()
+    private async Task<List<ProductRow>> ProductRowsAsync(CancellationToken cancellationToken = default)
     {
         var rows = new List<ProductRow>();
-        foreach (RecordResponse product in Try(() => connection?.Api?.Records("product") ?? []) ?? [])
+        foreach (RecordResponse product in (await TryAsync(async () => connection?.Api is IEstateApi current ? (await current.RecordsAsync("product", cancellationToken).ConfigureAwait(true)) : []).ConfigureAwait(true)) ?? [])
         {
             JsonElement body = product.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             string? releaseProvider = null;
@@ -774,40 +777,40 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Opens the subject of an attention item as a document.</summary>
-    public void OpenAttention(AttentionItem item)
+    private async Task OpenAttentionCoreAsync(AttentionItem item, CancellationToken cancellationToken = default)
     {
         Inspect(item);
         if (item.SubjectType == "work-order" && item.SubjectId is not null)
         {
-            OpenWorkOrder(item.SubjectId);
+            await OpenWorkOrderCoreAsync(item.SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true);
         }
         else if (item.SubjectType == "ask" && item.SubjectId is not null)
         {
             // An ask opens in the Goals workspace of its goal, where its recommendation sits beside the steps it holds; one with no goal opens as its record.
-            IReadOnlyList<RecordResponse> asks = Try(() => connection?.Api?.Record(item.SubjectId) is RecordResponse record ? [record] : (IReadOnlyList<RecordResponse>)[]) ?? [];
+            IReadOnlyList<RecordResponse> asks = (await TryAsync(async () => (connection?.Api is IEstateApi current ? (await current.RecordAsync(item.SubjectId, cancellationToken).ConfigureAwait(true)) : null) is RecordResponse record ? [record] : (IReadOnlyList<RecordResponse>)[]).ConfigureAwait(true)) ?? [];
             string? goal = asks.Count == 1 && asks[0].Envelope.TryGetProperty("body", out JsonElement body) ? Str(body, "goal") : null;
             if (goal is not null)
             {
-                OpenGoals(goal);
+                await OpenGoalsCoreAsync(goal, cancellationToken: cancellationToken).ConfigureAwait(true);
                 Inspect(item);
             }
             else
             {
-                OpenRecord(item.SubjectId);
+                await OpenRecordCoreAsync(item.SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true);
             }
         }
         else if (item.SubjectType == "result" && item.SubjectId is not null)
         {
-            OpenReview(item.SubjectId);
+            await OpenReviewCoreAsync(item.SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true);
         }
         else if (item.SubjectId is not null)
         {
-            OpenRecord(item.SubjectId);
+            await OpenRecordCoreAsync(item.SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true);
         }
     }
 
     /// <summary>Opens a work order's page: brief, assignments, attempts and results.</summary>
-    public void OpenWorkOrder(string keyOrId)
+    private async Task OpenWorkOrderCoreAsync(string keyOrId, CancellationToken cancellationToken = default)
     {
         Log($"open work order {keyOrId}");
         if (connection?.Api is null)
@@ -817,8 +820,8 @@ public sealed partial class ShellViewModel : Observable
 
         try
         {
-            ObserveResponse? observed = connection.Api.Observe(keyOrId);
-            BriefResponse? brief = connection.Api.BriefFor(keyOrId, CommunicationRecipient());
+            ObserveResponse? observed = (await connection.Api.ObserveAsync(keyOrId, cancellationToken: cancellationToken).ConfigureAwait(true));
+            BriefResponse? brief = (await connection.Api.BriefForAsync(keyOrId, (await CommunicationRecipientAsync(cancellationToken: cancellationToken).ConfigureAwait(true)), cancellationToken: cancellationToken).ConfigureAwait(true));
             if (brief?.Problem is not null)
             {
                 Open(new TextDocument(keyOrId, brief.Markdown + "\n" + AssignmentComposer.Refusal(brief.Problem), "refused"));
@@ -834,14 +837,14 @@ public sealed partial class ShellViewModel : Observable
             string key = brief.Json.TryGetProperty("workOrder", out JsonElement o) && o.TryGetProperty("body", out JsonElement b) && b.TryGetProperty("key", out JsonElement k) ? k.GetString() ?? keyOrId : keyOrId;
             Open(new WorkOrderDocument(key, brief.Json, CommunicationPresentation.Protected(communication, "result", key, "Complete work and result observations.", observed.Text), CommunicationPresentation.Describe(communication)));
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("observe failed: " + exception.Message);
         }
     }
 
     /// <summary>Opens an assignment's page: the brief as delegated, the attempts and their results.</summary>
-    public AssignmentDocument? OpenAssignment(string assignmentId)
+    private async Task<AssignmentDocument?> OpenAssignmentCoreAsync(string assignmentId, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
@@ -849,7 +852,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         AssignmentRow? row = Assignments.FirstOrDefault(a => a.Id == assignmentId);
-        BriefResponse? brief = row is null ? null : Try(() => connection.Api.Brief(row.Key) ?? new BriefResponse(string.Empty, default));
+        BriefResponse? brief = row is null ? null : (await TryAsync(async () => (await connection.Api.BriefAsync(row.Key, cancellationToken: cancellationToken).ConfigureAwait(true)) ?? new BriefResponse(string.Empty, default)).ConfigureAwait(true));
         if (brief?.Problem is not null)
         {
             Open(new TextDocument(assignmentId, brief.Markdown + "\n" + AssignmentComposer.Refusal(brief.Problem), "refused"));
@@ -868,8 +871,8 @@ public sealed partial class ShellViewModel : Observable
             return null;
         }
 
-        RecordResponse? original = Try(() => connection.Api.Record(assignmentId)!);
-        CommunicationProfile profile = AssignmentCommunication(assignmentId);
+        RecordResponse? original = (await TryAsync(async () => (await connection.Api.RecordAsync(assignmentId, cancellationToken: cancellationToken).ConfigureAwait(true))!).ConfigureAwait(true));
+        CommunicationProfile profile = (await AssignmentCommunicationAsync(assignmentId, cancellationToken: cancellationToken).ConfigureAwait(true));
         if (original is null) { profile = profile with { Unavailable = "The exact assignment source is unavailable; the view cannot confirm completeness." }; }
         var page = new AssignmentDocument(row.Key, node, row.ContributorName ?? row.Contributor, profile, original);
         Open(page);
@@ -877,7 +880,7 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Opens the assignment composer for a work order.</summary>
-    public AssignmentComposer? OpenComposer(string workOrderKey)
+    private async Task<AssignmentComposer?> OpenComposerCoreAsync(string workOrderKey, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
@@ -885,7 +888,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         var contributors = new List<ContributorRow>();
-        foreach (RecordResponse principal in Try(() => connection.Api.Records("principal")) ?? [])
+        foreach (RecordResponse principal in (await TryAsync(async () => (await connection.Api.RecordsAsync("principal", cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true)) ?? [])
         {
             JsonElement body = principal.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             contributors.Add(new ContributorRow(principal.Id, Str(body, "name") ?? principal.Id, Str(body, "kind") ?? "?"));
@@ -905,7 +908,7 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Opens the review and decision workspace for a result or a work order revision.</summary>
-    public ReviewWorkspace? OpenReview(string recordId)
+    private async Task<ReviewWorkspace?> OpenReviewCoreAsync(string recordId, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
@@ -914,7 +917,7 @@ public sealed partial class ShellViewModel : Observable
 
         try
         {
-            RecordResponse? record = connection.Api.Record(recordId);
+            RecordResponse? record = (await connection.Api.RecordAsync(recordId, cancellationToken: cancellationToken).ConfigureAwait(true));
             if (record is null)
             {
                 Open(new TextDocument(recordId, $"No record '{recordId}'.", "missing"));
@@ -924,9 +927,9 @@ public sealed partial class ShellViewModel : Observable
             JsonElement body = record.Envelope.TryGetProperty("body", out JsonElement b) ? b : default;
             string heading = record.Type == "result" ? $"Review result {record.Id[..12]}" : $"Review {record.Type} {record.Id[..12]}";
             string original = record.Type == "result" ? RenderResult(record, body) + "\n\nComplete original record:\n" + JsonSerializer.Serialize(record.Envelope, Pretty) : JsonSerializer.Serialize(record.Envelope, Pretty);
-            string summary = CommunicationPresentation.Protected(ResultCommunication(record), record.Type == "result" ? "result" : "decision", record.Id + " at " + record.Hash, Str(body, "summary") ?? heading, original);
+            string summary = CommunicationPresentation.Protected((await ResultCommunicationAsync(record, cancellationToken: cancellationToken).ConfigureAwait(true)), record.Type == "result" ? "result" : "decision", record.Id + " at " + record.Hash, Str(body, "summary") ?? heading, original);
             var reviews = new List<ReviewRow>();
-            foreach (RecordResponse review in Try(() => connection.Api.Records("review")) ?? [])
+            foreach (RecordResponse review in (await TryAsync(async () => (await connection.Api.RecordsAsync("review", cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true)) ?? [])
             {
                 JsonElement rb = review.Envelope.TryGetProperty("body", out JsonElement x) ? x : default;
                 string? subjectId = review.Envelope.TryGetProperty("subject", out JsonElement s) && s.ValueKind == JsonValueKind.Object ? Str(s, "id") : null;
@@ -937,11 +940,11 @@ public sealed partial class ShellViewModel : Observable
                 }
             }
 
-            var workspace = new ReviewWorkspace(record, SubjectFacts.About(connection.Api, record.Id), heading, summary, reviews, ActingPrincipalId ?? string.Empty, actingRole);
+            var workspace = new ReviewWorkspace(record, (await SubjectFacts.AboutAsync(connection.Api, record.Id, cancellationToken: cancellationToken).ConfigureAwait(true)), heading, summary, reviews, ActingPrincipalId ?? string.Empty, actingRole);
             Open(workspace);
             return workspace;
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("review failed: " + exception.Message);
             return null;
@@ -949,18 +952,18 @@ public sealed partial class ShellViewModel : Observable
     }
 
     /// <summary>Opens the products page from the product records.</summary>
-    public void OpenProducts()
+    private async Task OpenProductsCoreAsync(CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
             return;
         }
 
-        Open(new ProductsDocument(ProductRows()));
+        Open(new ProductsDocument((await ProductRowsAsync(cancellationToken: cancellationToken).ConfigureAwait(true))));
     }
 
     /// <summary>Opens a comparison of a record with the record it supersedes, or of two records.</summary>
-    public void OpenComparison(string rightId, string? leftId = null)
+    private async Task OpenComparisonCoreAsync(string rightId, string? leftId = null, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
@@ -969,7 +972,7 @@ public sealed partial class ShellViewModel : Observable
 
         try
         {
-            RecordResponse? right = connection.Api.Record(rightId);
+            RecordResponse? right = (await connection.Api.RecordAsync(rightId, cancellationToken: cancellationToken).ConfigureAwait(true));
             if (right is null)
             {
                 Open(new TextDocument(rightId, $"No record '{rightId}'.", "missing"));
@@ -977,11 +980,11 @@ public sealed partial class ShellViewModel : Observable
             }
 
             leftId ??= right.Envelope.TryGetProperty("supersedes", out JsonElement s) && s.ValueKind == JsonValueKind.String ? s.GetString() : null;
-            RecordResponse? left = leftId is null ? null : connection.Api.Record(leftId);
+            RecordResponse? left = leftId is null ? null : (await connection.Api.RecordAsync(leftId, cancellationToken: cancellationToken).ConfigureAwait(true));
             string leftText = left is null ? "(no earlier revision)" : JsonSerializer.Serialize(left.Envelope, Pretty);
             Open(new ComparisonDocument($"Compare {right.Type} {right.Id[..12]}", left?.Id ?? "none", leftText, right.Id, JsonSerializer.Serialize(right.Envelope, Pretty)));
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("comparison failed: " + exception.Message);
         }
@@ -1019,13 +1022,13 @@ public sealed partial class ShellViewModel : Observable
         return string.Join("\n", lines);
     }
 
-    private T? Try<T>(Func<T> read) where T : class
+    private async Task<T?> TryAsync<T>(Func<Task<T>> read) where T : class
     {
         try
         {
-            return read();
+            return await read().ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("read failed: " + exception.Message);
             return null;
@@ -1039,7 +1042,7 @@ public sealed partial class ShellViewModel : Observable
     private static string? Str(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
     /// <summary>Opens a record's envelope as a document; a work order (by key or id) opens as its page.</summary>
-    public void OpenRecord(string id)
+    private async Task OpenRecordCoreAsync(string id, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
         {
@@ -1050,14 +1053,14 @@ public sealed partial class ShellViewModel : Observable
         {
             if (WorkOrders.Any(w => w.Key == id || w.Id == id))
             {
-                OpenWorkOrder(id);
+                await OpenWorkOrderCoreAsync(id, cancellationToken: cancellationToken).ConfigureAwait(true);
                 return;
             }
 
-            RecordResponse? record = connection.Api.Record(id);
+            RecordResponse? record = (await connection.Api.RecordAsync(id, cancellationToken: cancellationToken).ConfigureAwait(true));
             Open(record is null ? new TextDocument(id, $"No record '{id}'.", "missing") : new TextDocument($"{record.Type} {id[..Math.Min(12, id.Length)]}", JsonSerializer.Serialize(record.Envelope, Pretty), "record"));
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Log("record failed: " + exception.Message);
         }
@@ -1088,7 +1091,7 @@ public sealed partial class ShellViewModel : Observable
         }
     }
 
-    private void ShowRegion(Region region)
+    private async Task ShowRegionAsync(Region region, CancellationToken cancellationToken = default)
     {
         switch (region.Name)
         {
@@ -1099,16 +1102,16 @@ public sealed partial class ShellViewModel : Observable
                 Open(new TextDocument("Work", WorkOrders.Count == 0 ? "No work orders." : string.Join("\n", WorkOrders.Select(w => $"{w.Key,-14} {w.StatusLabel,-48} {w.Kind,-10} {w.Title}")) + "\n\nAssignments:\n" + string.Join("\n", Assignments.Select(a => $"{a.Key,-14} {a.ContributorName ?? a.Contributor,-20} attempts {a.Attempts}  {a.Outcome}, {a.StateLabel}")) + "\n\nOpen a work order by its key with Ctrl+G; the result inbox is Ctrl+I.", "work"));
                 break;
             case "Goals":
-                OpenGoals();
+                await OpenGoalsCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
                 break;
             case "Products":
-                OpenProducts();
+                await OpenProductsCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
                 break;
             case "Releases":
-                OpenRelease();
+                await OpenReleaseCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
                 break;
             case "Runtime":
-                OpenRuntime();
+                await OpenRuntimeCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
                 break;
             case "Records":
                 Open(new TextDocument("Records", "Open a record or a work order by id or key with Ctrl+G (Cmd+G on macOS), or select an attention item.", "records"));

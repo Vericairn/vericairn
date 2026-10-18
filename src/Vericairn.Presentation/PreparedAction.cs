@@ -70,4 +70,23 @@ public static class SubjectFacts
         ids.Sort(StringComparer.Ordinal);
         return string.Join(",", ids);
     }
+    /// <summary>A cancellable fingerprint read for a prepared action, with the same ordering as the synchronous form.</summary>
+    public static async Task<string> AboutAsync(IEstateApi api, string subjectId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(api);
+        var ids = new List<string>();
+        foreach (string type in AboutTypes)
+        {
+            foreach (RecordResponse record in await api.RecordsAsync(type, cancellationToken).ConfigureAwait(false))
+            {
+                if (record.Envelope.TryGetProperty("subject", out JsonElement subject) && subject.ValueKind == JsonValueKind.Object && subject.TryGetProperty("id", out JsonElement id) && id.GetString() == subjectId)
+                {
+                    ids.Add(record.Id);
+                }
+            }
+        }
+        ids.Sort(StringComparer.Ordinal);
+        return string.Join(",", ids);
+    }
+
 }
