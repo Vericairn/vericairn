@@ -38,7 +38,7 @@ public class PolicyGoldenFixtureTests
             Assert.Equal(CanonicalJson.Serialize(record.Body), CanonicalJson.Serialize(rebuilt.Envelope.Body));
             Assert.Equal(record.Signatures, parsed.Signatures);
         }
-        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "estate-policy" or "policy-exception" or "writing-exception" or "product" or "operation"))
+        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "estate-policy" or "policy-exception" or "writing-exception" or "product" or "operation" or "living-document"))
             Assert.True(SignatureChecks.IsAuthentic(model, record));
     }
 
@@ -65,7 +65,7 @@ public class PolicyGoldenFixtureTests
         string root = FixtureRoot();
         string[] inventory = File.ReadAllLines(Path.Combine(root, "inventory.sha256"));
         Dictionary<string, string> expected = inventory.Where(l => l.Length > 0).Select(l => l.Split("  ", 2, StringSplitOptions.None)).ToDictionary(p => p[1], p => p[0], StringComparer.Ordinal);
-        string[] actual = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Select(p => Path.GetRelativePath(root, p).Replace('\\', '/')).Where(p => p != "inventory.sha256").Order(StringComparer.Ordinal).ToArray();
+        string[] actual = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories).Select(p => Path.GetRelativePath(root, p).Replace('\\', '/')).Where(p => p != "inventory.sha256" && !p.StartsWith(".vericairn/", StringComparison.Ordinal)).Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), actual);
         Assert.All(expected, item => Assert.Equal(item.Value, ContentHash.Sha256File(Path.Combine(root, item.Key))));
     }

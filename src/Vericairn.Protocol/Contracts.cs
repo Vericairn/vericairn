@@ -35,14 +35,14 @@ public sealed record Problem(string Code, string Message, IReadOnlyList<FindingD
 /// <param name="Hash">Content hash.</param>
 public sealed record RecordWritten(string Path, string Id, string Hash);
 
-/// <summary>The outcome of a write: written, or a problem. Never both.</summary>
+/// <summary>The outcome of a write. An interrupted companion batch carries both the stored record and its recovery problem.</summary>
 /// <param name="Written">The record, when written.</param>
-/// <param name="Problem">The problem, when not.</param>
+/// <param name="Problem">A refusal, or a recovery problem after the named record was already stored; never retry that record as new work.</param>
 public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
 {
-    /// <summary>True when written.</summary>
+    /// <summary>True when the record and any required companion publication completed.</summary>
     [JsonIgnore]
-    public bool Ok => Written is not null;
+    public bool Ok => Written is not null && Problem is null;
 
     /// <summary>A written outcome.</summary>
     public static WriteOutcome Success(RecordWritten written) => new(written, null);

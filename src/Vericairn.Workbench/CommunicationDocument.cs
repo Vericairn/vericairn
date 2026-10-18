@@ -87,8 +87,12 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
         {
             WriteOutcome outcome = (await estate.CommunicationSetAsync(new CommunicationSetRequest(by, Scope, values, Scope == "estate" ? null : Empty(Recipient),
                 Scope == "assignment" ? Empty(Assignment) : null, expected, Empty(Authority)), cancellationToken: cancellationToken).ConfigureAwait(true));
-            Note = outcome.Written is { } written ? "Recorded " + written.Id + " at " + written.Hash
-                : outcome.Problem?.Code + ": " + outcome.Problem?.Message + "\n" + string.Join('\n', outcome.Problem?.Findings.Select(f => f.Message) ?? []);
+            Note = outcome.Written is { } written ? "Recorded " + written.Id + " at " + written.Hash : string.Empty;
+            if (outcome.Problem is { } problem)
+            {
+                Note += (Note.Length == 0 ? string.Empty : "\n") + problem.Code + ": " + problem.Message + "\n"
+                    + string.Join('\n', problem.Findings.Select(f => f.Message));
+            }
             if (outcome.Ok)
             {
                 await RefreshAsync(cancellationToken).ConfigureAwait(true);

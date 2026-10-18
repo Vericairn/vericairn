@@ -12,3 +12,7 @@ devices were generated for this fixture; only public keys and signatures are ret
 storage is part of the fixture. `inventory.sha256` pins every retained byte. Records tests validate the estate,
 require coverage of every format-3 field in the registry and reconstruct every envelope hash without changing
 its body or signatures. Runtime migration tests use independently created, disposable estates.
+READ-01 adds a signed pattern living-document declaration. `PolicyGoldenFixtureWriter` regenerates this
+synthetic fixture with fresh in-memory test keys, rebinds exact references and approved definition hashes,
+validates the complete result and writes a new inventory. This refresh changes fixture signatures and public
+keys; it retains no private keys and touches neither the format-1 fixture nor frozen release documentation.

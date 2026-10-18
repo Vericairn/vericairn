@@ -2,11 +2,14 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Authoring;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
@@ -24,7 +27,8 @@ internal sealed class BatchJournal
 {
     private readonly string file;
 
-    private BatchJournal(string file, string id, string purpose, string? workOrder, string startedAt, IReadOnlyList<Entry> records)
+    private BatchJournal(string file, string id, string purpose, string? workOrder, string startedAt, IReadOnlyList<Entry> records,
+        IReadOnlyList<DocumentOutputChange>? outputs = null, IReadOnlyList<string>? directories = null)
     {
         this.file = file;
         Id = id;
@@ -32,6 +36,8 @@ internal sealed class BatchJournal
         WorkOrder = workOrder;
         StartedAt = startedAt;
         Records = records;
+        Outputs = outputs ?? [];
+        RetiredDirectories = directories ?? [];
     }
 
     /// <summary>The batch's identifier.</summary>
@@ -49,11 +55,21 @@ internal sealed class BatchJournal
     /// <summary>The batch's records, in the order they are stored.</summary>
     public IReadOnlyList<Entry> Records { get; }
 
+    /// <summary>Prepared derived output changes; retained only until this batch completes, never a currency ledger.</summary>
+    public IReadOnlyList<DocumentOutputChange> Outputs { get; }
+
+    /// <summary>Former owned directories, removed only when empty.</summary>
+    public IReadOnlyList<string> RetiredDirectories { get; }
+
+    /// <summary>Whether record-only recovery must defer to output recovery.</summary>
+    public bool HasOutputs => Outputs.Count != 0 || RetiredDirectories.Count != 0;
+
     /// <summary>Where this session's journals live: per clone for repository-synced estates, shared for local-only estates.</summary>
     public static string Directory(EstateSession session) => Path.Combine(Path.GetDirectoryName(session.Live.Path)!, "batches");
 
     /// <summary>Writes the journal of a batch before any of its records is stored.</summary>
-    public static BatchJournal Begin(EstateSession session, string purpose, string? workOrder, IReadOnlyList<AuthoredRecord> records)
+    public static BatchJournal Begin(EstateSession session, string purpose, string? workOrder, IReadOnlyList<AuthoredRecord> records,
+        IReadOnlyList<DocumentOutputChange>? outputs = null, IReadOnlyList<string>? directories = null)
     {
         ArgumentNullException.ThrowIfNull(records);
         string id = Ulid.NewUlid().Value;
@@ -69,11 +85,17 @@ internal sealed class BatchJournal
             ["startedAt"] = startedAt,
             ["records"] = new JsonArray([.. entries.Select(e => (JsonNode)new JsonObject { ["id"] = e.Id, ["type"] = e.Type, ["path"] = e.Path })]),
         };
+        if (outputs is { Count: > 0 }) json["outputs"] = new JsonArray([.. outputs.Select(o => (JsonNode)new JsonObject
+        {
+            ["path"] = o.Path, ["before"] = o.BeforeHash, ["after"] = o.AfterHash,
+            ["bytes"] = o.After is { } bytes ? Convert.ToBase64String(bytes.AsSpan()) : null,
+        })]);
+        if (directories is { Count: > 0 }) json["retiredDirectories"] = JsonSerializer.SerializeToNode(directories);
         string file = Path.Combine(directory, id + ".json");
         string pending = file + ".tmp";
         File.WriteAllText(pending, json.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
         File.Move(pending, file, overwrite: true);
-        return new BatchJournal(file, id, purpose, workOrder, startedAt, entries);
+        return new BatchJournal(file, id, purpose, workOrder, startedAt, entries, outputs, directories);
     }
 
     /// <summary>
@@ -144,7 +166,7 @@ internal sealed class BatchJournal
         if (!Ulid.IsValid(id) || id != Path.GetFileNameWithoutExtension(file) || string.IsNullOrWhiteSpace(purpose)
             || !RecordParser.IsTimestamp(startedAt) || !root.TryGetProperty("workOrder", out JsonElement workOrder)
             || (workOrder.ValueKind != JsonValueKind.Null && (workOrder.ValueKind != JsonValueKind.String || !Ulid.IsValid(workOrder.GetString())))
-            || !root.TryGetProperty("records", out JsonElement records) || records.ValueKind != JsonValueKind.Array || records.GetArrayLength() == 0)
+            || !root.TryGetProperty("records", out JsonElement records) || records.ValueKind != JsonValueKind.Array)
         {
             return null;
         }
@@ -172,7 +194,45 @@ internal sealed class BatchJournal
             entries.Add(new Entry(recordId, type, path));
         }
 
-        return new BatchJournal(file, id!, purpose, workOrder.ValueKind == JsonValueKind.Null ? null : workOrder.GetString(), startedAt!, entries);
+        var outputs = new List<DocumentOutputChange>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (root.TryGetProperty("outputs", out JsonElement changes))
+        {
+            if (changes.ValueKind != JsonValueKind.Array) return null;
+            foreach (JsonElement change in changes.EnumerateArray())
+            {
+                if (!Object(change) || Text(change, "path") is not { } path || !DocumentPatterns.IsSafePath(path) || !paths.Add(path)) return null;
+                if (!change.TryGetProperty("before", out JsonElement beforeValue) || beforeValue.ValueKind is not (JsonValueKind.Null or JsonValueKind.String)
+                    || !change.TryGetProperty("after", out JsonElement afterValue) || afterValue.ValueKind is not (JsonValueKind.Null or JsonValueKind.String)) return null;
+                string? before = Text(change, "before");
+                string? after = Text(change, "after");
+                if ((before is not null && !ContentHash.IsValid(before)) || (after is not null && !ContentHash.IsValid(after)) || before == after) return null;
+                ImmutableArray<byte>? bytes = null;
+                if (after is not null)
+                {
+                    if (Text(change, "bytes") is not { } encoded) return null;
+                    byte[] decoded;
+                    try { decoded = Convert.FromBase64String(encoded); }
+                    catch (FormatException) { return null; }
+                    if (decoded.Length > 1048576 || ContentHash.Sha256(decoded) != after || EstateChecks.Content(path, decoded).HasErrors) return null;
+                    bytes = [.. decoded];
+                }
+                else if (!change.TryGetProperty("bytes", out JsonElement absent) || absent.ValueKind != JsonValueKind.Null) return null;
+                outputs.Add(new(path, before, bytes));
+            }
+        }
+        var directories = new List<string>();
+        if (root.TryGetProperty("retiredDirectories", out JsonElement retired))
+        {
+            if (retired.ValueKind != JsonValueKind.Array) return null;
+            foreach (JsonElement directory in retired.EnumerateArray())
+            {
+                if (directory.ValueKind != JsonValueKind.String || directory.GetString() is not { } path || !DocumentPatterns.IsSafePath(path)) return null;
+                directories.Add(path);
+            }
+        }
+        if (entries.Count == 0 && outputs.Count == 0 && directories.Count == 0) return null;
+        return new BatchJournal(file, id!, purpose, workOrder.ValueKind == JsonValueKind.Null ? null : workOrder.GetString(), startedAt!, entries, outputs, directories);
 
         static bool Object(JsonElement value) => value.ValueKind == JsonValueKind.Object
             && value.EnumerateObject().Select(p => p.Name).Distinct(StringComparer.Ordinal).Count() == value.EnumerateObject().Count();

@@ -13,8 +13,14 @@ public interface IDocumentGenerator
     /// <summary>The generator's name, namespace/name, as declarations name it.</summary>
     string Id { get; }
 
+    /// <summary>The versioned contract, or null for a retained legacy implementation.</summary>
+    DocumentGeneratorDescriptor? Descriptor => null;
+
+    /// <summary>Renders only the immutable, authorized sources supplied by the caller.</summary>
+    DocumentRenderResult Generate(DocumentGenerationContext context) => DocumentRenderResult.Unavailable("This implementation supplies only the legacy contract.");
+
     /// <summary>The whole document (region null) or one region's content; null when this generator makes neither.</summary>
-    string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs);
+    string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs) => null;
 }
 
 /// <summary>The generators installed here: the foundation's, and those packs register. Registering one makes its name available.</summary>
@@ -26,9 +32,13 @@ public static class DocumentGenerators
     public static void Register(IDocumentGenerator generator)
     {
         ArgumentNullException.ThrowIfNull(generator);
+        generator.Descriptor?.Validate(generator.Id);
         lock (Installed)
         {
-            Installed[generator.Id] = generator;
+            if (!Installed.TryAdd(generator.Id, generator))
+            {
+                throw new InvalidOperationException("A document generator with this identity is already registered.");
+            }
         }
 
         LivingDocuments.Register(generator.Id);

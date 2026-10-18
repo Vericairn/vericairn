@@ -643,7 +643,8 @@ public sealed partial class ShellViewModel : Observable
         {
             Log("person observed estate: " + written.Id);
             await RefreshCoreAsync(cancellationToken: cancellationToken).ConfigureAwait(true);
-            Status = "Observation recorded: " + written.Id;
+            Status = "Observation recorded: " + written.Id
+                + (result.Problem is { } problem ? "\n" + problem.Message : string.Empty);
         }
         else
         {
