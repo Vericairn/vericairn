@@ -1,0 +1,44 @@
+{
+  "at": "2026-10-13T14:00:24Z",
+  "body": {
+    "brief": {
+      "expectedOutputs": [
+        "report"
+      ],
+      "limits": [],
+      "outcome": "A checked inventory.",
+      "permittedChanges": [
+        "test fixtures"
+      ],
+      "prohibitedEffects": [
+        "publication"
+      ],
+      "recovery": "Read the prior result.",
+      "reviewCriteria": [
+        "inventory"
+      ],
+      "sources": [],
+      "workspace": [
+        "example repository"
+      ]
+    },
+    "contributor": "01M57TPYP3J1PPGV71CJKDNBFC"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:f9011b9833ea1ca88e7f029eb912738a6115c0d966f4c096bd14201f28f56e97",
+  "id": "01M57TPYSHFM7HZ77R836NSWVT",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "rVsiVC5TcQIB580aQuxCfdEmrnnyP0f1Ube6Pkboqeo0Omw7vJz4E1IX6t27ggOr9yVAeHgdboNCqhBhhUrP_Q"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:d243b22106b54f6f3c7a860f0d1464cc97a55e5b0e6c373f7ca868629fad38b5",
+    "id": "01M57TPYS3D0BV4NWW96DTJCG3",
+    "type": "work-order"
+  },
+  "type": "assignment"
+}

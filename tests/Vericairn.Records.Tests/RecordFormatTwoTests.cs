@@ -80,7 +80,7 @@ public class RecordFormatTwoTests
     {
         using var estate = new TestEstate(recordFormat: 2);
         string path = Path.Combine(estate.Root, estate.Estate.ExpectedPath.Replace('/', Path.DirectorySeparatorChar));
-        string text = File.ReadAllText(path).Replace("vericairn.record/2", "vericairn.record/3", StringComparison.Ordinal);
+        string text = File.ReadAllText(path).Replace("vericairn.record/2", RecordFormats.Identifier(RecordFormats.Current + 1), StringComparison.Ordinal);
         var findings = new FindingList();
         RecordParser.Parse(System.Text.Encoding.UTF8.GetBytes(text), "x", findings);
         Assert.Contains(findings, f => f.Code == "record.format");
@@ -91,7 +91,7 @@ public class RecordFormatTwoTests
     {
         using var estate = new TestEstate();
         string manifest = Path.Combine(estate.Root, EstateLayout.ManifestPath);
-        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifest).Replace("\"recordFormat\": 1", "\"recordFormat\": 3", StringComparison.Ordinal)))
+        using (JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifest).Replace("\"recordFormat\": 1", "\"recordFormat\": 4", StringComparison.Ordinal)))
         {
             File.WriteAllBytes(manifest, Canonical.CanonicalJson.SerializePrettyUtf8(document.RootElement));
         }
@@ -99,7 +99,7 @@ public class RecordFormatTwoTests
         var findings = new FindingList();
         Assert.Null(EstateManifest.Load(estate.Root, findings));
         Finding refusal = Assert.Single(findings, f => f.Code == "manifest.record-format");
-        Assert.Contains("record format 3", refusal.Message, StringComparison.Ordinal);
+        Assert.Contains("record format 4", refusal.Message, StringComparison.Ordinal);
     }
 
     [Fact]

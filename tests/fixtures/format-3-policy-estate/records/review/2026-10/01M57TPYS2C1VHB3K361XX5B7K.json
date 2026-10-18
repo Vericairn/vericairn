@@ -1,0 +1,38 @@
+{
+  "at": "2026-10-13T14:00:20Z",
+  "body": {
+    "findings": [],
+    "independence": "operator",
+    "outcome": "pass",
+    "read": [
+      {
+        "hash": "sha256:b9981fd036009e8345a766bec65b63745125a53a8d7216394c90f224e1477c8a",
+        "id": "01M57TPYPA4E37QXJ9YZGM2FTS",
+        "type": "decision"
+      },
+      {
+        "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+        "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+        "type": "estate-policy"
+      }
+    ],
+    "summary": "Reviewed the exact result and its coverage."
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:82eae939b77655406942c96636df5a0ea39d8ceec14a207f62c152805004186d",
+  "id": "01M57TPYS2C1VHB3K361XX5B7K",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "1smhF5GigtftpkpaykR9GU0nyMOHW_zftyNuF-6VD42a-7y2x0i5DVcZ9GoFqmaieWZHE0Ecl3WTKAiUrXeRvw"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:dd6d8f977430acd062ad45f41707d4f0f8a89b04fdd3a6a09f6780211e997721",
+    "id": "01M57TPYS1FP5YX5CS5CB8Q038",
+    "type": "result"
+  },
+  "type": "review"
+}

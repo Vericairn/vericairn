@@ -16,9 +16,9 @@ namespace Vericairn.Runtime.Tests;
 /// </summary>
 public sealed class TestHome : IDisposable
 {
-    private readonly string? created;
+    private readonly string created;
 
-    /// <summary>Creates a test-owned home without inspecting or using an inherited home.</summary>
+    /// <summary>Always creates an isolated home before tests can use runtime storage.</summary>
     public TestHome()
     {
         created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);
@@ -29,11 +29,6 @@ public sealed class TestHome : IDisposable
     /// <summary>Removes the home this fixture created, once every test has finished.</summary>
     public void Dispose()
     {
-        if (created is null)
-        {
-            return;
-        }
-
         try
         {
             WorkspaceCleanup.Delete(created);

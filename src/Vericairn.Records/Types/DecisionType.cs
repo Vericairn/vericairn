@@ -43,6 +43,7 @@ public sealed class DecisionType : IRecordType
         new("answers", "ulid[]", false, "The asks this decision answers; an ask is answered by the principal it was put to, and never by waiting.", 2),
         new("obligations", "object[]", false, "What the answer leaves owed: key, summary, owner (ulid), resolution (action|evidence|review|decision), discharge (what discharges it) and optionally gates (the operation or work it holds); each stays open until a discharge record names it.", 2),
         new("documents", "string[]", false, "The living documents this decision changes, by path or by declaration id; each becomes due until it is cleared.", 2),
+        new("policies", "object[]", false, "Keyed declare/revise/retire requirements: policy key or identity, priorHash for changes, change and optional exact definitionHash. A requirement does not grant authority.", 3),
     ];
 
     /// <inheritdoc />
@@ -50,6 +51,7 @@ public sealed class DecisionType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
+        PolicyRequirements.Validate(context);
         body.Text("title", true, 200);
         body.Text("statement", true, 20000);
         body.Text("summary", true, 4000);

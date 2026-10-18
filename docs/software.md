@@ -119,9 +119,15 @@ standard output; `--out <file>` creates a new file without overwriting and
 `--json` returns identity plus base64 bytes. Each generated, shell-safe `vc1_`
 pin encodes the estate and exact source identity, so no retained manifest is
 needed. Records are read by id, record hash and byte hash from immutable record
-custody. Documents are read by path, revision record and byte hash from the
-working tree only while those bytes still match. Changed, missing or unsupported
-sources are unavailable in this copy; neither the latest revision nor an object
+custody. Documents are read by path, revision record and byte hash, using matching
+working-tree bytes first. FIX-27 for 0.8.0 also reads required originals from the
+estate repository's own local Git history when the working file is missing or
+differs. The adapter searches the exact path, and the returned bytes must match
+the pinned SHA-256 hash. Required pins carry `history: "local"` to preserve this
+retrieval behavior. Optional documents and pins without that marker remain
+working-tree-only. A shallow clone, absent or unreadable history, or no matching
+blob still refuses with guidance to restore the exact bytes or use a complete
+local clone. Nothing is fetched or checked out; no other revision or object
 store is substituted. Missing mandatory originals refuse the dependent step.
 Remote is not built or qualified.
 
@@ -887,17 +893,21 @@ workspace and reachable-history observation, not filesystem isolation or proof o
 change. Uncommitted changes reverted before settlement and commits no longer reachable from the run branch are
 invisible. Git administration itself and changes outside the workspace are not inventoried as changed paths.
 
-## The synthetic migration
+## Record-format migrations
 
 The move from record format 1 to 2 (`record-format-2`, [record-format-v2.md](record-format-v2.md)) stages nothing:
 no record is ever rewritten, so the step only moves the manifest's format, and the tests check that every record
 file is byte for byte what it was. When the estate holds admissions recorded without a signature, the move anchors
 them: the migration record lists them by id and hash, and the upgrade is refused unless the operator, or a
-principal with the `administer` scope, applies it with an admitted device held on this machine. The rest of the
-upgrade path is proven by a synthetic migration in the tests: a step from format 2 to a pretend format 3 stages a
-file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
-once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
-knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+principal with the `administer` scope, applies it with an admitted device held on this machine.
+
+POLICY-01 adds `record-format-3` for the planned 0.8.0 release
+([record-format-v3.md](record-format-v3.md)). This step also stages no file and infers no policy, duty, authority,
+placement or exception. The manifest supplies the refusal boundary for older runtimes. Reapplying the installed
+target makes no change. Fixture tests preserve every original record byte and include a refuse-level duty when
+checking a format-2 reader's refusal. Synthetic steps additionally test staged files and rollback: every step must
+succeed before publication, and a failed step or refused migration record leaves the prior files and directories.
+Migrations never rewrite records.
 
 ## Progress claims (0.7.0)
 
@@ -1199,6 +1209,23 @@ clone/branch's workspace directory and expected clone-branch head. It is outside
 enters a record. A later worker instance reuses that workspace, including its commits, index and uncommitted files.
 A clone branch moved unexpectedly between attempts refuses reuse; a completed transfer whose catalogue update
 was interrupted can be recovered when the clone still has the workspace's head.
+
+When a run is refused before dispatch, the worker removes the workspace that attempt just prepared, together
+with its catalogue entry, only if it can prove the workspace is still unused. It compares the complete
+repository with the snapshot taken before the workspace was made available, allowing only the worker's unchanged
+brief export. The comparison includes the index, references, reflogs and objects as well as tracked, untracked
+and ignored files. Fixing the refusal's cause and retrying, including after moving the workspace root, then
+creates a clean workspace. The execution preflight and custody checks keep their existing refusal rules.
+On Windows the inventory opens both directories and files with extended paths, including Git references and
+reflogs under the temporary preparation name, so long branch names do not leave an unused workspace behind.
+
+A reused workspace, a workspace taken up by another preparation, a branch already holding commits beyond the
+requested base, or any changed or incompletely verified workspace is kept. The refusal names its location and
+directs the operator to preserve its commits and files before removing it or selecting a root that contains it.
+Workspaces from dispatched runs stay for review, including when launch observation is uncertain.
+Refusals before intent still record nothing; refusals after
+intent keep their existing settlement and charging rules.
+Cleanup never runs against the registered clone and never follows workspace links to delete their targets.
 
 A workspace elsewhere under the selected root is reused; one outside it is refused with its location and cleanup
 guidance. To clean up an independent workspace, first preserve any uncommitted files and confirm its branch was

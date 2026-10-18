@@ -17,18 +17,19 @@ public static class WorkspaceScopeProbe
     public static int? TryRun(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        if (arguments.Count is not (2 or 5) || arguments[0] != Marker)
+        if (arguments.Count is not (2 or 3 or 5) || arguments[0] != Marker
+            || arguments.Count == 3 && arguments[2] != "--include-git")
         {
             return null;
         }
 
-        Console.Out.Write(JsonSerializer.Serialize(arguments.Count == 2
-            ? WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline)
+        Console.Out.Write(JsonSerializer.Serialize(arguments.Count != 5
+            ? WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, includeGit: arguments.Count == 3)
             : WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, arguments[2], arguments[3], arguments[4])));
         return 0;
     }
 
-    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null)
+    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
     {
         if (deadline <= TimeSpan.Zero)
         {
@@ -45,6 +46,8 @@ public static class WorkspaceScopeProbe
         {
             info.ArgumentList.Add(argument);
         }
+
+        if (includeGit) info.ArgumentList.Add("--include-git");
 
         if (branch is not null)
         {

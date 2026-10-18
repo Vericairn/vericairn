@@ -1,0 +1,151 @@
+# Record format 3
+
+Record format 3 adds attributable policy definitions, bounded exceptions and recurring-duty evidence. It is
+the POLICY-01 record and migration contract for the planned 0.8.0 release. A manifest at format 3 makes a
+format-2 reader refuse the estate before opening a writable runtime. Each older record retains its original
+format, bytes, hash, signatures and validation rules.
+
+The `record-format-3` migration moves format 2 forward without inferring policies, authority, placement,
+exceptions, completed duties or renewal dates. The upgrade appends its migration record and changes the
+manifest after all migration steps succeed. Reapplying an already installed target is a no-op. A failed step
+or refused migration record restores the previous repository files. Tests exercise disposable fixtures only.
+
+Policy evaluation, finding projections and policy-specific CLI, API and Workbench flows belong to POLICY-02
+and POLICY-03. An unrecognized rule contribution is retained as data; the record schema does not certify
+that the rule ran or passed. This change does not declare any policy in an existing estate.
+
+## Definitions and authority
+
+`estate-policy` has `key`, `title`, `owner`, `reason`, `basis`, `state`, `appliesTo`, `rules`, `level`, `startsAt`
+and `maxExceptionDays`. Optional `predecessor` pins a retired policy of a different key. A retired successor
+requires `retirement: {reason, findings, successor?}`. Retirement is terminal. Keys remain reserved by their
+identity after retirement. Ownership records responsibility; it grants no permission.
+
+`appliesTo` is exactly one of:
+
+- `{kind: estate}`;
+- `{kind: product, product}`;
+- `{kind: work-orders, workOrders}`;
+- `{kind: repository, repository, selectors}`.
+
+Selection ids name the first record of a continuing identity. Repository selectors use `/`, literal path
+components, `*` within a component and `**` across components. They cannot name an absolute path or traverse
+parents. Rules have unique stable `key`, namespaced `kind`, positive integer `version` and object `parameters`.
+
+A decision's optional `policies` list contains unique `{key, action, policy, change, priorHash?, definitionHash?}`
+requirements. `action` is `declare`, `revise` or `retire`. Declaration names a policy key; revision and retirement
+name its identity and exact prior hash. `definitionHash` hashes the canonical proposed policy body with only
+`basis` omitted. A requirement without that hash is pending design or reconsideration, not executable approval.
+An exact definition approval is signed and authored by the deciding operator. It supplies no management grant.
+
+Policy `basis` is a nonempty list of `{decision, requirement?, authority?}`. References contain `type`, `id`
+and `hash`. Initial declarations and behavioral changes must match an exact approved definition and prior
+revision. Title/reason edits and ownership transfer still require an attributable management action. A change
+that both transfers ownership and changes behavior needs both permissions.
+
+The three scopes are independent. Each grant uses the existing `authority` record with an explicit expiry,
+operator signature and `bounds`, one entry per granted policy scope:
+
+| Scope | Required bounds |
+|---|---|
+| `manage-estate-policies` | `scope`, `actions`, exact policy keys or identities in `policies`, `levels`, and exact `appliesTo` selections |
+| `grant-policy-exceptions` | `scope`, `actions`, `policies`, `levels`, exact `rules`, exact finite `targets`, `maxExceptionDays` |
+| `manage-writing-exceptions` | `scope`, `actions`, exact `tokens` or `allTokens: true`, optional `coverage` using the writing scope below |
+
+Management actions are `declare`, `revise`, `transfer`, `retire`, `reconcile`; policy-exception actions are
+`grant`, `revoke`, `reconcile`; writing actions are `add`, `remove`, `reconcile`. A policy grant's prose
+conditions are not presumed satisfied. A delegate with conditions that cannot be checked needs a different,
+explicitly bounded grant. Reserved actions remain reserved. Scope containment is conservative: equal
+selectors, `**`, and literal directory prefixes ending in `/**` prove containment; other unproved inclusion
+is refused. Generic engineering or administration authority does not substitute for these scopes.
+
+Authorization uses the cited grant as it existed at the action's authoring time. Future grants cannot
+authorize earlier work. Expiry or a later supersession prevents subsequent delegated actions while preserving
+historical attribution. A policy reconciliation requires format 3, a signature and the same bounded authority;
+its optional `policyAuthority` pins the grant used to choose the kept branch. The branch's own definition
+approval still applies. Discarded successors remain in the records.
+Removing all policy scopes from a grant still requires an operator-signed format-3 successor.
+Reconciling that grant's history also remains an operator action after those scopes are removed.
+Operator role evidence must trace through signed appointments to the charter's bootstrap operator;
+an unsigned role claim or a principal's self-promotion supplies no policy authority.
+
+## Exceptions
+
+`writing-exception` contains `token`, `code: writing.spacing`, `reason`, optional `scope`, `state` and `basis`.
+A token is one case-sensitive whole scanner token, not a pattern. `basis` is `{kind: operator}` or
+`{kind: authority, grant}` with an exact authority reference. A scope is a union of `paths` entries
+`{repository, selectors}` and `records` entries `{record, field?}`; at least one list is nonempty. A record
+selection names that exact record id and optionally one scanned prose field. It follows no revision.
+
+Addition uses `state: active`. A signed removal uses `state: removed`, supersedes the addition and includes
+`removalReason`. Token, code, original reason and scope stay fixed. A removed identity cannot be revived.
+Concurrent entries for the same token are separate identities. Expiry and policy-revision fields are invalid
+on writing entries.
+
+`policy-exception` pins the exact policy in its envelope and has `rule`, nonempty `targets`, `reason`,
+`expiresAt`, `basis: {decision, authority?}` and `state: granted`. Each target is a tagged exact record,
+publication, repository/path/content hash, or duty occurrence. An optional `submission` carries an exact
+`release` reference, `product` identity and `version`. A duty target carries its originating `policy`, `rule`,
+exact examined `subject` and tagged `occurrence`. It contains no future occurrence or range wildcard.
+
+Expiry follows the grant and fits the policy and delegated duration limits. Expiry is exclusive. A signed
+successor with `state: revoked` retains the policy, rule, targets and expiry; renewal is a new grant. Only the
+operator or the still-authorized original grantor revokes. Delegates cannot except their own work or duties;
+file provenance that cannot establish independence requires the operator. An exception records deferred
+enforcement, never completion or acceptance.
+
+Every policy, policy exception and writing exception, including lifecycle successors, requires an
+admitted-device signature even under optional charter signatures. Cited decision and bounded grant evidence
+must also be attributable. A body copied into an unsigned record supplies none of these permissions.
+
+## Duties and evidence
+
+`vericairn.estate/recurring-duty`, version 1, takes `subject`, `schedule`, `graceDays`, `discharge` and `renewal`.
+The subject is an estate, product, resource, device or credential-reference identity. Estate and product
+selections are supported; a product resource must carry an explicit product relation.
+
+| Schedule | Fields |
+|---|---|
+| `interval` | `unit: days|months`, positive `every`, UTC `firstDueAt` |
+| `release` | product identity; occurrences pin the first observed publication |
+| `date` | UTC `at`, nonnegative `leadDays`, exact `dateSource` |
+
+Month arithmetic always uses the original anchor. Grace is nonnegative and cannot extend past a dated expiry.
+`dateSource` is `{kind: credential-rotate-by, record}` or `{kind: reviewed-report, result, review}`. Typed
+credential dates must match the selected credential. Reports retain hashed outputs and an exact signed
+independent passing review. A date interpretation still needs exact definition approval.
+
+`discharge` contains unique required check names in `checks`, `review: none|independent|operator`, and a `records`
+list of unique named clauses. Clause kinds are `verification`, `device-rotation`, `credential-rotation`,
+`observed-operation`, `retirement` and `obligation`. These are fixed record relationships, not executable queries.
+`renewal: next-date-required` is valid only for a date schedule; other schedules use `none`.
+
+`result.duties` contains `{policy, rule, occurrence, subject, scope, coverage, proofs}` entries. Evidence
+references always pin type, id and hash. The occurrence is `{kind: interval, number}`, `{kind: release,
+publication}` or `{kind: date, at}`. It names the originating schedule revision; an editorial revision is not
+a new origin. Scope contains `repositories: [{record, commit}]`, retained hashes in `objects`, and exact
+`records` references. Scope describes evidence and does not extend an assignment's permitted effects.
+
+Proof bindings are `{clause, records}` in the clause's defined order, except a verification of the result
+itself uses `{kind: result-verification, clause}`. This avoids a hash cycle. An ordinary result review can
+carry unique exact references in `read`; it cites the later verification. Goal reviews keep their existing
+`conditions.read`. Duty results and their reviews require admitted-device signatures. Recording a result
+before verification, review or a next-date declaration is permitted; its completion evidence remains pending.
+
+`estate-policy.dutyDispositions` entries contain `rule`, exact originating `policy`, subject identity,
+`occurrence`, `disposition: ended-unmet` and `reason`. They are part of the approved definition. Entries name
+unique already-due, uncompleted occurrences from that policy's history. A removed rule or retired policy must
+account for every outstanding occurrence, including grace. Prior dispositions stay effective without being
+repeated. Schedule changes begin strictly after their revision and carry old debt; postponing activation cannot
+hide an occurrence already due. Ending debt never labels the work completed.
+
+## Work placement and verification
+
+`work-order.placement` is `{kind: release, carrier, product, version}` or `{kind: backlog, key}`.
+`work-order.releasePlan` contains `{product, version}`. A release carrier can place itself in its own plan.
+These fields organize work under its existing authority and do not create dependencies or acceptance.
+
+The checked-in format-3 policy estate pins every fixture byte in `inventory.sha256`. Tests cover all new
+record types and registry fields, round trips, signatures, bounded authority, occurrence identities, debt
+dispositions and the migration refusal boundary. Runtime tests use fixture estates and isolated homes.
+The platform matrix must run on the eventual pushed commit before integration.

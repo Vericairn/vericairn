@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-13T12:00:32Z",
+  "body": {
+    "affects": [],
+    "decidedAt": "2026-10-13T12:00:31Z",
+    "decidedBy": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "effects": [
+      "Apply the exact approved definition."
+    ],
+    "notAuthorized": [
+      "publication"
+    ],
+    "obligations": [
+      {
+        "discharge": "A checked inventory.",
+        "key": "inventory",
+        "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+        "resolution": "evidence",
+        "summary": "Check inventory."
+      }
+    ],
+    "stake": "medium",
+    "statement": "Approve the stated definition only.",
+    "summary": "Approve a bounded test change.",
+    "synthesis": "Test evidence, without external effects.",
+    "title": "Test decision"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:a9f946b338ea15574110efb4c77715e5804d03e3469c2dc155e3b947a6954be5",
+  "id": "01M57TPYPS5XBJ7M3N4B04E4RV",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "m5JvtX6ikpCZlSduCBkzpcPGis7Zui_lTkdD-1jYfaRkHqLg_Av9D3jzXjpvjqSIqmJlaqNgM8rVaI0PKoToTg"
+    }
+  ],
+  "type": "decision"
+}

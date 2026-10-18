@@ -21,7 +21,7 @@ internal static class WorkspaceScopeAudit
 
     public static WorkspaceSnapshot Capture(string workspace) => WorkspaceScopeProbe.Capture(workspace, Deadline);
 
-    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null)
+    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
@@ -76,7 +76,7 @@ internal static class WorkspaceScopeAudit
             {
                 CheckDeadline();
                 string leaf = Path.GetFileName(path);
-                if (leaf == ".git")
+                if (leaf == ".git" && !includeGit)
                 {
                     if (prefix.Length > 0)
                     {
@@ -102,6 +102,7 @@ internal static class WorkspaceScopeAudit
                     }
                     else if ((attributes & FileAttributes.Directory) != 0)
                     {
+                        if (includeGit) files[name] = "directory";
                         Visit(path, name + "/");
                     }
                     else
@@ -138,7 +139,7 @@ internal static class WorkspaceScopeAudit
     {
         if (OperatingSystem.IsWindows())
         {
-            using SafeFileHandle handle = CreateFileW(path, 0, 7, 0, 3, 0x02200000, 0); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+            using SafeFileHandle handle = CreateFileW(ExtendedWindowsPath(Path.GetFullPath(path)), 0, 7, 0, 3, 0x02200000, 0); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
             byte[] identity = new byte[24]; // FILE_ID_INFO: volume serial number and 128-bit file id.
             if (handle.IsInvalid || !GetFileInformationByHandleEx(handle, 9, out FileTag tag, 8)
                 || (tag.Attributes & (0x400u | 0x10u)) != 0x10u
@@ -179,7 +180,7 @@ internal static class WorkspaceScopeAudit
     {
         if (OperatingSystem.IsWindows())
         {
-            SafeFileHandle handle = CreateFileW(path, 0x80000000, 7, 0, 3, 0x00200000, 0); // OPEN_REPARSE_POINT
+            SafeFileHandle handle = CreateFileW(ExtendedWindowsPath(Path.GetFullPath(path)), 0x80000000, 7, 0, 3, 0x00200000, 0); // OPEN_REPARSE_POINT
             if (handle.IsInvalid || GetFileType(handle) != 1 || !GetFileInformationByHandleEx(handle, 9, out FileTag tag, 8)
                 || (tag.Attributes & (0x400u | 0x10u)) != 0)
             {
@@ -207,6 +208,15 @@ internal static class WorkspaceScopeAudit
         }
 
         return result;
+    }
+
+    internal static string ExtendedWindowsPath(string full)
+    {
+        // The caller supplies a full path: native opens do not get the framework's long-path handling. The preparation
+        // inventory includes Git refs and reflogs under the longer staging name, even when the published workspace
+        // itself fits within MAX_PATH.
+        return full.StartsWith(@"\\?\", StringComparison.Ordinal) ? full
+            : full.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + full[2..] : @"\\?\" + full;
     }
 
 #pragma warning disable SYSLIB1054

@@ -44,6 +44,12 @@ public interface ISourceAdapter
 
     /// <summary>Observes a repository without changing it; throws <see cref="ProviderRefusedException"/> when the path is not a repository with a commit.</summary>
     RepositoryObservation Inspect(string path);
+
+    /// <summary>
+    /// Reads a regular file at its exact SHA-256 hash from this repository's local history, without fetching or changing it.
+    /// Returns null for unsupported, shallow, missing or unreadable history, or when no revision matches.
+    /// </summary>
+    byte[]? ReadFileAtHash(string root, string relativePath, string hash) => null;
 }
 
 /// <summary>A source adapter that replays recorded observations: a genuinely different implementation of the contract for conformance tests and offline fixtures; it qualifies no live repository.</summary>

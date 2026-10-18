@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:07Z",
+  "body": {
+    "note": "Test contributor admission.",
+    "principal": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "status": "admitted"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:84472c2796570a995de7dde65f7ae8ad771eac88b0bdd02991d47d145085b70f",
+  "id": "01M57TPYPA4E37QXJ9YZGM2FTQ",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "OJnp-b6DbNf2kGFZ8Rs7olW4u0LxdDV7JBn2Us316bdc1kj4AY0LqKCQlfF12TWynQJXfh790lpfPFl3AuYHHA"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:49a444f22de0f8275919976b4a17f7894586db45ff615dba856a48208bb52bcd",
+    "id": "01M57TPYP9Q3KJKJ2QVCW03V50",
+    "type": "device"
+  },
+  "type": "admission"
+}

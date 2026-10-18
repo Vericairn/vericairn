@@ -49,7 +49,7 @@ public sealed partial class EstateService
         List<ContextAssembly.Source> sources;
         try
         {
-            sources = ContextSelection.Work(model, files, order);
+            sources = ContextSelection.Work(model, files, order, Providers.Source("git"));
         }
         catch (UnauthorizedAccessException)
         {
@@ -63,7 +63,7 @@ public sealed partial class EstateService
         List<ContextAssembly.Source> missing = sources.Where(s => s.Mandatory && s.Original is null).ToList();
         if (missing.Count > 0)
         {
-            const string message = "Context refused: required originals are unavailable; restore their pinned bytes before the dependent step.";
+            const string message = "Context refused: required originals are unavailable; restore their exact pinned bytes or use a complete estate clone with matching local history before the dependent step. Shallow or missing history cannot supply originals; no other revision is substituted.";
             return new ContextResponse(message, null, new Problem("incomplete-context", message, missing.Select(s =>
                 new FindingDto("error", "context.original-unavailable", s.Identity["path"]!.GetValue<string>(), s.Dependency)).ToList()));
         }
@@ -135,7 +135,8 @@ public sealed partial class EstateService
                         record.ComputedHash == pinned.GetProperty("revisionHash").GetString() &&
                         EstateModel.BodyString(record, "path") == path && EstateModel.BodyString(record, "hash") == byteHash)
                     {
-                        original = ContextSelection.LocalOriginal(model.Root, path, byteHash);
+                        original = ContextSelection.LocalOriginal(model.Root, path, byteHash,
+                            pinned.TryGetProperty("history", out JsonElement history) && history.GetString() == "local" ? Providers.Source("git") : null);
                     }
                 }
 
@@ -175,7 +176,7 @@ public sealed partial class EstateService
     }
 
     private static ContextReadResponse Unavailable(JsonElement? identity) => new(identity, null,
-        new Problem("original-unavailable", "The pinned original is unavailable in this copy. No latest revision was substituted. Prepare context again to obtain a self-contained pinned identity.", []));
+        new Problem("original-unavailable", "The pinned original is unavailable in this copy. Restore its exact bytes or, for a required original, use a complete estate clone with matching local history. No other revision was substituted. Prepare context again to obtain a self-contained pinned identity.", []));
 
     private static ContextResponse ContextRefusal(string code, string message) => new(message + "\n", null, new Problem(code, message, []));
 }
