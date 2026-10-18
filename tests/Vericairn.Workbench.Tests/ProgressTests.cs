@@ -44,7 +44,7 @@ public class ProgressTests(HeadlessFixture fixture)
             Assert.Equal("2 current: 1 planned; 1 submitted, awaiting acceptance", shell.Progress[1].Detail);
             Assert.Equal("1 of 1 planned work order; 0 held by an after or a blocker", shell.Progress[4].Detail);
             Assert.Equal("asks: none; acceptances only the operator gives: 1", shell.Progress[5].Detail);
-            Assert.StartsWith("pinned to source Vericairn/vericairn@0123456789ab · record format 2 · check: 0 errors, 0 warnings", shell.Progress[0].Detail, StringComparison.Ordinal);
+            Assert.StartsWith("pinned to source Vericairn/vericairn@0123456789ab · record format 3 · check: 0 errors, 0 warnings", shell.Progress[0].Detail, StringComparison.Ordinal);
 
             // Ctrl+Shift+P opens the whole report as the runtime renders it, and the keyboard lands in it.
             await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.P, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.P, null); });
