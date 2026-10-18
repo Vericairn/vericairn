@@ -19,9 +19,10 @@ public sealed class GitCommandAdapter : ISourceAdapter
     {
     }
 
-    internal GitCommandAdapter(Func<ProcessStartInfo, ProcessResult> run)
+    internal GitCommandAdapter(Func<ProcessStartInfo, ProcessResult> run, IWorkspaceProvider? workspaces = null)
     {
         this.run = run;
+        Workspaces = workspaces ?? new GitWorktreeWorkspaces();
     }
 
     /// <inheritdoc />
@@ -33,7 +34,7 @@ public sealed class GitCommandAdapter : ISourceAdapter
         ["Requires git on the PATH.", "Observations are read-only. Worker workspaces have independent administration and retain audited branches locally after settlement; the adapter never publishes."]);
 
     /// <inheritdoc />
-    public IWorkspaceProvider Workspaces { get; } = new GitWorktreeWorkspaces();
+    public IWorkspaceProvider Workspaces { get; }
 
     /// <inheritdoc />
     public byte[]? ReadFileAtHash(string root, string relativePath, string hash) => GitDocumentHistory.Read(root, relativePath, hash);
