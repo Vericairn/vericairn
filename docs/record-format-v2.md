@@ -331,13 +331,18 @@ repository, `covers` is compared at the head of that repository's clone register
 through its source; without one, it is compared at the commit reviewed or released. A document is due at the highest
 level among its reasons: `remind` shows in status; `warn` is also a `document.due` warning of `vericairn estate check`;
 `refuse` also refuses the next `vericairn release submit` of the product, before any intent is recorded, naming every
-such document at once. `vericairn release submit` also refuses, before any intent is recorded, when a cleared document
-of another repository that declares `refuse` and whose `release` trigger names the product differs, at the commit being
-released, from the content its latest review cleared. From 0.7.2 the build provider resolves that commit at the destination;
-both document bytes and repository `covers` checks use that exact commit. An unresolved commit refuses submission.
-The comparison runs where a clone is registered; if that clone lacks the commit, the refusal names the repository to
-fetch. It never substitutes the clone's HEAD. Observation checks the actual built commit again before recording a
-candidate, including when the branch moved after submission. A declaration that names a source, trigger, check or generator no installed pack provides is shown as
+such document at once. `vericairn release submit` also refuses, before any intent is recorded, when a repository document
+that declares `refuse` and whose `release` trigger names the product differs from the content its latest review cleared,
+or has no clearing review. Both document bytes and repository `covers` checks use a commit of the document's own
+repository. In the release repository this is the exact commit the build provider resolves at the
+effective destination; an unresolved commit refuses submission, and the clone's HEAD is never substituted. In another
+repository it is that repository's registered HEAD, or the reviewed commit when HEAD is its ancestor. A newer or
+divergent HEAD with changed content still refuses. Resource revisions retain the repository's identity. The comparison
+runs where a clone is registered; if that clone lacks the required commit,
+the refusal names the repository to fetch. An unregistered clone is reported as not compared, for the independent
+review to read at a commit of that document's repository. Observation checks again before recording a candidate,
+using the actual built commit for the release repository and the same ancestry rule in each other repository.
+A declaration that names a source, trigger, check or generator no installed pack provides is shown as
 unavailable (`document.unavailable`) and, when it declares a `refuse` trigger, closes its product's release gate until
 the pack is installed or the declaration is revised. Status in JSON lists every declared document with its state,
 reasons and latest clearance.

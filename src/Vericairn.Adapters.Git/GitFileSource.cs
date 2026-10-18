@@ -33,6 +33,10 @@ public sealed class GitFileSource : IDocumentSource
     }
 
     /// <inheritdoc />
+    public bool IsAncestor(EstateModel model, RecordEnvelope declaration, string ancestor, string descendant) =>
+        Clone(model, declaration) is string clone && Run(clone, out _, "merge-base", "--is-ancestor", ancestor, descendant) == 0;
+
+    /// <inheritdoc />
     public byte[]? Read(EstateModel model, RecordEnvelope declaration, string commit)
     {
         string? path = EstateModel.BodyString(declaration, "path");

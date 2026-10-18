@@ -70,7 +70,8 @@ public interface IReleaseProvider
 
     /// <summary>
     /// Resolves the build's ref at its destination to an exact commit, without dispatching. Null means this implementation cannot
-    /// establish it; a release needing repository document checks is then refused. The observed run's commit is checked again.
+    /// establish it; a release needing document checks in its own repository is then refused. Documents in other repositories
+    /// use their own commits. The observed run's commit is checked again.
     /// </summary>
     string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) => null;
 

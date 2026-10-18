@@ -22,6 +22,9 @@ public interface IDocumentSource
     /// <summary>The commit a reference names in the clone, or null.</summary>
     string? Resolve(EstateModel model, RecordEnvelope declaration, string reference);
 
+    /// <summary>True when the source can establish that one commit is an ancestor of another; false when unknown.</summary>
+    bool IsAncestor(EstateModel model, RecordEnvelope declaration, string ancestor, string descendant) => false;
+
     /// <summary>The document's bytes at a commit, or null when that commit has no such file or no clone is registered here.</summary>
     byte[]? Read(EstateModel model, RecordEnvelope declaration, string commit);
 

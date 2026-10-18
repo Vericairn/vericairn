@@ -53,12 +53,14 @@ The operator can restore readable journal data or inspect stored effects and pre
 outside the batches directory before retrying. Separate service reads can reconcile journals too;
 [software.md](software.md#record-publication-and-local-recovery-072) states the single-service boundary.
 
-Release submit resolves the provider's exact build commit for repository document checks and claims
+Release submit resolves the provider's exact build commit for document checks in the release repository and claims
 its operation identity before dispatch. A receiptless intent is uncertain, so observe and reconcile it
 before retrying. Observation persists that uncertainty even when it subsequently waits for a run or
-draft; the response can include the recorded operation. Observation checks documents at the actual
-build commit again before recording success or a candidate. Missing commits refuse with fetch guidance,
-without substituting clone HEAD. Provider I/O runs outside the service gate; this is not distributed
+draft; the response can include the recorded operation. Observation checks the release repository's documents at the
+actual build commit again before recording success or a candidate. Missing commits refuse with fetch guidance,
+without substituting clone HEAD. Documents in other repositories use their own registered HEAD commits in both checks,
+or the reviewed commit when HEAD is its ancestor; unregistered clones are reported as not compared.
+Provider I/O runs outside the service gate; this is not distributed
 exactly-once execution across independently running services.
 
 ## Context artifacts (0.7.0 addition)

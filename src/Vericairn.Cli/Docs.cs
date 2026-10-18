@@ -337,7 +337,9 @@ internal static partial class Docs
 
         Section(lines, "Decisions", window.Where(r => r.Type == "decision").Select(r => $"**{Str(r.Body, "title")}** ({When(r.At)}, decision {r.Id}): {Str(r.Body, "summary")}"));
         Section(lines, "Work orders opened or revised", window.Where(r => r.Type == "work-order").Select(r => $"**{Str(r.Body, "key")}** ({Str(r.Body, "kind")}): {Str(r.Body, "title")}{(r.Supersedes is null ? string.Empty : " (revised)")}."));
-        Section(lines, "Milestone and release acceptances", window.Where(r => r.Type == "acceptance" && !(r.Body.TryGetProperty("self", out JsonElement self) && self.ValueKind == JsonValueKind.True)).Select(r =>
+        Section(lines, "Milestone and release acceptances", window.Where(r => r.Type == "acceptance" &&
+            (!(r.Body.TryGetProperty("self", out JsonElement self) && self.ValueKind == JsonValueKind.True) ||
+             (r.Subject?.Type == "release" && model.HasRole(r.By, Roles.Operator)))).Select(r =>
         {
             RecordEnvelope? subject = r.Subject is null ? null : model.ById.GetValueOrDefault(r.Subject.Id);
             string what = subject is null ? r.Subject?.ToString() ?? string.Empty : subject.Type == "release" ? "release " + Str(subject.Body, "version") : Str(subject.Body, "key") ?? subject.Id;
