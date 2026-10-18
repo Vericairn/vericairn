@@ -17,7 +17,7 @@ FIX-22 shows compact attention for obligations still open in the available recor
 [0.7.3 documentation set](docs/releases/0.7.3/README.md) describes the behavior and remaining limits;
 the estate's release record establishes publication and qualification.
 
-The release notes open with [Security](docs/releases/0.7.2/release-notes.md#security): F-01 affected export
+0.7.2's release notes open with [Security](docs/releases/0.7.2/release-notes.md#security): F-01 affected export
 restoration in every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
 The fix binds restored bytes to the verified inventory; it does not authenticate the export's producer.
 
