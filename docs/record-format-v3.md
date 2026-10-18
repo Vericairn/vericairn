@@ -179,3 +179,29 @@ migration. Historical pins remain unchanged. Strict whole generated outputs refu
 `document-review` records, and neither missing implementations nor a matching historical pin can establish
 currentness. External repository comparisons require an exact commit and a complete versioned source
 inventory; they cannot substitute a clone's head for the release commit.
+### Canonical rendering and contribution coverage
+
+The immutable renderer interface, output contract, rendition response and coverage
+descriptor have separate version numbers. `DocumentRendering` takes only selected,
+verified snapshots and named inputs. Stored and on-demand views use that same
+renderer. Input digests identify the relevant source revisions, generator and
+implementation; the comparison commit is response metadata and never becomes an
+input to its own output. Each pattern member receives only its own revision.
+Generated source dependencies must be current at the same basis and acyclic.
+
+Canonical Markdown is UTF-8 without a BOM, with LF endings, no trailing horizontal
+whitespace and exactly one final newline. Source wording is escaped as literal
+data, numbers and UTC dates use invariant formatting, and selections have explicit
+ordinal order. The original source hashes still describe original bytes. Renderers
+return explicit success, unavailable or error; failed renditions contain no bytes
+or digest. Ordinary repository content checks and the declared size bound apply.
+
+`DocumentCoverage` compares the authoritative kind inventory and shipped descriptors
+in both directions. It includes admitted record types and declared collection
+fields; owning contributions supply deeper nested and non-record collections.
+Each exact kind names its reader task, item/list contracts, input schema, Internal
+audience and destination, or a bounded no-reader reason. Missing and duplicate
+coverage, missing implementations and unsupported versions fail conformance.
+Descriptors do not certify prose quality. The READ-02 and READ-03 builds supply the
+first-party readers and their coverage; this foundation does not claim that an
+absent reader is covered by a raw JSON fallback.

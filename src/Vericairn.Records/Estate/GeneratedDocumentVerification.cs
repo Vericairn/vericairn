@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
-using System.Text;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
@@ -31,11 +30,15 @@ public static class GeneratedDocumentVerification
 {
     /// <summary>Reruns a versioned generator on verified inputs and compares every owned member at one source basis.</summary>
     public static GeneratedDocumentPlan Plan(EstateModel model, RecordEnvelope declaration, string? commit = null)
+        => Plan(model, declaration, commit, new HashSet<string>(StringComparer.Ordinal));
+
+    private static GeneratedDocumentPlan Plan(EstateModel model, RecordEnvelope declaration, string? commit, HashSet<string> visiting)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(declaration);
         try
         {
+            if (!visiting.Add(declaration.Id)) return Error("The declared source graph contains a generation cycle.");
             if (DocumentChecks.Generator(declaration) is not (string id, _) || DocumentGenerators.Find(id) is not { Descriptor: { } descriptor } generator)
                 return Unavailable("The versioned generator is unavailable.");
             bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;
@@ -47,20 +50,28 @@ public static class GeneratedDocumentVerification
             if (elsewhere && selection.Commit != commit) return Unavailable("The source did not read the requested exact commit.");
             DocumentMemberSelection members = DocumentGeneration.Members(declaration, selection);
             if (members.Status != DocumentGenerationStatus.Success) return new(members.Status, [], [], members.Commit, [members.Reason ?? "Generation is unavailable."]);
-            if (members.Members.Any(m => m.Context.Sources.Any(s => s.Kind != "record" && s.Path is not null && GeneratedDocumentContract.Owns(declaration, s.Path))))
-                return Error("A generator cannot consume its own output.");
+            foreach (DocumentSourceSnapshot input in selection.Sources.Where(s => s.Kind != "record" && s.Path is not null))
+            {
+                foreach (RecordEnvelope owner in model.Current("living-document").Where(d =>
+                    EstateModel.BodyString(d, "repository") == input.Repository && GeneratedDocumentContract.Owns(d, input.Path!)
+                    && GeneratedDocumentContract.IsStrict(model, d)))
+                {
+                    if (visiting.Contains(owner.Id)) return Error("The declared source graph contains a generation cycle.");
+                    GeneratedDocumentPlan dependency = Plan(model, owner, commit, visiting);
+                    if (!dependency.Current || !dependency.Expected.Any(f => f.Path == input.Path && f.Hash == input.Hash))
+                        return new(dependency.Status == DocumentGenerationStatus.Success ? DocumentGenerationStatus.Error : dependency.Status,
+                            [], [], commit, ["A generated source dependency is not verified at this exact basis."]);
+                }
+            }
 
             var expected = ImmutableArray.CreateBuilder<DocumentFile>();
             foreach (DocumentMember member in members.Members)
             {
-                DocumentRenderResult result = generator.Generate(member.Context);
-                if (result.Status != DocumentGenerationStatus.Success || result.Content is null)
-                    return new(result.Status == DocumentGenerationStatus.Success ? DocumentGenerationStatus.Error : result.Status, [], [], members.Commit,
+                DocumentRendition result = DocumentRendering.Render(generator, member.Context);
+                if (result.Status != DocumentGenerationStatus.Success)
+                    return new(result.Status, [], [], members.Commit,
                         [result.Reason ?? "The generator returned no complete output."]);
-                byte[] bytes = new UTF8Encoding(false, true).GetBytes(result.Content);
-                if (bytes.Length > descriptor.MaxMemberBytes) return Error("A generated member exceeds its declared size bound.");
-                if (EstateChecks.Content(member.Path, bytes).HasErrors) return Error("A generated member fails the ordinary repository content checks.");
-                expected.Add(new(member.Path, [.. bytes], member.Context.InputDigest));
+                expected.Add(new(member.Path, result.Bytes, result.InputDigest));
             }
 
             DocumentFileInventory actual = elsewhere ? source!.ReadInventory(model, declaration, commit!) : ReadInventory(model.Root, declaration);
@@ -87,6 +98,7 @@ public static class GeneratedDocumentVerification
         {
             return Error("The generator or source violated its declared contract.");
         }
+        finally { visiting.Remove(declaration.Id); }
 
         GeneratedDocumentPlan Unavailable(string reason) => new(DocumentGenerationStatus.Unavailable, [], [], commit, [reason]);
         GeneratedDocumentPlan Error(string reason) => new(DocumentGenerationStatus.Error, [], [], commit, [reason]);

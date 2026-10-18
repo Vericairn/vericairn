@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
@@ -28,7 +29,9 @@ public sealed record DocumentGeneratorDescriptor(
             || MediaType != "text/markdown" || string.IsNullOrWhiteSpace(Ordering) || Audience != "Internal"
             || PathMapping is not ("single" or "record-revision") || MaxMemberBytes is < 1 or > 1048576
             || RecordTypes.Distinct(StringComparer.Ordinal).Count() != RecordTypes.Length
-            || RecordTypes.Any(t => RecordTypeRegistry.Find(t) is null || t is "document-revision" or "document-review" or "living-document")
+            || RecordTypes.Any(t => RecordTypeRegistry.Find(t) is null)
+            || SourceKinds.Distinct(StringComparer.Ordinal).Count() != SourceKinds.Length
+            || Selections.Distinct(StringComparer.Ordinal).Count() != Selections.Length
             || Inputs.Any(p => !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(string.IsNullOrWhiteSpace)))
         {
             throw new ArgumentException("The generator descriptor is incomplete, unsupported or cyclic.", nameof(id));
@@ -41,13 +44,17 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
     string? Path, ImmutableArray<byte> Bytes, string? RecordType, string? At, string? Title,
     string? Supersedes, RecordReference? Subject, JsonElement? Body)
 {
+    /// <summary>The exact recorded author, never a joined current name.</summary>
+    public string? Author { get; init; }
+    /// <summary>The source record's own format, retained independently of the rendering contract.</summary>
+    public long? RecordFormat { get; init; }
     /// <summary>Captures a verified record without giving the renderer access to an estate, clock or filesystem.</summary>
     public static DocumentSourceSnapshot Record(RecordEnvelope record)
     {
         ArgumentNullException.ThrowIfNull(record);
         return new("record", record.Id, record.ComputedHash, null, record.ExpectedPath, [], record.Type,
             record.At, EstateModel.BodyString(record, "title") ?? EstateModel.BodyString(record, "key") ?? EstateModel.BodyString(record, "token") ?? "item",
-            record.Supersedes, record.Subject, record.Body.Clone());
+            record.Supersedes, record.Subject, record.Body.Clone()) { Author = record.By, RecordFormat = record.Format };
     }
 
     /// <summary>Captures a file or object, verifying the advertised exact bytes before any renderer sees them.</summary>
@@ -132,8 +139,48 @@ public sealed record DocumentMemberSelection(DocumentGenerationStatus Status, Im
 /// <summary>Validates declared inputs and enumerates expected paths from complete selected source snapshots.</summary>
 public static class DocumentGeneration
 {
+    private static readonly string[] TitleFields = ["title", "key", "token"];
     /// <summary>The version of the immutable renderer interface.</summary>
     public const int InterfaceVersion = 1;
+
+    /// <summary>Canonical selection order, independent of adapters and filesystem enumeration.</summary>
+    public static ImmutableArray<DocumentSourceSnapshot> Order(ImmutableArray<DocumentSourceSnapshot> sources) =>
+        [.. sources.OrderBy(s => s.Kind, StringComparer.Ordinal).ThenBy(s => s.RecordType, StringComparer.Ordinal)
+            .ThenBy(s => s.At, StringComparer.Ordinal).ThenBy(s => s.Identity, StringComparer.Ordinal)];
+
+    /// <summary>Validates exact identities and file hashes before the selected content crosses into a renderer.</summary>
+    public static string? ValidateSources(DocumentGeneratorDescriptor descriptor, ImmutableArray<DocumentSourceSnapshot> sources)
+    {
+        if (sources.IsDefault || sources.Any(s => !descriptor.SourceKinds.Contains(s.Kind) || !ContentHash.IsValid(s.Hash)
+            || string.IsNullOrWhiteSpace(s.Identity) || s.Bytes.IsDefault
+            || (s.Kind == "record" ? !descriptor.RecordTypes.Contains(s.RecordType ?? string.Empty) || !ValidRecord(s)
+                : s.Path is null || !DocumentPatterns.IsSafePath(s.Path) || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash))
+            || sources.Select(s => (s.Kind, s.Identity)).Distinct().Count() != sources.Length)
+            return "The source selection is inconsistent with the declared contract.";
+        return null;
+    }
+
+    private static bool ValidRecord(DocumentSourceSnapshot source)
+    {
+        if (source.Body is not { ValueKind: JsonValueKind.Object } body || source.RecordFormat is not (>= 1 and <= RecordFormats.Current)
+            || !Identity.Ulid.IsValid(source.Identity) || !Identity.Ulid.IsValid(source.Author) || !RecordParser.IsTimestamp(source.At)
+            || source.Repository is not null || !source.Bytes.IsEmpty) return false;
+        var basis = new JsonObject
+        {
+            ["format"] = RecordFormats.Identifier(source.RecordFormat.Value), ["type"] = source.RecordType,
+            ["id"] = source.Identity, ["at"] = source.At, ["by"] = source.Author, ["body"] = JsonNode.Parse(body.GetRawText()),
+        };
+        if (source.Supersedes is not null) basis["supersedes"] = source.Supersedes;
+        if (source.Subject is { } subject)
+        {
+            var reference = new JsonObject { ["type"] = subject.Type, ["id"] = subject.Id };
+            if (subject.Hash is not null) reference["hash"] = subject.Hash;
+            basis["subject"] = reference;
+        }
+        string title = TitleFields.Select(k => body.TryGetProperty(k, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null).FirstOrDefault(t => t is not null) ?? "item";
+        return title == source.Title && source.Path == "records/" + source.RecordType + "/" + source.At![..7] + "/" + source.Identity + ".json"
+            && ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(basis))) == source.Hash;
+    }
 
     /// <summary>Enumerates a concrete file or a per-revision register without looking at output files or their pins.</summary>
     public static DocumentMemberSelection Members(RecordEnvelope declaration, DocumentSourceSelection sources)
@@ -167,13 +214,12 @@ public static class DocumentGeneration
         string selection = parameters.GetValueOrDefault("selection", "all-revisions");
         if (!descriptor.Selections.Contains(selection)) return Unavailable("The requested selection is unavailable.");
         if (parameters.GetValueOrDefault("audience") != descriptor.Audience) return Unavailable("The requested audience selection is unavailable.");
-        if (sources.Sources.Any(s => !descriptor.SourceKinds.Contains(s.Kind) || !ContentHash.IsValid(s.Hash)
-            || (s.Kind == "record" && !descriptor.RecordTypes.Contains(s.RecordType ?? string.Empty)))
-            || sources.Sources.Select(s => (s.Kind, s.Identity)).Distinct().Count() != sources.Sources.Length)
-            return Error("The source selection is inconsistent with the declared contract.");
+        if (ValidateSources(descriptor, sources.Sources) is { } error) return Error(error);
+        if (sources.Sources.Any(s => s.RecordType is "document-revision" or "document-review" or "living-document" or "verification"))
+            return Error("A committed rendition cannot depend on output pins, declarations, clearance or check results.");
 
         string? pattern = EstateModel.BodyString(declaration, "pathPattern");
-        var context = new DocumentGenerationContext(InterfaceVersion, descriptor, parameters.ToImmutable(), selection, null, sources.Sources);
+        var context = new DocumentGenerationContext(InterfaceVersion, descriptor, parameters.ToImmutable(), selection, null, Order(sources.Sources));
         if (pattern is null)
         {
             string? path = EstateModel.BodyString(declaration, "path");

@@ -46,8 +46,11 @@ public static class DocumentPatterns
         if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) return true;
         string? ap = EstateModel.BodyString(left, "pathPattern");
         string? bp = EstateModel.BodyString(right, "pathPattern");
-        return (ap is not null && IsValid(ap) && b.StartsWith(Prefix(ap), StringComparison.OrdinalIgnoreCase))
-            || (bp is not null && IsValid(bp) && a.StartsWith(Prefix(bp), StringComparison.OrdinalIgnoreCase));
+        return (ap is not null && IsValid(ap) && Within(b, Prefix(ap)))
+            || (bp is not null && IsValid(bp) && Within(a, Prefix(bp)));
+
+        static bool Within(string path, string prefix) => path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(path, prefix.TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Maps a source revision's UTC time, title and full identity without consulting current state.</summary>
