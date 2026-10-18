@@ -150,6 +150,21 @@ public class WorkerScopeTests
     [InlineData("env nohup dd of=../outside", "scope")]
     [InlineData("cd .. && nice sed -i 's/a/b/' outside", "scope")]
     [InlineData("python3 -c \"open('../outside', 'w')\"", "scope")]
+    [InlineData("cp -r \"$VERICAIRN_HOME\" copy", "credentials")]
+    [InlineData("cp -a \"$VERICAIRN_HOME/..\" copy", "credentials")]
+    [InlineData("tar -cf copy.tar -C \"$VERICAIRN_HOME\" .", "credentials")]
+    [InlineData("rsync -a \"$VERICAIRN_HOME\" copy", "credentials")]
+    [InlineData("zip -r copy.zip \"$VERICAIRN_HOME\"", "credentials")]
+    [InlineData("ditto \"$VERICAIRN_HOME\" copy", "credentials")]
+    [InlineData("env doas -n -u worker git credential-store --file helper.data get", "credentials")]
+    [InlineData("git credential-store --file helper.data store", "credentials")]
+    [InlineData("git credential-cache --socket helper.socket erase", "credentials")]
+    [InlineData("cd .. && (touch outside)", "scope")]
+    [InlineData("cd .. && { touch outside; }", "scope")]
+    [InlineData("make install PREFIX=..", "scope")]
+    [InlineData("make install DESTDIR=..", "scope")]
+    [InlineData("defaults write org.example.app key -bool true", "scope")]
+    [InlineData("doas -u worker touch ../outside", "scope")]
     public void Fix20CriticalObservationsStopTheWorker(string command, string code)
     {
         using var run = new RunEstate(brief: Brief("path:NOTES.md"));
@@ -173,6 +188,21 @@ public class WorkerScopeTests
     [InlineData("osascript -e 'do shell script \"touch /etc/x\"'", "audit-unverified")]
     [InlineData("gh auth status", "network")]
     [InlineData("env git -C . credential reject", null)]
+    [InlineData("cp -r source copy", null)]
+    [InlineData("tar -cf copy.tar source", null)]
+    [InlineData("rsync -a source copy", null)]
+    [InlineData("zip -r copy.zip source", null)]
+    [InlineData("ditto source copy", null)]
+    [InlineData("git credential-store --file get", null)]
+    [InlineData("ls -R \"$VERICAIRN_HOME\"", "scope-read")]
+    [InlineData("cat \"$VERICAIRN_HOME/estates/estate/local/live.db\"", "scope-read")]
+    [InlineData("cd sub && (touch inside)", null)]
+    [InlineData("cd sub && { touch inside; }", null)]
+    [InlineData("make install PREFIX=inside", null)]
+    [InlineData("make install DESTDIR=inside PREFIX=/usr", null)]
+    [InlineData("defaults write ./settings key -bool true", null)]
+    [InlineData("cd .. && (doas echo x &>/dev/null)", null)]
+    [InlineData("cd .. && { doas echo x >/dev/null; }", null)]
     public void Fix20NoncriticalObservationsDoNotInventAScopeStop(string command, string? warning)
     {
         using var run = new RunEstate(brief: Brief("path:NOTES.md"));
@@ -186,6 +216,35 @@ public class WorkerScopeTests
         Assert.DoesNotContain(settled.Signals!, s => s.Code is "scope" or "credentials");
         if (warning is not null) Assert.Equal("warning", Assert.Single(settled.Signals!, s => s.Code == warning).Severity);
         else Assert.DoesNotContain(settled.Signals!, s => s.Code == "audit-unverified");
+        Assert.Equal(0, run.Service.Check().Errors);
+    }
+
+    [Theory]
+    [InlineData("touch ../outside", true)]
+    [InlineData("git credential-store --file helper.data get", true)]
+    [InlineData("cp -r \"$VERICAIRN_HOME\" copy", true)]
+    [InlineData("touch inside", false)]
+    [InlineData("echo x > /dev/null", false)]
+    public void ArrayCommandEventsUseTheWorkerStopPath(string body, bool stops)
+    {
+        using var run = new RunEstate(brief: Brief("path:NOTES.md"));
+        string report = run.Report("array-command");
+        File.WriteAllText(report + ".command", JsonSerializer.Serialize(new[] { "sh", "-c", body }));
+        RunResponse started = run.Start("codex", "watch-codex-command-array-input", report);
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+        Assert.Equal(stops ? "known-failure" : "observed-success", settled.Status);
+        if (stops)
+        {
+            Assert.Equal("worker", settled.Stop!.RequestedBy);
+            Assert.NotNull(settled.Stop.ContainedAt);
+            Assert.Contains(settled.Signals!, s => s.Severity == "critical");
+        }
+        else
+        {
+            Assert.Null(settled.Stop);
+            Assert.DoesNotContain(settled.Signals!, s => s.Severity == "critical");
+        }
         Assert.Equal(0, run.Service.Check().Errors);
     }
 }

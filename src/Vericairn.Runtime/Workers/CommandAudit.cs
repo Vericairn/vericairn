@@ -30,7 +30,7 @@ public static partial class CommandAudit
         { "commit", "tag", "merge", "revert", "notes", "stash" };
 
     private enum PathAccess { Read, Write, Unknown }
-    private sealed record InvocationPath(string Path, PathAccess Access, string? WorkingDirectory = null);
+    private sealed record InvocationPath(string Path, PathAccess Access, string? WorkingDirectory = null, bool CopiesTree = false);
     private static readonly IReadOnlyDictionary<string, string> NoEnvironment = new Dictionary<string, string>();
 
     /// <summary>A stable action fingerprint, independent of event id and JSON property order.</summary>
@@ -125,7 +125,7 @@ public static partial class CommandAudit
             foreach (string field in new[] { "command", "cmd" })
             {
                 string? command = null;
-                Check(() => command = StringField(action.Input, field), codes);
+                Check(() => command = CommandField(action.Input, field, codes), codes);
                 if (command is not null)
                 {
                     bool commandReads = false;
@@ -160,7 +160,7 @@ public static partial class CommandAudit
                 string path = invocation.Path;
                 Check(() =>
                 {
-                    if (CredentialPath(path, invocation.WorkingDirectory, environment))
+                    if (CredentialPath(path, invocation.WorkingDirectory, environment, invocation.CopiesTree))
                     {
                         codes.Add("credentials");
                     }
@@ -211,6 +211,34 @@ public static partial class CommandAudit
 
     private static string? StringField(JsonElement input, string name) =>
         input.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static string? CommandField(JsonElement input, string name, HashSet<string> codes)
+    {
+        if (!input.TryGetProperty(name, out JsonElement value)) return null;
+        if (value.ValueKind == JsonValueKind.String) return value.GetString();
+        if (value.ValueKind != JsonValueKind.Array) { codes.Add("audit-unverified"); return null; }
+        var words = new List<string>();
+        foreach (JsonElement item in value.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String) words.Add(item.GetString()!);
+            else codes.Add("audit-unverified");
+        }
+        if (words.Count == 0) { codes.Add("audit-unverified"); return null; }
+        // A single string may be a shell command; an argv array must keep argument boundaries,
+        // notably the body passed to sh -c and quoted text that is not itself an invocation.
+        return words.Count == 1 ? words[0] : string.Join(' ', words.Select(QuoteArgument));
+    }
+
+    private static string QuoteArgument(string word)
+    {
+        int equal = word.IndexOf('=', StringComparison.Ordinal);
+        if (equal > 0 && word[..equal].All(c => char.IsAsciiLetterOrDigit(c) || c == '_'))
+            return word[..(equal + 1)] + QuoteWord(word[(equal + 1)..]);
+        return QuoteWord(word);
+    }
+
+    private static string QuoteWord(string word) => word.Length > 0 && word.All(c => char.IsAsciiLetterOrDigit(c) || "_./\\-=:$%~{}".Contains(c, StringComparison.Ordinal))
+        ? word : "'" + word.Replace("'", "'\"'\"'", StringComparison.Ordinal) + "'";
 
     private static IEnumerable<string> TemporaryNames => OperatingSystem.IsWindows() ? ["TMPDIR", "TEMP", "TMP"] : ["TMPDIR"];
 
@@ -317,7 +345,7 @@ public static partial class CommandAudit
         return !words.Any(w => !w.StartsWith('\'') && (w.Contains("$(", StringComparison.Ordinal) || w.Contains('`', StringComparison.Ordinal)));
     }
 
-    [GeneratedRegex("(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>\"'])+|<<<|<<-|[;&|<>]+|\\r?\\n", RegexOptions.CultureInvariant, 100)]
+    [GeneratedRegex("(?:\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'|[^\\s;&|<>()\"'])+|<<<|<<-|[;&|<>]+|[()]|\\r?\\n", RegexOptions.CultureInvariant, 100)]
     private static partial Regex ShellWords();
 
     [GeneratedRegex("\\\\([$`\"\\\\])", RegexOptions.CultureInvariant, 100)]
