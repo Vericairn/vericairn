@@ -53,6 +53,12 @@ public interface IWorkspaceProvider
     /// <summary>Captures the workspace before launch, including ignored files, for the settlement's scope audit.</summary>
     WorkspaceSnapshot Capture(PreparedWorkspace workspace) => new(new Dictionary<string, string>(StringComparer.Ordinal), "This workspace provider supplies no file inventory.");
 
+    /// <summary>
+    /// After a refusal before dispatch, removes only a workspace this preparation created and can prove still unused, allowing
+    /// only the worker's exported brief. Reused workspaces always stay. Returns null when removed, otherwise preservation guidance.
+    /// </summary>
+    string? DiscardUnused(PreparedWorkspace workspace, WorkspaceSnapshot? exported, string brief) => "This workspace provider cannot prove the workspace is unused.";
+
     /// <summary>Compares changes since launch with the assignment's permitted repository-relative paths.</summary>
     RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted) => new(0, 0, [], "This workspace provider cannot verify assignment scope.");
 

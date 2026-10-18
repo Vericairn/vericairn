@@ -38,15 +38,9 @@ public class WorkspaceRootJourneyTests
         Success(await journey.Binary("worker", "configure", "--workspaces", journey.Workspaces));
         Assert.Equal(Path.Combine(journey.CanonicalScratch, "workspaces"), Success(await journey.Binary("--json", "worker", "configure")).Json.GetProperty("root").GetString());
 
-        // The refused default run left its workspace repository for inspection. A new root never silently takes it over outside that root.
-        string previous = Directory.EnumerateDirectories(Path.Combine(journey.Home, "estates"), ".git", SearchOption.AllDirectories).Single();
-        string oldWorkspace = Path.GetDirectoryName(previous)!;
-        string canonicalWorkspace = Path.GetFullPath(Git(oldWorkspace, "rev-parse", "--show-toplevel"));
-        refused = await journey.Run();
-        Assert.Equal(2, refused.Code);
-        Assert.Contains($"at '{canonicalWorkspace}'", refused.Err, StringComparison.Ordinal);
-        Assert.Contains("remove that workspace directory", refused.Err, StringComparison.Ordinal);
-        CliHarness.Delete(oldWorkspace);
+        // The refused default run removed the unused workspace it had prepared, so the retry under the new root starts cleanly.
+        string estates = Path.Combine(journey.Home, "estates");
+        Assert.False(Directory.Exists(estates) && Directory.EnumerateDirectories(estates, ".git", SearchOption.AllDirectories).Any());
 
         Success(await journey.Run());
         Assert.True(File.Exists(journey.Report));

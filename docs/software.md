@@ -1196,6 +1196,23 @@ enters a record. A later worker instance reuses that workspace, including its co
 A clone branch moved unexpectedly between attempts refuses reuse; a completed transfer whose catalogue update
 was interrupted can be recovered when the clone still has the workspace's head.
 
+When a run is refused before dispatch, the worker removes the workspace that attempt just prepared, together
+with its catalogue entry, only if it can prove the workspace is still unused. It compares the complete
+repository with the snapshot taken before the workspace was made available, allowing only the worker's unchanged
+brief export. The comparison includes the index, references, reflogs and objects as well as tracked, untracked
+and ignored files. Fixing the refusal's cause and retrying, including after moving the workspace root, then
+creates a clean workspace. The execution preflight and custody checks keep their existing refusal rules.
+On Windows the inventory opens both directories and files with extended paths, including Git references and
+reflogs under the temporary preparation name, so long branch names do not leave an unused workspace behind.
+
+A reused workspace, a workspace taken up by another preparation, a branch already holding commits beyond the
+requested base, or any changed or incompletely verified workspace is kept. The refusal names its location and
+directs the operator to preserve its commits and files before removing it or selecting a root that contains it.
+Workspaces from dispatched runs stay for review, including when launch observation is uncertain.
+Refusals before intent still record nothing; refusals after
+intent keep their existing settlement and charging rules.
+Cleanup never runs against the registered clone and never follows workspace links to delete their targets.
+
 A workspace elsewhere under the selected root is reused; one outside it is refused with its location and cleanup
 guidance. To clean up an independent workspace, first preserve any uncommitted files and confirm its branch was
 retained, then remove its directory. No `git worktree remove` is needed. The next preparation replaces the stale
