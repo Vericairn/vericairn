@@ -51,7 +51,7 @@ public sealed class DocumentRevisionType : IRecordType
         }
 
         if (context.Model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is null
-            && GeneratedDocumentContract.IsStrict(context.Model, d) && GeneratedDocumentContract.Owns(d, path)
+            && GeneratedDocumentContract.IsStrict(context.Model, d) && !GeneratedDocumentContract.IsRetired(context.Model, d) && GeneratedDocumentContract.Owns(d, path)
             && !GeneratedDocumentContract.IsHistoricalPin(context.Model, d, context.Record)))
             context.Error("document.generated-pin", "A whole generated document is verified from its sources and takes no output pin.");
 

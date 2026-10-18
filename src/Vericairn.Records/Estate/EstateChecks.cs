@@ -332,6 +332,25 @@ public static partial class EstateChecks
         foreach (LivingDocuments.State state in LivingDocuments.Derive(model))
         {
             string location = state.Repository is null ? state.Path : state.Declaration.ExpectedPath;
+            if (state.Repository is null && state.Declaration.Format >= 3)
+            {
+                foreach (RecordEnvelope previous in model.Chain(state.Declaration).Select(id => model.ById[id]).Where(d => d.Id != state.Declaration.Id
+                    && DocumentPatterns.Destination(d) != DocumentPatterns.Destination(state.Declaration)))
+                {
+                    try
+                    {
+                        DocumentFileInventory former = GeneratedDocumentVerification.ReadInventory(model.Root, previous);
+                        if (former.Status != DocumentGenerationStatus.Success) findings.Error("document.former-unavailable", location, "Former generated ownership could not be inspected.");
+                        foreach (DocumentFile formerFile in former.Files.Where(f => !GeneratedDocumentContract.Owns(state.Declaration, f.Path)
+                            && !model.Current("living-document").Any(d => d.Id != state.Declaration.Id && EstateModel.BodyString(d, "repository") is null
+                                && GeneratedDocumentContract.Owns(d, f.Path) && (GeneratedDocumentContract.IsStrict(model, d)
+                                    || model.Current("document-revision").Any(p => EstateModel.BodyString(p, "path") == f.Path && EstateModel.BodyString(p, "hash") == f.Hash)))))
+                            findings.Error("document.former-output", formerFile.Path, "A former owned output remains without a checked successor or retirement.");
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    { findings.Error("document.former-unavailable", location, "Former generated ownership could not be inspected safely."); }
+                }
+            }
             if (GeneratedDocumentContract.IsStrict(model, state.Declaration))
             {
                 GeneratedDocumentPlan plan = state.Generation!;
@@ -358,7 +377,9 @@ public static partial class EstateChecks
             string file = Path.Combine(model.Root, state.Path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(file))
             {
-                findings.Warning("document.absent", state.Path, $"Declared living by {state.Declaration.Id}, and no such file is in the estate.");
+                if (GeneratedDocumentContract.UsesStrictRegions(model, state.Declaration))
+                    findings.Error("document.generated-unavailable", state.Path, "The declared generated regions are absent.");
+                else findings.Warning("document.absent", state.Path, $"Declared living by {state.Declaration.Id}, and no such file is in the estate.");
                 continue;
             }
 
@@ -413,7 +434,9 @@ public static partial class EstateChecks
             string full = Path.Combine(model.Root, path);
             if (!File.Exists(full))
             {
-                if (retired.Contains(path))
+                bool historicalGenerated = model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is null
+                    && GeneratedDocumentContract.IsStrict(model, d) && GeneratedDocumentContract.IsHistoricalPin(model, d, revision));
+                if (retired.Contains(path) || historicalGenerated)
                 {
                     findings.Info("document.retired", path, $"Pinned by {revision.Id} and deliberately retired; its last revision remains in history.");
                     continue;

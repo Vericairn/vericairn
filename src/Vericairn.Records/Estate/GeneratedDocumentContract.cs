@@ -20,6 +20,18 @@ public static class GeneratedDocumentContract
     /// <summary>The complete before/after generation preview reviewed alongside the declaration basis.</summary>
     public const string MigrationPreviewOutput = "living-document-migration-preview";
 
+    /// <summary>Whole adopted files and every format-3 authored region have mandatory fresh generation checks.</summary>
+    public static bool RequiresFreshCheck(EstateModel model, RecordEnvelope declaration) => IsStrict(model, declaration)
+        || UsesStrictRegions(model, declaration);
+
+    /// <summary>New authored-region declarations are strict; a legacy lineage retains its comparison until reviewed adoption.</summary>
+    public static bool UsesStrictRegions(EstateModel model, RecordEnvelope declaration)
+    {
+        if (EstateModel.BodyString(declaration, "kind") != "authored" || DocumentChecks.Regions(declaration).Count == 0) return false;
+        return model.Chain(declaration).Select(id => id == declaration.Id ? declaration : model.ById[id])
+            .Any(d => d.Format >= 3 && (d.Supersedes is null || HasReviewedMigration(model, d)));
+    }
+
     /// <summary>New format-3 declarations are strict; an older lineage changes mode only through reviewed adoption.</summary>
     public static bool IsStrict(EstateModel model, RecordEnvelope declaration)
     {
@@ -28,7 +40,7 @@ public static class GeneratedDocumentContract
         bool strict = false;
         foreach (string id in model.Chain(declaration))
         {
-            RecordEnvelope item = model.ById[id];
+            RecordEnvelope item = id == declaration.Id ? declaration : model.ById[id];
             if (EstateModel.BodyString(item, "kind") != "generated") { strict = false; continue; }
             if (item.Format < 3) continue;
             strict |= item.Supersedes is null || HasReviewedMigration(model, item);
@@ -44,6 +56,16 @@ public static class GeneratedDocumentContract
             ? path.StartsWith(DocumentPatterns.Prefix(pattern), StringComparison.OrdinalIgnoreCase)
             : string.Equals(EstateModel.BodyString(declaration, "path"), path, StringComparison.OrdinalIgnoreCase);
     }
+
+    /// <summary>The concrete path a retirement names for this file or bounded register directory.</summary>
+    public static string? RetirementPath(RecordEnvelope declaration) => EstateModel.BodyString(declaration, "pathPattern") is { } pattern && DocumentPatterns.IsValid(pattern)
+        ? DocumentPatterns.Prefix(pattern).TrimEnd('/') : EstateModel.BodyString(declaration, "path");
+
+    /// <summary>Only an authenticated, authorized format-3 retirement can end strict generated ownership.</summary>
+    public static bool IsRetired(EstateModel model, RecordEnvelope declaration) => EstateModel.BodyString(declaration, "repository") is null
+        && model.Current("retirement").Any(r => r.Format >= 3 && EstateModel.BodyString(r, "retiredAt") is not null
+            && EstateModel.BodyString(r, "path") == RetirementPath(declaration) && string.CompareOrdinal(r.At, declaration.At) >= 0
+            && SignatureChecks.IsAuthentic(model, r) && (model.HasRole(r.By, Roles.Operator) || model.HasScope(r.By, Scopes.LocalEngineering, r.AtTime)));
 
     /// <summary>Canonical migration proposal bytes, retained as an ordinary result output, not a new record or status ledger.</summary>
     public static byte[] MigrationBasis(RecordEnvelope? previous, JsonElement nextBody)
@@ -95,11 +117,9 @@ public static class GeneratedDocumentContract
         }
         bool generated = EstateModel.BodyString(declaration, "kind") == "generated";
         bool priorStrict = previous is not null && IsStrict(context.Model, previous);
-        bool versioned = DocumentChecks.Generator(declaration) is (_, IReadOnlyList<string> inputs) && inputs.Any(i => i.StartsWith("format=", StringComparison.Ordinal));
-        bool changed = previous is not null && ContractBody(previous) != ContractBody(declaration);
-        bool existingPins = previous is null && context.Model.OfType("document-revision").Any(r => string.CompareOrdinal(r.At, declaration.At) <= 0
-            && EstateModel.BodyString(r, "path") is { } path && Owns(declaration, path));
-        bool migration = (priorStrict && changed) || (generated && ((previous is not null && !priorStrict && (versioned || changed || declaration.Body.TryGetProperty("pathPattern", out _))) || existingPins));
+        if (previous is not null && IsRetired(context.Model, previous) && !HasReviewedMigration(context.Model, declaration))
+            context.Error("document.retired", "Changing retired generated ownership requires an explicit reviewed migration.");
+        bool migration = RequiresMigration(context.Model, declaration);
         if (migration && !HasReviewedMigration(context.Model, declaration))
             context.Error("document.migration", "Changing generated ownership or converting a legacy declaration requires an explicit migration result and an authentic independent operator review of its exact basis.");
 
@@ -112,6 +132,24 @@ public static class GeneratedDocumentContract
         }
         if (migration && !context.HasRole(declaration.By, Roles.Operator) && !context.HasScope(declaration.By, Scopes.LocalEngineering))
             context.Error("document.migration-author", "Generated ownership is migrated by the operator or under local-engineering authority.");
+    }
+
+    /// <summary>Whether this successor changes generated ownership or adopts a legacy lineage.</summary>
+    public static bool RequiresMigration(EstateModel model, RecordEnvelope declaration)
+    {
+        RecordEnvelope? previous = declaration.Supersedes is null ? null : model.ById.GetValueOrDefault(declaration.Supersedes);
+        bool generated = EstateModel.BodyString(declaration, "kind") == "generated";
+        bool priorStrict = previous is not null && IsStrict(model, previous);
+        bool versioned = DocumentChecks.Generator(declaration) is (_, IReadOnlyList<string> inputs) && inputs.Any(i => i.StartsWith("format=", StringComparison.Ordinal));
+        bool changed = previous is not null && ContractBody(previous) != ContractBody(declaration);
+        bool existingPins = previous is null && model.OfType("document-revision").Any(r => string.CompareOrdinal(r.At, declaration.At) <= 0
+            && EstateModel.BodyString(r, "path") is { } path && Owns(declaration, path));
+        bool regionsChanged = previous is not null && Regions(previous) != Regions(declaration)
+            && (previous.Body.TryGetProperty("regions", out _) || declaration.Body.TryGetProperty("regions", out _));
+        return declaration.Format >= 3 && (regionsChanged || (priorStrict && changed) || (generated && ((previous is not null && !priorStrict
+            && (versioned || changed || declaration.Body.TryGetProperty("pathPattern", out _))) || existingPins)));
+
+        static string? Regions(RecordEnvelope item) => item.Body.TryGetProperty("regions", out JsonElement regions) ? CanonicalJson.Serialize(regions) : null;
     }
 
     private static string ContractBody(RecordEnvelope declaration)

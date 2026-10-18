@@ -32,7 +32,7 @@ public sealed record DocumentGeneratorDescriptor(
             || RecordTypes.Any(t => RecordTypeRegistry.Find(t) is null)
             || SourceKinds.Distinct(StringComparer.Ordinal).Count() != SourceKinds.Length
             || Selections.Distinct(StringComparer.Ordinal).Count() != Selections.Length
-            || Inputs.Any(p => !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(string.IsNullOrWhiteSpace)))
+            || Inputs.Any(p => p.Key == "format" || !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(v => !DocumentInputs.Supported(v))))
         {
             throw new ArgumentException("The generator descriptor is incomplete, unsupported or cyclic.", nameof(id));
         }
@@ -61,7 +61,7 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
     public static DocumentSourceSnapshot Content(string kind, string identity, string repository, string path, string hash, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        if (!DocumentPatterns.IsSafePath(path) || ContentHash.Sha256(bytes) != hash)
+        if (!DocumentPatterns.IsSafeSourcePath(path) || ContentHash.Sha256(bytes) != hash)
             throw new ArgumentException("The source path or content hash is invalid.", nameof(bytes));
         return new(kind, identity, hash, repository, path, [.. bytes], null, null, null, null, null, null);
     }
@@ -154,7 +154,7 @@ public static class DocumentGeneration
         if (sources.IsDefault || sources.Any(s => !descriptor.SourceKinds.Contains(s.Kind) || !ContentHash.IsValid(s.Hash)
             || string.IsNullOrWhiteSpace(s.Identity) || s.Bytes.IsDefault
             || (s.Kind == "record" ? !descriptor.RecordTypes.Contains(s.RecordType ?? string.Empty) || !ValidRecord(s)
-                : s.Path is null || !DocumentPatterns.IsSafePath(s.Path) || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash))
+                : string.IsNullOrWhiteSpace(s.Repository) || s.Path is null || !DocumentPatterns.IsSafeSourcePath(s.Path) || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash))
             || sources.Select(s => (s.Kind, s.Identity)).Distinct().Count() != sources.Length)
             return "The source selection is inconsistent with the declared contract.";
         return null;
@@ -187,7 +187,8 @@ public static class DocumentGeneration
     {
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(sources);
-        if (sources.Status != DocumentGenerationStatus.Success) return new(sources.Status, [], sources.Commit, sources.Reason);
+        if (sources.Status != DocumentGenerationStatus.Success) return new(sources.Status == DocumentGenerationStatus.Unavailable ? sources.Status : DocumentGenerationStatus.Error,
+            [], sources.Commit, "The complete required source selection is unavailable or invalid.");
         if (DocumentChecks.Generator(declaration) is not (string id, IReadOnlyList<string> inputs)
             || DocumentGenerators.Find(id)?.Descriptor is not { } descriptor)
             return Unavailable("The versioned generator is not installed.");
@@ -206,7 +207,7 @@ public static class DocumentGeneration
         foreach ((string name, string value) in parameters)
         {
             if (name == "format") continue;
-            if (!descriptor.Inputs.TryGetValue(name, out ImmutableArray<string> allowed) || !allowed.Contains(value))
+            if (!descriptor.Inputs.TryGetValue(name, out ImmutableArray<string> allowed) || !DocumentInputs.Accepts(allowed, value))
                 return Error("An input name or value is not supported by this generator contract.");
         }
 
@@ -236,6 +237,7 @@ public static class DocumentGeneration
                 return Error("Each register member requires an exact record revision, UTC time and title.");
             string path = DocumentPatterns.Member(pattern, source.Identity,
                 DateTimeOffset.ParseExact(source.At, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal), source.Title);
+            if (!DocumentPatterns.IsSafePath(path)) return Error("The mapped member exceeds the portable path contract.");
             members.Add(new(path, context with { Selection = "item", Sources = [source] }));
         }
 

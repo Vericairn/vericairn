@@ -103,6 +103,33 @@ public class DocumentGenerationTests
         Assert.Throws<InvalidOperationException>(() => DocumentGenerators.Register(Generator));
     }
 
+    [Fact]
+    public void NamedGrammarAdmitsExplicitIdentitiesAndInstantsWithoutAClockOrEstateSpecificRegistration()
+    {
+        Assert.True(DocumentInputs.Accepts(["all", "@ulid"], "all"));
+        Assert.True(DocumentInputs.Accepts(["all", "@ulid"], "01ARZ3NDEKTSV4RRFFQ69G5FAV"));
+        Assert.False(DocumentInputs.Accepts(["all", "@ulid"], "latest"));
+        Assert.True(DocumentInputs.Accepts(["@timestamp"], "2026-10-13T12:00:00Z"));
+        Assert.False(DocumentInputs.Accepts(["@timestamp"], "now"));
+        Assert.False(DocumentInputs.Accepts(["@path"], "../outside.md"));
+        Assert.False(DocumentInputs.Supported("@unknown"));
+    }
+
+    [Fact]
+    public void AValidPatternCannotPublishAnOverlongMappedMember()
+    {
+        using var f = new PolicyFixture();
+        string prefix = string.Join('/', Enumerable.Repeat(new string('x', 85), 5));
+        JsonObject body = Declaration(prefix + "/{month}/{date}-{slug}-{id}.md");
+        JsonObject decision = f.DecisionBody();
+        decision["title"] = new string('t', 100);
+        f.Add("decision", decision);
+        RecordEnvelope declared = f.Add("living-document", body);
+        DocumentMemberSelection result = Members(f.Estate.Load(), declared);
+        Assert.Equal(DocumentGenerationStatus.Error, result.Status);
+        Assert.Empty(result.Members);
+    }
+
     internal static DocumentMemberSelection Members(EstateModel model, RecordEnvelope declaration) =>
         DocumentGeneration.Members(declaration, DocumentSourceSelection.Records(model, Generator.Descriptor!));
 

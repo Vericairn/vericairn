@@ -851,6 +851,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 return NotFound($"No living-document declaration has id {declaration}.");
             }
+            if (GeneratedDocumentContract.IsStrict(model, declared))
+                return Refuse("Wholly generated documents are proved by their sources and cannot receive authored clearance.");
 
             // Who wrote an estate file is in the estate's own revisions, and they decide its reviewer's independence. Who wrote a
             // document of another repository is not in the estate, so there the reviewer states it; without a statement a
@@ -917,7 +919,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string text = System.Text.Encoding.UTF8.GetString(bytes);
             LivingDocuments.State state = LivingDocuments.Derive(model).First(d => d.Declaration.Id == declared.Id);
             List<RecordEnvelope> answered = state.Reasons.Where(r => r.Record is not null).Select(r => model.ById[r.Record!]).ToList();
-            IReadOnlyList<DocumentChecks.Outcome> checks = DocumentChecks.Run(model, declared, text, path, commit is null ? session.Root : null, answered, exists);
+            IReadOnlyList<DocumentChecks.Outcome> checks = DocumentChecks.Run(model, declared, text, path, commit is null ? session.Root : null, answered, exists, commit);
             var content = new JsonObject { ["hash"] = ContentHash.Sha256(bytes), ["bytes"] = bytes.Length };
             if (commit is not null)
             {
@@ -1275,13 +1277,22 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && d.DeclaresRefuse))
+        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && (d.DeclaresRefuse || GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration))))
         {
             if (document.Generation is { } generation)
             {
                 if (generation.Current) compared.Add($"{document.Path} at {generation.Commit}: every generated member equals its verified sources");
                 else changed.AddRange(generation.Problems.Select(p => $"{document.Path}: {p}"));
                 continue;
+            }
+
+            if (GeneratedDocumentContract.UsesStrictRegions(model, document.Declaration))
+            {
+                string? regionCommit = document.ComparisonCommit;
+                IReadOnlyList<string> failures = CompareRegionsAtCommit(model, document.Declaration, regionCommit);
+                if (failures.Count != 0) { changed.AddRange(failures.Select(p => document.Path + ": " + p)); continue; }
+                compared.Add(document.Path + " at " + regionCommit + ": every generated region equals its verified sources");
+                if (!LivingDocuments.Triggers(document.Declaration).Any(t => t.Level == "refuse")) continue;
             }
 
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
@@ -1335,6 +1346,19 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return (changed, compared);
     }
 
+    private static IReadOnlyList<string> CompareRegionsAtCommit(EstateModel model, RecordEnvelope declaration, string? commit)
+    {
+        try
+        {
+            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(declaration, "source"));
+            byte[]? bytes = commit is not null && source?.Resolve(model, declaration, commit) == commit ? source.Read(model, declaration, commit) : null;
+            return bytes is null ? ["The exact generated-region source commit is unavailable."]
+                : DocumentChecks.Generated(model, declaration, new System.Text.UTF8Encoding(false, true).GetString(bytes), commit);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        { return ["The exact generated-region comparison could not complete safely."]; }
+    }
+
     private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit, ProviderDescriptor provider, string destination)
     {
         IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
@@ -1346,13 +1370,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
         (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories);
+        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is null && d.Generation is null && GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration)))
+        {
+            try
+            {
+                string file = GeneratedDocumentVerification.SafeFile(model.Root, document.Path);
+                if (!File.Exists(file)) changed.Add(document.Path + ": required generated regions are missing");
+                else changed.AddRange(DocumentChecks.Generated(model, document.Declaration, File.ReadAllText(file)).Select(p => document.Path + ": " + p));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            { changed.Add(document.Path + ": required generated regions are unavailable"); }
+        }
         changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
         return (changed, compared);
     }
 
     private static bool NeedsReleaseCommit(EstateModel model, string product, IReadOnlySet<string> repositories) =>
         model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is string repository && repositories.Contains(repository) &&
-            (GeneratedDocumentContract.IsStrict(model, d) || (LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"))));
+            (GeneratedDocumentContract.RequiresFreshCheck(model, d) || (LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"))));
 
     // Match the effective build destination, including request overrides, through the provider's resource location keys.
     // Every revision of a matching resource denotes the same repository, including an older declaration or clone registration.
@@ -2521,13 +2556,34 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return WriteOutcome.Fail(rejected);
         }
 
+        DocumentChangePlan generated = PrepareDocuments(current, [record]);
+        if (generated.Status != DocumentGenerationStatus.Success)
+            return WriteOutcome.Fail(new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
+        BatchJournal? outputJournal = null;
+        bool stored = false;
+
         try
         {
+            if (!generated.Changes.IsEmpty || !generated.RetiredDirectories.IsEmpty)
+            {
+                GeneratedOutputStore.Validate(session.Root, generated.Changes);
+                outputJournal = BatchJournal.Begin(session, "Store the record and its generated companions.", null, [record], generated.Changes, generated.RetiredDirectories);
+            }
             session.Write(record);
+            stored = true;
+            if (outputJournal is not null)
+            {
+                GeneratedOutputStore.Apply(session.Root, generated.Changes, generated.RetiredDirectories, BeforePublishingDocuments);
+                outputJournal.Close();
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {
-            return Refuse(exception.Message);
+            if (stored)
+                return new WriteOutcome(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash),
+                    new Problem("reconcile-required", $"Record {record.Envelope.Id} was stored. Companion publication stopped; its batch journal retains the pending outputs. Reopen the estate or run docs regenerate to recover before retrying the change.", []));
+            outputJournal?.Close();
+            return Refuse(outputJournal is null ? exception.Message : "The prepared record and companion batch could not be stored; no record was written.");
         }
 
         return WriteOutcome.Success(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
@@ -2580,6 +2636,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>A test's hook at the validation boundary, for observing publication and injecting a failed judgment.</summary>
     internal Action<IReadOnlyList<AuthoredRecord>>? BeforeValidatingRecords { get; set; }
 
+    /// <summary>A test hook between prepared output publications; recovery never relies on it.</summary>
+    internal Action<string>? BeforePublishingDocuments { get; set; }
+
     /// <summary>
     /// Stores records that only hold together, such as routing's assignment of a step and the run intent or the ask that carries it.
     /// The estate is judged with all of them, their content checks included, before any is stored, so none is stored when any would
@@ -2599,12 +2658,17 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return ([], rejected);
         }
 
+        DocumentChangePlan generated = PrepareDocuments(session.Load(), records);
+        if (generated.Status != DocumentGenerationStatus.Success)
+            return ([], new Problem("generated-refused", "Not written: " + string.Join(" ", generated.Problems), []));
+
         BatchJournal journal;
         try
         {
-            journal = BatchJournal.Begin(session, purpose, workOrder, records);
+            GeneratedOutputStore.Validate(session.Root, generated.Changes);
+            journal = BatchJournal.Begin(session, purpose, workOrder, records, generated.Changes, generated.RetiredDirectories);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             return ([], new Problem("refused", $"Not written: the journal of the batch could not be written on this machine ({exception.Message}).", []));
         }
@@ -2631,6 +2695,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             written.Add(new RecordWritten(record.RelativePath, record.Envelope.Id, record.Envelope.ComputedHash));
         }
 
+        try
+        {
+            GeneratedOutputStore.Apply(session.Root, generated.Changes, generated.RetiredDirectories, BeforePublishingDocuments);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return (written, new Problem("reconcile-required", "The records were stored, but companion publication stopped. Their batch journal retains the pending outputs for recovery; do not repeat the record writes.", []));
+        }
         journal.Close();
         return (written, null);
     }
@@ -2672,6 +2744,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         FindingList findings = UnreadableBatches(read);
         foreach (BatchJournal journal in read.Journals)
         {
+            if (journal.HasOutputs)
+            {
+                if (GeneratedOutputStore.Recover(session, journal, model)) continue;
+                string storedOutputs = string.Join(", ", journal.Records.Where(r => model.ById.ContainsKey(r.Id)).Select(r => r.Type + " " + r.Id));
+                findings.Error("batch.outputs-incomplete", "batch-journal:" + journal.Id,
+                    "A generated batch remains incomplete. Stored records: " + (storedOutputs.Length == 0 ? "none" : storedOutputs)
+                    + ". Its prepared outputs are retained for recovery; no record is rolled back and no unverified output is pruned.");
+                continue;
+            }
             List<BatchJournal.Entry> stored = [.. journal.Records.Where(r => model.ById.ContainsKey(r.Id))];
             List<BatchJournal.Entry> missing = [.. journal.Records.Where(r => !model.ById.ContainsKey(r.Id))];
             RecordEnvelope? order = journal.WorkOrder is string id && model.ById.TryGetValue(id, out RecordEnvelope? named) && named.Type == "work-order" ? model.Latest(named) : null;
@@ -2716,11 +2797,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     private Problem? JudgeProposedLocked(IReadOnlyList<AuthoredRecord> records)
     {
-        FindingList unreadable = UnreadableBatches(BatchJournal.All(session));
+        BatchJournal.ReadResult batches = BatchJournal.All(session);
+        FindingList unreadable = UnreadableBatches(batches);
         if (unreadable.Count > 0)
         {
             return new Problem("reconcile-required", "Not written: unreadable batch journals require local reconciliation before further record writes.", ToFindings(unreadable, "reconcile-required").Findings);
         }
+        if (batches.Journals.Any(j => j.HasOutputs && !GeneratedOutputStore.Recover(session, j, session.Load())))
+            return new Problem("reconcile-required", "Not written: a prior generated batch has unresolved outputs. Recover its original records and outputs before another write.", []);
 
         try
         {
@@ -2735,6 +2819,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return new Problem("refused", "Not written: the proposed estate could not be validated. Restore readable estate content before retrying.", []);
         }
     }
+
+    private DocumentChangePlan PrepareDocuments(EstateModel current, IReadOnlyList<AuthoredRecord> records) =>
+        !records.Any(r => r.Envelope.Type == "living-document") && !current.Current("living-document").Any(d => GeneratedDocumentContract.IsStrict(current, d))
+            ? new(DocumentGenerationStatus.Success, [], [], [])
+            : DocumentRecordChanges.Prepare(current, LoadWith(records), [.. records.Select(r => r.Envelope)]);
 
     /// <summary>The estate as it would be with records added that are not stored yet; as it is without any. Caller holds the gate.</summary>
     private EstateModel LoadWith(IReadOnlyList<AuthoredRecord> records)

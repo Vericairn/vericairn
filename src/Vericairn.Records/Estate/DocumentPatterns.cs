@@ -20,9 +20,13 @@ public static class DocumentPatterns
 
     /// <summary>A portable path with no traversal, platform aliases, reserved names or hidden directories.</summary>
     public static bool IsSafePath(string path)
+        => IsSafeSourcePath(path) && path.Split('/').All(p => !p.StartsWith('.'));
+
+    /// <summary>A portable selected source path, including declared configuration files, without traversal or platform aliases.</summary>
+    public static bool IsSafeSourcePath(string path)
     {
         if (!Patterns.RelativePath.IsMatch(path) || path.Length > 500) return false;
-        return path.Split('/').All(p => p.Length > 0 && !p.StartsWith('.') && !p.EndsWith('.')
+        return path.Split('/').All(p => p.Length > 0 && p is not ("." or "..") && !p.EndsWith('.')
             && p.Split('.')[0].ToUpperInvariant() is not ("CON" or "PRN" or "AUX" or "NUL" or "COM1" or "COM2" or "COM3" or "COM4" or "COM5" or "COM6" or "COM7" or "COM8" or "COM9" or "LPT1" or "LPT2" or "LPT3" or "LPT4" or "LPT5" or "LPT6" or "LPT7" or "LPT8" or "LPT9"));
     }
 

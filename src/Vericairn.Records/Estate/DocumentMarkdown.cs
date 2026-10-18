@@ -40,7 +40,7 @@ public static class DocumentMarkdown
     /// <summary>A link to an explicitly selected repository path. Arbitrary URI schemes and executable destinations are refused.</summary>
     public static string Link(string label, string path)
     {
-        if (!DocumentPatterns.IsSafePath(path)) throw new ArgumentException("A source link requires a portable repository path.", nameof(path));
+        if (!DocumentPatterns.IsSafeSourcePath(path)) throw new ArgumentException("A source link requires a portable repository path.", nameof(path));
         return "[" + Text(label) + "](" + path + ")";
     }
 

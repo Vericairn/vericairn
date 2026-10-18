@@ -14,11 +14,13 @@ public class GeneratedDocumentSourceTests
     private static readonly DependencyRenderer DependencyGenerator = InstallDependencyGenerator();
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void SourceDependenciesMustBeCurrentAndAcyclicAtTheSameCommit(bool cycle)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void SourceDependenciesMustBeCurrentAndAcyclicAtTheSameCommit(bool cycle, bool region)
     {
-        var source = new DependencySource(cycle);
+        var source = new DependencySource(cycle, region);
         Assert.True(DocumentSources.Register(source));
         using var f = new PolicyFixture();
         RecordEnvelope repository = f.Estate.Add("resource", f.Estate.OperatorId, """{"kind":"repository","name":"Example","role":"source","location":{"github":"Example/example"},"visibility":"private"}""");
@@ -29,6 +31,14 @@ public class GeneratedDocumentSourceTests
             body["repository"] = repository.Id;
             body["source"] = source.Id;
             body["generator"]!["id"] = DependencyGenerator.Id;
+            if (region && path == "docs/second.md")
+            {
+                body["kind"] = "authored";
+                body.Remove("generator");
+                body["triggers"] = new JsonArray(new JsonObject { ["on"] = "decision", ["level"] = "warn" });
+                body["regions"] = new JsonArray(new JsonObject { ["id"] = "section", ["generator"] = DependencyGenerator.Id,
+                    ["inputs"] = new JsonArray("format=1", "audience=Internal", "selection=all-revisions") });
+            }
             return f.Add("living-document", body);
         }
         RecordEnvelope first = Add("docs/first.md");
@@ -40,6 +50,7 @@ public class GeneratedDocumentSourceTests
         {
             Assert.Equal(DocumentGenerationStatus.Error, plan.Status);
             Assert.Empty(plan.Expected);
+            Assert.Contains(plan.Problems, p => p.Contains("cycle", StringComparison.Ordinal));
         }
     }
 
@@ -58,9 +69,9 @@ public class GeneratedDocumentSourceTests
         public DocumentRenderResult Generate(DocumentGenerationContext context) => DocumentRenderResult.Success("Body\n");
     }
 
-    private sealed class DependencySource(bool cycle) : IDocumentSource
+    private sealed class DependencySource(bool cycle, bool region) : IDocumentSource
     {
-        public string Id => cycle ? "example.documents/cyclic-source" : "example.documents/acyclic-source";
+        public string Id => "example.documents/" + (cycle ? "cyclic" : "acyclic") + (region ? "-region-source" : "-source");
         public int SnapshotVersion => 1;
         public string? Head(EstateModel model, RecordEnvelope declaration) => null;
         public string? Resolve(EstateModel model, RecordEnvelope declaration, string reference) => reference;
@@ -70,7 +81,7 @@ public class GeneratedDocumentSourceTests
         public DocumentSourceSelection ReadSelection(EstateModel model, RecordEnvelope declaration, string commit, DocumentGeneratorDescriptor generator)
         {
             string path = EstateModel.BodyString(declaration, "path") == "docs/first.md" ? "docs/second.md" : cycle ? "docs/first.md" : "sources/base.md";
-            byte[] bytes = "Body\n"u8.ToArray();
+            byte[] bytes = region && path == "docs/second.md" ? "<!-- vericairn:generated section -->\nBody\n<!-- vericairn:end section -->\n"u8.ToArray() : "Body\n"u8.ToArray();
             return new(DocumentGenerationStatus.Success, [DocumentSourceSnapshot.Content("file", path, EstateModel.BodyString(declaration, "repository")!, path,
                 Vericairn.Records.Hashing.ContentHash.Sha256(bytes), bytes)], commit, null);
         }

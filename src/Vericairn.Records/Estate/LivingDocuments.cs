@@ -126,7 +126,7 @@ public static class LivingDocuments
         }
 
         return model.Current("living-document").Where(d => NamesProduct(model, d, product)
-                || (GeneratedDocumentContract.IsStrict(model, d) && (EstateModel.BodyString(d, "repository") is not { } repository
+                || (GeneratedDocumentContract.RequiresFreshCheck(model, d) && (EstateModel.BodyString(d, "repository") is not { } repository
                     || releaseRepositories is null || releaseRepositories.Contains(repository))))
             .OrderBy(d => EstateModel.BodyString(d, "path"), StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
             .Select(d =>
@@ -135,7 +135,7 @@ public static class LivingDocuments
                 IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(d, "source"));
                 bool releaseRepository = releaseRepositories is null || (repository is not null && releaseRepositories.Contains(repository));
                 string? at = repository is null ? null
-                    : releaseRepository ? commit : GeneratedDocumentContract.IsStrict(model, d) ? null : source?.Head(model, d);
+                    : releaseRepository ? commit : GeneratedDocumentContract.RequiresFreshCheck(model, d) ? null : source?.Head(model, d);
                 State state = Evaluate(model, d, at);
                 if (!releaseRepository && at is not null && state.Clearance is { Type: "document-review" } review &&
                     review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&

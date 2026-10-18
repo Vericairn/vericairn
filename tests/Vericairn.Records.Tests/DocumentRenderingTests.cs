@@ -24,6 +24,8 @@ public class DocumentRenderingTests
         Assert.Equal("[A&#124;B](docs/source.md)", DocumentMarkdown.Link("A|B", "docs/source.md"));
         Assert.Throws<ArgumentException>(() => DocumentMarkdown.Link("Open", "javascript:run"));
         Assert.Throws<ArgumentException>(() => DocumentMarkdown.Link("Open", "../private.md"));
+        Assert.Equal("[Manifest](.vericairn/manifest.json)", DocumentMarkdown.Link("Manifest", ".vericairn/manifest.json"));
+        Assert.False(DocumentPatterns.IsSafePath(".vericairn/manifest.json"));
     }
 
     [Fact]

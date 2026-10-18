@@ -68,6 +68,17 @@ public class GeneratedDocumentVerificationTests
         }).ToArray());
         RecordEnvelope submitted = f.Add("result", resultBody, builder: true, subject: result.Subject, supersedes: result.Id);
         f.Review(submitted);
+        AuthoredRecord prepared = RecordAuthor.Create(new RecordDraft("living-document", f.Estate.OperatorId, PolicyFixture.Element(next), Supersedes: editorial.Id,
+            At: f.Estate.Clock.AddMinutes(1), Format: 3), [f.OperatorSigner]);
+        EstateModel before = f.Estate.Load();
+        EstateModel proposed = With(f, prepared);
+        Assert.Equal(DocumentGenerationStatus.Success, DocumentRecordChanges.Prepare(before, proposed, [prepared.Envelope]).Status);
+        f.Estate.WriteFile("docs/decisions.md", "Changed after the preview was reviewed.\n");
+        DocumentChangePlan stale = DocumentRecordChanges.Prepare(f.Estate.Load(), With(f, prepared), [prepared.Envelope]);
+        Assert.Equal(DocumentGenerationStatus.Error, stale.Status);
+        Assert.Empty(stale.Changes);
+        Assert.False(File.Exists(Path.Combine(f.Estate.Root, prepared.RelativePath)));
+        f.Estate.WriteFile("docs/decisions.md", "Hand edit.\n");
         RecordEnvelope adopted = f.Add("living-document", next, supersedes: editorial.Id);
         f.AssertValid();
         Assert.True(GeneratedDocumentContract.IsStrict(f.Estate.Load(), adopted));
@@ -75,6 +86,47 @@ public class GeneratedDocumentVerificationTests
         Assert.DoesNotContain(EstateChecks.Run(f.Estate.Load()), p => p.Code == "document.drift");
         Assert.Equal(oldPin, File.ReadAllBytes(Path.Combine(f.Estate.Root, pin.ExpectedPath)));
         Assert.Single(f.Estate.Load().OfType("document-revision"));
+    }
+
+    [Fact]
+    public void RestoringAuthoredOwnershipNeedsItsExactPinInThePreparedBatch()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope generated = f.Add("living-document", DocumentGenerationTests.Declaration(null));
+        const string content = "Approve the stated definition only.\n";
+        f.Estate.WriteFile("docs/decisions.md", content);
+        JsonObject authored = PolicyFixture.Body(generated);
+        authored["kind"] = "authored";
+        authored.Remove("generator");
+        authored["triggers"] = new JsonArray(new JsonObject { ["on"] = "decision", ["level"] = "warn" });
+        AuthoredRecord proposal = RecordAuthor.Create(new RecordDraft("living-document", f.Estate.OperatorId, PolicyFixture.Element(authored),
+            Supersedes: generated.Id, At: f.Estate.Clock.AddMinutes(1), Format: 3), [f.OperatorSigner]);
+        DocumentMigrationPreview preview = DocumentMigration.Prepare(f.Estate.Load(), proposal.Envelope);
+        Assert.Equal(DocumentGenerationStatus.Success, preview.Status);
+        ReviewMigration(f, preview);
+        AuthoredRecord successor = RecordAuthor.Create(new RecordDraft("living-document", f.Estate.OperatorId, PolicyFixture.Element(authored),
+            Supersedes: generated.Id, At: f.Estate.Clock.AddMinutes(1), Format: 3), [f.OperatorSigner]);
+        Assert.Equal(DocumentGenerationStatus.Error, DocumentRecordChanges.Prepare(f.Estate.Load(), With(f, successor), [successor.Envelope]).Status);
+        var pinBody = new JsonObject { ["path"] = "docs/decisions.md", ["title"] = "Restored authored document", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(content)),
+            ["bytes"] = Encoding.UTF8.GetByteCount(content), ["mediaType"] = "text/markdown", ["revision"] = 1, ["summary"] = "Restore exact authored custody." };
+        AuthoredRecord pin = RecordAuthor.Create(new RecordDraft("document-revision", f.Estate.OperatorId, PolicyFixture.Element(pinBody), At: f.Estate.Clock.AddMinutes(1), Format: 3), [f.OperatorSigner]);
+        EstateModel proposed = With(f, successor, pin);
+        Assert.False(proposed.Findings.HasErrors, string.Join('\n', proposed.Findings));
+        Assert.Equal(DocumentGenerationStatus.Success, DocumentRecordChanges.Prepare(f.Estate.Load(), proposed, [successor.Envelope, pin.Envelope]).Status);
+        Assert.Empty(f.Estate.Load().OfType("document-revision"));
+    }
+
+    [Fact]
+    public void AuthoredRegionContractChangesRequireAnExplicitReviewedMigration()
+    {
+        using var f = new PolicyFixture();
+        var body = new JsonObject { ["path"] = "docs/guide.md", ["title"] = "Guide", ["kind"] = "authored", ["source"] = "estate-file",
+            ["triggers"] = new JsonArray(new JsonObject { ["on"] = "decision", ["level"] = "warn" }),
+            ["regions"] = new JsonArray(new JsonObject { ["id"] = "releases", ["generator"] = "vericairn.records/releases" }), ["summary"] = "Keep authored guidance." };
+        RecordEnvelope old = f.Add("living-document", body);
+        body["regions"]![0]!["generator"] = "example.documents/unavailable";
+        RecordEnvelope changed = f.Add("living-document", body, supersedes: old.Id);
+        Assert.Contains(f.Estate.Load().Findings, p => p.Code == "document.migration" && p.Location == changed.ExpectedPath);
     }
 
     [Fact]
@@ -139,9 +191,40 @@ public class GeneratedDocumentVerificationTests
         Assert.Equal("failed", Assert.Single(DocumentChecks.Run(f.Estate.Load(), declaration, Text, "docs/guide.md", f.Estate.Root, [])).Result);
     }
 
+    [Fact]
+    public void AnEditorialFormatUpgradeDoesNotConvertLegacyRegionComparisons()
+    {
+        using var f = new PolicyFixture(2);
+        var body = new JsonObject { ["path"] = "docs/guide.md", ["title"] = "Guide", ["kind"] = "authored", ["source"] = "estate-file",
+            ["triggers"] = new JsonArray(new JsonObject { ["on"] = "decision", ["level"] = "warn" }),
+            ["regions"] = new JsonArray(new JsonObject { ["id"] = "releases", ["generator"] = "vericairn.records/releases" }), ["summary"] = "Retained legacy region." };
+        RecordEnvelope old = f.Add("living-document", body);
+        f.Estate.MoveTo(3);
+        body["title"] = "An editorial title";
+        RecordEnvelope edited = f.Add("living-document", body, supersedes: old.Id);
+        f.AssertValid();
+        Assert.False(GeneratedDocumentContract.UsesStrictRegions(f.Estate.Load(), edited));
+        const string bytes = "<!-- vericairn:generated releases -->\r\n| Version | Published | Release |\r\n|---|---|---|\r\n<!-- vericairn:end releases -->\r\n";
+        Assert.Empty(DocumentChecks.Generated(f.Estate.Load(), edited, bytes));
+    }
+
     private static RecordEnvelope Pin(PolicyFixture fixture, string path, string text) => fixture.Add("document-revision", new JsonObject
     {
         ["path"] = path, ["title"] = "A pinned file", ["hash"] = ContentHash.Sha256(Encoding.UTF8.GetBytes(text)), ["bytes"] = Encoding.UTF8.GetByteCount(text),
         ["mediaType"] = "text/markdown", ["revision"] = 1, ["summary"] = "The original file remains in history.",
     });
+
+    private static EstateModel With(PolicyFixture f, params AuthoredRecord[] added) => EstateLoader.Load(f.Estate.Root,
+        [.. EstateLoader.EnumerateRecordFiles(f.Estate.Root), .. added.Select(r => new RecordFile(r.RelativePath, r.Bytes))]);
+
+    private static void ReviewMigration(PolicyFixture f, DocumentMigrationPreview preview)
+    {
+        RecordEnvelope original = f.Result();
+        JsonObject body = PolicyFixture.Body(original);
+        body["outputs"] = new JsonArray(new JsonObject { ["name"] = GeneratedDocumentContract.MigrationOutput, ["hash"] = preview.BasisHash },
+            new JsonObject { ["name"] = GeneratedDocumentContract.MigrationPreviewOutput, ["hash"] = preview.PreviewHash });
+        body["evidence"] = new JsonArray(preview.Pins.Select(p => (JsonNode)new JsonObject { ["summary"] = "Retain the exact historical pin.", ["hash"] = p.Hash,
+            ["location"] = f.Estate.Load().ById[p.Id].ExpectedPath }).ToArray());
+        f.Review(f.Add("result", body, builder: true, subject: original.Subject, supersedes: original.Id));
+    }
 }

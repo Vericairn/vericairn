@@ -30,7 +30,7 @@ public static class DocumentRendering
             descriptor.Validate(generator.Id);
             if (context.Parameters.GetValueOrDefault("format") != descriptor.ContractVersion.ToString(CultureInfo.InvariantCulture))
                 return Failed(DocumentGenerationStatus.Unavailable, "The requested output contract version is unavailable.");
-            if (context.Parameters.Any(p => p.Key != "format" && (!descriptor.Inputs.TryGetValue(p.Key, out ImmutableArray<string> values) || !values.Contains(p.Value)))
+            if (context.Parameters.Any(p => p.Key != "format" && (!descriptor.Inputs.TryGetValue(p.Key, out ImmutableArray<string> values) || !DocumentInputs.Accepts(values, p.Value)))
                 || descriptor.Inputs.Keys.Any(k => !context.Parameters.ContainsKey(k)))
                 return Failed(DocumentGenerationStatus.Error, "The named inputs violate the generator contract.");
             if (DocumentGeneration.ValidateSources(descriptor, context.Sources) is { } error)

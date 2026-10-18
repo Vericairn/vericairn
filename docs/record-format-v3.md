@@ -179,6 +179,7 @@ migration. Historical pins remain unchanged. Strict whole generated outputs refu
 `document-review` records, and neither missing implementations nor a matching historical pin can establish
 currentness. External repository comparisons require an exact commit and a complete versioned source
 inventory; they cannot substitute a clone's head for the release commit.
+
 ### Canonical rendering and contribution coverage
 
 The immutable renderer interface, output contract, rendition response and coverage
@@ -205,3 +206,35 @@ coverage, missing implementations and unsupported versions fail conformance.
 Descriptors do not certify prose quality. The READ-02 and READ-03 builds supply the
 first-party readers and their coverage; this foundation does not claim that an
 absent reader is covered by a raw JSON fallback.
+
+Named-input schemas accept fixed literals and bounded typed alternatives for exact
+identities, UTC instants, hashes, commits, repository paths and text. A date or
+interval is an explicit input; no renderer reads the current clock. Unknown grammar
+tokens, duplicate names and unsupported output versions are refused.
+
+### Repair, retirement and interrupted writes
+
+The existing `docs regenerate` operation selects a declaration, register directory
+or proved member. It prepares the complete rendition before publishing any bytes,
+refuses unavailable generators and malformed markers, and preserves authored bytes
+outside regions. It neither prunes unexpected files nor writes pins. Authored files
+still need their ordinary updated pin after a region changes.
+
+Repository record writes prepare the affected generated members before storing a
+record. A rendering failure writes neither records nor outputs. The existing local
+batch journal carries prepared output changes until publication completes. Each
+destination replacement is atomic and guarded by its observed hash. An I/O failure
+after records were stored reports those records together with a recovery problem;
+it never calls them rolled back. Reopening the estate or using the existing repair
+route resumes verified pending outputs. Changed destinations or unavailable fresh
+inputs hold recovery and further writes. The transient journal is removed after
+completion and is not companion authority or a second status ledger.
+
+The existing signed `retirement` record names the exact generated file or register
+directory. Retiring generated ownership requires operator or local-engineering
+authority and a complete current inventory; unexpected or unavailable members are
+never pruned. Generator, destination and region-contract changes require a fresh
+reviewed migration preview. Restoring authored ownership requires an exact pin in
+the proposed batch. Source records and historical pins are retained unchanged.
+Local-only records remain in their canonical live store; committed estate companion
+adoption requires repository custody, while on-demand rendering needs no file.
