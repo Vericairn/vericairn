@@ -25,7 +25,7 @@ internal sealed class McpServeCommand : Command
         Console.OutputEncoding = utf8;
         var server = new McpServer(new ToolRegistry(api, actingAs), CommandContext.VersionText());
         context.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
-        server.Run(Console.In, context.Output, context.Error);
+        server.RunAsync(Console.In, context.Output, context.Error).GetAwaiter().GetResult();
         return Clean;
     });
 }

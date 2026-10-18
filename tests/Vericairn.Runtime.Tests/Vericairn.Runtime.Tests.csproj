@@ -20,6 +20,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../../src/Vericairn.Sdk/Vericairn.Sdk.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Mcp/Vericairn.Mcp.csproj" />
     <ProjectReference Include="../../src/Vericairn.Adapters.Git/Vericairn.Adapters.Git.csproj" />
     <ProjectReference Include="../../src/Vericairn.Providers.GitHub/Vericairn.Providers.GitHub.csproj" />
     <ProjectReference Include="../../src/Vericairn.Packs.Software/Vericairn.Packs.Software.csproj" />

@@ -171,6 +171,12 @@
           "Vericairn.Runtime": "[0.7.3-dev, )"
         }
       },
+      "vericairn.mcp": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Protocol": "[0.7.3-dev, )"
+        }
+      },
       "vericairn.packs.software": {
         "type": "Project",
         "dependencies": {
