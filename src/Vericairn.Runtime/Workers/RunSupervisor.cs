@@ -462,7 +462,7 @@ public sealed class RunSupervisor
                                 }
                             }
 
-                            foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment))
+                            foreach (RunSignal observation in CommandAudit.Inspect(action, workspace, permitted, environment, options.BeforeCredentialCheck))
                             {
                                 AddSignal(observation);
                             }

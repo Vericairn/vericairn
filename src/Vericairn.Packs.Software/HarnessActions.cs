@@ -60,6 +60,8 @@ internal static class HarnessActions
                 arguments = parsed.RootElement.Clone();
             }
 
+            // Keep the reported server identity. The admitted inventory, which knows each tool's
+            // provider, decides whether Codex's internal server denotes a native tool.
             return [new HarnessAction(id, "mcp__" + Required(item, "server") + "__" + Required(item, "tool"), arguments.Clone())];
         }
 

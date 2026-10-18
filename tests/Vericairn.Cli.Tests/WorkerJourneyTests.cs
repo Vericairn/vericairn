@@ -40,6 +40,54 @@ public sealed class WorkerJourneyTests : IDisposable
 
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
 
+    [Theory]
+    [InlineData("printenv VERICAIRN_HOME", false)]
+    [InlineData("echo $VERICAIRN_HOME", false)]
+    [InlineData("cat \"$VERICAIRN_HOME/keys/device\"", true)]
+    public void WorkerLocationObservationsContinueWhileCredentialObservationsStop(string command, bool stop)
+    {
+        string root = CliHarness.TempDirectory("worker-location");
+        string scratch = CliHarness.TempDirectory("worker-location-scratch");
+        try
+        {
+            (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
+            string report = Path.Combine(scratch, "location.jsonl");
+            File.WriteAllText(report + ".command", command);
+            CliHarness.Outcome ran = CliHarness.Run("--estate", root, "worker", "run", assignment, "--launcher", "codex", "--agent", builder, "--by", op, "--repository", resource,
+                "--setting", "command=" + FakeHarness.Setting("watch-codex-command-input", report));
+            Assert.Contains(stop ? "known-failure" : "observed-success", ran.Out, StringComparison.Ordinal);
+            string listed = CliHarness.Ok("--estate", root, "worker", "runs").Out;
+            Assert.Equal(stop, listed.Contains("worker critical credentials", StringComparison.Ordinal));
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally { CliHarness.Delete(root, scratch); }
+    }
+
+    [Fact]
+    public void WorkerSettlementExcludesIgnoredOutputAndRetainsTheCommittedBranch()
+    {
+        string root = CliHarness.TempDirectory("worker-ignored");
+        string scratch = CliHarness.TempDirectory("worker-ignored-scratch");
+        try
+        {
+            (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
+            string clone = Path.Combine(scratch, "widget");
+            File.WriteAllText(Path.Combine(clone, ".gitignore"), "artifacts/\n");
+            Git(clone, "add", ".gitignore");
+            Git(clone, "commit", "-q", "-m", "Ignore build output");
+            CliHarness.Ok("--estate", root, "worker", "run", assignment, "--launcher", "codex", "--agent", builder, "--by", op, "--repository", resource,
+                "--setting", "command=" + FakeHarness.Setting("workspace-commit-ignored", Path.Combine(scratch, "commit.jsonl")));
+            JsonElement run = Assert.Single(CliHarness.Ok("--estate", root, "--json", "worker", "runs").Json.GetProperty("runs").EnumerateArray());
+            Assert.Equal("observed-success", run.GetProperty("status").GetString());
+            Assert.Equal(1, run.GetProperty("scope").GetProperty("changed").GetInt32());
+            Assert.Equal(0, run.GetProperty("scope").GetProperty("outsideCount").GetInt32());
+            Git(clone, "cat-file", "-e", "refs/heads/work/w-1:widget/permitted.txt");
+            Assert.False(Directory.Exists(Path.Combine(clone, "artifacts")));
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+        }
+        finally { CliHarness.Delete(root, scratch); }
+    }
+
     [Fact]
     public void ExplicitExecutionChoicesReachTheIntentAndTheHarnessFromTheCommandLine()
     {
