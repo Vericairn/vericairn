@@ -52,13 +52,18 @@ public sealed class GoalsWorkspace : Document
     public const string Unavailable = "The runtime gave no goal; the estate is unavailable to this client.";
 
     private readonly Func<IEstateApi?> api;
+    private readonly Func<Func<CancellationToken, Task>, Task>? execute;
+
+    /// <summary>The pending selection read, for callers that need to wait for it.</summary>
+    public Task SelectionTask { get; private set; } = Task.CompletedTask;
     private GoalListRow? selected;
     private string heading = string.Empty, objective = string.Empty, acceptance = string.Empty, next = string.Empty, note = Unavailable;
 
     /// <summary>The workspace over the API the shell holds now.</summary>
-    public GoalsWorkspace(Func<IEstateApi?> api) : base("Goals", "goals")
+    public GoalsWorkspace(Func<IEstateApi?> api, Func<Func<CancellationToken, Task>, Task>? execute = null) : base("Goals", "goals")
     {
         this.api = api;
+        this.execute = execute;
     }
 
     /// <summary>The estate's goals.</summary>
@@ -72,7 +77,7 @@ public sealed class GoalsWorkspace : Document
         {
             if (Set(ref selected, value))
             {
-                Show();
+                SelectionTask = execute is null ? ShowSafelyAsync() : execute(ShowAsync);
             }
         }
     }
@@ -108,15 +113,15 @@ public sealed class GoalsWorkspace : Document
     public ObservableCollection<EvaluationRow> Evaluations { get; } = [];
 
     /// <summary>Reads the goals again and shows the one named, else the one shown, else the first open one.</summary>
-    public void Fill(string? goal = null)
+    public async Task FillAsync(string? goal = null, CancellationToken cancellationToken = default)
     {
         IEstateApi? estate = api();
         IReadOnlyList<GoalRow> rows;
         try
         {
-            rows = estate?.Goals() ?? [];
+            rows = estate is null ? [] : await estate.GoalsAsync(cancellationToken).ConfigureAwait(true);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Note = "The runtime did not answer: " + exception.Message;
             return;
@@ -133,19 +138,21 @@ public sealed class GoalsWorkspace : Document
             ? "No goal is proposed; vericairn goal propose proposes one."
             : "Each goal from the runtime's records; the steps are routed from the runtime's machine. Activation, acceptance, funding, answers and steps are the sponsor's or an operator's, through vericairn goal and vericairn ask; this page shows them.";
         GoalListRow? chosen = Goals.FirstOrDefault(g => g.Id == keep) ?? Goals.FirstOrDefault(g => g.Status is not ("achieved" or "impossible" or "abandoned")) ?? Goals.FirstOrDefault();
-        if (ReferenceEquals(chosen, selected) || chosen?.Id == selected?.Id)
+        selected = chosen;
+        Raise(nameof(Selected));
+        await ShowAsync(cancellationToken).ConfigureAwait(true);
+    }
+
+    private async Task ShowSafelyAsync()
+    {
+        try { await ShowAsync(CancellationToken.None).ConfigureAwait(true); }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null)
         {
-            selected = chosen;
-            Raise(nameof(Selected));
-            Show();
-        }
-        else
-        {
-            Selected = chosen;
+            Note = ClientFailure.FromException(exception)!.Message;
         }
     }
 
-    private void Show()
+    private async Task ShowAsync(CancellationToken cancellationToken)
     {
         Conditions.Clear();
         Steps.Clear();
@@ -162,11 +169,13 @@ public sealed class GoalsWorkspace : Document
         GoalPresentation view;
         try
         {
-            GoalResponse? goal = estate.Goal(selected.Id);
-            NextResponse? routed = estate.GoalNext(selected.Id);
+            string selectedId = selected.Id;
+            GoalResponse? goal = await estate.GoalAsync(selectedId, cancellationToken).ConfigureAwait(true);
+            NextResponse? routed = await estate.GoalNextAsync(selectedId, cancellationToken).ConfigureAwait(true);
+            if (selected?.Id != selectedId) return;
             view = GoalPresentation.From(goal?.Json ?? default, routed?.Json ?? default);
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Heading = selected.Title;
             Objective = "The runtime did not answer: " + exception.Message;
@@ -467,7 +476,7 @@ public sealed class AssignmentComposer(string workOrderKey, IReadOnlyList<Contri
     }
 
     /// <summary>Sends the assignment; the runtime validates and signs.</summary>
-    public void Submit(IEstateApi api, string? by)
+    public async Task SubmitAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
         if (string.IsNullOrWhiteSpace(by))
@@ -482,7 +491,7 @@ public sealed class AssignmentComposer(string workOrderKey, IReadOnlyList<Contri
             return;
         }
 
-        WriteOutcome outcome = api.Assign(new AssignRequest(WorkOrderKey, Contributor.Id, by, Brief(), string.IsNullOrWhiteSpace(Note) ? null : Note.Trim()));
+        WriteOutcome outcome = (await api.AssignAsync(new AssignRequest(WorkOrderKey, Contributor.Id, by, Brief(), string.IsNullOrWhiteSpace(Note) ? null : Note.Trim()), cancellationToken: cancellationToken).ConfigureAwait(true));
         if (outcome.Ok)
         {
             WrittenId = outcome.Written!.Id;
@@ -650,19 +659,19 @@ public sealed class ReviewWorkspace : Document
     public string? WrittenId { get; private set; }
 
     /// <summary>Checks the pinned subject against the runtime; false when the draft must not be sent.</summary>
-    public bool CheckPrepared(IEstateApi api)
+    public async Task<bool> CheckPreparedAsync(IEstateApi api, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
-        PreparedState state = PreparedAction.Check(Prepared, api.Record(SubjectId), SubjectFacts.About(api, SubjectId));
+        PreparedState state = PreparedAction.Check(Prepared, (await api.RecordAsync(SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true)), (await SubjectFacts.AboutAsync(api, SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true)));
         PreparedState = PreparedAction.Label(state);
         return state == Presentation.PreparedState.Reusable;
     }
 
     /// <summary>Sends the review.</summary>
-    public void SubmitReview(IEstateApi api)
+    public async Task SubmitReviewAsync(IEstateApi api, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
-        if (!CheckPrepared(api))
+        if (!(await CheckPreparedAsync(api, cancellationToken: cancellationToken).ConfigureAwait(true)))
         {
             Status = PreparedState;
             return;
@@ -686,14 +695,14 @@ public sealed class ReviewWorkspace : Document
         }
 
         var body = new JsonObject { ["independence"] = Independence, ["outcome"] = ReviewOutcome, ["summary"] = ReviewSummary.Trim(), ["findings"] = findings };
-        Send(api, "review", body);
+        await SendAsync(api, "review", body, cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
     /// <summary>Sends the acceptance with the selected reviews as its basis.</summary>
-    public void SubmitAcceptance(IEstateApi api)
+    public async Task SubmitAcceptanceAsync(IEstateApi api, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
-        if (!CheckPrepared(api))
+        if (!(await CheckPreparedAsync(api, cancellationToken: cancellationToken).ConfigureAwait(true)))
         {
             Status = PreparedState;
             return;
@@ -705,10 +714,10 @@ public sealed class ReviewWorkspace : Document
             ["basis"] = new JsonArray(Reviews.Where(r => r.Selected).Select(r => (JsonNode)r.Id).ToArray()),
             ["self"] = SelfAcceptance,
         };
-        Send(api, "acceptance", body);
+        await SendAsync(api, "acceptance", body, cancellationToken: cancellationToken).ConfigureAwait(true);
     }
 
-    private void Send(IEstateApi api, string type, JsonObject body)
+    private async Task SendAsync(IEstateApi api, string type, JsonObject body, CancellationToken cancellationToken = default)
     {
         if (ActingPrincipal.Length == 0)
         {
@@ -719,12 +728,12 @@ public sealed class ReviewWorkspace : Document
         try
         {
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-            WriteOutcome outcome = api.NewRecord(new NewRecordRequest(type, ActingPrincipal, document.RootElement.Clone(), Prepared.Subject));
+            WriteOutcome outcome = (await api.NewRecordAsync(new NewRecordRequest(type, ActingPrincipal, document.RootElement.Clone(), Prepared.Subject), cancellationToken: cancellationToken).ConfigureAwait(true));
             if (outcome.Ok)
             {
                 WrittenId = outcome.Written!.Id;
                 Status = $"Written: {type} {outcome.Written.Id}, signed by the runtime with the acting principal's device.";
-                Prepared = Prepared with { Facts = SubjectFacts.About(api, SubjectId) };
+                Prepared = Prepared with { Facts = (await SubjectFacts.AboutAsync(api, SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true)) };
                 PreparedState = PreparedAction.Label(Presentation.PreparedState.Reusable);
                 if (type == "review")
                 {
@@ -736,7 +745,12 @@ public sealed class ReviewWorkspace : Document
                 Status = AssignmentComposer.Refusal(outcome.Problem);
             }
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null)
+        {
+            Status = ClientFailure.FromException(exception)!.Message;
+            throw;
+        }
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Status = "The runtime did not answer: " + exception.Message;
         }
@@ -933,7 +947,7 @@ public sealed class ReleaseWorkspace : Document
     public ReleaseResponse? LastResponse { get; private set; }
 
     /// <summary>Submits the release: the runtime records the intent, then dispatches; nothing is published.</summary>
-    public void Submit(IEstateApi api, string? by)
+    public async Task SubmitAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
         if (string.IsNullOrWhiteSpace(by))
@@ -964,11 +978,11 @@ public sealed class ReleaseWorkspace : Document
         }
 
         var values = Settings.Where(s => s.Value.Trim().Length > 0).ToDictionary(s => s.Name, s => s.Value.Trim(), StringComparer.Ordinal);
-        Answer(() => api.ReleaseSubmit(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values)));
+        await AnswerAsync(async () => (await api.ReleaseSubmitAsync(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values), cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true);
     }
 
     /// <summary>Observes the selected destination (or the form's product and version): the run, the draft, the publication; or cancels with the reason given.</summary>
-    public void Observe(IEstateApi api, string? by)
+    public async Task ObserveAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
         if (string.IsNullOrWhiteSpace(by))
@@ -989,7 +1003,7 @@ public sealed class ReleaseWorkspace : Document
         ReleaseObserveRequest request = Selected is not null
             ? new ReleaseObserveRequest(targetVersion, Selected.Repository, by, Lines(Qualified), Lines(Limitations), signingState, cancel, Selected.Product, Selected.Provider)
             : new ReleaseObserveRequest(targetVersion, null, by, Lines(Qualified), Lines(Limitations), signingState, cancel, Product!.Id);
-        Answer(() => api.ReleaseObserve(request));
+        await AnswerAsync(async () => (await api.ReleaseObserveAsync(request, cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true);
     }
 
     private void RebuildSettings()
@@ -1007,11 +1021,12 @@ public sealed class ReleaseWorkspace : Document
         }
     }
 
-    private void Answer(Func<ReleaseResponse> call)
+    private async Task AnswerAsync(Func<Task<ReleaseResponse>> call)
     {
         try
         {
-            ReleaseResponse response = call();
+            LastResponse = null;
+            ReleaseResponse response = await call().ConfigureAwait(true);
             LastResponse = response;
             Status = response.Problem is null ? response.Message : AssignmentComposer.Refusal(response.Problem);
             if (response.Publish is not null)
@@ -1019,7 +1034,12 @@ public sealed class ReleaseWorkspace : Document
                 Publish = response.Publish;
             }
         }
-        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException)
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null)
+        {
+            Status = ClientFailure.FromException(exception)!.Message;
+            throw;
+        }
+        catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
             Status = "The runtime did not answer: " + exception.Message;
         }
@@ -1118,7 +1138,7 @@ public sealed class LivingDocumentsWorkspace : Document
     }
 
     /// <summary>Sends the review of the selected document as the acting principal.</summary>
-    public void Submit(IEstateApi api, string? by)
+    public async Task SubmitAsync(IEstateApi api, string? by, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(api);
         if (string.IsNullOrWhiteSpace(by))
@@ -1147,7 +1167,7 @@ public sealed class LivingDocumentsWorkspace : Document
         }
 
         string? reviewed = string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim();
-        WriteOutcome sent = api.DocumentReview(Selected.Row.Declaration, new DocumentReviewRequest(by, Outcome, Summary.Trim(), parsed, reviewed));
+        WriteOutcome sent = (await api.DocumentReviewAsync(Selected.Row.Declaration, new DocumentReviewRequest(by, Outcome, Summary.Trim(), parsed, reviewed), cancellationToken: cancellationToken).ConfigureAwait(true));
         Status = sent.Ok
             ? $"Written: document review {sent.Written!.Id}. The runtime read {Selected.Row.Path}, recorded the triggers the review answers and ran the declared checks."
             : AssignmentComposer.Refusal(sent.Problem);

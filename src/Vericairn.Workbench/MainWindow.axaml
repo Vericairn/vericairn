@@ -69,7 +69,16 @@
       </StackPanel>
     </Border>
 
-    <TextBlock DockPanel.Dock="Bottom" Name="StatusBar" Text="{Binding Status}" Padding="12,6" AutomationProperties.Name="Status" />
+    <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="12,6">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <TextBlock Text="{Binding RequestState}" VerticalAlignment="Center" AutomationProperties.Name="Request state" />
+        <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Width="100" Height="4" VerticalAlignment="Center" />
+        <Button Name="CancelRequestButton" Content="Cancel request" Command="{Binding CancelCommand}" MinHeight="28" AutomationProperties.Name="Cancel current request" />
+        <Button Content="Refresh" Command="{Binding RefreshCommand}" MinHeight="28" />
+      </StackPanel>
+      <TextBlock Name="StatusBar" Text="{Binding Status}" TextWrapping="Wrap" AutomationProperties.Name="Status" />
+      <SelectableTextBlock Text="{Binding UncertaintyNotice}" IsVisible="{Binding HasUncertainOutcomes}" TextWrapping="Wrap" AutomationProperties.Name="Effects needing reconciliation" />
+    </StackPanel>
 
     <Border DockPanel.Dock="Top" Padding="12,6" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="0,0,0,1" AutomationProperties.Name="Machine-local release information">
       <StackPanel Spacing="4">

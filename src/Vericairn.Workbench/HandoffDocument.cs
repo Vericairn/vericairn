@@ -38,11 +38,11 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
     public bool HasPackage => package is not null;
 
     /// <summary>Ask the runtime to prepare a new complete basis; keep the old one if it refuses.</summary>
-    public void Prepare()
+    public async Task PrepareAsync(CancellationToken cancellationToken = default)
     {
-        Read(estate =>
+        await ReadAsync(async estate =>
         {
-            HandoffResponse response = estate.Handoff();
+            HandoffResponse response = (await estate.HandoffAsync(cancellationToken: cancellationToken).ConfigureAwait(true));
             if (response.Package is null)
             {
                 Note = "A new hand-over was refused.\n" + response.Text;
@@ -52,11 +52,11 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             Keep(response.Package, response.Text);
             ResumeText = "No comparison yet. Resume or refresh to check changes since this package.";
             Note = "Hand-over prepared. Save the package to continue on another machine. Remote is not built.";
-        });
+        }).ConfigureAwait(true);
     }
 
     /// <summary>Compare against the current runtime while keeping the original basis and its bytes.</summary>
-    public void Compare()
+    public async Task CompareAsync(CancellationToken cancellationToken = default)
     {
         if (package is null)
         {
@@ -64,21 +64,21 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             return;
         }
 
-        Read(estate =>
+        await ReadAsync(async estate =>
         {
-            ResumeResponse response = estate.ResumeHandoff(package);
+            ResumeResponse response = (await estate.ResumeHandoffAsync(package, cancellationToken: cancellationToken).ConfigureAwait(true));
             ResumeText = response.Text;
             Note = response.Problem is not null ? response.Problem.Message
                 : response.HasErrors ? "The current copy is incomplete or invalid. Review every change and finding before continuing."
                 : "Comparison refreshed. The world may have moved; recheck authority and required originals before acting. Remote is not built.";
-        });
+        }).ConfigureAwait(true);
     }
 
     /// <summary>Load a saved package only after the runtime validates its integrity, estate and completeness.</summary>
-    public bool Load(string json)
+    public async Task<bool> LoadAsync(string json, CancellationToken cancellationToken = default)
     {
         bool loaded = false;
-        Read(estate =>
+        await ReadAsync(async estate =>
         {
             HandoffPackage? candidate = JsonSerializer.Deserialize<HandoffPackage>(json, ProtocolJson.Options);
             if (candidate is null)
@@ -87,7 +87,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
                 return;
             }
 
-            ResumeResponse response = estate.ResumeHandoff(candidate);
+            ResumeResponse response = (await estate.ResumeHandoffAsync(candidate, cancellationToken: cancellationToken).ConfigureAwait(true));
             if (response.Problem is not null)
             {
                 Note = response.Text;
@@ -99,12 +99,12 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             Note = response.HasErrors ? "Package loaded; this copy has missing or invalid state. Review the comparison before continuing."
                 : "Package loaded and compared with this estate. The world may have moved. Remote is not built.";
             loaded = true;
-        });
+        }).ConfigureAwait(true);
         return loaded;
     }
 
     /// <summary>Save in a new file; an existing retained package is never overwritten.</summary>
-    public bool Save(string path)
+    public async Task<bool> SaveAsync(string path, CancellationToken cancellationToken = default)
     {
         if (package is null)
         {
@@ -114,8 +114,8 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
 
         try
         {
-            using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            file.Write(Encoding.UTF8.GetBytes(PackageJson));
+            await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
+            await file.WriteAsync(Encoding.UTF8.GetBytes(PackageJson), cancellationToken).ConfigureAwait(true);
             Note = "Package saved. Use Open package here or vericairn resume to continue from it.";
             return true;
         }
@@ -139,7 +139,7 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
         Raise(nameof(HasPackage));
     }
 
-    private void Read(Action<IEstateApi> operation)
+    private async Task ReadAsync(Func<IEstateApi, Task> operation)
     {
         if (api() is not { } estate)
         {
@@ -149,7 +149,12 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
 
         try
         {
-            operation(estate);
+            await operation(estate).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null)
+        {
+            Note = ClientFailure.FromException(exception)!.Message;
+            throw;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException or JsonException or CanonicalJsonException or ArgumentException or FormatException or KeyNotFoundException)
         {

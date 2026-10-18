@@ -37,7 +37,7 @@ public class ReviewFindingsTests(HeadlessFixture fixture)
         });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             IEstateApi api = shell.Api!;
             Assert.True(api.NewRecord(new("work-order", person, Seed.Json("""{"key":"COMMS-REVIEW","kind":"ordinary","title":"Review the original","intent":"Keep every finding visible.","scope":["tests"],"exitQuestion":"Reviewed?","inputs":[],"deliverables":["result"]}"""))).Ok);
             string assignment = api.Assign(new("COMMS-REVIEW", person, person, Seed.Json("""{"outcome":"Inspect the result.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no publication"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["all findings visible"],"recovery":"Review the unperformed checks."}"""))).Written!.Id;
@@ -47,10 +47,10 @@ public class ReviewFindingsTests(HeadlessFixture fixture)
             WriteOutcome reviewed = api.NewRecord(new("review", person, Seed.Json("""{"independence":"self","outcome":"findings","summary":"Two issues remain.","findings":[{"severity":"error","summary":"The returned identity is wrong.","location":"src/identity.cs"},{"severity":"warning","summary":"The platform evidence is incomplete.","location":"tests/platform.cs"}]}"""), $"result:{result.Written!.Id}:{result.Written.Hash}"));
             Assert.True(reviewed.Ok, reviewed.Problem?.Message);
             Assert.True(api.CommunicationSet(new(person, "person", new(Progress: "none", Result: depth), person)).Ok);
-            await fixture.Ui(shell.Refresh);
-            ReviewWorkspace page = await fixture.Ui(() =>
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
+            ReviewWorkspace page = await fixture.UiAsync(async () =>
             {
-                ReviewWorkspace opened = Assert.IsType<ReviewWorkspace>(shell.OpenReview(result.Written.Id));
+                ReviewWorkspace opened = Assert.IsType<ReviewWorkspace>((await shell.OpenReviewAsync(result.Written.Id, cancellationToken: TestContext.Current.CancellationToken)));
                 // Inspect in the same dispatcher turn: no incidental render tick may realize the new tab for us.
                 AssertReachable(window, opened, "The other platforms have not run.");
                 AssertReachable(window, opened, "No real coding agent was launched.");
@@ -65,12 +65,12 @@ public class ReviewFindingsTests(HeadlessFixture fixture)
             });
             Assert.Contains($"result ({depth})", page.SummaryText, StringComparison.Ordinal);
 
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 page.ReviewOutcome = "findings";
                 page.ReviewSummary = "A further check is needed.";
                 page.ReviewFindings = "warning: The imported evidence needs review.";
-                page.SubmitReview(api);
+                await page.SubmitReviewAsync(api, cancellationToken: TestContext.Current.CancellationToken);
                 Assert.StartsWith("Written: review", page.Status, StringComparison.Ordinal);
                 Assert.Equal(2, page.Reviews.Count);
                 AssertReachable(window, page.Reviews.Last(), "warning: The imported evidence needs review.");

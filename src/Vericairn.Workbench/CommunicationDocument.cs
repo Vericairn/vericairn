@@ -8,7 +8,7 @@ using Vericairn.Protocol;
 namespace Vericairn.Workbench;
 
 /// <summary>An editor of one attributable profile. The expected revision is held from refresh through submission.</summary>
-public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> author, Action? saved = null) : Document("Communication settings", "communication")
+public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> author, Func<CancellationToken, Task>? saved = null) : Document("Communication settings", "communication")
 {
     private string scope = "person", recipient = string.Empty, assignment = string.Empty, authority = string.Empty;
     private string progress = "inherit", status = "inherit", decision = "inherit", result = "inherit", handoff = "inherit";
@@ -50,12 +50,12 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
         [.. profile.Revisions.Where(r => r.Scope != Scope || !r.Current), new CommunicationLayer(Scope, Values(), By: author())]));
 
     /// <summary>Read the scope explicitly, loading its expected revision. This does not run on background refresh.</summary>
-    public void Refresh()
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
-        Read(estate =>
+        await ReadAsync(async estate =>
         {
             if (Recipient.Length == 0) { Recipient = author() ?? string.Empty; }
-            profile = estate.Communication(Scope == "estate" ? null : Empty(Recipient), Scope == "assignment" ? Empty(Assignment) : null);
+            profile = (await estate.CommunicationAsync(Scope == "estate" ? null : Empty(Recipient), Scope == "assignment" ? Empty(Assignment) : null, cancellationToken: cancellationToken).ConfigureAwait(true));
             Effective = CommunicationPresentation.Describe(profile);
             CommunicationLayer? current = profile.Revisions.Where(r => r.Current && r.Scope == Scope).Take(2).ToList() is { Count: 1 } revisions ? revisions[0] : null;
             expected = current?.Hash;
@@ -66,16 +66,16 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
             ResultDepth = values.Result ?? "inherit";
             HandoffDepth = values.Handoff ?? "inherit";
             Raise(nameof(Preview));
-        });
+        }).ConfigureAwait(true);
     }
 
     /// <summary>Submit this draft with the exact prior revision read, retaining a conflict for review if it changed.</summary>
-    public void Save() => Submit(Values());
+    public Task SaveAsync(CancellationToken cancellationToken = default) => SubmitAsync(Values(), cancellationToken);
 
     /// <summary>Reset the whole selected scope to inheritance by authoring a new revision.</summary>
-    public void Reset() => Submit(new CommunicationValues());
+    public Task ResetAsync(CancellationToken cancellationToken = default) => SubmitAsync(new CommunicationValues(), cancellationToken);
 
-    private void Submit(CommunicationValues values)
+    private async Task SubmitAsync(CommunicationValues values, CancellationToken cancellationToken = default)
     {
         if (author() is not string by)
         {
@@ -83,18 +83,18 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
             return;
         }
 
-        Read(estate =>
+        await ReadAsync(async estate =>
         {
-            WriteOutcome outcome = estate.CommunicationSet(new CommunicationSetRequest(by, Scope, values, Scope == "estate" ? null : Empty(Recipient),
-                Scope == "assignment" ? Empty(Assignment) : null, expected, Empty(Authority)));
+            WriteOutcome outcome = (await estate.CommunicationSetAsync(new CommunicationSetRequest(by, Scope, values, Scope == "estate" ? null : Empty(Recipient),
+                Scope == "assignment" ? Empty(Assignment) : null, expected, Empty(Authority)), cancellationToken: cancellationToken).ConfigureAwait(true));
             Note = outcome.Written is { } written ? "Recorded " + written.Id + " at " + written.Hash
                 : outcome.Problem?.Code + ": " + outcome.Problem?.Message + "\n" + string.Join('\n', outcome.Problem?.Findings.Select(f => f.Message) ?? []);
             if (outcome.Ok)
             {
-                Refresh();
-                saved?.Invoke();
+                await RefreshAsync(cancellationToken).ConfigureAwait(true);
+                if (saved is not null) await saved(cancellationToken).ConfigureAwait(true);
             }
-        });
+        }).ConfigureAwait(true);
     }
 
     private CommunicationValues Values() => new(Inherit(ProgressFrequency), Inherit(StatusDepth), Inherit(DecisionDepth), Inherit(ResultDepth), Inherit(HandoffDepth));
@@ -102,7 +102,7 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
     private static string? Empty(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private void Changed() => Raise(nameof(Preview));
 
-    private void Read(Action<IEstateApi> action)
+    private async Task ReadAsync(Func<IEstateApi, Task> action)
     {
         if (api() is not { } estate)
         {
@@ -110,7 +110,12 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
             return;
         }
 
-        try { action(estate); }
+        try { await action(estate).ConfigureAwait(true); }
+        catch (Exception exception) when (ClientFailure.FromException(exception) is not null)
+        {
+            Note = ClientFailure.FromException(exception)!.Message;
+            throw;
+        }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException or ArgumentException)
         {
             Note = "Communication settings unavailable: " + exception.Message;
