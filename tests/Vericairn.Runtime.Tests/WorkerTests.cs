@@ -334,23 +334,23 @@ public class WorkerTests
     }
 
     [Fact]
-    public void SettlementFlagsCommittedRenamedUntrackedAndIgnoredChangesOutsidePermittedPaths()
+    public void SettlementFlagsCommittedRenamedAndUntrackedChangesOutsidePermittedPaths()
     {
         using var run = new RunEstate(brief: RunEstate.Brief.Replace("\"path:widget/\"", "\"src/**\",\"docs/*.md\"", StringComparison.Ordinal));
         RunResponse started = run.Start("generic", "scope-edits", run.Report("scope"));
         Assert.True(started.Ok, started.Message);
         RunRow row = run.Settled(started.Run);
         Assert.Equal("observed-success", row.Status);
-        Assert.Equal(8, row.Scope!.Changed);
-        Assert.Equal(6, row.Scope.OutsideCount);
+        Assert.Equal(7, row.Scope!.Changed);
+        Assert.Equal(5, row.Scope.OutsideCount);
         RunSignal signal = Assert.Single(row.Signals!, s => s.Code == "scope-settlement");
         Assert.Equal("warning", signal.Severity);
         Assert.NotNull(signal.Attention);
-        Assert.Equal([".gitignore", "README-old.md", "README.md", "committed.txt", "ignored/outside.txt", "outside.txt"], row.Scope.Outside);
+        Assert.Equal([".gitignore", "README-old.md", "README.md", "committed.txt", "outside.txt"], row.Scope.Outside);
         Assert.Null(row.Scope.Problem);
         AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
-        Assert.Equal(6, recorded.Latest.Body.GetProperty("scope").GetProperty("outsideCount").GetInt32());
-        Assert.Contains("Scope attention: 6", recorded.Latest.Body.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
+        Assert.Equal(5, recorded.Latest.Body.GetProperty("scope").GetProperty("outsideCount").GetInt32());
+        Assert.Contains("Scope attention: 5", recorded.Latest.Body.GetProperty("observed").GetProperty("summary").GetString(), StringComparison.Ordinal);
         Assert.All(recorded.Revisions, revision => Assert.Equal(run.Estate.OperatorId, revision.By));
         Assert.Empty(run.Service.Records("acceptance"));
         Assert.Equal(0, run.Service.Check().Errors);

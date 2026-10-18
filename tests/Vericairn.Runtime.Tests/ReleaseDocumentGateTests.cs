@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
@@ -16,6 +17,39 @@ namespace Vericairn.Runtime.Tests;
 public sealed class ReleaseDocumentGateTests
 {
     private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
+
+    [Fact]
+    public void AnUnavailableStrictGeneratorRefusesReleaseWithoutAuthoredTriggersOrPins()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope product = f.Add("product", new JsonObject
+        {
+            ["name"] = "Example", ["slug"] = "example", ["summary"] = "Test product.",
+            ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Test edition." }),
+            ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Test surface." }),
+            ["release"] = new JsonObject { ["destination"] = new JsonObject { ["provider"] = "github-releases", ["settings"] = new JsonObject { ["repository"] = "Example/example" } } },
+        });
+        f.Add("living-document", new JsonObject
+        {
+            ["pathPattern"] = "docs/generated/{month}/{date}-{slug}-{id}.md", ["title"] = "Generated decisions",
+            ["kind"] = "generated", ["generator"] = new JsonObject { ["id"] = "example.documents/uninstalled", ["inputs"] = new JsonArray("format=1", "audience=Internal", "selection=all-revisions") },
+            ["source"] = "estate-file", ["triggers"] = new JsonArray(), ["checks"] = new JsonArray("matches-generator"), ["summary"] = "Test mandatory verification.",
+        });
+        f.AssertValid();
+        using var service = EstateService.Open(f.Estate.Root);
+        var provider = new FakeReleaseProvider();
+        var registry = new ProviderRegistry();
+        registry.Register(provider);
+        service.Providers = registry;
+
+        ReleaseResponse response = service.ReleaseSubmit(new ReleaseSubmitRequest(product.Id, "1.0.0", "Example/example", f.Estate.OperatorId));
+
+        Assert.False(response.Ok);
+        Assert.Contains("generator", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(provider.Dispatches);
+        Assert.Empty(service.Records("operation"));
+        Assert.Empty(service.Records("document-revision"));
+    }
     [Theory]
     [InlineData("behind", false)]
     [InlineData("ahead", false)]

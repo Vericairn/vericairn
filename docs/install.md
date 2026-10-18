@@ -219,7 +219,7 @@ The Codex launcher enables the ordinary code-mode tool host and pre-approves onl
 tools; the server still enforces the acting principal's authority. Global approval policy is unset.
 The seventh live run committed the permitted file on macOS. FIX-19 adds exactly the independent workspace's
 own `.git` to Codex's writable roots; the registered clone's `.git` stays protected. Settlement audits the
-run branch and fetches the audited head into the clone with a guarded reference update. An incomplete audit,
+run branch and fetches the audited head into the clone with a guarded reference update. An incomplete committed audit,
 changed head, checked-out destination or concurrent branch move refuses transfer and leaves a local warning;
 preserve the workspace for review. Uncommitted work stays there. Worker Git ignores ambient configuration
 and disables hooks. Borrowed objects depend on the registered clone: preserve work before pruning its objects
@@ -230,6 +230,11 @@ FIX-20 requests a stop for recognized credential access and outside writes, incl
 null-device output does not trigger an outside-write stop. Ordinary outside reads, network attempts and
 unverified effects still warn. Reports can arrive after execution; the audit does not isolate credentials
 or prove that unreported activity did not occur. See [command observations](software.md#command-observations-070).
+
+FIX-26 exempts location-only home reads, recognizes Codex's own admitted tools under its internal server name,
+and excludes ignored build output from settlement's file inventory. A completed committed audit remains available
+for branch retention independently of that inventory. Timed-out checks retry once; a credential check that still
+cannot complete requests containment. Credential-store classification is unchanged.
 
 FIX-21 prepares loaded and rotated runtime certificates before concurrent TLS use, correcting the race
 present since 0.6.1. Handshake diagnostics retain exception type and message when daemon logging is configured;

@@ -36,8 +36,24 @@ internal sealed class ReleaseCoordinationService(
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && d.DeclaresRefuse))
+        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && (d.DeclaresRefuse || GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration))))
         {
+            if (document.Generation is { } generation)
+            {
+                if (generation.Current) compared.Add($"{document.Path} at {generation.Commit}: every generated member equals its verified sources");
+                else changed.AddRange(generation.Problems.Select(p => $"{document.Path}: {p}"));
+                continue;
+            }
+
+            if (GeneratedDocumentContract.UsesStrictRegions(model, document.Declaration))
+            {
+                string? regionCommit = document.ComparisonCommit;
+                IReadOnlyList<string> failures = CompareRegionsAtCommit(model, document.Declaration, regionCommit);
+                if (failures.Count != 0) { changed.AddRange(failures.Select(p => document.Path + ": " + p)); continue; }
+                compared.Add(document.Path + " at " + regionCommit + ": every generated region equals its verified sources");
+                if (!LivingDocuments.Triggers(document.Declaration).Any(t => t.Level == "refuse")) continue;
+            }
+
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
             string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
@@ -89,6 +105,19 @@ internal sealed class ReleaseCoordinationService(
         return (changed, compared);
     }
 
+    private static IReadOnlyList<string> CompareRegionsAtCommit(EstateModel model, RecordEnvelope declaration, string? commit)
+    {
+        try
+        {
+            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(declaration, "source"));
+            byte[]? bytes = commit is not null && source?.Resolve(model, declaration, commit) == commit ? source.Read(model, declaration, commit) : null;
+            return bytes is null ? ["The exact generated-region source commit is unavailable."]
+                : DocumentChecks.Generated(model, declaration, new System.Text.UTF8Encoding(false, true).GetString(bytes), commit);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        { return ["The exact generated-region comparison could not complete safely."]; }
+    }
+
     private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit, ProviderDescriptor provider, string destination)
     {
         IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
@@ -100,13 +129,24 @@ internal sealed class ReleaseCoordinationService(
 
         IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
         (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories);
+        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is null && d.Generation is null && GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration)))
+        {
+            try
+            {
+                string file = GeneratedDocumentVerification.SafeFile(model.Root, document.Path);
+                if (!File.Exists(file)) changed.Add(document.Path + ": required generated regions are missing");
+                else changed.AddRange(DocumentChecks.Generated(model, document.Declaration, File.ReadAllText(file)).Select(p => document.Path + ": " + p));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            { changed.Add(document.Path + ": required generated regions are unavailable"); }
+        }
         changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
         return (changed, compared);
     }
 
     private static bool NeedsReleaseCommit(EstateModel model, string product, IReadOnlySet<string> repositories) =>
         model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is string repository && repositories.Contains(repository) &&
-            LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
+            (GeneratedDocumentContract.RequiresFreshCheck(model, d) || (LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"))));
 
     // Match the effective build destination, including request overrides, through the provider's resource location keys.
     // Every revision of a matching resource denotes the same repository, including an older declaration or clone registration.

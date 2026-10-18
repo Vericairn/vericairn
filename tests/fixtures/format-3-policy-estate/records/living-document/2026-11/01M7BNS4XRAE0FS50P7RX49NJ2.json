@@ -1,0 +1,31 @@
+{
+  "at": "2026-11-14T00:02:11Z",
+  "body": {
+    "generator": {
+      "id": "example.documents/revisions",
+      "inputs": [
+        "format=1",
+        "audience=Internal",
+        "selection=all-revisions"
+      ]
+    },
+    "kind": "generated",
+    "pathPattern": "docs/registers/decisions/{month}/{date}-{slug}-{id}.md",
+    "source": "estate-file",
+    "summary": "One file for each exact recorded decision.",
+    "title": "Recorded decisions",
+    "triggers": []
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:f71e4a4fa827996fb74e6b694c41306ee94ae7f9d7aab52053a22ac6e8b4e9d3",
+  "id": "01M7BNS4XRAE0FS50P7RX49NJ2",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "_9D8Gv-_rRxnxQgocb_JuwlKiphoe9xe2xxJejjhgM97bnALVFb-28knwyKt0u22NZUnWx4zxyKLuk0Buu05wg"
+    }
+  ],
+  "type": "living-document"
+}

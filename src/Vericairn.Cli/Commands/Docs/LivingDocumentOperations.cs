@@ -5,6 +5,7 @@ using System.Text.Json;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Store;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
@@ -80,49 +81,10 @@ internal sealed class LivingDocumentOperations(CommandContext context)
     {
         try
         {
-            EstateModel model = LoadCopy(root);
-            RecordEnvelope? declaration = model.Current("living-document").FirstOrDefault(d => EstateModel.BodyString(d, "path") == path && EstateModel.BodyString(d, "repository") is null);
-            if (declaration is null)
-            {
-                return context.Fail($"No living document {path} is declared in the estate's own repository.");
-            }
-
-            string file = Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
-            string text = File.Exists(file) ? File.ReadAllText(file).Replace("\r\n", "\n", StringComparison.Ordinal) : string.Empty;
-            var rewritten = new List<string>();
-            var missing = new List<string>();
-            foreach ((string id, string generator, IReadOnlyList<string> inputs) in DocumentChecks.Regions(declaration))
-            {
-                if (DocumentGenerators.Find(generator)?.Generate(model, id, inputs) is not string fresh)
-                {
-                    missing.Add($"{id} ({generator} is not installed here)");
-                    continue;
-                }
-
-                if (GeneratedRegions.Replace(text, id, fresh) is not string replaced)
-                {
-                    missing.Add($"{id} (its markers {GeneratedRegions.Start(id)} and {GeneratedRegions.End(id)} are not in place)");
-                    continue;
-                }
-
-                if (replaced != text)
-                {
-                    rewritten.Add(id);
-                    text = replaced;
-                }
-            }
-
-            if (EstateModel.BodyString(declaration, "kind") == "generated" && DocumentChecks.Generator(declaration) is (string whole, IReadOnlyList<string> wholeInputs)
-                && DocumentGenerators.Find(whole)?.Generate(model, null, wholeInputs) is string document && document.Replace("\r\n", "\n", StringComparison.Ordinal) != text)
-            {
-                text = document.Replace("\r\n", "\n", StringComparison.Ordinal);
-                rewritten.Add("the whole document");
-            }
-
-            if (rewritten.Count > 0)
-            {
-                File.WriteAllText(file, text);
-            }
+            using EstateSession session = EstateSession.Open(root);
+            DocumentChangePlan plan = DocumentRepairWriter.Repair(session, path);
+            IReadOnlyList<string> rewritten = plan.Rewritten;
+            IReadOnlyList<string> missing = plan.Problems;
 
             if (json)
             {
@@ -130,7 +92,7 @@ internal sealed class LivingDocumentOperations(CommandContext context)
             }
             else
             {
-                context.Output.WriteLine(rewritten.Count == 0 ? $"{path}: every generated region is current." : $"{path}: rewrote {string.Join(", ", rewritten)}.");
+                context.Output.WriteLine(rewritten.Count == 0 ? $"{path}: {(missing.Count == 0 ? "every generated member is current" : "generation did not complete")}." : $"{path}: rewrote {string.Join(", ", rewritten)}.");
                 foreach (string gap in missing)
                 {
                     context.Error.WriteLine($"{path}: not regenerated: {gap}");
@@ -141,7 +103,7 @@ internal sealed class LivingDocumentOperations(CommandContext context)
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or JsonException)
         {
-            return context.Fail(exception.Message);
+            return context.Fail("The document could not be regenerated safely; inspect its declaration and source availability.");
         }
     }
 }

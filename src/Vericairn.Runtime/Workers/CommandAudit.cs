@@ -55,7 +55,7 @@ public static partial class CommandAudit
 
     /// <summary>
     /// Flags recognizable network, credential and outside-workspace path attempts without retaining their arguments.
-    /// A failed check adds an audit-unverified warning without discarding the action's completed verdicts.
+    /// Failed checks preserve completed verdicts; an exhausted credential timeout also requests a stop.
     /// </summary>
     public static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted) =>
         Inspect(action, workspace, permitted, NoEnvironment, IsReadOnly);
@@ -63,10 +63,10 @@ public static partial class CommandAudit
     internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, Func<string, bool> isReadOnly) =>
         Inspect(action, workspace, permitted, NoEnvironment, isReadOnly);
 
-    internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, IReadOnlyDictionary<string, string> environment) =>
-        Inspect(action, workspace, permitted, environment, IsReadOnly);
+    internal static IReadOnlyList<RunSignal> Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, IReadOnlyDictionary<string, string> environment, Action<TimeSpan>? beforeCredentialCheck = null) =>
+        Inspect(action, workspace, permitted, environment, IsReadOnly, beforeCredentialCheck);
 
-    private static RunSignal[] Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, IReadOnlyDictionary<string, string> environment, Func<string, bool> isReadOnly)
+    private static RunSignal[] Inspect(HarnessAction action, string workspace, IReadOnlyList<string> permitted, IReadOnlyDictionary<string, string> environment, Func<string, bool> isReadOnly, Action<TimeSpan>? beforeCredentialCheck = null)
     {
         ArgumentNullException.ThrowIfNull(action);
         // Retain the public argument; actual changes are checked against these patterns at settlement.
@@ -93,17 +93,17 @@ public static partial class CommandAudit
                 else if (cwd is not null)
                 {
                     working = null;
-                    Check(() => working = ResolvePath(ExpandPath(cwd, environment), workspace), codes);
+                    Check(() => working = ResolvePath(ExpandPath(cwd, environment), workspace), codes, credentials: true);
                     if (working is null) codes.Add("audit-unverified");
                 }
             }
 
-            Check(() => GatherPaths(action.Input, paths, structured), codes);
+            Check(() => GatherPaths(action.Input, paths, structured), codes, credentials: true);
             for (int i = 0; i < paths.Count; i++)
             {
                 int index = i;
                 paths[index] = paths[index] with { WorkingDirectory = working };
-                Check(() => paths[index] = paths[index] with { Path = ExpandPath(paths[index].Path, environment) }, codes);
+                Check(() => paths[index] = paths[index] with { Path = ExpandPath(paths[index].Path, environment) }, codes, credentials: true);
             }
             if (action.Tool is "WebFetch" or "WebSearch" or "web_search" || action.Tool.Contains("__web", StringComparison.OrdinalIgnoreCase))
             {
@@ -129,7 +129,7 @@ public static partial class CommandAudit
                 if (command is not null)
                 {
                     bool commandReads = false;
-                    Check(() => commandReads = InspectCommand(command, paths, codes, isReadOnly, new CommandContext(working, environment), 0), codes);
+                    Check(() => commandReads = InspectCommand(command, paths, codes, isReadOnly, new CommandContext(working, environment), 0), codes, credentials: true);
                     readOnly = (!sawCommand || readOnly) && commandReads && paths.All(p => p.Access == PathAccess.Read);
                     sawCommand = true;
                 }
@@ -139,12 +139,12 @@ public static partial class CommandAudit
             {
                 if (StringField(action.Input, "patch") is string patch)
                 {
-                    foreach (Match match in PatchPaths().Matches(patch))
+                    foreach (Match match in Matches(PatchPaths(), patch))
                     {
                         paths.Add(new InvocationPath(match.Groups[1].Value, PathAccess.Write, working));
                     }
                 }
-            }, codes);
+            }, codes, credentials: true);
 
             if (working is not null)
             {
@@ -158,13 +158,14 @@ public static partial class CommandAudit
             foreach (InvocationPath invocation in paths)
             {
                 string path = invocation.Path;
-                Check(() =>
+                Check(limit =>
                 {
+                    beforeCredentialCheck?.Invoke(limit);
                     if (CredentialPath(path, invocation.WorkingDirectory, environment, invocation.CopiesTree))
                     {
                         codes.Add("credentials");
                     }
-                }, codes);
+                }, codes, credentials: true);
                 Check(() =>
                 {
                     if (NullDevice(path)) return;
@@ -199,10 +200,12 @@ public static partial class CommandAudit
         string at = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
         string? fingerprint = null;
         Check(() => fingerprint = Fingerprint(action), codes);
+        bool credentialTimeout = codes.Remove("credential-timeout");
         return codes.Order(StringComparer.Ordinal).Select(code => new RunSignal(code, code is "credentials" or "scope" ? "critical" : "warning", at, code switch
         {
             "network" => "The worker observed an invocation that attempts network access.",
-            "credentials" => "The worker observed an invocation targeting credentials or a secret store.",
+            "credentials" => credentialTimeout ? "The worker could not complete a credential check after retrying; the run must stop."
+                : "The worker observed an invocation targeting credentials or a secret store.",
             "scope" => "The worker observed an invocation that may change a path outside its workspace.",
             "scope-read" => "The worker observed an invocation that may read outside its workspace.",
             _ => "The worker could not complete one or more invocation checks; completed audit verdicts still apply.",
@@ -256,16 +259,29 @@ public static partial class CommandAudit
         return !Path.IsPathRooted(relative) && relative != ".." && !relative.StartsWith("../", StringComparison.Ordinal);
     }
 
-    private static bool Check(Action check, HashSet<string> codes)
+    private static bool Check(Action check, HashSet<string> codes, bool credentials = false) => Check(_ => check(), codes, credentials);
+
+    private static bool Check(Action<TimeSpan> check, HashSet<string> codes, bool credentials = false)
     {
+        bool timedOut = false;
         try
         {
-            check();
+            try { check(TimeSpan.FromMilliseconds(100)); }
+            catch (TimeoutException exception) when (exception is not AuditTimeoutException)
+            {
+                timedOut = true;
+                check(RetryLimit);
+            }
             return true;
         }
         catch (Exception exception) when (CheckFailure(exception))
         {
             codes.Add("audit-unverified");
+            if (credentials && (timedOut || exception is TimeoutException))
+            {
+                codes.Add("credentials");
+                codes.Add("credential-timeout");
+            }
             return false;
         }
     }
@@ -328,14 +344,14 @@ public static partial class CommandAudit
 
     private static bool IsReadOnly(string command)
     {
-        string[] words = ShellWords().Matches(command).Select(m => m.Value).ToArray();
+        string[] words = Matches(ShellWords(), command).Select(m => m.Value).ToArray();
         string[] tokens = words.Select(w => w.Trim('"', '\'')).ToArray();
         string executable = tokens[0].Replace('\\', '/').Split('/')[^1];
         if (executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) executable = executable[..^4];
         int gitCommand = executable.Equals("git", StringComparison.OrdinalIgnoreCase) ? GitSubcommand(tokens, 1, tokens.Length) : -1;
         if (!ReadCommands.Contains(executable) && !(gitCommand >= 0 && GitReadCommands.Contains(tokens[gitCommand]))) return false;
         if (executable.Equals("sed", StringComparison.OrdinalIgnoreCase)
-            && !(tokens.Length >= 3 && tokens[1] == "-n" && SedPrint().IsMatch(tokens[2]))) return false;
+            && !(tokens.Length >= 3 && tokens[1] == "-n" && IsMatch(SedPrint(), tokens[2]))) return false;
         // These options execute helpers or write files. Unclassified forms keep the conservative path verdict.
         if (executable.Equals("find", StringComparison.OrdinalIgnoreCase) && tokens.Any(t => t is "-delete" or "-exec" or "-execdir" or "-ok" or "-okdir" or "-fprint" or "-fprint0" or "-fprintf" or "-fls")) return false;
         if (executable.Equals("rg", StringComparison.OrdinalIgnoreCase) && tokens.Any(t => t is "--pre" or "--hostname-bin" or "-z" or "--search-zip"

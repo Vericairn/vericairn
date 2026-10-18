@@ -14,7 +14,7 @@
     {
       "algorithm": "ecdsa-p256-sha256",
       "device": "01M57TPYP4PJ10HN6CYX7650CM",
-      "signature": "LqdHQlIXpcSjAsCMm2lCT0fWiDS5Eo1Cxd1NEhIttfpZrTFt2llZvceH5dT0CH3cE5onR9WJfQbkn9Hozebt1w"
+      "signature": "x95DaE1Rgcuk_hy8NFFcGvRXYvGP3RzHG-zk62MR4_-BTqYJKxIRmoVsgOl8ws6vtWcWpYPXSiwVxAuMAZbgGQ"
     }
   ],
   "type": "retirement"

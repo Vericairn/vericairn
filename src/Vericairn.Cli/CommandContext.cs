@@ -161,6 +161,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         if (outcome.Written is RecordWritten written)
         {
             Output.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
+            if (outcome.Problem is { } interrupted) return Fail(interrupted.Message);
             return Clean;
         }
 

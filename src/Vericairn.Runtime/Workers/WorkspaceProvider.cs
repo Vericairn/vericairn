@@ -23,6 +23,9 @@ public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files
 {
     /// <summary>The exact run-branch head inspected by the committed scope audit, local only.</summary>
     public string? Head { get; init; }
+
+    /// <summary>Worker exports omitted from settlement changes, retained locally for unused-workspace cleanup.</summary>
+    public IReadOnlyDictionary<string, string>? RunFiles { get; init; }
 }
 
 /// <summary>
@@ -50,7 +53,7 @@ public interface IWorkspaceProvider
     /// <summary>Prepares at the requested directory, or reuses this branch's existing workspace only within the selected workspace root.</summary>
     PreparedWorkspace Prepare(string clone, string branch, string? baseReference, string directory, string workspaceRoot) => Prepare(clone, branch, baseReference, directory);
 
-    /// <summary>Captures the workspace before launch, including ignored files, for the settlement's scope audit.</summary>
+    /// <summary>Captures tracked and non-ignored workspace files before launch for the settlement's scope audit.</summary>
     WorkspaceSnapshot Capture(PreparedWorkspace workspace) => new(new Dictionary<string, string>(StringComparer.Ordinal), "This workspace provider supplies no file inventory.");
 
     /// <summary>

@@ -10,21 +10,21 @@ public static partial class CommandAudit
     private static void InspectCode(string code, List<InvocationPath> paths, HashSet<string> codes, CommandContext context)
     {
         codes.Add("audit-unverified");
-        Check(() => { if (NetworkCode().IsMatch(code)) codes.Add("network"); }, codes);
-        Check(() => { if (SecretEnvironment().IsMatch(code)) codes.Add("credentials"); }, codes);
+        Check(() => { if (IsMatch(NetworkCode(), code)) codes.Add("network"); }, codes);
+        Check(() => { if (IsMatch(SecretEnvironment(), code)) codes.Add("credentials"); }, codes, credentials: true);
         Check(() =>
         {
-            foreach (Match word in ShellWords().Matches(code))
+            foreach (Match word in Matches(ShellWords(), code))
             {
                 string text = Value(word.Value);
                 if (NetworkCommands.Contains(text)) codes.Add("network");
-                if (SecretPath().IsMatch(text.Replace('\\', '/'))) codes.Add("credentials");
+                if (IsMatch(SecretPath(), text.Replace('\\', '/'))) codes.Add("credentials");
             }
-        }, codes);
+        }, codes, credentials: true);
         Check(() =>
         {
             bool[] syntax = CodeSyntax(code);
-            foreach (Match match in CodePaths().Matches(code))
+            foreach (Match match in Matches(CodePaths(), code))
             {
                 if (!syntax[match.Index]) continue;
                 string function = match.Groups["function"].Value;
@@ -33,9 +33,9 @@ public static partial class CommandAudit
                     : function.StartsWith("read", StringComparison.Ordinal) ? PathAccess.Read : PathAccess.Write;
                 paths.Add(new InvocationPath(match.Groups["path"].Value, access, context.Working));
             }
-            foreach (Match match in PathlibWrites().Matches(code))
+            foreach (Match match in Matches(PathlibWrites(), code))
                 if (syntax[match.Index]) paths.Add(new InvocationPath(match.Groups["path"].Value, PathAccess.Write, context.Working));
-        }, codes);
+        }, codes, credentials: true);
     }
 
     // A call printed as sample text or placed in a comment is not a literal write invocation.

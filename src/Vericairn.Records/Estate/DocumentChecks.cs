@@ -24,7 +24,7 @@ public static partial class DocumentChecks
     /// Runs every check a declaration names against the document's text, answering the given trigger records. Links resolve in the
     /// estate's working tree when a root is given, else through <paramref name="exists"/>, which answers for a repository-relative path.
     /// </summary>
-    public static IReadOnlyList<Outcome> Run(EstateModel model, RecordEnvelope declaration, string text, string documentPath, string? root, IReadOnlyList<RecordEnvelope> answered, Func<string, bool>? exists = null)
+    public static IReadOnlyList<Outcome> Run(EstateModel model, RecordEnvelope declaration, string text, string documentPath, string? root, IReadOnlyList<RecordEnvelope> answered, Func<string, bool>? exists = null, string? commit = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(declaration);
@@ -38,7 +38,7 @@ public static partial class DocumentChecks
             outcomes.Add(name switch
             {
                 "names-version" => NamesVersion(text, answered),
-                "matches-generator" => MatchesGenerator(model, declaration, text),
+                "matches-generator" => MatchesGenerator(model, declaration, text, commit),
                 "links-resolve" => root is not null ? LinksResolve(text, documentPath, relative => File.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))) || Directory.Exists(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar))))
                     : exists is not null ? LinksResolve(text, documentPath, exists)
                     : new Outcome(name, "not-performed", "The links are resolved where the repository is."),
@@ -50,21 +50,26 @@ public static partial class DocumentChecks
     }
 
     /// <summary>Every generated region, and a generated document, compared with a fresh generation; the regions that differ or have lost their markers.</summary>
-    public static IReadOnlyList<string> Generated(EstateModel model, RecordEnvelope declaration, string text)
+    public static IReadOnlyList<string> Generated(EstateModel model, RecordEnvelope declaration, string text, string? commit = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(text);
+        if (GeneratedDocumentContract.IsStrict(model, declaration))
+            return GeneratedDocumentVerification.Plan(model, declaration, commit).Problems;
+        bool strictRegions = GeneratedDocumentContract.UsesStrictRegions(model, declaration);
         var problems = new List<string>();
         foreach ((string id, string generator, IReadOnlyList<string> inputs) in Regions(declaration))
         {
-            string? fresh = DocumentGenerators.Find(generator)?.Generate(model, id, inputs);
+            DocumentRenderResult rendition = DocumentRepair.Region(model, declaration, generator, id, inputs, commit);
+            string? fresh = rendition.Status == DocumentGenerationStatus.Success ? rendition.Content : null;
             if (fresh is null)
             {
+                if (strictRegions) problems.Add($"region {id}: generator {generator} is unavailable or failed");
                 continue;
             }
 
-            string? content = GeneratedRegions.Content(text.Replace("\r\n", "\n", StringComparison.Ordinal), id);
+            string? content = GeneratedRegions.Content(strictRegions ? text : text.Replace("\r\n", "\n", StringComparison.Ordinal), id);
             if (content is null)
             {
                 problems.Add($"region {id} has lost its markers");
@@ -119,11 +124,12 @@ public static partial class DocumentChecks
             : new Outcome("names-version", "failed", $"Does not name {string.Join(", ", missing)}, the release this review answers.");
     }
 
-    private static Outcome MatchesGenerator(EstateModel model, RecordEnvelope declaration, string text)
+    private static Outcome MatchesGenerator(EstateModel model, RecordEnvelope declaration, string text, string? commit)
     {
-        IReadOnlyList<string> problems = Generated(model, declaration, text);
+        IReadOnlyList<string> problems = Generated(model, declaration, text, commit);
         bool installed = Regions(declaration).Any(r => DocumentGenerators.Find(r.Generator) is not null) || (Generator(declaration) is (string id, _) && DocumentGenerators.Find(id) is not null);
-        return !installed ? new Outcome("matches-generator", "not-performed", "Its generator is not installed here; the product's own tests compare it.")
+        bool strict = GeneratedDocumentContract.RequiresFreshCheck(model, declaration);
+        return !installed && !strict ? new Outcome("matches-generator", "not-performed", "Its generator is not installed here; the product's own tests compare it.")
             : problems.Count == 0 ? new Outcome("matches-generator", "passed", "Equals a fresh generation.")
             : new Outcome("matches-generator", "failed", string.Join("; ", problems) + ".");
     }

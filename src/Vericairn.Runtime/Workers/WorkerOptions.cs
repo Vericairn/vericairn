@@ -8,6 +8,8 @@ public sealed record WorkerOptions
 {
     internal Action? AfterEvent { get; init; }
 
+    internal Action<TimeSpan>? BeforeCredentialCheck { get; init; }
+
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
     internal Action? BeforeTransmission { get; init; }

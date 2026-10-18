@@ -165,6 +165,7 @@ internal static class FakeHarness
             // The installed baseline omits approvals from mcp list; also exercise a harness reporting them.
             if (behavior["mcpApproval"]?.GetValue<string>() is string approval) list[0]!["default_tools_approval_mode"] = approval;
             if (defect == "other-approved-server") list[0]!["name"] = "other";
+            if (defect == "codex-server") list[0]!["name"] = "codex";
             if (defect == "extra-approved-server") list.Add(new JsonObject { ["name"] = "other", ["enabled"] = true, ["default_tools_approval_mode"] = "approve" });
             if (defect == "null-approval") list[0]!["default_tools_approval_mode"] = null;
             if (defect == "duplicate-approval")
@@ -238,6 +239,11 @@ internal static class FakeHarness
                 model = execution == "different" ? "model-a" : model, effort }));
             // No usage or exact model revision is reported by this scenario.
             return 0;
+        }
+        if (codex && behavior["nativeTool"]?.GetValue<string>() is string nativeTool)
+        {
+            foreach (string lifecycle in new[] { "item.started", "item.updated", "item.completed" })
+                Console.WriteLine(JsonSerializer.Serialize(new { type = lifecycle, item = new { type = "mcp_tool_call", id = "native", server = "codex", tool = nativeTool, arguments = new { } } }));
         }
         if (behavior["actions"]?.GetValue<string>() is string actions)
         {
@@ -409,7 +415,7 @@ internal static class FakeHarness
         }
 
         bool listing = arguments.Contains("features") && arguments.Contains("list");
-        if (listing && scenario.StartsWith("watch-codex", StringComparison.Ordinal))
+        if (listing && (scenario.StartsWith("watch-codex", StringComparison.Ordinal) || scenario == "workspace-commit-ignored"))
         {
             Emit("goals stable true");
             return 0;
@@ -561,12 +567,13 @@ internal static class FakeHarness
             case "codex-broken" when listing:
                 Console.Error.WriteLine("error: unrecognized subcommand 'features'");
                 return 2;
-            case "workspace-commit":
+            case "workspace-commit" or "workspace-commit-ignored":
                 if (!Directory.Exists(".git")) return 2;
                 Directory.CreateDirectory("widget");
                 File.WriteAllText("widget/permitted.txt", "permitted work\n");
                 Git("add", "widget/permitted.txt");
                 Git("commit", "-q", "-m", "Commit inside the workspace");
+                if (scenario == "workspace-commit-ignored") WriteLargeIgnoredOutput(Environment.CurrentDirectory);
                 return 0;
             case "scope-edits":
                 Directory.CreateDirectory("src");
@@ -700,6 +707,13 @@ internal static class FakeHarness
 
         Emit("""{"type":"result","subtype":"success","is_error":false,"num_turns":3,"result":"Done.","usage":{"input_tokens":500,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":100}}""");
         return 0;
+    }
+
+    internal static void WriteLargeIgnoredOutput(string workspace)
+    {
+        Directory.CreateDirectory(Path.Combine(workspace, "artifacts"));
+        using var output = File.Create(Path.Combine(workspace, "artifacts", "build.bin"));
+        output.SetLength(1024L * 1024 * 1024 + 1);
     }
 
     private static void Git(params string[] arguments)

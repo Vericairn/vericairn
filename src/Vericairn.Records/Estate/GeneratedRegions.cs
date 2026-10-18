@@ -40,6 +40,7 @@ public static class GeneratedRegions
 
     private static (int From, int To)? Find(string text, string id)
     {
+        if (!ValidMarkers(text)) return null;
         string start = Start(id);
         string end = End(id);
         int opening = Line(text, start, 0);
@@ -61,6 +62,36 @@ public static class GeneratedRegions
         }
 
         return (from + 1, closing);
+    }
+
+    /// <summary>Every marker is unique, closed and unnested; stray or crossing markers cannot hide outside a requested region.</summary>
+    public static bool ValidMarkers(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        string? open = null;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string line in text.Split('\n'))
+        {
+            string value = line.TrimEnd('\r');
+            bool starts = value.StartsWith("<!-- vericairn:generated ", StringComparison.Ordinal);
+            bool ends = value.StartsWith("<!-- vericairn:end ", StringComparison.Ordinal);
+            if (!starts && !ends) continue;
+            string prefix = starts ? "<!-- vericairn:generated " : "<!-- vericairn:end ";
+            if (!value.EndsWith(" -->", StringComparison.Ordinal)) return false;
+            string name = value[prefix.Length..^4];
+            if (!Types.Patterns.Slug.IsMatch(name)) return false;
+            if (starts)
+            {
+                if (open is not null || !seen.Add(name)) return false;
+                open = name;
+            }
+            else
+            {
+                if (open != name) return false;
+                open = null;
+            }
+        }
+        return open is null;
     }
 
     /// <summary>Where a marker stands alone on a line, from an offset; -1 when it does not.</summary>
