@@ -32,7 +32,7 @@ internal static partial class CliApp
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
-        root.Subcommands.Add(ConnectionsFamily(jsonOption));
+        root.Subcommands.Add(new ConnectionsCommand(context));
         root.Subcommands.Add(new ReleaseCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
         root.Subcommands.Add(new CheckCommand(context));
@@ -280,35 +280,6 @@ internal static partial class CliApp
 
 
 
-    private static Command ConnectionsFamily(Option<bool> jsonOption)
-    {
-        var connections = new Command("connections", "The runtimes this machine reaches over the local network: add one by pairing with a code, list them with their state, and remove one. Kept for this user on this machine, never in a repository.");
-
-        var addressArgument = new Argument<string>("address") { Description = "Where the runtime listens: its address and port, as the pairing code's administrator gave them, for example 192.168.1.20:7443." };
-        var codeOption = new Option<string>("--code") { Description = "The pairing code, as shown: four groups of four characters (16 in all).", Required = true };
-        var nameOption = new Option<string>("--name") { Description = "This device's descriptive name, never a machine path.", Required = true };
-        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default, the strongest this machine offers, or file, cng, secure-enclave or secret-service." };
-        var presenceOption = new Option<bool?>("--presence") { Description = "Every signature needs its owner's presence (Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines." };
-        var add = new Command("add", "Pair this machine with the runtime at an address using a code an administrator issued: the runtime proves it knows the code and who it is, this machine makes its device key and presents it, and the runtime records and admits the device. The connection pins the runtime's identity.");
-        add.Arguments.Add(addressArgument);
-        add.Options.Add(codeOption);
-        add.Options.Add(nameOption);
-        add.Options.Add(custodyOption);
-        add.Options.Add(presenceOption);
-        add.SetAction(parseResult => Commands.ConnectionsAdd(parseResult.GetValue(addressArgument)!, parseResult.GetValue(codeOption)!, parseResult.GetValue(nameOption)!, parseResult.GetValue(custodyOption), parseResult.GetValue(presenceOption), parseResult.GetValue(jsonOption)));
-        connections.Subcommands.Add(add);
-
-        var list = new Command("list", "Check every connection now and show its state: current, partial, denied, cached (with when it was last current) or unavailable.");
-        list.SetAction(parseResult => Commands.ConnectionsList(parseResult.GetValue(jsonOption)));
-        connections.Subcommands.Add(list);
-
-        var idArgument = new Argument<string>("id") { Description = "The connection's id, as listed." };
-        var remove = new Command("remove", "Forget a connection on this machine. The device stays admitted until an administrator revokes it, since disconnection is never revocation, and its key stays in this machine's custody.");
-        remove.Arguments.Add(idArgument);
-        remove.SetAction(parseResult => Commands.ConnectionsRemove(parseResult.GetValue(idArgument)!, parseResult.GetValue(jsonOption)));
-        connections.Subcommands.Add(remove);
-        return connections;
-    }
 
     private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
