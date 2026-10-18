@@ -13,10 +13,10 @@ internal sealed record PolicyFinding(
     PolicyTarget Target, string Item, string Verdict, string Disposition, string Level, string Owner,
     string Basis, string? AsOf, string Actual, string Required, string NextAction,
     RecordReference? Anchor, string? AnchorAt, ImmutableArray<RecordReference> Evidence, ImmutableArray<RecordReference> Exceptions,
-    int SubjectCount = 1)
+    int SubjectCount = 1, DutyFinding? Duty = null, bool Enforced = true)
 {
-    public bool ReleaseHold => Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
-    public Severity Severity => Verdict == "satisfied" || Disposition is "excepted" or "ended-unmet" || Level == "remind" ? Severity.Info : Severity.Warning;
+    public bool ReleaseHold => Enforced && Level == "refuse" && Verdict is "unmet" or "unavailable" && Disposition is not ("excepted" or "ended-unmet");
+    public Severity Severity => !Enforced || Verdict == "satisfied" || Disposition is "excepted" or "ended-unmet" || Level == "remind" ? Severity.Info : Severity.Warning;
 }
 
 internal sealed record PolicyRuleSummary(RecordReference Policy, string Rule, int Subjects, int Satisfied, int Unmet, int Unavailable, int Excepted);

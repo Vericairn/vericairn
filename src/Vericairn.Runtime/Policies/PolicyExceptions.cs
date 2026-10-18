@@ -60,6 +60,8 @@ internal static class PolicyExceptions
             "record" => finding.Target.Kind == "record" && ReferenceMatches(Get(target, "record"), finding.Target.Record),
             "publication" => finding.Target.Kind == "publication" && ReferenceMatches(Get(target, "publication"), finding.Target.Record),
             "file" => finding.Target.Kind == "file" && Text(target, "repository") == finding.Target.Repository && Text(target, "path") == finding.Target.Path && Text(target, "hash") == finding.Target.Hash,
+            "occurrence" => finding.Duty is { } duty && ReferenceMatches(Get(target, "policy"), duty.Origin) && Text(target, "rule") == finding.Rule &&
+                ReferenceMatches(Get(target, "subject"), finding.Target.Record) && PolicyRecords.Equal(Get(target, "occurrence"), duty.Occurrence),
             _ => false,
         };
     }

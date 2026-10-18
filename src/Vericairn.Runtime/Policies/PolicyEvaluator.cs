@@ -18,8 +18,12 @@ internal static class PolicyEvaluator
         List<Finding> parameterErrors = [];
         foreach (RecordEnvelope policy in basis.Model.Current("estate-policy"))
         {
-            if (EstateModel.BodyString(policy, "state") != "active") continue;
-            foreach (JsonElement rule in PolicyRecords.Items(PolicyRecords.Property(policy.Body, "rules")))
+            bool active = EstateModel.BodyString(policy, "state") == "active";
+            JsonElement[] currentRules = PolicyRecords.Items(PolicyRecords.Property(policy.Body, "rules")).ToArray();
+            JsonElement[] historicalDuties = basis.Model.Chain(policy).Select(id => basis.Model.ById[id]).SelectMany(p => PolicyRecords.Items(PolicyRecords.Property(p.Body, "rules")))
+                .Where(DutyRecords.IsDuty).GroupBy(r => PolicyRecords.Text(r, "key"), StringComparer.Ordinal).Select(g => g.Last())
+                .Where(r => !active || !currentRules.Any(c => PolicyRecords.Text(c, "key") == PolicyRecords.Text(r, "key") && DutyRecords.IsDuty(c))).ToArray();
+            foreach (JsonElement rule in (active ? currentRules : []).Concat(historicalDuties))
             {
                 var context = new PolicyRuleContext(basis, policy, rule);
                 if (unavailable is not null) findings.Add(context.Unavailable(unavailable));
@@ -57,6 +61,8 @@ internal sealed class PolicyRuleContext(PolicyBasis basis, RecordEnvelope policy
     internal JsonElement Parameters => PolicyRecords.Property(Rule, "parameters");
     internal string Identity => PolicyRecords.Identity(Model, Policy);
     internal string Key => PolicyRecords.Text(Rule, "key") ?? "?";
+    internal bool Enforced => EstateModel.BodyString(Policy, "state") == "active" && PolicyRecords.Items(PolicyRecords.Property(Policy.Body, "rules"))
+        .Any(r => PolicyRecords.Text(r, "key") == Key && PolicyRecords.Text(r, "kind") == PolicyRecords.Text(Rule, "kind") && PolicyRecords.Equal(PolicyRecords.Property(r, "version"), PolicyRecords.Property(Rule, "version")));
 
     internal PolicyFinding Finding(PolicyTarget target, string item, string verdict, string actual, string required, string nextAction,
         RecordEnvelope? anchor = null, IEnumerable<RecordReference>? evidence = null, string disposition = "none", int subjects = 1) =>
@@ -64,7 +70,7 @@ internal sealed class PolicyRuleContext(PolicyBasis basis, RecordEnvelope policy
             PolicyRecords.Property(Rule, "version").TryGetInt32(out int version) ? version : 0, target, item, verdict, disposition,
             EstateModel.BodyString(Policy, "level") ?? "refuse", EstateModel.BodyString(Policy, "owner") ?? "?", Basis.Digest, Basis.AsOf,
             actual, required, nextAction, anchor?.Reference, anchor?.At,
-            (evidence ?? []).Distinct().OrderBy(r => r.Type, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Hash, StringComparer.Ordinal).ToImmutableArray(), [] , subjects);
+            (evidence ?? []).Distinct().OrderBy(r => r.Type, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Hash, StringComparer.Ordinal).ToImmutableArray(), [] , subjects, Enforced: Enforced);
 
     internal PolicyFinding Unavailable(string reason) => Finding(new("policy", Identity, Policy.Reference), "", "unavailable", reason,
         "Complete, valid inputs and an installed implementation of this exact rule version.", "Repair the named input and evaluate again.", subjects: 0);
