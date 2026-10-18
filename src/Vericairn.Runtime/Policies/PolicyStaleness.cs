@@ -12,7 +12,7 @@ namespace Vericairn.Runtime.Policies;
 
 internal static partial class FoundationPolicyKinds
 {
-    private static IEnumerable<PolicyFinding> Stale(PolicyRuleContext context)
+    private static IEnumerable<PolicyFinding> Stale(PolicyRuleContext context, bool parametersOnly = false)
     {
         string @class = Choice(context.Parameters, "class", "planned-without-release", "result-awaiting-review", "assignment-without-attempt", "open-ask", "obligation-past-gate", "retirement-past-condition");
         Shape(context.Parameters, @class switch
@@ -22,6 +22,13 @@ internal static partial class FoundationPolicyKinds
             _ => ["class", "maxAgeDays"],
         });
         long days = Integer(context.Parameters, "maxAgeDays", maximum: long.MaxValue);
+        if (@class == "result-awaiting-review") Choice(context.Parameters, "reviewRequirement", "any", "independent", "operator");
+        if (parametersOnly)
+        {
+            if (@class is "obligation-past-gate" or "retirement-past-condition")
+                _ = Gated(context, @class, days, parametersOnly: true).ToArray();
+            yield break;
+        }
         DateTimeOffset at = context.Basis.Time!.Value;
         EstateModel model = context.Model;
         RecordEnvelope[] orders = PolicyWork.Orders(context).ToArray();
@@ -89,7 +96,7 @@ internal static partial class FoundationPolicyKinds
             seconds.ToString(CultureInfo.InvariantCulture) + " elapsed seconds.", "Less than " + Number(days) + " elapsed days.", "Resolve the waiting condition or record its authorized disposition.", anchor, evidence) with { AnchorAt = Time(anchorTime) };
     }
 
-    private static IEnumerable<PolicyFinding> Gated(PolicyRuleContext context, string @class, long days)
+    private static IEnumerable<PolicyFinding> Gated(PolicyRuleContext context, string @class, long days, bool parametersOnly = false)
     {
         JsonElement[] gates = Array(context.Parameters, "gates", empty: true);
         bool obligations = @class == "obligation-past-gate";
@@ -104,6 +111,7 @@ internal static partial class FoundationPolicyKinds
         }
         if (gates.GroupBy(g => PolicyWork.Identity(context.Model, Exact(context.Model, Get(g, "subject"))) + ":" + Text(g, "obligation"), StringComparer.Ordinal).Any(g => g.Count() != 1))
             throw new PolicyParameterException("A gate subject is mapped more than once.");
+        if (parametersOnly) yield break;
         var subjects = obligations
             ? context.Model.OfType("decision").SelectMany(d => Items(Get(d.Body, "obligations")).Select(o => (Record: d, Key: Text(o, "key") ?? "?", Prose: Text(o, "gates") ?? "No typed gate.")))
                 .GroupBy(x => (Identity: PolicyWork.Identity(context.Model, x.Record), x.Key)).Select(g => g.Last())

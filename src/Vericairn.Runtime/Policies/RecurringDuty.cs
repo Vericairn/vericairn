@@ -27,6 +27,12 @@ internal static class RecurringDuty
     internal const int MaximumOccurrences = 10000;
     internal const int MaximumProofSteps = 1000000;
 
+    internal static void ValidateRegistration(PolicyRuleContext context)
+    {
+        // Historical removed duties use their original declaration's scope in Occurrences.
+        if (EstateModel.BodyString(context.Policy, "state") == "active" && DutyRecords.IsDuty(DutyRecords.Rule(context.Policy, context.Key))) Validate(context);
+    }
+
     internal static void Validate(PolicyRuleContext context)
     {
         var findings = new FindingList();

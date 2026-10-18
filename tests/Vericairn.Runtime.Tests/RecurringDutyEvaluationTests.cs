@@ -193,6 +193,23 @@ public class RecurringDutyEvaluationTests
     }
 
     [Fact]
+    public void ARemovedDutyKeepsItsOwnHistoricalScopeAndCannotQuietItsReplacement()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope policy = f.Policy(); f.Estate.SetClock(At("2026-10-14T14:00:00Z"));
+        JsonObject body = PolicyFixture.Body(policy);
+        body["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = f.Estate.Estate.Id, ["selectors"] = new JsonArray("docs/**") };
+        body["rules"] = new JsonArray(new JsonObject { ["key"] = "files", ["kind"] = FoundationPolicyKinds.RevisionLine, ["version"] = 1,
+            ["parameters"] = new JsonObject { ["selectors"] = new JsonArray("docs/**"), ["style"] = "estate-design/1" } });
+        body["dutyDispositions"] = new JsonArray(f.Disposition(policy)); f.Policy(body, policy);
+        PolicyEvaluation result = Evaluate(f, repositories: [new(f.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, true, [PolicyBasisTests.File("docs/test.md", "# Title\nMissing revision.")])]);
+        Assert.Equal(0, result.Errors); Assert.True(result.Complete);
+        PolicyFinding ended = Assert.Single(result.Findings, x => x.Duty is not null);
+        Assert.Equal("ended-unmet", ended.Disposition); Assert.False(ended.Enforced);
+        Assert.True(Assert.Single(result.Findings, x => x.Rule == "files").ReleaseHold);
+    }
+
+    [Fact]
     public void OccurrenceExceptionsRetainDebtAndDoNotTouchAnotherOccurrenceOrError()
     {
         using var f = new PolicyFixture();

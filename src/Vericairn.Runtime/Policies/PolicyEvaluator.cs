@@ -27,8 +27,7 @@ internal static class PolicyEvaluator
             {
                 var context = new PolicyRuleContext(basis, policy, rule);
                 if (unavailable is not null) findings.Add(context.Unavailable(unavailable));
-                else if (DutyRecords.Time(EstateModel.BodyString(policy, "startsAt")) is not { } starts) findings.Add(context.Unavailable("The policy activation is unavailable."));
-                else if (starts > basis.Time) findings.Add(context.Finding(new("policy", context.Identity, policy.Reference), "", "satisfied", "Policy activation is in the future.", "Activation at " + EstateModel.BodyString(policy, "startsAt"), "Wait for activation.", disposition: "scheduled", subjects: 0));
+                else if (DutyRecords.Time(EstateModel.BodyString(policy, "startsAt")) is null) findings.Add(context.Unavailable("The policy activation is unavailable."));
                 else
                 {
                     try { findings.AddRange(registry is null ? [context.Unavailable("The exact rule kind and version are not installed.")] : registry.Evaluate(context)); }
@@ -61,8 +60,10 @@ internal sealed class PolicyRuleContext(PolicyBasis basis, RecordEnvelope policy
     internal JsonElement Parameters => PolicyRecords.Property(Rule, "parameters");
     internal string Identity => PolicyRecords.Identity(Model, Policy);
     internal string Key => PolicyRecords.Text(Rule, "key") ?? "?";
-    internal bool Enforced => EstateModel.BodyString(Policy, "state") == "active" && PolicyRecords.Items(PolicyRecords.Property(Policy.Body, "rules"))
+    internal bool CurrentRule => PolicyRecords.Items(PolicyRecords.Property(Policy.Body, "rules"))
         .Any(r => PolicyRecords.Text(r, "key") == Key && PolicyRecords.Text(r, "kind") == PolicyRecords.Text(Rule, "kind") && PolicyRecords.Equal(PolicyRecords.Property(r, "version"), PolicyRecords.Property(Rule, "version")));
+    internal bool Enforced => (Basis.UnavailableReason() is not null || !(Basis.Time is { } at && DutyRecords.Time(EstateModel.BodyString(Policy, "startsAt")) is { } starts && starts > at)) &&
+        EstateModel.BodyString(Policy, "state") == "active" && CurrentRule;
 
     internal PolicyFinding Finding(PolicyTarget target, string item, string verdict, string actual, string required, string nextAction,
         RecordEnvelope? anchor = null, IEnumerable<RecordReference>? evidence = null, string disposition = "none", int subjects = 1) =>

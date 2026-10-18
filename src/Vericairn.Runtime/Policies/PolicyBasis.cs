@@ -24,6 +24,7 @@ internal enum PolicyTimeOrigin { Recorded, Preview, Submission }
 // and validation before constructing it. Copy collections and discard the loader's machine-local root.
 internal sealed class PolicyBasis
 {
+    private readonly string? unavailable;
     internal const string Contract = "vericairn.estate-policy/1";
     internal const string RepositoryContract = "vericairn.policy-repository/1";
 
@@ -60,6 +61,7 @@ internal sealed class PolicyBasis
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
         });
+        unavailable = CheckUnavailable();
     }
 
     internal ImmutableArray<RecordEnvelope> Records { get; }
@@ -81,7 +83,9 @@ internal sealed class PolicyBasis
             validated.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault(),
             PolicyTimeOrigin.Recorded, repositories, implementations: implementations);
 
-    internal string? UnavailableReason()
+    internal string? UnavailableReason() => unavailable;
+
+    private string? CheckUnavailable()
     {
         if (!Complete) return "The record view is incomplete.";
         if (Time is null || Records.Length == 0) return "The evaluation needs a valid explicit UTC time and recorded basis.";

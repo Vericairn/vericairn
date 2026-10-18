@@ -21,9 +21,19 @@ internal static partial class FoundationPolicyKinds
 
     internal static void Validate(PolicyRuleContext context)
     {
-        // Each version's closed parameter reader runs before any selected subject is returned, including
-        // the zero-subject case. Keep it with that kind's interpretation to avoid schema/evaluator drift.
         if (context.Parameters.ValueKind != JsonValueKind.Object) throw new PolicyParameterException("Rule parameters must be an object.");
+        // Run the same closed readers used by evaluation, without selecting subjects or reading source
+        // bytes. Declarations can be checked before activation without a second schema drifting apart.
+        IEnumerable<PolicyFinding> validation = Text(context.Rule, "kind") switch
+        {
+            Placement => Placements(context, parametersOnly: true),
+            Staleness => Stale(context, parametersOnly: true),
+            KeyFamily => Families(context, parametersOnly: true),
+            RevisionLine => Revisions(context, parametersOnly: true),
+            Consistency => Consistencies(context, parametersOnly: true),
+            _ => throw new PolicyParameterException("This foundation parameter reader does not recognize the kind."),
+        };
+        _ = validation.ToArray();
     }
 
     internal static IReadOnlyList<PolicyFinding> Evaluate(PolicyRuleContext context)
@@ -42,7 +52,7 @@ internal static partial class FoundationPolicyKinds
         return findings.Length > 0 ? findings : [context.Finding(new("policy", context.Identity, context.Policy.Reference), "", "satisfied", "No subjects selected.", "All selected subjects satisfy the rule.", "No action.", subjects: 0)];
     }
 
-    private static IEnumerable<PolicyFinding> Placements(PolicyRuleContext context)
+    private static IEnumerable<PolicyFinding> Placements(PolicyRuleContext context, bool parametersOnly = false)
     {
         Shape(context.Parameters, ["backlogs"]);
         JsonElement[] backlogs = Array(context.Parameters, "backlogs", empty: true);
@@ -55,6 +65,7 @@ internal static partial class FoundationPolicyKinds
             if (Text(backlog, "product") is { } product && (!context.Model.ById.TryGetValue(product, out RecordEnvelope? found) || found.Type != "product")) throw new PolicyInputException("A backlog product is missing.");
         }
         if (backlogs.GroupBy(b => Text(b, "key"), StringComparer.Ordinal).Any(g => g.Count() > 1)) throw new PolicyParameterException("Backlog keys must be unique.");
+        if (parametersOnly) yield break;
         if (PolicyWork.PlacementRegistries(context).Count() != 1) throw new PolicyInputException("Conflicting active placement registries.");
         foreach (RecordEnvelope order in PolicyWork.Orders(context).Where(o => PolicyWork.Planned(context.Model, o, context.Basis.Time!.Value)))
         {
@@ -70,7 +81,7 @@ internal static partial class FoundationPolicyKinds
         }
     }
 
-    private static IEnumerable<PolicyFinding> Families(PolicyRuleContext context)
+    private static IEnumerable<PolicyFinding> Families(PolicyRuleContext context, bool parametersOnly = false)
     {
         Shape(context.Parameters, ["families", "createdFrom"]);
         DateTimeOffset from = Timestamp(context.Parameters, "createdFrom");
@@ -83,6 +94,7 @@ internal static partial class FoundationPolicyKinds
             Integer(family, "digits", 1);
             if (Strings(family, "suffixes").Any(s => s.Any(c => c is not (>= 'A' and <= 'Z')))) throw new PolicyParameterException("Family suffixes are literal ASCII uppercase words, or empty.");
         }
+        if (parametersOnly) yield break;
         foreach (RecordEnvelope order in PolicyWork.Orders(context).Where(o => context.Model.ById[PolicyWork.Identity(context.Model, o)].AtTime >= from))
         {
             string key = EstateModel.BodyString(order, "key") ?? "";
@@ -100,7 +112,7 @@ internal static partial class FoundationPolicyKinds
         return Strings(family, "suffixes").Any(s => ending == (s.Length == 0 ? "" : "-" + s));
     }
 
-    private static IEnumerable<PolicyFinding> Revisions(PolicyRuleContext context)
+    private static IEnumerable<PolicyFinding> Revisions(PolicyRuleContext context, bool parametersOnly = false)
     {
         Shape(context.Parameters, ["selectors", "style"], "repository");
         Choice(context.Parameters, "style", "estate-design/1");
@@ -114,6 +126,7 @@ internal static partial class FoundationPolicyKinds
             throw new PolicyInputException("The source repository must be explicitly related to the selected product.");
         string[] coverage = selectionKind == "repository" ? Strings(selection, "selectors") : ["**"];
         Selectors(coverage);
+        if (parametersOnly) yield break;
         PolicyRepository repository = Repository(context.Basis, repositoryId);
         foreach (PolicyFile file in repository.Files.Where(f => f.Path.EndsWith(".md", StringComparison.Ordinal) && selectors.Any(s => Matches(s, f.Path)) && coverage.Any(s => Matches(s, f.Path))))
         {
@@ -131,11 +144,12 @@ internal static partial class FoundationPolicyKinds
     [GeneratedRegex(@"\ARevision [1-9][0-9]*, (?<date>(?:January|February|March|April|May|June|July|August|September|October|November|December) [0-9]{1,2}, [0-9]{4})(?<explanation>\D.*)\z", RegexOptions.CultureInvariant)]
     private static partial Regex RevisionPattern();
 
-    private static IEnumerable<PolicyFinding> Consistencies(PolicyRuleContext context)
+    private static IEnumerable<PolicyFinding> Consistencies(PolicyRuleContext context, bool parametersOnly = false)
     {
         Shape(context.Parameters, ["cases"]);
         string[] cases = Strings(context.Parameters, "cases");
         if (cases.Any(c => c is not ("accepted-still-open" or "published-plan-still-open"))) throw new PolicyParameterException("Unknown work-state consistency case.");
+        if (parametersOnly) yield break;
         foreach (RecordEnvelope order in PolicyWork.Orders(context))
         {
             RecordEnvelope? status = PolicyWork.Status(context.Model, order, context.Basis.Time!.Value);

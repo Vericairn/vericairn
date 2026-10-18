@@ -27,7 +27,7 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
         kind == FoundationPolicyKinds.RevisionLine ? ["repository", "product"] : ["estate", "product", "work-orders"],
         kind == FoundationPolicyKinds.RevisionLine ? [PolicyBasis.RepositoryContract] : [], 100000, 100000,
         FoundationPolicyKinds.Validate, FoundationPolicyKinds.Evaluate)).Append(new(Vericairn.Records.Types.DutyRecords.Kind, 1, implementationDigest,
-            ["estate", "product"], [], 100000, RecurringDuty.MaximumOccurrences, FoundationPolicyKinds.Validate, RecurringDuty.Evaluate)));
+            ["estate", "product"], [], 100000, RecurringDuty.MaximumOccurrences, RecurringDuty.ValidateRegistration, RecurringDuty.Evaluate)));
 
     internal IReadOnlyList<PolicyFinding> Evaluate(PolicyRuleContext context)
     {
@@ -39,12 +39,16 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
         PolicyImplementation[] pins = context.Basis.Implementations.Where(i => i.Kind == kind && i.Version == version).ToArray();
         if (pins.Length != 1 || pins[0].Digest != registration.ImplementationDigest || !ContentHash.IsValid(registration.ImplementationDigest))
             return [context.Unavailable("The exact implementation digest is missing, conflicting or different from the basis.")];
-        if (!registration.Selections.Contains(Text(Get(context.Policy.Body, "appliesTo"), "kind") ?? "", StringComparer.Ordinal)) throw new PolicyParameterException("This rule version does not support the selected scope.");
+        if ((context.CurrentRule || kind != Vericairn.Records.Types.DutyRecords.Kind) && !registration.Selections.Contains(Text(Get(context.Policy.Body, "appliesTo"), "kind") ?? "", StringComparer.Ordinal))
+            throw new PolicyParameterException("This rule version does not support the selected scope.");
         if (registration.MaximumRecords < 1 || registration.MaximumFindings < 1 || context.Basis.Records.Length > registration.MaximumRecords)
             return [context.Unavailable("The declared record history bound was exhausted; no partial evaluation is reported.")];
+        registration.Validate(context);
+        if (Vericairn.Records.Types.DutyRecords.Time(Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "startsAt")) > context.Basis.Time)
+            return [context.Finding(new("policy", context.Identity, context.Policy.Reference), "", "satisfied", "Policy activation is in the future.",
+                "Activation at " + Vericairn.Records.Estate.EstateModel.BodyString(context.Policy, "startsAt"), "Wait for activation.", disposition: "scheduled", subjects: 0)];
         if (registration.SourceContracts.Any(contract => !context.Basis.Repositories.Any(r => r.Contract == contract && r.Complete)))
             return [context.Unavailable("A required source contract is unavailable.")];
-        registration.Validate(context);
         IReadOnlyList<PolicyFinding> findings = registration.Evaluate(context);
         if (findings.Count > registration.MaximumFindings) return [context.Unavailable("The declared finding bound was exhausted; no partial evaluation is reported.")];
         if (findings.Count == 0 || findings.Any(f => f.Policy != context.Policy.Reference || f.Rule != context.Key || f.Kind != kind || f.Version != version || f.Basis != context.Basis.Digest || f.AsOf != context.Basis.AsOf ||
