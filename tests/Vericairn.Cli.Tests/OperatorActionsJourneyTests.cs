@@ -39,8 +39,12 @@ public class OperatorActionsJourneyTests
             Assert.Contains(ask, CliHarness.Ok("--estate", root, "operator", "list", "--depth", "short").Out, StringComparison.Ordinal);
             string[] args = item.GetProperty("commands")[0].GetProperty("arguments").EnumerateArray().Select(a => a.GetString()!).ToArray();
             string answer = $$"""{"title":"Answer","statement":"Keep the current behavior.","summary":"No change.","synthesis":"The operator keeps the current behavior.","effects":["Keep it."],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[],"answers":["{{ask}}"]}""";
-            CliHarness.Outcome written = CliHarness.RunWithInput(answer, ["--estate", root, "--json", .. args]);
-            Assert.Equal(0, written.Code);
+            int body = Array.IndexOf(args, "--body");
+            Assert.True(body >= 0 && args[body + 1] == "-", "The shown command reads its body from standard input.");
+            // The in-process harness cannot feed the raw standard-input stream that --body - reads, so the same JSON comes from a file.
+            args[body + 1] = CliHarness.WriteJson(scratch, "answer.json", answer);
+            CliHarness.Outcome written = CliHarness.Run(["--estate", root, "--json", .. args]);
+            Assert.True(written.Code == 0, $"exit {written.Code}: {written.Err}");
             Assert.Empty(CliHarness.Ok("--estate", root, "--json", "operator", "list").Json.GetProperty("items").EnumerateArray());
         }
         finally { CliHarness.Delete(root); CliHarness.Delete(scratch); }
