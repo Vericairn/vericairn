@@ -24,11 +24,11 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
         var shell = new ShellViewModel(_ => connection, new StartingRuntime(connection), new Preferences(preferences));
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(estate.Root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal(1, connection.Meter.Calls.Count(c => c.Name == "Progress"));
             Assert.Contains(shell.Attention, item => item.Kind == "unknown-check" && item.State == "unknown" && item.Why.Contains("source unavailable: progress", StringComparison.Ordinal));
             connection.Meter.FailProgress = false;
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.DoesNotContain(shell.Attention, item => item.Why.Contains("source unavailable: progress", StringComparison.Ordinal));
             Assert.NotEmpty(shell.Progress);
         }
@@ -58,7 +58,7 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
         try
         {
             var watch = Stopwatch.StartNew();
-            await fixture.UiAsync(() => shell.OpenEstateAsync(estate.Root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken));
             output.WriteLine($"{records} records: open {watch.Elapsed.TotalMilliseconds:F2} ms, service start {connection.StartMilliseconds:F2} ms");
             foreach (var group in connection.Meter.Calls.GroupBy(c => c.Name))
             {
@@ -83,7 +83,7 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
             // A later refresh must still observe additions and principal revisions, not keep a session-wide UI cache.
             estate.Add("work-status", estate.BuilderId, """{"status":"submitted","note":"Ready for review."}""", new RecordReference("work-order", order.Id, null));
             estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Renamed Operator","roles":["operator"]}""", supersedes: estate.OperatorId);
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal("submitted", Assert.Single(shell.WorkOrders).Status);
             Assert.Contains("Renamed Operator", shell.ActingPrincipal, StringComparison.Ordinal);
             Assert.Equal(records + 2, connection.Service.Session.ParsedFiles);
@@ -141,7 +141,7 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
             var watch = Stopwatch.StartNew();
             try
             {
-                if (FailProgress && targetMethod!.Name == "Progress") { throw new IOException("fixture progress unavailable"); }
+                if (FailProgress && targetMethod!.Name is "Progress" or "ProgressAsync") { throw new IOException("fixture progress unavailable"); }
                 return targetMethod!.Invoke(Target, args);
             }
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
@@ -151,7 +151,7 @@ public class FirstLaunchTests(HeadlessFixture fixture, ITestOutputHelper output)
             }
             finally
             {
-                string name = targetMethod!.Name + (args?.FirstOrDefault() is string first ? ":" + first : string.Empty);
+                string name = targetMethod!.Name.Replace("Async", string.Empty, StringComparison.Ordinal) + (args?.FirstOrDefault() is string first ? ":" + first : string.Empty);
                 Calls.Add((name, watch.Elapsed.TotalMilliseconds));
             }
         }

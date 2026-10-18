@@ -6,6 +6,14 @@ namespace Vericairn.Runtime.Workers;
 public static partial class CommandAudit
 {
     private static bool Separator(string word) => word is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n";
+    private static bool HomeLocationOnly(string[] values)
+    {
+        int start = 0;
+        while (start < values.Length && values[start] is "-0" or "--null") start++;
+        if (start < values.Length && values[start] == "--") start++;
+        return start < values.Length && values.Skip(start).All(value => value == "VERICAIRN_HOME");
+    }
+
     private static string Value(string word) => word.Length >= 2 && word[0] is '\'' or '"' && word[^1] == word[0]
         ? word[0] == '\'' ? word[1..^1].Replace("'\"'\"'", "'", StringComparison.Ordinal) : word[1..^1] : word;
     private static string SuffixWord(string word, int prefix) => word.Length != Value(word).Length
@@ -50,7 +58,7 @@ public static partial class CommandAudit
                     // Group redirects are opened in the caller's directory, before the body runs.
                     segmentReads &= InspectSimple(tokens[(close + 1)..end], paths, codes, isReadOnly, before.Copy(), depth);
                 }
-            }, codes)) current.Working = null;
+            }, codes, credentials: true)) current.Working = null;
             context = current;
             reads &= segmentReads;
             // A pipeline/background child cannot change the parent's directory or variables. The
@@ -97,7 +105,7 @@ public static partial class CommandAudit
             // Parentheses here were not a command group. Substitutions and other unsupported
             // syntax remain uncertain, even when an enclosing echo would ignore its operands.
             if (word is "(" or ")") codes.Add("audit-unverified");
-            if (!word.StartsWith('\'') && SecretEnvironment().IsMatch(word)) codes.Add("credentials");
+            if (!word.StartsWith('\'') && IsMatch(SecretEnvironment(), word)) codes.Add("credentials");
             if (!word.StartsWith('\'') && (word.Contains("$(", StringComparison.Ordinal) || word.Contains('`', StringComparison.Ordinal))) codes.Add("audit-unverified");
             if (word is ">" or ">>" or ">|" or "&>" or "&>>" or ">&" or "<" or "<&")
             {
@@ -138,7 +146,8 @@ public static partial class CommandAudit
         bool reads = false;
         Check(() => reads = isReadOnly(string.Join(' ', arguments.Skip(start))), codes);
         if (NetworkCommands.Contains(executable)) codes.Add("network");
-        if (executable is "printenv" or "cmdkey" or "secret-tool" or "Get-StoredCredential" or "security" or "op" or "pass"
+        if (executable == "printenv" && !HomeLocationOnly(values)
+            || executable is "cmdkey" or "secret-tool" or "Get-StoredCredential" or "security" or "op" or "pass"
             || executable == "gpg" && values.Any(v => v.StartsWith("--export-secret", StringComparison.Ordinal))
             || executable == "gh" && GitHubTokenOutput(values)) codes.Add("credentials");
         if (executable.StartsWith("git-credential-", StringComparison.Ordinal)
@@ -185,7 +194,7 @@ public static partial class CommandAudit
         foreach (ShellToken body in bodies)
         {
             if (Interpreter(executable)) InspectCode(body.Input!, paths, codes, local);
-            else if (body.ExpandInput && SecretEnvironment().IsMatch(body.Input!)) codes.Add("credentials");
+            else if (body.ExpandInput && IsMatch(SecretEnvironment(), body.Input!)) codes.Add("credentials");
         }
 
         if (executable.Equals("git", StringComparison.OrdinalIgnoreCase))
@@ -271,13 +280,13 @@ public static partial class CommandAudit
     {
         if (word.StartsWith('\'') && word.EndsWith('\'')) return Value(word);
         string expanded = ExpandPath(Value(word), context.ExpansionEnvironment ?? context.Environment);
-        return word.StartsWith('"') && word.EndsWith('"') ? DoubleQuotedEscape().Replace(expanded, "$1") : expanded;
+        return word.StartsWith('"') && word.EndsWith('"') ? Replace(DoubleQuotedEscape(), expanded, "$1") : expanded;
     }
 
     private static string? ResolveDirectory(string word, CommandContext context, HashSet<string> codes)
     {
         string? resolved = null;
-        Check(() => resolved = ResolvePath(ShellPath(word, context), context.Working), codes);
+        Check(() => resolved = ResolvePath(ShellPath(word, context), context.Working), codes, credentials: true);
         if (resolved is null) codes.Add("audit-unverified");
         return resolved;
     }

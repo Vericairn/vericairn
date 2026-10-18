@@ -20,14 +20,6 @@ public class WorkTests(HeadlessFixture fixture)
     private const string Order = """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Exercise the loop.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget.txt"]}""";
     private const string Completed = """{"outcome":"completed","summary":"Done.","outputs":[],"evidence":[],"checks":[{"name":"tests","outcome":"passed","summary":"Pass."}],"limitations":[],"unresolvedEffects":[],"nextStep":"none"}""";
 
-    static WorkTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task TheLoopFromComposedAssignmentThroughTheInboxToAnAcceptance()
     {
@@ -41,17 +33,17 @@ public class WorkTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal("Operator (named with --as; no device of this principal is held here, so its records will be unsigned)", shell.ActingPrincipal);
 
             // The work order page shows the brief and no assignment yet.
-            await fixture.Ui(() => shell.OpenWorkOrder("W-1"));
+            await fixture.UiAsync(() => shell.OpenWorkOrderAsync("W-1", cancellationToken: TestContext.Current.CancellationToken));
             WorkOrderDocument page = Assert.IsType<WorkOrderDocument>(shell.SelectedDocument);
             Assert.Equal("W-1: Build the widget", page.Heading);
             Assert.Empty(page.Assignments);
 
             // The composer sends nothing until asked, then the runtime validates and signs.
-            AssignmentComposer composer = (await fixture.Ui(() => shell.OpenComposer("W-1")))!;
+            AssignmentComposer composer = (await fixture.UiAsync(() => shell.OpenComposerAsync("W-1", cancellationToken: TestContext.Current.CancellationToken)))!;
             composer.Contributor = composer.Contributors.Single(c => c.Id == agent);
             composer.Outcome = "A widget that builds and passes its tests.";
             composer.PermittedChanges = "the widget sources\nthe widget tests";
@@ -61,7 +53,7 @@ public class WorkTests(HeadlessFixture fixture)
             composer.ReviewCriteria = "tests pass";
             composer.Recovery = "Record a result before stopping.";
             Assert.Equal("Not sent.", composer.Status);
-            await fixture.Ui(() => composer.Submit(shell.Api!, shell.ActingPrincipalId));
+            await fixture.UiAsync(() => composer.SubmitAsync(shell.Api!, shell.ActingPrincipalId, cancellationToken: TestContext.Current.CancellationToken));
             Assert.StartsWith("Written: assignment", composer.Status, StringComparison.Ordinal);
             string assignment = composer.WrittenId!;
 
@@ -72,20 +64,21 @@ public class WorkTests(HeadlessFixture fixture)
             Assert.True(result.Ok, result.Problem?.Message);
 
             // Home and the inbox both show the claim to inspect.
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Contains(shell.Attention, a => a.SubjectType == "result" && a.SubjectId == result.Written!.Id);
 
             // The work order page lists the assignment; Enter on it opens the assignment page with the attempt and its result.
-            await fixture.Ui(() => shell.OpenWorkOrder("W-1"));
+            await fixture.UiAsync(() => shell.OpenWorkOrderAsync("W-1", cancellationToken: TestContext.Current.CancellationToken));
             page = Assert.IsType<WorkOrderDocument>(shell.SelectedDocument);
             Assert.Equal(assignment, Assert.Single(page.Assignments).Id);
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.UpdateLayout();
                 ListBox list = window.GetVisualDescendants().OfType<ListBox>().First(l => l.DataContext is WorkOrderDocument);
                 list.SelectedIndex = 0;
                 (list.ContainerFromIndex(0) as Control)?.Focus();
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             AssignmentDocument assignmentPage = Assert.IsType<AssignmentDocument>(shell.SelectedDocument);
             Assert.Equal("W-1: assignment " + assignment[..12] + " to Agent One", assignmentPage.Heading);
@@ -100,13 +93,14 @@ public class WorkTests(HeadlessFixture fixture)
             Assert.Equal("Agent One", row.Contributor);
 
             // Keyboard: Enter on the inbox row opens the review workspace for that exact result.
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.UpdateLayout();
                 ListBox list = window.GetVisualDescendants().OfType<ListBox>().First(l => l.DataContext is ResultInboxDocument);
                 list.SelectedIndex = 0;
                 (list.ContainerFromIndex(0) as Control)?.Focus();
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             ReviewWorkspace workspace = Assert.IsType<ReviewWorkspace>(shell.SelectedDocument);
             Assert.Equal(result.Written.Id, workspace.SubjectId);
@@ -121,20 +115,19 @@ public class WorkTests(HeadlessFixture fixture)
             // The workspace's own review is a new fact it has just shown, so the acceptance draft stays reusable.
             workspace.ReviewSummary = "Read the result, re-ran the checks it names.";
             workspace.ReviewFindings = "info: the limitations list is empty and that matches the checks";
-            await fixture.Ui(() => workspace.SubmitReview(shell.Api));
+            await fixture.UiAsync(() => workspace.SubmitReviewAsync(shell.Api, cancellationToken: TestContext.Current.CancellationToken));
             Assert.StartsWith("Written: review", workspace.Status, StringComparison.Ordinal);
-            Assert.True(workspace.CheckPrepared(shell.Api), workspace.PreparedState);
+            Assert.True(await fixture.UiAsync(() => workspace.CheckPreparedAsync(shell.Api, cancellationToken: TestContext.Current.CancellationToken)), workspace.PreparedState);
             ReviewRow review = Assert.Single(workspace.Reviews);
-            review.Selected = true;
-            workspace.AcceptanceStatement = "Accepted on the review.";
-            await fixture.Ui(() => workspace.SubmitAcceptance(shell.Api));
+            await fixture.Ui(() => { review.Selected = true; workspace.AcceptanceStatement = "Accepted on the review."; });
+            await fixture.UiAsync(() => workspace.SubmitAcceptanceAsync(shell.Api, cancellationToken: TestContext.Current.CancellationToken));
             Assert.StartsWith("Written: acceptance", workspace.Status, StringComparison.Ordinal);
 
             RecordResponse acceptance = shell.Api.Record(workspace.WrittenId!)!;
             Assert.Equal(review.Id, acceptance.Envelope.GetProperty("body").GetProperty("basis")[0].GetString());
             Assert.Equal(result.Written.Hash, acceptance.Envelope.GetProperty("subject").GetProperty("hash").GetString());
 
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.DoesNotContain(shell.Attention, a => a.SubjectType == "result");
             Assert.Equal("accepted", Assert.Single(shell.Assignments).State);
             Assert.Equal(0, Seed.Run("--estate", root, "estate", "check"));
@@ -155,22 +148,22 @@ public class WorkTests(HeadlessFixture fixture)
         string orderId = Seed.LastId(root, "work-order");
 
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-prepared"))) { ActingOverride = op };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         IEstateApi api = shell.Api!;
 
         // Reusable while the subject is unchanged.
-        ReviewWorkspace workspace = (await fixture.Ui(() => shell.OpenReview(orderId)))!;
-        Assert.True(workspace.CheckPrepared(api));
+        ReviewWorkspace workspace = (await fixture.UiAsync(() => shell.OpenReviewAsync(orderId, cancellationToken: TestContext.Current.CancellationToken)))!;
+        Assert.True((await workspace.CheckPreparedAsync(api, cancellationToken: TestContext.Current.CancellationToken)));
         Assert.StartsWith("reusable", workspace.PreparedState, StringComparison.Ordinal);
 
         // A new fact about the subject (a review written elsewhere) makes the preparation need review: the draft is kept and nothing is sent.
         RecordResponse order = api.Record(orderId)!;
         WriteOutcome elsewhere = api.NewRecord(new NewRecordRequest("review", op, Seed.Json("""{"independence":"self","outcome":"pass","summary":"Reviewed on another device.","findings":[]}"""), $"work-order:{orderId}:{order.Hash}"));
         Assert.True(elsewhere.Ok, elsewhere.Problem?.Message);
-        Assert.False(workspace.CheckPrepared(api));
+        Assert.False((await workspace.CheckPreparedAsync(api, cancellationToken: TestContext.Current.CancellationToken)));
         Assert.StartsWith("needs review", workspace.PreparedState, StringComparison.Ordinal);
         workspace.ReviewSummary = "Would have been sent.";
-        workspace.SubmitReview(api);
+        await workspace.SubmitReviewAsync(api, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(workspace.PreparedState, workspace.Status);
         Assert.Equal("Would have been sent.", workspace.ReviewSummary);
         Assert.Null(workspace.WrittenId);
@@ -179,16 +172,16 @@ public class WorkTests(HeadlessFixture fixture)
         // A newer revision supersedes the subject: the preparation is withdrawn, the draft stays readable, nothing can be sent.
         WriteOutcome revised = api.NewRecord(new NewRecordRequest("work-order", op, Seed.Json(Order.Replace("Build the widget", "Build the revised widget", StringComparison.Ordinal)), null, orderId));
         Assert.True(revised.Ok, revised.Problem?.Message);
-        Assert.False(workspace.CheckPrepared(api));
+        Assert.False((await workspace.CheckPreparedAsync(api, cancellationToken: TestContext.Current.CancellationToken)));
         Assert.StartsWith("withdrawn", workspace.PreparedState, StringComparison.Ordinal);
         workspace.AcceptanceStatement = "Would have been accepted.";
-        workspace.SubmitAcceptance(api);
+        await workspace.SubmitAcceptanceAsync(api, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(workspace.PreparedState, workspace.Status);
         Assert.Empty(api.Records("acceptance"));
         Assert.Equal(PreparedState.Withdrawn, PreparedAction.Check(workspace.Prepared, null, string.Empty));
 
         // The comparison of the revision with the record it supersedes: raw sides and the line difference.
-        await fixture.Ui(() => shell.OpenComparison(revised.Written!.Id));
+        await fixture.UiAsync(() => shell.OpenComparisonAsync(revised.Written!.Id, cancellationToken: TestContext.Current.CancellationToken));
         ComparisonDocument comparison = Assert.IsType<ComparisonDocument>(shell.SelectedDocument);
         Assert.Equal(orderId, comparison.LeftTitle);
         Assert.Contains("-", comparison.DiffText.Split('\n').Where(l => l.Contains("Build the widget", StringComparison.Ordinal)).Select(l => l[..1]));
@@ -196,15 +189,15 @@ public class WorkTests(HeadlessFixture fixture)
         Assert.Contains("removed", comparison.Summary, StringComparison.Ordinal);
 
         // A refusal shows every finding the runtime returns; nothing is written.
-        ReviewWorkspace fresh = (await fixture.Ui(() => shell.OpenReview(revised.Written!.Id)))!;
-        Assert.True(fresh.CheckPrepared(api), fresh.PreparedState);
+        ReviewWorkspace fresh = (await fixture.UiAsync(() => shell.OpenReviewAsync(revised.Written!.Id, cancellationToken: TestContext.Current.CancellationToken)))!;
+        Assert.True((await fresh.CheckPreparedAsync(api, cancellationToken: TestContext.Current.CancellationToken)), fresh.PreparedState);
         fresh.ReviewSummary = string.Empty;
-        fresh.SubmitReview(api);
+        await fresh.SubmitReviewAsync(api, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(fresh.WrittenId);
         Assert.Contains("ERROR", fresh.Status, StringComparison.Ordinal);
         Assert.Contains("summary", fresh.Status, StringComparison.Ordinal);
         fresh.AcceptanceStatement = string.Empty;
-        fresh.SubmitAcceptance(api);
+        await fresh.SubmitAcceptanceAsync(api, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(fresh.WrittenId);
         Assert.Contains("ERROR", fresh.Status, StringComparison.Ordinal);
         Assert.Contains("statement", fresh.Status, StringComparison.Ordinal);
@@ -213,14 +206,14 @@ public class WorkTests(HeadlessFixture fixture)
 
         // Without an admitted device held here nothing can be authored, and the surface says so before any request.
         var readOnly = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-readonly")));
-        await fixture.UiAsync(() => readOnly.OpenEstateAsync(root));
+        await fixture.UiAsync(() => readOnly.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Null(readOnly.ActingPrincipalId);
-        AssignmentComposer composer = (await fixture.Ui(() => readOnly.OpenComposer("W-1")))!;
-        composer.Submit(readOnly.Api!, readOnly.ActingPrincipalId);
+        AssignmentComposer composer = (await fixture.UiAsync(() => readOnly.OpenComposerAsync("W-1", cancellationToken: TestContext.Current.CancellationToken)))!;
+        await composer.SubmitAsync(readOnly.Api!, readOnly.ActingPrincipalId, cancellationToken: TestContext.Current.CancellationToken);
         Assert.StartsWith("No acting principal", composer.Status, StringComparison.Ordinal);
-        ReviewWorkspace unsigned = (await fixture.Ui(() => readOnly.OpenReview(revised.Written!.Id)))!;
+        ReviewWorkspace unsigned = (await fixture.UiAsync(() => readOnly.OpenReviewAsync(revised.Written!.Id, cancellationToken: TestContext.Current.CancellationToken)))!;
         Assert.StartsWith("No acting principal", unsigned.Declaration, StringComparison.Ordinal);
-        unsigned.SubmitAcceptance(readOnly.Api!);
+        await unsigned.SubmitAcceptanceAsync(readOnly.Api!, cancellationToken: TestContext.Current.CancellationToken);
         Assert.StartsWith("No acting principal", unsigned.Status, StringComparison.Ordinal);
         Assert.Empty(api.Records("acceptance"));
     }
@@ -238,8 +231,8 @@ public class WorkTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
-            await fixture.Ui(shell.OpenProducts);
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(() => shell.OpenProductsAsync(cancellationToken: TestContext.Current.CancellationToken));
             ProductsDocument products = Assert.IsType<ProductsDocument>(shell.SelectedDocument);
             ProductRow product = Assert.Single(products.Products);
             Assert.Equal("Widget", product.Name);
@@ -247,14 +240,18 @@ public class WorkTests(HeadlessFixture fixture)
             Assert.Equal("CLI", product.Surfaces);
 
             // Ctrl+I opens the inbox; empty, it says so.
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.I, RawInputModifiers.Control, PhysicalKey.I, null); });
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.I, RawInputModifiers.Control, PhysicalKey.I, null);
+                await shell.PendingOperation;
+            });
             ResultInboxDocument inbox = Assert.IsType<ResultInboxDocument>(shell.SelectedDocument);
             Assert.Empty(inbox.Rows);
             Assert.Equal("No result awaits review.", inbox.Note);
 
             // Every focusable target of the work screens meets the compact minimum.
-            await fixture.Ui(() => shell.OpenWorkOrder("W-1"));
-            await fixture.Ui(() => shell.OpenComposer("W-1"));
+            await fixture.UiAsync(() => shell.OpenWorkOrderAsync("W-1", cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(() => shell.OpenComposerAsync("W-1", cancellationToken: TestContext.Current.CancellationToken));
             foreach (Document document in shell.Documents.ToList())
             {
                 await fixture.Ui(() => { shell.SelectedDocument = document; window.UpdateLayout(); });

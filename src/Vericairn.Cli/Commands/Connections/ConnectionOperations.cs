@@ -18,9 +18,9 @@ internal sealed class ConnectionOperations(CommandContext context)
         {
             var connections = new RuntimeConnections();
             IReadOnlyList<RuntimeConnection> before = connections.List();
-            RuntimeConnection connection = connections.Add(address, code, new PairingOptions(name) { Custody = custody, Presence = presence });
+            RuntimeConnection connection = connections.AddAsync(address, code, new PairingOptions(name) { Custody = custody, Presence = presence }, context.CancellationToken).GetAwaiter().GetResult();
             List<RuntimeConnection> replaced = [.. before.Where(earlier => connections.Find(earlier.Id) is null)];
-            ConnectionStatus status = connections.Probe(connection);
+            ConnectionStatus status = connections.ProbeAsync(connection, cancellationToken: context.CancellationToken).GetAwaiter().GetResult();
             if (json)
             {
                 Json.JsonObject added = Json.JsonNode.Parse(JsonSerializer.Serialize(ConnectionJson(status), ProtocolJson.Options))!.AsObject();
@@ -58,7 +58,7 @@ internal sealed class ConnectionOperations(CommandContext context)
         try
         {
             var connections = new RuntimeConnections();
-            List<ConnectionStatus> statuses = connections.List().Select(c => connections.Probe(c)).ToList();
+            List<ConnectionStatus> statuses = connections.List().Select(c => connections.ProbeAsync(c, cancellationToken: context.CancellationToken).GetAwaiter().GetResult()).ToList();
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(statuses.Select(ConnectionJson), ProtocolJson.Options));

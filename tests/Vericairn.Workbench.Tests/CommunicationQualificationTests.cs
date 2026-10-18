@@ -19,7 +19,7 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         string root = Seed.Temp("wb-comms-qualification");
         string person = Seed.Init(root);
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-comms-prefs"))) { ActingOverride = person };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         IEstateApi api = shell.Api!;
         WriteOutcome added = api.NewRecord(new("principal", person, Seed.Json("""{"kind":"human","name":"Reviewer","roles":["contributor"]}""")));
         Assert.True(added.Ok, added.Problem?.Message);
@@ -27,8 +27,8 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         foreach ((string recipient, string depth, string decision) in new[] { (person, "short", "comprehensive"), (other, "comprehensive", "standard") })
         {
             await fixture.Ui(() => shell.ActingOverride = recipient);
-            CommunicationDocument page = await fixture.Ui(shell.OpenCommunication);
-            await fixture.Ui(() => { page.StatusDepth = depth; page.DecisionDepth = decision; page.HandoffDepth = depth; page.Save(); });
+            CommunicationDocument page = Assert.IsType<CommunicationDocument>(await fixture.UiAsync(() => shell.OpenCommunicationAsync(cancellationToken: TestContext.Current.CancellationToken)));
+            await fixture.UiAsync(async () => { page.StatusDepth = depth; page.DecisionDepth = decision; page.HandoffDepth = depth; await page.SaveAsync(cancellationToken: TestContext.Current.CancellationToken); });
             CommunicationProfile profile = api.Communication(recipient);
             Assert.Contains($"status ({depth})", shell.HumanStatus, StringComparison.Ordinal);
             Assert.Contains($"decision: {decision} ← person", page.Effective, StringComparison.Ordinal);
@@ -41,15 +41,19 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
             Assert.Equal(savedHash, served.Revisions.Single().Hash);
         }
 
-        await fixture.Ui(() => { shell.ActingOverride = person; shell.Refresh(); });
+        await fixture.UiAsync(async () => { shell.ActingOverride = person; await shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken); });
         Assert.Contains("status (short)", shell.HumanStatus, StringComparison.Ordinal);
         string canonical = api.Status().Json.GetRawText();
         int settings = api.Records("communication-setting").Count;
         foreach (string depth in CommunicationResolution.Depths)
         {
-            await fixture.Ui(() => shell.StatusViewDepth = depth);
+            await fixture.UiAsync(async () =>
+            {
+                shell.StatusViewDepth = depth;
+                await shell.PendingOperation;
+            });
             Assert.Contains($"status ({depth})", shell.HumanStatus, StringComparison.Ordinal);
-            CommunicationDocument page = await fixture.Ui(shell.OpenCommunication);
+            CommunicationDocument page = Assert.IsType<CommunicationDocument>(await fixture.UiAsync(() => shell.OpenCommunicationAsync(cancellationToken: TestContext.Current.CancellationToken)));
             Assert.Contains("status: short ← person", page.Effective, StringComparison.Ordinal);
             Assert.Equal(canonical, api.Status().Json.GetRawText());
         }
@@ -57,7 +61,11 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         Assert.Equal(settings, api.Records("communication-setting").Count);
         Assert.Equal("short", api.Communication(person).Fields["status"].Value);
         Assert.Equal("comprehensive", api.Communication(other).Fields["status"].Value);
-        await fixture.Ui(() => shell.StatusViewDepth = "inherit");
+        await fixture.UiAsync(async () =>
+        {
+            shell.StatusViewDepth = "inherit";
+            await shell.PendingOperation;
+        });
         Assert.Contains("status (short)", shell.HumanStatus, StringComparison.Ordinal);
     }
 
@@ -67,7 +75,7 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         string root = Seed.Temp("wb-comms-attention");
         string person = Seed.Init(root);
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-comms-attention-prefs"))) { ActingOverride = person };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         IEstateApi api = shell.Api!;
         Assert.True(api.NewRecord(new("work-order", person, Seed.Json("""{"key":"COMMS-J","kind":"ordinary","title":"Interrupted work","intent":"Inspect before retrying.","scope":["tests"],"exitQuestion":"Reconciled?","inputs":[],"deliverables":["results"]}"""))).Ok);
         WriteOutcome assigned = api.Assign(new("COMMS-J", person, person, Seed.Json("""{"outcome":"Check the result.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no retry"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["checks pass"],"recovery":"Inspect the original effect."}""")));
@@ -78,7 +86,7 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         WriteOutcome ask = api.NewRecord(new("ask", person, Seed.Json($$"""{"to":"{{person}}","question":"Retry?","recommendation":"Inspect first.","options":["Reconcile the original effect.","Abandon the retry."],"consequence":"The work waits without a retry.","state":"open"}""")));
         Assert.True(ask.Ok, ask.Problem?.Message);
         Assert.True(api.CommunicationSet(new(person, "person", new("none", "short", "short", "short", "short"), person)).Ok);
-        await fixture.Ui(shell.Refresh);
+        await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Contains("status (short)", shell.HumanStatus, StringComparison.Ordinal);
         string attention = string.Join('\n', shell.Attention.Select(item => item.Why));
         foreach (string required in new[] { result.Written!.Id, result.Written.Hash, "1 failed checks", "1 unresolved effects", ask.Written!.Id, "vericairn records show " + ask.Written.Id })
@@ -88,7 +96,7 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
 
         Assert.DoesNotContain(api.Record(result.Written.Id)!.Envelope.GetRawText(), attention, StringComparison.Ordinal);
         Presentation.AttentionItem askItem = Assert.Single(shell.Attention, a => a.SubjectId == ask.Written.Id);
-        await fixture.Ui(() => shell.OpenAttention(askItem));
+        await fixture.UiAsync(() => shell.OpenAttentionAsync(askItem, cancellationToken: TestContext.Current.CancellationToken));
         foreach (string required in new[] { "Inspect first.", "Reconcile the original effect.", "Abandon the retry.", "The work waits without a retry." })
         {
             Assert.Contains(required, api.Asks(person).Text, StringComparison.Ordinal);
@@ -97,15 +105,15 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         Assert.Equal("open", api.Record(ask.Written.Id)!.Envelope.GetProperty("body").GetProperty("state").GetString());
         WriteOutcome review = api.NewRecord(new("review", person, Seed.Json("""{"independence":"self","outcome":"findings","summary":"Inspect the remaining effect.","findings":[{"severity":"error","summary":"Follow up."}]}"""), $"result:{result.Written.Id}:{result.Written.Hash}"));
         Assert.True(review.Ok, review.Problem?.Message);
-        await fixture.Ui(shell.RefreshProgress);
+        await fixture.UiAsync(() => shell.RefreshProgressAsync(cancellationToken: TestContext.Current.CancellationToken));
         Presentation.AttentionItem reviewItem = Assert.Single(shell.Attention, a => a.Kind == "required-decision" && a.SubjectId == result.Written.Id);
         Assert.Contains(review.Written!.Hash, reviewItem.Why, StringComparison.Ordinal);
-        await fixture.Ui(() => shell.OpenAttention(reviewItem));
+        await fixture.UiAsync(() => shell.OpenAttentionAsync(reviewItem, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(result.Written.Id, Assert.IsType<ReviewWorkspace>(shell.SelectedDocument).SubjectId);
         RecordResponse order = Assert.Single(api.Records("work-order"));
         WriteOutcome accepted = api.NewRecord(new("acceptance", person, Seed.Json("""{"statement":"Work accepted.","basis":[],"self":true}"""), $"work-order:{order.Id}:{order.Hash}"));
         Assert.True(accepted.Ok, accepted.Problem?.Message);
-        await fixture.Ui(shell.RefreshProgress);
+        await fixture.UiAsync(() => shell.RefreshProgressAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.DoesNotContain(shell.Attention, a => a.SubjectId == result.Written.Id);
         Assert.Contains(shell.Attention, a => a.SubjectId == ask.Written.Id);
 
@@ -139,10 +147,10 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
         Assert.True(result.Ok, result.Problem?.Message);
         Assert.True(api.CommunicationSet(new(person, "person", new(Progress: "none", Handoff: "short"), person)).Ok);
         var previous = new HandoffDocument(() => api, () => api.Communication(person));
-        await fixture.Ui(previous.Prepare);
+        await fixture.UiAsync(() => previous.PrepareAsync());
         string saved = previous.PackageJson;
         var successor = new HandoffDocument(() => api, () => api.Communication(person));
-        await fixture.Ui(() => Assert.True(successor.Load(saved)));
+        await fixture.UiAsync(async () => Assert.True((await successor.LoadAsync(saved, cancellationToken: TestContext.Current.CancellationToken))));
         Assert.Equal(saved, successor.PackageJson);
         Assert.Contains("handoff (short)", successor.Text, StringComparison.Ordinal);
         foreach (string required in new[] { decision.Written!.Hash, result.Written!.Hash, operation.Written.Hash, "Do not retry the uncertain effect.", "The reply was lost.", "No external observation.", "wb-original-effect" })
@@ -152,7 +160,7 @@ public class CommunicationQualificationTests(HeadlessFixture fixture)
 
         WriteOutcome revised = api.NewRecord(new("work-order", person, Seed.Json(orderBody.Replace("Reconcile before retrying.", "Inspect the changed source.", StringComparison.Ordinal)), Supersedes: order.Written.Id));
         Assert.True(revised.Ok, revised.Problem?.Message);
-        await fixture.Ui(successor.Compare);
+        await fixture.UiAsync(() => successor.CompareAsync(cancellationToken: TestContext.Current.CancellationToken));
         Assert.Contains(revised.Written!.Id, successor.ResumeText, StringComparison.Ordinal);
         Assert.Contains("Inspect the changed source.", successor.ResumeText, StringComparison.Ordinal);
         Assert.Contains("Nothing is restarted or accepted", successor.ResumeText, StringComparison.Ordinal);

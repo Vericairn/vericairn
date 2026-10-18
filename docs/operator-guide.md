@@ -85,7 +85,7 @@ FIX-19 gives each workspace its own repository, with read-only object borrowing 
 Codex's sandbox adds only that workspace's `.git` to its writable roots. The seventh live run committed
 successfully on macOS; live qualification on other platforms is not established by that run.
 After settlement, the worker fetches the audited branch head for review with a guarded reference update.
-Incomplete audits, changed workspace heads, checked-out destination branches and concurrent clone branch
+Incomplete committed audits, changed workspace heads, checked-out destination branches and concurrent clone branch
 moves refuse transfer and leave a local `audit-unverified` warning. Preserve the workspace and reconcile
 before retrying. Uncommitted changes remain in it. Worker Git disables hooks and ambient configuration.
 Borrowed objects depend on the clone; preserve work before pruning objects or removing either repository.
@@ -99,6 +99,12 @@ the Vericairn home itself, including a recursive listing, and reading a per-clon
 warnings; they do not request a stop. Independently recognized credential paths retain their critical signals. The
 command audit observes harness reports that can arrive after execution and cannot enforce isolation.
 The [software guide](software.md#command-observations-070) lists recognized forms and remaining gaps.
+
+FIX-26 permits reading only the home's location and matches Codex's own tools to their admitted native names.
+Credential-store reads, copies and archives remain critical. Timed-out checks receive one retry with a generous
+limit; an unfinished credential check then requests a stop. Settlement excludes ignored build output and untracked
+worker brief files while counting tracked and other untracked changes. A complete committed audit can retain the
+branch for review even when the separate file inventory is incomplete.
 
 ## Runtime certificate concurrency
 

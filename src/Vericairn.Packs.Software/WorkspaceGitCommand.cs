@@ -12,7 +12,11 @@ namespace Vericairn.Packs.Software;
 internal static class WorkspaceGitCommand
 {
     internal static int Run(string directory, out string output, params string[] arguments)
+        => Run(directory, out output, TimeSpan.FromMinutes(2), arguments);
+
+    internal static int Run(string directory, out string output, TimeSpan deadline, params string[] arguments)
     {
+        if (deadline <= TimeSpan.Zero) throw new ProviderRefusedException("Git's observation deadline expired.");
         string control = Path.Combine(Path.GetTempPath(), "vericairn-git-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(control);
         try
@@ -52,10 +56,11 @@ internal static class WorkspaceGitCommand
             using Process process = Process.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
             Task<string> standardOutput = WorkspaceGitScope.ReadAsync(process.StandardOutput);
             Task<string> standardError = WorkspaceGitScope.ReadAsync(process.StandardError);
-            if (!process.WaitForExit(TimeSpan.FromMinutes(2)))
+            if (!process.WaitForExit(deadline))
             {
                 process.Kill(entireProcessTree: true);
-                throw new ProviderRefusedException("Git did not answer within two minutes.");
+                _ = process.WaitForExit(1000);
+                throw new ProviderRefusedException("Git did not answer within its deadline.");
             }
             Task.WhenAll(standardOutput, standardError).WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
             output = process.ExitCode == 0 ? standardOutput.Result : standardError.Result + standardOutput.Result;

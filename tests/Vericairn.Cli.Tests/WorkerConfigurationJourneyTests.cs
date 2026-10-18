@@ -54,11 +54,14 @@ public class WorkerConfigurationJourneyTests
             }
 
             // A configured model never grants another server, even at the shipped baseline version.
-            File.WriteAllText(report + ".behavior", """{"mcp":"ambient"}""");
-            Assert.Equal(2, (await Binary(run)).Code);
-            Assert.False(File.Exists(report));
-            Assert.Empty((await Binary("--json", "worker", "runs")).Json.GetProperty("runs").EnumerateArray());
-            File.Delete(report + ".behavior");
+            foreach (string server in new[] { "ambient", "codex-server" })
+            {
+                File.WriteAllText(report + ".behavior", JsonSerializer.Serialize(new { mcp = server }));
+                Assert.Equal(2, (await Binary(run)).Code);
+                Assert.False(File.Exists(report));
+                Assert.Empty((await Binary("--json", "worker", "runs")).Json.GetProperty("runs").EnumerateArray());
+            }
+            File.WriteAllText(report + ".behavior", JsonSerializer.Serialize(new { nativeTool = daemon ? "create_goal" : "list_mcp_resources" }));
 
             Success(await Binary([.. run, "--execution", "model=model-b"]));
             string[] arguments = JsonSerializer.Deserialize<string[]>(File.ReadAllText(report))!;

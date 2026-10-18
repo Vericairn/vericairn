@@ -24,11 +24,13 @@ internal static class WorkspaceScopeAudit
     internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
+        var runFiles = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
         string? identity = null;
         string? head = null;
         var watch = Stopwatch.StartNew();
         var committed = new HashSet<string>(StringComparer.Ordinal);
+        WorkspaceScopeFiles? exclusions = null;
         long bytes = 0;
         try
         {
@@ -38,32 +40,52 @@ internal static class WorkspaceScopeAudit
             }
 
             identity = DirectoryIdentity(workspace);
-            // Inventory the physical tree, including ignored and untracked files. Agent-modifiable Git configuration and
-            // GIT_DIR/GIT_WORK_TREE never decide which ordinary workspace files the audit can see.
+            try
+            {
+                if (branch is null) gitDirectory = WorkspaceGitScope.DirectoryOf(workspace);
+                else head = WorkspaceGitScope.Changes(gitDirectory, branch, baseline, deadline - watch.Elapsed, committed);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
+            {
+                problem = "The committed workspace inventory is unavailable; assignment scope is unverified.";
+            }
+            // Refusal cleanup still needs every byte, including ignored work and Git state. Settlement
+            // excludes ignored output before opening it, and uses only isolated Git configuration.
+            if (!includeGit)
+            {
+                try { exclusions = new WorkspaceScopeFiles(workspace, gitDirectory!, deadline - watch.Elapsed); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or ArgumentException)
+                {
+                    problem ??= "The workspace ignore inventory is unavailable; assignment scope is unverified.";
+                }
+            }
             Visit(workspace, "");
-            if (branch is null)
-            {
-                gitDirectory = WorkspaceGitScope.DirectoryOf(workspace);
-            }
-            else
-            {
-                head = WorkspaceGitScope.Changes(gitDirectory, branch, baseline, deadline - watch.Elapsed, committed);
-            }
-            if (identity != DirectoryIdentity(workspace))
-            {
-                throw new IOException("The workspace changed identity during its inventory.");
-            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
         {
             problem = "The worker could not read the whole workspace inventory; assignment scope is incomplete.";
         }
 
-        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray()) { Head = head };
+        // Retention needs an independently complete committed audit and the same physical workspace.
+        try
+        {
+            if (identity != DirectoryIdentity(workspace))
+            {
+                head = null;
+                problem ??= "The workspace changed identity during its inventory.";
+            }
+        }
+        catch (IOException)
+        {
+            head = null;
+            problem ??= "The workspace identity is unavailable after its inventory.";
+        }
+
+        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray()) { Head = head, RunFiles = runFiles };
 
         void CheckDeadline()
         {
-            if (watch.Elapsed >= deadline || files.Count >= 100_000 || bytes >= 1024L * 1024 * 1024)
+            if (watch.Elapsed >= deadline || files.Count + runFiles.Count >= 100_000 || bytes >= 1024L * 1024 * 1024)
             {
                 throw new IOException("The scope audit reached its work or time limit.");
             }
@@ -76,6 +98,10 @@ internal static class WorkspaceScopeAudit
             {
                 CheckDeadline();
                 string leaf = Path.GetFileName(path);
+                string name = prefix + leaf;
+                bool runFile = exclusions?.RunFile(name) == true;
+                // Keep the two exported fingerprints for refusal cleanup, outside the settlement inventory.
+                if (exclusions?.Excludes(name) == true && name != ".vericairn" && !runFile) continue;
                 if (leaf == ".git" && !includeGit)
                 {
                     if (prefix.Length > 0)
@@ -86,7 +112,7 @@ internal static class WorkspaceScopeAudit
                     continue;
                 }
 
-                string name = prefix + leaf;
+                Dictionary<string, string> inventory = runFile ? runFiles : files;
                 if (!Relative(name) || name.Contains('\ufffd', StringComparison.Ordinal))
                 {
                     problem = "An inventory name could not be decoded losslessly or safely; assignment scope is incomplete.";
@@ -98,11 +124,11 @@ internal static class WorkspaceScopeAudit
                     FileAttributes attributes = File.GetAttributes(path);
                     if ((attributes & FileAttributes.ReparsePoint) != 0)
                     {
-                        files[name] = "link:" + Hash(Encoding.UTF8.GetBytes(new FileInfo(path).LinkTarget ?? "unreadable-link"));
+                        inventory[name] = "link:" + Hash(Encoding.UTF8.GetBytes(new FileInfo(path).LinkTarget ?? "unreadable-link"));
                     }
                     else if ((attributes & FileAttributes.Directory) != 0)
                     {
-                        if (includeGit) files[name] = "directory";
+                        if (includeGit) inventory[name] = "directory";
                         Visit(path, name + "/");
                     }
                     else
@@ -120,7 +146,7 @@ internal static class WorkspaceScopeAudit
                         }
 
                         string mode = OperatingSystem.IsWindows() ? string.Empty : ((int)File.GetUnixFileMode(path)).ToString(System.Globalization.CultureInfo.InvariantCulture);
-                        files[name] = mode + ":" + Convert.ToHexString(hash.GetHashAndReset());
+                        inventory[name] = mode + ":" + Convert.ToHexString(hash.GetHashAndReset());
                     }
                 }
                 catch (FileNotFoundException)

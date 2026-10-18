@@ -106,6 +106,16 @@ public class LivingDocumentJourneyTests
             Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
             Assert.Contains("docs/guide.md  current", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
 
+            // Repair canonicalizes only the region; the author's surrounding bytes keep their exact line endings.
+            string withCrLf = File.ReadAllText(guide).Replace("\n", "\r\n", StringComparison.Ordinal);
+            File.WriteAllText(guide, withCrLf);
+            Assert.Contains("document.generated-edited", CliHarness.Run("--estate", root, "estate", "check").Out, StringComparison.Ordinal);
+            CliHarness.Ok("--estate", root, "docs", "regenerate", "docs/guide.md");
+            string repaired = File.ReadAllText(guide);
+            Assert.StartsWith("# Guide\r\n\r\nSee [the overview](overview.md).\r\n<!-- vericairn:generated releases -->\r\n", repaired, StringComparison.Ordinal);
+            Assert.Contains("| Version | Published | Release |\n|---|---|---|\n", repaired, StringComparison.Ordinal);
+            Assert.EndsWith("<!-- vericairn:end releases -->\r\n", repaired, StringComparison.Ordinal);
+
             // A decision that names it makes it due, at warn.
             CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Rename","stake":"low","notAuthorized":[],"statement":"Rename the overview.","summary":"Rename.","synthesis":"The operator renames the overview.","effects":["rename"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z","documents":["docs/guide.md"]}"""));
             string living = CliHarness.Ok("--estate", root, "docs", "living").Out;

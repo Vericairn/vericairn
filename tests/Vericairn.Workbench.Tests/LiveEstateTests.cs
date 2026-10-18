@@ -29,7 +29,7 @@ public class LiveEstateTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root!));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root!, cancellationToken: TestContext.Current.CancellationToken));
             Assert.True(shell.HasEstate, shell.Status);
             Assert.Equal("daemon", shell.RuntimeMode);
             Assert.NotNull(shell.Api);
@@ -37,16 +37,16 @@ public class LiveEstateTests(HeadlessFixture fixture)
 
             ResultInboxDocument inbox = await fixture.Ui(shell.OpenInbox);
             Assert.Contains(inbox.Rows, r => r.ResultId == result);
-            ReviewWorkspace workspace = (await fixture.Ui(() => shell.OpenReview(result!)))!;
-            Assert.True(workspace.CheckPrepared(shell.Api!), workspace.PreparedState);
+            ReviewWorkspace workspace = (await fixture.UiAsync(() => shell.OpenReviewAsync(result!, cancellationToken: TestContext.Current.CancellationToken)))!;
+            Assert.True((await workspace.CheckPreparedAsync(shell.Api!, cancellationToken: TestContext.Current.CancellationToken)), workspace.PreparedState);
             workspace.ReviewSummary = reviewText!;
-            await fixture.Ui(() => workspace.SubmitReview(shell.Api!));
+            await fixture.UiAsync(() => workspace.SubmitReviewAsync(shell.Api!, cancellationToken: TestContext.Current.CancellationToken));
             Assert.StartsWith("Written: review", workspace.Status, StringComparison.Ordinal);
             string reviewId = workspace.WrittenId!;
             ReviewRow row = Assert.Single(workspace.Reviews, r => r.Id == reviewId);
             row.Selected = true;
             workspace.AcceptanceStatement = statement!;
-            await fixture.Ui(() => workspace.SubmitAcceptance(shell.Api!));
+            await fixture.UiAsync(() => workspace.SubmitAcceptanceAsync(shell.Api!, cancellationToken: TestContext.Current.CancellationToken));
             Assert.StartsWith("Written: acceptance", workspace.Status, StringComparison.Ordinal);
             Console.Out.WriteLine($"live: review {reviewId} acceptance {workspace.WrittenId} through {shell.RuntimeWhere}");
             File.WriteAllText(Path.Combine(VericairnHome.Path(), "workbench", "live-journey.txt"), $"{reviewId}\n{workspace.WrittenId}\n{shell.RuntimeWhere}\n");

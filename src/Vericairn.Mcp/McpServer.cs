@@ -4,6 +4,7 @@
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Protocol;
 
 namespace Vericairn.Mcp;
 
@@ -80,11 +81,145 @@ public sealed class McpServer
                 continue;
             }
 
-            Send(output, Handle(id.DeepClone(), method, request["params"] as JsonObject));
+            Send(output, HandleAsync(id.DeepClone(), method, request["params"] as JsonObject, CancellationToken.None).GetAwaiter().GetResult());
         }
     }
 
-    private JsonObject Handle(JsonNode id, string method, JsonObject? parameters)
+    /// <summary>
+    /// Serves asynchronously while continuing to read cancellation notifications and pings during slow tool calls. Each request
+    /// has its own cancellation source; stopping observation never retries a tool or claims its effect was undone.
+    /// </summary>
+    public async Task RunAsync(TextReader input, TextWriter output, TextWriter? log = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(output);
+        var active = new Dictionary<string, CancellationTokenSource>(StringComparer.Ordinal);
+        var gate = new object();
+        using var writing = new SemaphoreSlim(1, 1);
+        var pending = new List<Task>();
+        Task<string?>? reading = null;
+        bool inputCompleted = false;
+
+        async Task<string?> ReadAsync()
+        {
+            // Console.In and some TextReader implementations perform their "async" read synchronously. Keep that read off
+            // the server loop, and stop waiting on cancellation even if the reader cannot interrupt its underlying handle.
+            reading = Task.Run(async () => await input.ReadLineAsync(cancellationToken).ConfigureAwait(false), cancellationToken);
+            return await reading.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        async Task SendAsync(JsonObject message)
+        {
+            await writing.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await output.WriteLineAsync(message.ToJsonString()).ConfigureAwait(false);
+                await output.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            finally { writing.Release(); }
+        }
+
+        async Task RespondAsync(JsonNode id, string method, JsonObject? parameters, string key, CancellationTokenSource stop)
+        {
+            try
+            {
+                await SendAsync(await HandleAsync(id, method, parameters, stop.Token).ConfigureAwait(false)).ConfigureAwait(false);
+            }
+            finally
+            {
+                lock (gate) { active.Remove(key); }
+                stop.Dispose();
+            }
+        }
+
+        try
+        {
+            while (await ReadAsync().ConfigureAwait(false) is string line)
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                JsonNode? message;
+                try { message = JsonNode.Parse(line); }
+                catch (JsonException exception)
+                {
+                    await SendAsync(Error(null, -32700, "Parse error: " + exception.Message)).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (message is not JsonObject request)
+                {
+                    await SendAsync(Error(null, -32600, "Invalid request: not an object.")).ConfigureAwait(false);
+                    continue;
+                }
+
+                JsonNode? id = request["id"];
+                string? method = request["method"] is JsonValue m && m.TryGetValue(out string? name) ? name : null;
+                if (method is null)
+                {
+                    if (id is not null) await SendAsync(Error(id.DeepClone(), -32600, "Invalid request: no method.")).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (id is null)
+                {
+                    if (method == "notifications/cancelled" && request["params"] is JsonObject cancellation && cancellation["requestId"] is JsonNode cancelled)
+                    {
+                        lock (gate)
+                        {
+                            if (active.TryGetValue(cancelled.ToJsonString(), out CancellationTokenSource? stop)) stop.Cancel();
+                        }
+                    }
+                    if (log is not null) await log.WriteLineAsync($"notification {method}").ConfigureAwait(false);
+                    continue;
+                }
+
+                string key = id.ToJsonString();
+                var source = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                bool added;
+                lock (gate) { added = active.TryAdd(key, source); }
+                if (!added)
+                {
+                    source.Dispose();
+                    await SendAsync(Error(id.DeepClone(), -32600, "A request with this id is already active.")).ConfigureAwait(false);
+                    continue;
+                }
+
+                pending.RemoveAll(task => task.IsCompletedSuccessfully);
+                pending.Add(RespondAsync(id.DeepClone(), method, request["params"] as JsonObject, key, source));
+            }
+            inputCompleted = true;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Ending the server stops each caller's observation, not any possible runtime effect.
+        }
+        finally
+        {
+            lock (gate)
+            {
+                if (!inputCompleted || cancellationToken.IsCancellationRequested)
+                    foreach (CancellationTokenSource source in active.Values.ToArray()) source.Cancel();
+            }
+            if (reading is not null && !reading.IsCompletedSuccessfully)
+                _ = reading.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            await Task.WhenAll(pending).ConfigureAwait(false);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+    }
+
+    private async Task<JsonObject> HandleAsync(JsonNode id, string method, JsonObject? parameters, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await HandleCoreAsync(id, method, parameters, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or TimeoutException or HttpRequestException or IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or ArgumentException)
+        {
+            return Error(id, -32603, ClientFailure.FromException(exception)?.Message ?? exception.Message);
+        }
+    }
+
+    private async Task<JsonObject> HandleCoreAsync(JsonNode id, string method, JsonObject? parameters, CancellationToken cancellationToken)
     {
         switch (method)
         {
@@ -101,7 +236,7 @@ public sealed class McpServer
             case "ping":
                 return Result(id, new JsonObject());
             case "tools/list":
-                return Result(id, new JsonObject { ["tools"] = new JsonArray(tools.Visible().Select(t => (JsonNode)t.Describe()).ToArray()) });
+                return Result(id, new JsonObject { ["tools"] = new JsonArray((await tools.VisibleAsync(cancellationToken).ConfigureAwait(false)).Select(t => (JsonNode)t.Describe()).ToArray()) });
             case "tools/call":
                 string? toolName = parameters?["name"] is JsonValue n && n.TryGetValue(out string? tn) ? tn : null;
                 if (toolName is null)
@@ -109,7 +244,7 @@ public sealed class McpServer
                     return Error(id, -32602, "Invalid params: 'name' is required.");
                 }
 
-                ToolCallResult call = tools.Call(toolName, parameters?["arguments"] as JsonObject);
+                ToolCallResult call = await tools.CallAsync(toolName, parameters?["arguments"] as JsonObject, cancellationToken).ConfigureAwait(false);
                 if (call.Unknown)
                 {
                     return Error(id, -32602, $"Unknown tool '{toolName}'.");

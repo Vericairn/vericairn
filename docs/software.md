@@ -597,7 +597,7 @@ bindings are rechecked before dispatch. No launcher reads a price, so a cap in c
    worker never pushes from a workspace. It fetches objects first, then updates the clone's branch only if its
    previous head still equals the value observed during preparation (including an absent branch). An unexpected
    move, deletion or creation refuses the update; a branch checked out in the clone or another worktree is refused
-   too. The clone's working tree and index stay unchanged. An incomplete audit or a workspace branch changed since
+   too. The clone's working tree and index stay unchanged. An incomplete committed audit or a workspace branch changed since
    that audit also refuses transfer. Outside-scope commits are retained for review with their scope warning.
    A transfer refusal leaves the workspace intact and appears as a local `audit-unverified` warning in worker
    run/status output, with its reason; it does not rewrite the immutable settlement or accept the agent's work.
@@ -866,13 +866,21 @@ At settlement the worker compares a physical file inventory captured after brief
 workspace after the whole process boundary exits. It enumerates the workspace itself, independent of `core.worktree`,
 `GIT_DIR`, replaced Git administration files or other agent-writable Git configuration. The physical root's identity
 must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
-are compared, including deletions, renames, untracked files and ignored files. From 0.6.1 the audit also compares the
+are compared, including deletions, renames and untracked files. FIX-26 excludes untracked ignored output before
+opening it, using repository ignore rules and a copied index through isolated Git configuration. Tracked files
+still count even when they match an ignore rule. The worker's untracked `.vericairn/brief.md` and
+`.vericairn/.gitignore` are excluded from comparison; their fingerprints remain available for refusal cleanup.
+Other non-ignored files there still count. Refusal cleanup separately inventories
+everything, including ignored files, before deciding whether an unused workspace can be removed.
+From 0.6.1 the audit also compares the
 run branch's head and every commit reachable from it but not from the prepared baseline commit against that baseline,
 including side branches of merges. The union of all changed paths counts, even when the worktree or a later commit
 restored a path, or the worktree checked out a different head. It pins the original Git object/reference directory
 before launch and reads the run branch and objects from the workspace's own repository through isolated Git metadata, without loading agent-writable Git configuration,
 replacement refs, grafts, attributes or external diff drivers. Missing history or an unreadable branch marks the
-audit incomplete. Preexisting
+audit incomplete. FIX-26 keeps the completed committed audit independent of file-inventory failures, so ignored
+build output cannot prevent the audited branch from being fetched for review. The original workspace identity,
+unchanged audited head and guarded destination reference update remain required. Preexisting
 unchanged files are not attributed to the run. `brief.permittedChanges` entries are interpreted literally as
 repository-relative files/directories or globs (`*` and `?` within a segment, `**` across segments).
 Bare patterns contain no whitespace; use `path:` for an explicit pattern, including a path containing spaces.
@@ -927,6 +935,22 @@ classification. These corrections retire the corresponding 0.7.2 review limits f
 cases below. The audit remains a signal over reported invocations, not an enforcement boundary.
 
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
+
+FIX-26 matches calls on Codex's internal `codex` server to native tool names, including `list_mcp_resources`,
+`list_mcp_resource_templates`, `read_mcp_resource` and the goal tools. This requires the admitted inventory to
+identify Codex as the harness providing each tool. Configured MCP tools retain their server-qualified identities;
+a configured server named `codex` cannot impersonate the harness and is refused by the launcher's server inventory.
+Tools outside the admitted inventory still request a stop.
+
+FIX-26 also permits printing only the home's location with `printenv VERICAIRN_HOME`, including `--`, `-0` or
+`--null`, or with `echo` and `printf`. Printing other variables, reading credential stores, and redirects or
+additional commands retain their independent checks. The location alone grants no access to the stores below.
+
+A timed-out check is retried once. Pattern checks retry the same operation with a five-second matching limit
+instead of the initial 100 milliseconds, before the caller consumes its results. If a credential check still
+cannot complete, FIX-26 emits a critical `credentials` signal alongside `audit-unverified` and requests containment.
+Completed verdicts survive other failures. A timeout in a read-only classification check that does not hide the
+independent credential checks remains a warning.
 
 Recognizable network commands, structured network URLs and web tools produce warnings; `dotnet restore` is one such
 network attempt. Credential access remains critical for reads, copies and listings as well as writes. FIX-20 recognizes
@@ -1495,7 +1519,7 @@ still requires the builder's three-platform CI run. API v1 stays additive; harne
 record format 2, never format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
-refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not
+refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.1. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
 
 ## Newer-release notices (0.7.3)

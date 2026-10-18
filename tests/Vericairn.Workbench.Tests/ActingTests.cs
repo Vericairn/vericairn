@@ -35,7 +35,7 @@ public class ActingTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             ComboBox box = await fixture.Ui(() => window.FindControl<ComboBox>("ActingBox")!);
             Assert.Equal(op, shell.ActingPrincipalId);
             Assert.Equal(opDevice, shell.SelectedActing?.Id);
@@ -43,16 +43,20 @@ public class ActingTests(HeadlessFixture fixture)
             Assert.Equal("Operator Renamed (device Operator device)", shell.ActingPrincipal);
 
             // The review workspace acts as the same principal, with the operator's independence.
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal(op, shell.ActingPrincipalId);
             Assert.Equal(opDevice, shell.SelectedActing?.Id);
 
             // Choosing another device in the selector chooses its principal, and a refresh keeps that choice.
-            await fixture.Ui(() => box.SelectedItem = shell.ActingCandidates.Single(d => d.Id == agentDevice));
+            await fixture.UiAsync(async () =>
+            {
+                box.SelectedItem = shell.ActingCandidates.Single(d => d.Id == agentDevice);
+                await shell.PendingOperation;
+            });
             Assert.Null(shell.ActingOverride);
             Assert.Equal(agent, shell.ActingPrincipalId);
             Assert.Equal("Agent One (device Agent device)", shell.ActingPrincipal);
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal(agent, shell.ActingPrincipalId);
             Assert.Equal(agentDevice, shell.SelectedActing?.Id);
         }
@@ -78,7 +82,7 @@ public class ActingTests(HeadlessFixture fixture)
         Seed.Cli("--estate", root, "--json", "records", "new", "estate", "--by", op, "--supersedes", estate, "--body", Seed.Write(scratch, "charter.json", charter.ToJsonString()));
 
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-acting-none"))) { ActingOverride = reviewer };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(reviewer, shell.ActingPrincipalId);
         Assert.Null(shell.SelectedActing);
         Assert.Equal("Reviewer (named with --as; no admitted device of this principal is held here, so writes will be refused)", shell.ActingPrincipal);

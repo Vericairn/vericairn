@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Text;
+using Vericairn.Protocol;
 
 namespace Vericairn.Workbench;
 
@@ -15,17 +16,52 @@ public interface IRuntimeManager
     /// <summary>Starts a daemon for the estate and waits until it answers.</summary>
     Task<RuntimeOutcome> StartAsync(string root);
 
+    /// <summary>The cancellable start operation; stopping observation does not undo a service change.</summary>
+    async Task<RuntimeOutcome> StartAsync(string root, CancellationToken cancellationToken)
+    {
+        Func<string, Task<RuntimeOutcome>> legacy = StartAsync;
+        return await ClientOperation.RunAsync("RuntimeStart", token => Task.Run(() => legacy(root), token), true, TimeSpan.FromMinutes(15), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Asks the daemon to stop.</summary>
     Task<RuntimeOutcome> StopAsync(string root);
+
+    /// <summary>The cancellable stop operation; stopping observation does not undo a service change.</summary>
+    async Task<RuntimeOutcome> StopAsync(string root, CancellationToken cancellationToken)
+    {
+        Func<string, Task<RuntimeOutcome>> legacy = StopAsync;
+        return await ClientOperation.RunAsync("RuntimeStop", token => Task.Run(() => legacy(root), token), true, TimeSpan.FromMinutes(15), cancellationToken).ConfigureAwait(false);
+    }
 
     /// <summary>The per-user service unit and commands, without installing anything.</summary>
     Task<RuntimeOutcome> InstallPlanAsync(string root);
 
+    /// <summary>The cancellable installplan operation; stopping observation does not undo a service change.</summary>
+    async Task<RuntimeOutcome> InstallPlanAsync(string root, CancellationToken cancellationToken)
+    {
+        Func<string, Task<RuntimeOutcome>> legacy = InstallPlanAsync;
+        return await ClientOperation.RunAsync("RuntimeInstallPlan", token => Task.Run(() => legacy(root), token), false, TimeSpan.FromMinutes(15), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Installs the daemon as a per-user service that starts at login; the plan says what this does.</summary>
     Task<RuntimeOutcome> InstallAsync(string root);
 
+    /// <summary>The cancellable install operation; stopping observation does not undo a service change.</summary>
+    async Task<RuntimeOutcome> InstallAsync(string root, CancellationToken cancellationToken)
+    {
+        Func<string, Task<RuntimeOutcome>> legacy = InstallAsync;
+        return await ClientOperation.RunAsync("RuntimeInstall", token => Task.Run(() => legacy(root), token), true, TimeSpan.FromMinutes(15), cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Removes the per-user service installed before.</summary>
     Task<RuntimeOutcome> UninstallAsync(string root);
+
+    /// <summary>The cancellable uninstall operation; stopping observation does not undo a service change.</summary>
+    async Task<RuntimeOutcome> UninstallAsync(string root, CancellationToken cancellationToken)
+    {
+        Func<string, Task<RuntimeOutcome>> legacy = UninstallAsync;
+        return await ClientOperation.RunAsync("RuntimeUninstall", token => Task.Run(() => legacy(root), token), true, TimeSpan.FromMinutes(15), cancellationToken).ConfigureAwait(false);
+    }
 }
 
 /// <summary>Drives the vericairn command line found beside this executable, named by VERICAIRN_CLI, or on the path.</summary>
@@ -46,21 +82,41 @@ public sealed class CliRuntimeManager : IRuntimeManager
     }
 
     /// <inheritdoc />
-    public Task<RuntimeOutcome> StartAsync(string root) => RunAsync(root, "runtime", "start");
+    public Task<RuntimeOutcome> StartAsync(string root) => StartAsync(root, CancellationToken.None);
 
     /// <inheritdoc />
-    public Task<RuntimeOutcome> StopAsync(string root) => RunAsync(root, "runtime", "stop");
+    public Task<RuntimeOutcome> StartAsync(string root, CancellationToken cancellationToken) =>
+        ClientOperation.RunAsync("RuntimeStart", token => RunAsync(root, token, "runtime", "start"), true, TimeSpan.FromMinutes(15), cancellationToken);
 
     /// <inheritdoc />
-    public Task<RuntimeOutcome> InstallPlanAsync(string root) => RunAsync(root, "runtime", "install", "--plan");
+    public Task<RuntimeOutcome> StopAsync(string root) => StopAsync(root, CancellationToken.None);
 
     /// <inheritdoc />
-    public Task<RuntimeOutcome> InstallAsync(string root) => RunAsync(root, "runtime", "install");
+    public Task<RuntimeOutcome> StopAsync(string root, CancellationToken cancellationToken) =>
+        ClientOperation.RunAsync("RuntimeStop", token => RunAsync(root, token, "runtime", "stop"), true, TimeSpan.FromMinutes(15), cancellationToken);
 
     /// <inheritdoc />
-    public Task<RuntimeOutcome> UninstallAsync(string root) => RunAsync(root, "runtime", "uninstall");
+    public Task<RuntimeOutcome> InstallPlanAsync(string root) => InstallPlanAsync(root, CancellationToken.None);
 
-    private static async Task<RuntimeOutcome> RunAsync(string root, params string[] arguments)
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> InstallPlanAsync(string root, CancellationToken cancellationToken) =>
+        ClientOperation.RunAsync("RuntimeInstallPlan", token => RunAsync(root, token, "runtime", "install", "--plan"), false, TimeSpan.FromMinutes(15), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> InstallAsync(string root) => InstallAsync(root, CancellationToken.None);
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> InstallAsync(string root, CancellationToken cancellationToken) =>
+        ClientOperation.RunAsync("RuntimeInstall", token => RunAsync(root, token, "runtime", "install"), true, TimeSpan.FromMinutes(15), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> UninstallAsync(string root) => UninstallAsync(root, CancellationToken.None);
+
+    /// <inheritdoc />
+    public Task<RuntimeOutcome> UninstallAsync(string root, CancellationToken cancellationToken) =>
+        ClientOperation.RunAsync("RuntimeUninstall", token => RunAsync(root, token, "runtime", "uninstall"), true, TimeSpan.FromMinutes(15), cancellationToken);
+
+    private static async Task<RuntimeOutcome> RunAsync(string root, CancellationToken cancellationToken, params string[] arguments)
     {
         try
         {
@@ -72,6 +128,7 @@ public sealed class CliRuntimeManager : IRuntimeManager
                 start.ArgumentList.Add(argument);
             }
 
+            cancellationToken.ThrowIfCancellationRequested();
             using Process? process = Process.Start(start);
             if (process is null)
             {
@@ -82,10 +139,22 @@ public sealed class CliRuntimeManager : IRuntimeManager
             // open for as long as it runs. What the command wrote is collected while it runs and for a moment after it exits.
             var collected = new StringBuilder();
             var gate = new object();
-            Task readOutput = Collect(process.StandardOutput, collected, gate);
-            Task readError = Collect(process.StandardError, collected, gate);
-            await process.WaitForExitAsync().ConfigureAwait(true);
-            await Task.WhenAny(Task.WhenAll(readOutput, readError), Task.Delay(OutputGrace)).ConfigureAwait(true);
+            Task readOutput = Collect(process.StandardOutput, collected, gate, cancellationToken);
+            Task readError = Collect(process.StandardError, collected, gate, cancellationToken);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+                await Task.WhenAny(Task.WhenAll(readOutput, readError), Task.Delay(OutputGrace, cancellationToken)).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+            finally
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                    catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception) { }
+                }
+            }
             lock (gate)
             {
                 return new RuntimeOutcome(process.ExitCode == 0, collected.ToString().Trim());
@@ -100,13 +169,13 @@ public sealed class CliRuntimeManager : IRuntimeManager
     /// <summary>How long output is still collected after the command exits.</summary>
     private static readonly TimeSpan OutputGrace = TimeSpan.FromSeconds(2);
 
-    private static async Task Collect(StreamReader reader, StringBuilder sink, object gate)
+    private static async Task Collect(StreamReader reader, StringBuilder sink, object gate, CancellationToken cancellationToken)
     {
         var buffer = new char[4096];
         try
         {
             int read;
-            while ((read = await reader.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) > 0)
+            while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false)) > 0)
             {
                 lock (gate)
                 {
@@ -114,7 +183,7 @@ public sealed class CliRuntimeManager : IRuntimeManager
                 }
             }
         }
-        catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException)
         {
             // The process was disposed while a service still held the stream open; what was read is kept.
         }

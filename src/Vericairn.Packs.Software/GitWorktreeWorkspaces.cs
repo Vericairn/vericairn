@@ -161,7 +161,8 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory);
         RunScope scope = WorkspaceScopeAudit.Compare(baseline, after, permitted);
         if (reviews.TryGetValue(workspace, out Review? review))
-            review.Head = scope.Problem is null && Same(review.GitDirectory, baseline.GitDirectory ?? string.Empty) ? after.Head : null;
+            review.Head = baseline.Identity is not null && baseline.Identity == after.Identity
+                && Same(review.GitDirectory, baseline.GitDirectory ?? string.Empty) ? after.Head : null;
         return scope;
     }
 

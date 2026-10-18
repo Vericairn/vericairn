@@ -16,7 +16,7 @@ public sealed class ChangesCommandTests
     [InlineData("merge", "--pull-request")]
     public void MutationsRequireAnExplicitHeadProductAndActor(string action, string selection)
     {
-        RootCommand root = CliApp.Build();
+        RootCommand root = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
         Command changes = root.Subcommands.Single(c => c.Name == "changes");
         Command command = changes.Subcommands.Single(c => c.Name == action);
         foreach (string option in new[] { "--head", "--product", "--by", selection })
@@ -28,7 +28,7 @@ public sealed class ChangesCommandTests
     [Fact]
     public void ObservationKeepsTheOriginalIdentityAndMakesOperatorReconciliationExplicit()
     {
-        Command changes = CliApp.Build().Subcommands.Single(c => c.Name == "changes");
+        Command changes = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken).Subcommands.Single(c => c.Name == "changes");
         Assert.Equal(Actions, changes.Subcommands.Select(c => c.Name).Order());
         Command observe = changes.Subcommands.Single(c => c.Name == "observe");
         Assert.True(observe.Options.Single(o => o.Name == "--operation").Required);
