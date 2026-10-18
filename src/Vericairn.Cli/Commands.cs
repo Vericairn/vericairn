@@ -104,67 +104,6 @@ internal static partial class Commands
         return response.Problem is not null ? Failed : response.HasErrors ? HasErrors : Clean;
     }));
 
-    /// <summary>List current document revision identities without reading their original bodies.</summary>
-    public static int ContextCatalogue(string root, bool json) => WithApi(root, api =>
-    {
-        var rows = api.Records("document-revision").Select(r => new { r.Id, r.Hash, Path = r.Envelope.GetProperty("body").GetProperty("path").GetString() }).ToList();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-        }
-        else
-        {
-            foreach (var row in rows)
-            {
-                Console.Out.WriteLine($"{row.Path}  revision {row.Id}  {row.Hash}");
-            }
-        }
-
-        return Clean;
-    });
-
-    /// <summary>Compute context without writing through the runtime's common contract.</summary>
-    public static int ContextPrepare(string root, string workOrder, bool json, long? maxBytes = null) => WithApi(root, api =>
-    {
-        ContextResponse response = api.Context(workOrder, maxBytes);
-        Console.Out.Write(json ? JsonSerializer.Serialize(response.Package is null ? (object)response.Problem! : response.Package, ProtocolJson.Options) : response.Text);
-        return response.Problem is null ? Clean : Failed;
-    });
-
-    /// <summary>Retrieve verified original bytes, or the identity and base64 bytes as JSON.</summary>
-    public static int ContextRead(string root, string manifest, string? source, bool original, string? output, bool json) => WithApi(root, api =>
-    {
-        if (!original)
-        {
-            return Fail("Context retrieval requires --original.");
-        }
-
-        ContextReadResponse response = source is null ? api.ContextRead(manifest) : api.ContextRead(manifest, source);
-        if (response.Problem is not null)
-        {
-            Console.Out.Write(json ? JsonSerializer.Serialize(response, ProtocolJson.Options) : response.Problem.Message + "\n");
-            return Failed;
-        }
-
-        if (output is not null)
-        {
-            using var file = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-            file.Write(response.Content!);
-        }
-
-        if (json)
-        {
-            Console.Out.Write(JsonSerializer.Serialize(response, ProtocolJson.Options));
-        }
-        else if (output is null)
-        {
-            using Stream stream = Console.OpenStandardOutput();
-            stream.Write(response.Content!);
-        }
-
-        return Clean;
-    });
-
     public static int Handoff(string root, string? output, long? maxBytes, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         HandoffResponse response = api.Handoff(maxBytes);
