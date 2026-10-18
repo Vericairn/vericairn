@@ -45,7 +45,10 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             using var client = new VericairnClient(endpoint);
             return client.HealthAsync(CancellationToken).GetAwaiter().GetResult().Api == ApiVersion.Current;
         }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or System.Net.Sockets.SocketException or JsonException or UnauthorizedAccessException)
+        // An unreachable or unanswering daemon is not alive, as before the client boundary wrapped transport failures: the command
+        // falls back to the embedded runtime. A person's cancellation still propagates.
+        catch (Exception exception) when (exception is HttpRequestException or IOException or System.Net.Sockets.SocketException or JsonException or UnauthorizedAccessException
+            or ClientUnavailableException or ClientTimeoutException)
         {
             return false;
         }
