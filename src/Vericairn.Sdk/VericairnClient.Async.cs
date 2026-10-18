@@ -232,7 +232,7 @@ public sealed partial class VericairnClient
 
     /// <summary>The cancellable OperatorRecord operation, with a deadline covering the complete response.</summary>
     public Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunAsync<OperatorRecordResponse>(nameof(OperatorRecord), async token => (await PostAsync<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorRecord)), cancellationToken);
+        RunOperationAsync<OperatorRecordResponse>(nameof(OperatorRecord), async token => (await PostAsync<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(OperatorRecord)), cancellationToken);
 
     /// <summary>The cancellable Goals operation, with a deadline covering the complete response.</summary>
     public Task<IReadOnlyList<GoalRow>> GoalsAsync(CancellationToken cancellationToken = default) =>
