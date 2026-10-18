@@ -23,8 +23,12 @@ public sealed class OperatorRecordApiTests
         using var api = new VericairnClient(host.Endpoint);
         int count = host.Service.Session.Load().Records.Count;
         var request = new OperatorRecordRequest("acceptance", estate.OperatorId, JsonSerializer.SerializeToElement(new { statement = "Inspect first." }));
-        OperatorRecordResponse response = api.OperatorRecord(request, TestContext.Current.CancellationToken);
+        OperatorRecordResponse response = api.OperatorRecord(request);
         Assert.False(response.Ok);
+        Assert.Equal(count, host.Service.Session.Load().Records.Count);
+        // The asynchronous counterpart reaches the same route and refuses the same way.
+        OperatorRecordResponse asynchronous = await api.OperatorRecordAsync(request, TestContext.Current.CancellationToken);
+        Assert.False(asynchronous.Ok);
         Assert.Equal(count, host.Service.Session.Load().Records.Count);
         Assert.Contains("operator record acceptance", response.NextStep, StringComparison.Ordinal);
         Assert.True(RequestScope.Covers("POST /v1/operator/record"));

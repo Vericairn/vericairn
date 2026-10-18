@@ -14,7 +14,7 @@ public sealed class OperatorRecordCommandTests
     [Fact]
     public void RecordIsAnAdditionalCommandClassWithExplicitAuthorAndBody()
     {
-        RootCommand root = CliApp.Build();
+        RootCommand root = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
         Command family = root.Subcommands.Single(c => c.Name == "operator");
         Command record = Assert.IsType<OperatorRecordCommand>(family.Subcommands.Single(c => c.Name == "record"));
         Assert.Contains(family.Subcommands, c => c is OperatorListCommand);
@@ -35,7 +35,7 @@ public sealed class OperatorRecordCommandTests
                 $$"""{"to":"{{op}}","question":"Proceed?","recommendation":"Review.","consequence":"Work waits.","state":"open"}"""));
             CliHarness.Outcome listed = CliHarness.Ok("--estate", root, "--json", "operator", "list");
             string[] args = listed.Json.GetProperty("items")[0].GetProperty("commands")[0].GetProperty("oneStep").GetProperty("arguments").EnumerateArray().Select(a => a.GetString()!).ToArray();
-            Assert.Empty(CliApp.Build().Parse(args).Errors);
+            Assert.Empty(CliApp.Build(cancellationToken: TestContext.Current.CancellationToken).Parse(args).Errors);
             int body = Array.IndexOf(args, "--body");
             Assert.Equal("-", args[body + 1]);
             // The in-process harness supplies standard input through the equivalent file option.

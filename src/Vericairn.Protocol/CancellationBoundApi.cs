@@ -252,6 +252,12 @@ public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken can
     public Task<OperatorActionsResponse> OperatorActionsAsync(string? recipient = null, string? assignment = null, CommunicationValues? view = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.OperatorActionsAsync(recipient, assignment, view, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => inner.OperatorRecordAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.OperatorRecordAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => inner.GoalsAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

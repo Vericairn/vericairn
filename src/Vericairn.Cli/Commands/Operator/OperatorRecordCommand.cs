@@ -37,7 +37,8 @@ internal sealed class OperatorRecordCommand : Command
                 response = api.OperatorRecord(new(parse.GetValue(type)!, parse.GetValue(by)!, input,
                     parse.GetValue(subject), parse.GetValue(supersedes), parse.GetValue(product), parse.GetValue(wait), parse.GetValue(reconciliation)));
             }
-            catch (Exception exception) when (exception is OperationCanceledException or HttpRequestException)
+            // A definite refusal had no effect to wait for; the client boundary reports it.
+            catch (Exception exception) when (exception is OperationCanceledException or TimeoutException or HttpRequestException && exception is not ClientRefusedException)
             {
                 transportFailed = true;
                 response = new("operator-record", "stopped", "The client stopped waiting; the runtime may still be settling its current recorded operation.", false,

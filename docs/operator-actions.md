@@ -111,7 +111,7 @@ receipts separately before starting a new action. No branch is automatically del
 Git and gh use the user's own login and configuration. There is no token parameter or credential
 retrieval. If the client disconnects or cancels, the runtime lets the current recorded operation
 settle and stops before the next effect. Wait for that operation to settle, then resume the same
-input to inspect its recorded outcome. The synchronous SDK method also accepts a cancellation token.
+input to inspect its recorded outcome. The SDK's `OperatorRecordAsync` accepts a cancellation token.
 
 ## Presentation and API
 
@@ -136,8 +136,11 @@ accept `OperatorRecordRequest`: `type`, `by`, `body`, optional `subject`, `super
 `nextStep`, `record`, `branch`, `head`, the last `change` response and any `problem`. The CLI returns
 0 only when `ok` is true, 1 for a refused, stopped or waiting action, and 2 for input or connection
 failure. `--json` preserves the full response. Authenticated device requests are bound to their own
-principal; all authoring, signature, authority and presence checks remain in force. No asynchronous
-counterpart is added by this stage.
+principal; all authoring, signature, authority and presence checks remain in force.
+`OperatorRecordAsync(request, cancellationToken)` is its cancellable counterpart. It has the
+15-minute deadline that checks and releases have, because each check phase may wait up to 240
+seconds. When a request is aborted, the daemon passes the abort to the action, which stops at its
+next recorded step, before any merge. The same command with the same body then resumes it.
 
 Record errors retain the unresolved items and findings but remove authoring commands. The new CLI
 command returns 0 for a valid read, 1 when the record snapshot has errors, and 2 when it cannot read

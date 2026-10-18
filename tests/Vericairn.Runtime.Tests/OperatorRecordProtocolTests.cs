@@ -21,7 +21,7 @@ public sealed class OperatorRecordProtocolTests
             Assert.Equal(type.GetProperties().Select(p => JsonNamingPolicy.CamelCase.ConvertName(p.Name)).Order(), fields);
         }
         Assert.Contains(typeof(IEstateApi).GetMethods(), m => m.Name == "OperatorRecord" && m.ReturnType == typeof(OperatorRecordResponse));
-        Assert.DoesNotContain(typeof(IEstateApi).GetMethods(), m => m.Name == "OperatorRecordAsync");
+        Assert.Equal(typeof(Task<OperatorRecordResponse>), typeof(IEstateApi).GetMethod("OperatorRecordAsync", [typeof(OperatorRecordRequest), typeof(CancellationToken)])?.ReturnType);
         JsonElement request = document.RootElement.GetProperty("components").GetProperty("schemas").GetProperty("OperatorRecordRequest");
         Assert.Equal("[\"type\",\"by\",\"body\"]", JsonSerializer.Serialize(request.GetProperty("required")));
         Assert.Equal(120, request.GetProperty("properties").GetProperty("waitSeconds").GetProperty("default").GetInt32());

@@ -141,7 +141,7 @@ public partial interface IEstateApi
     OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null);
 
     /// <summary>Sign the operator's own record and carry its isolated commit through recorded repository operations; resume identical input safely.</summary>
-    OperatorRecordResponse OperatorRecord(OperatorRecordRequest request, CancellationToken cancellationToken = default);
+    OperatorRecordResponse OperatorRecord(OperatorRecordRequest request);
 
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();

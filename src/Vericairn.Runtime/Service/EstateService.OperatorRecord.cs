@@ -27,7 +27,15 @@ public sealed partial class EstateService
         RecordCommitBasis Basis, string Branch, string Hash, string? Head = null, ChangeResponse? Completed = null);
 
     /// <inheritdoc />
-    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request, CancellationToken cancellationToken = default)
+    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => OperatorRecord(request, CancellationToken.None);
+
+    /// <inheritdoc />
+    /// <remarks>The token also reaches the action itself, which stops at its next recorded step, before any merge; the same input resumes it.</remarks>
+    public Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(OperatorRecord), () => OperatorRecord(request, cancellationToken), true, this, cancellationToken);
+
+    /// <summary>Records and carries the operator's record; cancellation stops it at its next recorded step, before any merge, and the same input resumes it.</summary>
+    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         string identity = "operator-record";
