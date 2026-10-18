@@ -165,6 +165,10 @@ public partial interface IEstateApi
     Task<OperatorActionsResponse> OperatorActionsAsync(string? recipient = null, string? assignment = null, CommunicationValues? view = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(OperatorActions), () => OperatorActions(recipient, assignment, view), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="OperatorRecord"/>; a stopped observation does not undo an effect.</summary>
+    Task<OperatorRecordResponse> OperatorRecordAsync(OperatorRecordRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(OperatorRecord), () => OperatorRecord(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Goals"/>; a stopped observation does not undo an effect.</summary>
     Task<IReadOnlyList<GoalRow>> GoalsAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Goals), () => Goals(), false, this as IClientOperationLifetime, cancellationToken);

@@ -113,10 +113,11 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             WriteOutcome { Written: RecordWritten record } => record,
             WorkProgressResponse { Ok: true, Written: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
+            OperatorRecordResponse { Record: RecordWritten record } => record,
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false };
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -173,6 +174,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
         ["GET /v1/asks"] = null,
         ["GET /v1/operator/actions"] = null,
+        ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
         ["GET /v1/goals"] = null,
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,
@@ -239,6 +241,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
         [typeof(EstateObserveRequest)] = (_, r, d) => Acting(((EstateObserveRequest)r).By, d),
         [typeof(NewRecordRequest)] = (_, r, d) => Acting(((NewRecordRequest)r).By, d) ?? DeviceRecord(((NewRecordRequest)r).Type, d),
+        [typeof(OperatorRecordRequest)] = (_, r, d) => Acting(((OperatorRecordRequest)r).By, d) ?? DeviceRecord(((OperatorRecordRequest)r).Type, d),
         [typeof(GoalStepRequest)] = (_, r, d) => Acting(((GoalStepRequest)r).By, d),
         [typeof(TakeoverRequest)] = (_, r, d) => Acting(((TakeoverRequest)r).By, d),
         [typeof(AssignRequest)] = (_, r, d) => Acting(((AssignRequest)r).By, d),

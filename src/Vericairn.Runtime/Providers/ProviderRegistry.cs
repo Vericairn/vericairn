@@ -25,6 +25,9 @@ public sealed class ProviderRegistry
     /// <summary>The host's scanner for exactly the commits being pushed.</summary>
     public ISecretScanner? SecretScanner { get; set; }
 
+    /// <summary>The host's adapter for an operator's isolated local record commit.</summary>
+    public IRecordCommitAdapter? RecordCommitAdapter { get; set; }
+
     /// <summary>Registers a pull-request provider and returns the previous implementation.</summary>
     public IPullRequestProvider? Register(IPullRequestProvider provider)
     {

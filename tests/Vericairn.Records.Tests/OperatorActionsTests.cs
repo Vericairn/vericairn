@@ -10,6 +10,19 @@ namespace Vericairn.Records.Tests;
 
 public class OperatorActionsTests
 {
+    private static readonly string[] OneStepPrefix = ["operator", "record"];
+
+    [Fact]
+    public void RetainedQueueDocumentsWithoutTheAdditionalCommandStillRender()
+    {
+        using var estate = new TestEstate(2);
+        estate.Add("ask", estate.BuilderId, Ask(estate.OperatorId, "A retained question"));
+        JsonObject report = Valid(estate);
+        foreach (JsonObject command in Items(report).SelectMany(Commands)) command.Remove("oneStep");
+        string text = OperatorActions.RenderText(report);
+        Assert.Contains("records new decision", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Record and merge:", text, StringComparison.Ordinal);
+    }
     [Fact]
     public void EmptyQueueIsDeterministicAndReadingWritesNothing()
     {
@@ -295,7 +308,16 @@ public class OperatorActionsTests
     {
         EstateModel model = estate.Load();
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
-        return OperatorActions.Derive(model);
+        JsonObject report = OperatorActions.Derive(model);
+        foreach (JsonObject command in Items(report).SelectMany(Commands))
+        {
+            string[] original = command["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToArray();
+            string[] oneStep = command["oneStep"]!["arguments"]!.AsArray().Select(a => a!.GetValue<string>()).ToArray();
+            Assert.Equal(OneStepPrefix.Concat(original.Skip(2)), oneStep);
+            Assert.Equal("vericairn " + string.Join(' ', oneStep), command["oneStep"]!["command"]!.GetValue<string>());
+            Assert.Contains(command["oneStep"]!["command"]!.GetValue<string>(), OperatorActions.RenderText(report), StringComparison.Ordinal);
+        }
+        return report;
     }
 
     private static List<JsonObject> Items(JsonObject report) => report["items"]!.AsArray().OfType<JsonObject>().ToList();
