@@ -149,3 +149,20 @@ The checked-in format-3 policy estate pins every fixture byte in `inventory.sha2
 record types and registry fields, round trips, signatures, bounded authority, occurrence identities, debt
 dispositions and the migration refusal boundary. Runtime tests use fixture estates and isolated homes.
 The platform matrix must run on the eventual pushed commit before integration.
+
+## Generated living documents
+
+READ-01 extends `living-document` in format 3 with `pathPattern`. It is exclusive with `path`, requires
+`kind: generated`, and cannot carry authored `regions`. The supported form is a literal portable directory
+followed by `/{month}/{date}-{slug}-{id}.md`. The source revision supplies its UTC month and date, a bounded
+ASCII title slug (or `item` when none remains), and its full revision id. The directory is owned by one
+declaration; overlapping declarations, authored files and case collisions are refused. A pattern is never
+evidence of membership by itself: the generator enumerates the complete selected source inventory.
+
+A whole generated format-3 declaration permits `triggers: []` and has no `clearedBy`. Format-2 records still
+require a concrete `path` and nonempty triggers, and refuse `pathPattern` with a format error. No new record
+type or companion-status field is introduced. The signed golden fixture includes the new field, and its
+inventory retains every fixture byte. Generator interface and output-contract versions are independent of
+record format. Legacy region inputs retain their existing grammar; versioned generators use validated named
+inputs, including an explicit `format`, `audience` and `selection`. Missing contracts and incomplete source
+selections are unavailable, never a successful empty collection.

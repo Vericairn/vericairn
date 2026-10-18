@@ -64,7 +64,7 @@
     {
       "algorithm": "ecdsa-p256-sha256",
       "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
-      "signature": "zdPvtzALJxt084b9gZc4fh4M9FyoGKwZURzO_UooaZGLaXbGtnnGEg3hKeypxvF_ifzxS-tmeg8BkesyuF5NmQ"
+      "signature": "fJ-8G5LZ-rrT2GXZuEo5VH0xb-cvs4ycXKlAvXc1C7ncZkdP5uQMcGQa0lwW_9cjZR9FiGvxavmM8NztvfLwzA"
     }
   ],
   "type": "estate-policy"

@@ -10,18 +10,18 @@
     "profiles": [
       "embedded"
     ],
-    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWw0TBB6d2NlCGzEhW8eySqoLeT5D5DD4qClk9bHQvMLOvNDq0DTDmvVsZXuxkTXWknUN0vJRmvsqwRvR4fddjw",
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwxXgS7BRQxqTinRJpmDJow3Ortt4gQFqNtgOvifPgYiljfpqfxzG8ofNFdepCDvlOapwg00aU4JAD6BF73irYQ",
     "purpose": "signing"
   },
   "by": "01M57TPYNPYJYZKTGCETXTHRT8",
   "format": "vericairn.record/3",
-  "hash": "sha256:9e37a49953faa90aaa1e39205dd336b78aa18c9a69c7e85b8995443df32dd99a",
+  "hash": "sha256:3b2a4fb09d0e7aae4013d53f76ae7cfdf16d26aa5b8b9dfcc4d687d4bdea2ca2",
   "id": "01M57TPYP4PJ10HN6CYX7650CM",
   "signatures": [
     {
       "algorithm": "ecdsa-p256-sha256",
       "device": "01M57TPYP4PJ10HN6CYX7650CM",
-      "signature": "XIbQqTM2w0QcK2Dyqh9SzKfdjzE7Y5fzibpomsEsofP1LPcMW-Qqd5xwWtwI6D0BrF_7f5AhOFMoxVvmWydpQQ"
+      "signature": "SN2U5dnQCheu7q2eQcLOaMbUI8HfXZtWpgkDjQ6YtnEP7MduzX2VBQ8QxHOrMVHBKmCescD-E0y8AwfSIkgUIQ"
     }
   ],
   "type": "device"

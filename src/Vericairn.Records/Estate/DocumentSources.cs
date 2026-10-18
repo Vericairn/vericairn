@@ -16,6 +16,13 @@ public interface IDocumentSource
     /// <summary>The source's name, namespace/name, as declarations name it.</summary>
     string Id { get; }
 
+    /// <summary>The supported immutable snapshot interface version; legacy sources supply no snapshot interface.</summary>
+    int SnapshotVersion => 0;
+
+    /// <summary>Obtains a complete authorized input selection at the exact requested commit before rendering.</summary>
+    DocumentSourceSelection ReadSelection(EstateModel model, RecordEnvelope declaration, string commit, DocumentGeneratorDescriptor generator) =>
+        new(DocumentGenerationStatus.Unavailable, [], commit, "This source does not provide the versioned snapshot contract.");
+
     /// <summary>The commit at the head of the repository's clone here, or null when no clone is registered or it cannot be read.</summary>
     string? Head(EstateModel model, RecordEnvelope declaration);
 
