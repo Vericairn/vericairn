@@ -2,8 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
-using Vericairn.Runtime.Portability;
-using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 

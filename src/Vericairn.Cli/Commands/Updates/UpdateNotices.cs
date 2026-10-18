@@ -16,5 +16,4 @@ internal static class UpdateNotices
         if (notice.Length > 0) context.Error.WriteLine(notice);
         return action();
     }
-
 }

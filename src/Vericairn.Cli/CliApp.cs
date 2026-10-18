@@ -45,5 +45,4 @@ internal static class CliApp
         root.Subcommands.Add(new VersionCommand(context, updates));
         return root;
     }
-
 }

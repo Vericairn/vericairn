@@ -2,10 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
-using System.Text.Json;
-using Vericairn.Mcp;
-using Vericairn.Protocol;
-using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 
