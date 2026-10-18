@@ -18,7 +18,7 @@ public sealed class TestHome : IDisposable
 {
     private readonly string created;
 
-    /// <summary>Creates this test process's home without reading or reusing inherited per-user state.</summary>
+    /// <summary>Always creates an isolated home before tests can use runtime storage.</summary>
     public TestHome()
     {
         created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);

@@ -1,0 +1,50 @@
+{
+  "at": "2026-10-13T12:00:13Z",
+  "body": {
+    "basis": "01M57TPYPA4E37QXJ9YZGM2FTS",
+    "bounds": [
+      {
+        "actions": [
+          "declare",
+          "revise",
+          "transfer",
+          "retire",
+          "reconcile"
+        ],
+        "appliesTo": [
+          {
+            "kind": "estate"
+          }
+        ],
+        "levels": [
+          "remind",
+          "warn",
+          "refuse"
+        ],
+        "policies": [
+          "maintenance"
+        ],
+        "scope": "manage-estate-policies"
+      }
+    ],
+    "conditions": [],
+    "expires": "2027-01-01T00:00:00Z",
+    "grantee": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "reserved": [],
+    "scope": [
+      "manage-estate-policies"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:9e2d813123aae493d6239fec12a517586deae26def5b98d17028d00f70057908",
+  "id": "01M57TPYPC5P4Q97ZMQ1A1X4XC",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "1f-g2DshsHxnaZaBBf-eswm-1RHcOPb5UKOKLaa7sLl3Ms5UZnPqoko73-qvRbrOKJu59h6aVmo_RKwHmhTppg"
+    }
+  ],
+  "type": "authority"
+}

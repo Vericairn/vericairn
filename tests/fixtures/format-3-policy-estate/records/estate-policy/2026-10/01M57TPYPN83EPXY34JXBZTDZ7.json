@@ -1,0 +1,52 @@
+{
+  "at": "2026-10-13T12:00:23Z",
+  "body": {
+    "appliesTo": {
+      "kind": "repository",
+      "repository": "01M57TPYPBZKR5291T0ZPZV759",
+      "selectors": [
+        "docs/**"
+      ]
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:a851a2bd4f13489557158645623b171166b2aca3cf7286b608935dd6ede7b80e",
+          "id": "01M57TPYPN83EPXY34JXBZTDZ5",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "file-policy",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "age",
+        "kind": "example.policy/age",
+        "parameters": {
+          "plannedDays": 30
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:ba7075484f6e7e0304f24540f94c523434be475e7d2a7204cdd2c9864e85953f",
+  "id": "01M57TPYPN83EPXY34JXBZTDZ7",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "yea5BFhtDiIntJRjid36MkH_V3b0hC75yxXcWxjVgStQjPDD2NcFXwG0zu0UYuepu5GDC0brlthxRc75RFTkxQ"
+    }
+  ],
+  "type": "estate-policy"
+}

@@ -311,6 +311,9 @@ public class GoalStepTests
         Assert.True(refused.Problem?.Code == "rejected", refused.Message); // Include the full preparation refusal if the content check was never reached.
         Assert.Contains("Not written: the estate would be invalid with these records (", refused.Message, StringComparison.Ordinal);
         Assert.EndsWith("Nothing was recorded.", refused.Message, StringComparison.Ordinal);
+        string workspace = Path.Combine(Vericairn.Records.Signing.VericairnHome.Path(), "estates", run.Service.Session.Manifest.Estate,
+            "workspaces", branch.Replace('/', '-'));
+        Assert.False(Directory.Exists(workspace), refused.Message);
         Assert.DoesNotContain("Routing assigned", refused.Message, StringComparison.Ordinal);
         Assert.Contains(refused.Problem!.Findings, f => f.Code == "secrets.pattern" && f.Location.StartsWith("records/operation/", StringComparison.Ordinal));
         Assert.Null(refused.Assignment);
@@ -321,6 +324,7 @@ public class GoalStepTests
         RunResponse single = run.Start("claude-code", "claude", run.Report("never"), branch: branch);
         Assert.False(single.Ok, single.Message);
         Assert.Contains(single.Problem!.Findings, f => f.Code == "secrets.pattern");
+        Assert.False(Directory.Exists(workspace), single.Message);
         Assert.Empty(run.Service.Records("operation"));
         Assert.False(File.Exists(run.Report("never")));
     }

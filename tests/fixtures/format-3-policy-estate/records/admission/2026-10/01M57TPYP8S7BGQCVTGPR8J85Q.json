@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:05Z",
+  "body": {
+    "note": "Test root admission.",
+    "principal": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "status": "admitted"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:1b931c79cf74408e0d8b3de4fb0334eb35872940b76577f9770c36d793e0693b",
+  "id": "01M57TPYP8S7BGQCVTGPR8J85Q",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "cHocc7tBkD149AOPQdxX8UnCpxZHHEzmbrSIw1XmxT1tHcH_YBBIHEla5N4vbI_l4bBRjrsc-6MYLEzNx5wa4g"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:61fb9ff99f2940226fffd7b12988f37b2fabdfb116f37acf6ecff129e2b38be2",
+    "id": "01M57TPYP4PJ10HN6CYX7650CM",
+    "type": "device"
+  },
+  "type": "admission"
+}

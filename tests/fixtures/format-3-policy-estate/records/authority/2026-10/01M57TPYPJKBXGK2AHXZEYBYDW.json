@@ -1,0 +1,53 @@
+{
+  "at": "2026-10-13T12:00:16Z",
+  "body": {
+    "basis": "01M57TPYPA4E37QXJ9YZGM2FTS",
+    "bounds": [
+      {
+        "actions": [
+          "add",
+          "remove",
+          "reconcile"
+        ],
+        "coverage": {
+          "paths": [
+            {
+              "repository": "01M57TPYP3J1PPGV71CJKDNBFA",
+              "selectors": [
+                "docs/**"
+              ]
+            }
+          ],
+          "records": [
+            {
+              "record": "01M57TPYPA4E37QXJ9YZGM2FTS"
+            }
+          ]
+        },
+        "scope": "manage-writing-exceptions",
+        "tokens": [
+          "Open311"
+        ]
+      }
+    ],
+    "conditions": [],
+    "expires": "2027-01-01T00:00:00Z",
+    "grantee": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "reserved": [],
+    "scope": [
+      "manage-writing-exceptions"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:02e3b7a46516e73e06b62feb107edf795ec9af7e7e5410aa41a19dd05ef6e6de",
+  "id": "01M57TPYPJKBXGK2AHXZEYBYDW",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "4dx43S_FwXd0WMgwHcl7ELt1-no-j-vouMCZ1R9pr62Yh4YsMbh4zhOjVa5DxAy6kNpleRjU4k3wR83VdA8OGg"
+    }
+  ],
+  "type": "authority"
+}

@@ -27,6 +27,7 @@ public sealed class AuthorityType : IRecordType
         new("conditions", "string[]", true, "Conditions under which the grant applies."),
         new("basis", "ulid", true, "The decision record that authorizes this grant."),
         new("expires", "timestamp", false, "When the grant stops being in force; a record authored from then on cannot rely on it.", 2),
+        new("bounds", "object[]", false, "Required for policy scopes: one typed bound per scope, with actions, subject selection and scope-specific limits. Policy grants require expiry and an operator signature.", 3),
     ];
 
     /// <inheritdoc />
@@ -44,6 +45,7 @@ public sealed class AuthorityType : IRecordType
             body.Error("authority.expires", "expires", "A grant expires after it is made.");
         }
 
+        PolicyAuthority.ValidateGrant(context);
         body.NoOtherKeys();
         if (grantee is not null && context.RequireReference("grantee", grantee, "principal") is null)
         {
@@ -51,7 +53,7 @@ public sealed class AuthorityType : IRecordType
         }
 
         context.RequireReference("basis", basis, "decision");
-        if (!context.HasRole(context.Record.By, Roles.Operator))
+        if (!(PolicyAuthority.IsPolicyGrant(context.Model, context.Record) ? PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At) : context.HasRole(context.Record.By, Roles.Operator)))
         {
             context.Error("authority.author", "Only an operator can grant authority.");
         }

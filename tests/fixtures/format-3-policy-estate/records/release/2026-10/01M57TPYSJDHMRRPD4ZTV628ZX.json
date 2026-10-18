@@ -1,0 +1,45 @@
+{
+  "at": "2026-10-13T14:00:27Z",
+  "body": {
+    "artifacts": [
+      {
+        "bytes": 10,
+        "hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "name": "example-0.8.0-linux-x64.tar.gz",
+        "platform": "linux-x64"
+      }
+    ],
+    "commit": "1111111111111111111111111111111111111111",
+    "evidence": [],
+    "limitations": [],
+    "qualified": [],
+    "recordFormat": {
+      "reads": [
+        1,
+        2,
+        3
+      ],
+      "writes": 3
+    },
+    "repository": "Example/example",
+    "signing": "unsigned fixture artifact",
+    "status": "candidate",
+    "version": "0.8.0"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:aa99f1cfcbdcc22de6d19fd70b8df14d902772ffa4c3d1d38df06a613278f8a2",
+  "id": "01M57TPYSJDHMRRPD4ZTV628ZX",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "mQIFNWna9zKKw1PWIifALp5KCxMG2UldVJKnz71HflMv2uX15u7Je-ZQXDS-yNeWcNBNfB7xNE8smChdURDr7A"
+    }
+  ],
+  "subject": {
+    "id": "01M57TPYPBZKR5291T0ZPZV757",
+    "type": "product"
+  },
+  "type": "release"
+}

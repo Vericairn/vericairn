@@ -1,0 +1,15 @@
+{
+  "at": "2026-10-13T12:00:01Z",
+  "body": {
+    "kind": "human",
+    "name": "Test Operator",
+    "roles": [
+      "operator"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:b45554f9dff85ceb8d8037b755384934b2920f0e514b07641f7af12849795bd0",
+  "id": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "type": "principal"
+}
