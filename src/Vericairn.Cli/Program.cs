@@ -10,7 +10,7 @@ Console.OutputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false
 Console.Out.NewLine = "\n";
 Console.Error.NewLine = "\n";
 
-if (Vericairn.Packs.Software.WorkspaceScopeProbe.TryRun(args) is int scopeResult)
+if (Vericairn.Adapters.Git.WorkspaceScopeProbe.TryRun(args) is int scopeResult)
 {
     return scopeResult;
 }

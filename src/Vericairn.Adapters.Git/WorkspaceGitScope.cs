@@ -7,7 +7,7 @@ using System.Text;
 using Microsoft.Win32.SafeHandles;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>Reads committed paths in an isolated observer, without loading the workspace's Git configuration or replacement refs.</summary>
 internal static class WorkspaceGitScope

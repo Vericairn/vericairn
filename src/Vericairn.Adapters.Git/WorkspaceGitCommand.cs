@@ -6,7 +6,7 @@ using System.Diagnostics;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>Worker-owned Git invocations. Never use this against agent-controlled repository configuration.</summary>
 internal static class WorkspaceGitCommand

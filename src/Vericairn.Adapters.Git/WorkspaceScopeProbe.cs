@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>The worker's isolated filesystem observer, hosted by the command line so a deadline can terminate even blocked I/O.</summary>
 public static class WorkspaceScopeProbe
