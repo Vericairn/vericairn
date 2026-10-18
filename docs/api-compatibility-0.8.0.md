@@ -108,6 +108,7 @@ key semantics. Nested state lists are also read-only.
 | `Vericairn.Records.Estate.GoalPredicates.States` | `public static IReadOnlyDictionary<string, IReadOnlyList<string>> { get; }` backed by `Dictionary` | Same property; `ReadOnlyDictionary` over private storage, retaining the read-only lists |
 | `Vericairn.Protocol.ProtocolJson.Options` | `public static JsonSerializerOptions { get; }`; writable until first serialization | Same property and serialization settings; read-only on creation |
 | `Vericairn.Runtime.Workers.WorkerOptions.Default` | `public static WorkerOptions { get; }`; configurations backed by mutable dictionary | Same property; its empty configurations are read-only |
+| `Vericairn.Runtime.Workers.RunCapabilities.Unsupported` | `public static RunCapabilities { get; }`; five empty collection-expression lists | Same property and empty values; the record now owns read-only list snapshots |
 
 To customize JSON conventions, construct `new JsonSerializerOptions(ProtocolJson.Options)`
 and change that private copy. Do not mutate the shared defaults.
@@ -193,6 +194,7 @@ The test implementation retains these members and their behavior.
 | `FakeReleaseProvider.DispatchBehavior.Normal` | Removed; same test support value |
 | `FakeReleaseProvider.DispatchBehavior.RefuseAuthentication` | Removed; same test support value |
 | `FakeReleaseProvider.DispatchBehavior.Uncertain` | Removed; same test support value |
+| `FakeReleaseProvider.DispatchBehavior.value__`: compiler-generated `public int` backing field | Removed from the runtime; unchanged backing in the test support enum |
 | `FakeReleaseProvider(string provider = "github-releases")` | Removed; same test support constructor |
 | `DispatchBehavior NextDispatch { get; set; }` | Removed; same test support property |
 | `string HeadSha { get; set; }` | Removed; same test support property |
@@ -212,6 +214,10 @@ The test implementation retains these members and their behavior.
 `Minute` is not a supported time-unit override. Consumers use the existing
 `Heartbeat`, `Grace` and `StopWait` options for worker pacing. Tests reach the
 internal seam through the existing friend assemblies.
+
+Property rows include their getter and, where present, setter methods. The enum's
+underlying type remains `int` in test support, with `Normal = 0`,
+`RefuseAuthentication = 1` and `Uncertain = 2`.
 
 ## Infrastructure retained intentionally
 

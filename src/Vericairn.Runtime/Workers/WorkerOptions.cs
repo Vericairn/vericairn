@@ -42,8 +42,8 @@ public sealed record WorkerOptions
     /// </summary>
     public TimeSpan StopWait { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>The length of one of a cap's wall minutes; a minute, and shorter only where a test paces a run.</summary>
-    public TimeSpan Minute { get; init; } = TimeSpan.FromMinutes(1);
+    // Test clock scaling stays inside the runtime's friend assemblies; a cap's public unit is always a minute.
+    internal TimeSpan Minute { get; init; } = TimeSpan.FromMinutes(1);
 
     /// <summary>The environment a harness's is built from, copied on initialization and passed through the allowlist; this process's own when null.</summary>
     public IReadOnlyDictionary<string, string>? Environment
