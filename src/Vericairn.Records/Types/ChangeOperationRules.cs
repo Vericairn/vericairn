@@ -23,8 +23,8 @@ internal static class ChangeOperationRules
     internal static void Read(ValidationContext context)
     {
         BodyReader body = context.Body;
-        IReadOnlyList<string>? required = body.StringArray("requiredChecks", false, allowEmpty: true, maxItemLength: 200);
-        IReadOnlyList<BodyReader>? checks = body.NestedArray("checks", false, allowEmpty: true);
+        IReadOnlyList<string>? required = body.Since(3, "requiredChecks") ? body.StringArray("requiredChecks", false, allowEmpty: true, maxItemLength: 200) : null;
+        IReadOnlyList<BodyReader>? checks = body.Since(3, "checks") ? body.NestedArray("checks", false, allowEmpty: true) : null;
         foreach (BodyReader check in checks ?? [])
         {
             check.Text("name", true, 200);
@@ -33,7 +33,7 @@ internal static class ChangeOperationRules
             check.Enum("conclusion", false, "success", "failure", "cancelled", "skipped", "neutral", "timed_out", "action_required", "stale", "startup_failure", "unknown");
             check.NoOtherKeys();
         }
-        BodyReader? scan = body.Nested("scan", false);
+        BodyReader? scan = body.Since(3, "scan") ? body.Nested("scan", false) : null;
         if (scan is not null)
         {
             scan.Text("tool", true, 100, Patterns.Slug, "a tool id");
@@ -47,6 +47,12 @@ internal static class ChangeOperationRules
         {
             if (required is not null || checks is not null || scan is not null)
                 context.Error("operation.change-evidence", "Checks and scans belong to repository change operations.");
+            return;
+        }
+
+        if (context.Format < 3)
+        {
+            context.Error("operation.format", "Repository change operations belong to record format 3; an estate records them once it is upgraded to a release that writes that format.");
             return;
         }
 

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json.Nodes;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
@@ -95,9 +96,29 @@ public sealed class RepositoryChangeRecordsTests
         Assert.Contains(fixture.Estate.Load().Findings, f => f.Code == "product.changes");
     }
 
+    [Fact]
+    public void RepositoryChangesBelongToRecordFormatThree()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        RecordEnvelope repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"private"}""");
+        RecordEnvelope product = estate.Add("product", estate.OperatorId, $$$"""
+            {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],
+             "changes":{"provider":"example","repository":"{{{repository.Id}}}","target":"main","requiredChecks":["tests"]}}
+            """);
+        estate.Add("operation", estate.OperatorId, $$$"""
+            {"provider":"example","action":"change-merge","identity":"example-change","intent":"A checked repository change.","status":"not-started",
+             "target":{"head":"{{{Head}}}","product":"{{{product.Id}}}","productHash":"{{{product.ComputedHash}}}","destination":"Example/widget","target":"main"},
+             "requiredChecks":["tests"],"evidence":[]}
+            """);
+        List<Finding> findings = estate.Load().Findings.ToList();
+        Assert.Contains(findings, f => f.Code == "body.format" && f.Location.EndsWith("#body.changes", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "body.format" && f.Location.EndsWith("#body.requiredChecks", StringComparison.Ordinal));
+        Assert.Contains(findings, f => f.Code == "operation.format");
+    }
+
     private sealed class Fixture : IDisposable
     {
-        internal TestEstate Estate { get; } = new(recordFormat: 2);
+        internal TestEstate Estate { get; } = new(recordFormat: 3);
         internal RecordEnvelope Product { get; }
         private readonly RecordEnvelope repository;
         private readonly bool none;

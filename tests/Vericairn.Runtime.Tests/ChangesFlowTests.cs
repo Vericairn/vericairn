@@ -479,7 +479,7 @@ public sealed class ChangesFlowTests
 
     internal sealed class Fixture : IDisposable
     {
-        internal TestEstate Estate { get; } = new(recordFormat: 2);
+        internal TestEstate Estate { get; } = new(recordFormat: 3);
         internal ControlledProvider Provider { get; } = new();
         internal TestPushAdapter Adapter { get; } = new();
         internal TestScanner Scanner { get; } = new();
