@@ -21,7 +21,7 @@ internal static class WorkspaceScopeAudit
 
     public static WorkspaceSnapshot Capture(string workspace) => WorkspaceScopeProbe.Capture(workspace, Deadline);
 
-    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null)
+    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         string? problem = null;
@@ -76,7 +76,7 @@ internal static class WorkspaceScopeAudit
             {
                 CheckDeadline();
                 string leaf = Path.GetFileName(path);
-                if (leaf == ".git")
+                if (leaf == ".git" && !includeGit)
                 {
                     if (prefix.Length > 0)
                     {
@@ -102,6 +102,7 @@ internal static class WorkspaceScopeAudit
                     }
                     else if ((attributes & FileAttributes.Directory) != 0)
                     {
+                        if (includeGit) files[name] = "directory";
                         Visit(path, name + "/");
                     }
                     else
