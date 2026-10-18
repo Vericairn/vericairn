@@ -29,7 +29,7 @@ public class DocsTests
         {
             Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
             string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
-            Check(CliApp.Build(), string.Empty);
+            Check(CliApp.Build(cancellationToken: TestContext.Current.CancellationToken), string.Empty);
 
             void Check(Command command, string path)
             {

@@ -169,7 +169,7 @@ public class LocalNetworkConformanceTests
         var pretend = new RuntimeConnection(Ulid.NewUlid().Value, harness.Address, harness.Estate.Estate.Id, null, harness.Host.IdentityPublicKey!, id, Base64Url.EncodeToString(spki), harness.Estate.BuilderId, null, ["local-network"], "2026-10-15T00:00:00Z");
         using (VericairnClient client = VericairnClient.LocalNetwork(pretend, strangerSigner))
         {
-            HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.Health());
+            HttpRequestException refused = Assert.ThrowsAny<HttpRequestException>(() => client.Health());
             Assert.Equal(ConnectionStates.Denied, Refusal(refused).State);
         }
 
@@ -215,7 +215,7 @@ public class LocalNetworkConformanceTests
 
         // A new connection fares no better: the SDK is refused while it sets up, and a check says denied.
         using VericairnClient client = harness.Connections.Connect(connection);
-        Assert.Equal(ConnectionStates.Denied, Refusal(Assert.Throws<HttpRequestException>(() => client.Health())).State);
+        Assert.Equal(ConnectionStates.Denied, Refusal(Assert.ThrowsAny<HttpRequestException>(() => client.Health())).State);
         ConnectionStatus check = harness.Connections.Probe(connection);
         Assert.Equal(ConnectionStates.Denied, check.State);
         Assert.Contains("revoked", check.Message, StringComparison.Ordinal);
@@ -342,7 +342,7 @@ public class LocalNetworkConformanceTests
         RuntimeConnection redirected = connection with { Id = Ulid.NewUlid().Value, Address = impostor.Address };
         using (VericairnClient misled = harness.Connections.Connect(redirected))
         {
-            RuntimeConnectionException refused = Refusal(Assert.Throws<HttpRequestException>(() => misled.Health()));
+            RuntimeConnectionException refused = Refusal(Assert.ThrowsAny<HttpRequestException>(() => misled.Health()));
             Assert.Equal(ConnectionStates.Unavailable, refused.State);
             Assert.Contains("did not prove the runtime identity", refused.Message, StringComparison.Ordinal);
         }

@@ -12,6 +12,22 @@ namespace Vericairn.Runtime.Tests;
 public sealed class SdkOperationsTests
 {
     [Fact]
+    public async Task CancelledPairingAndConnectionProbeStopBeforeOpeningAConnection()
+    {
+        using var stop = new CancellationTokenSource();
+        stop.Cancel();
+        ClientCancelledException pairing = await Assert.ThrowsAsync<ClientCancelledException>(() =>
+            RuntimePairing.PairAsync("unused", "unused", new PairingOptions("Test device"), stop.Token));
+        Assert.False(pairing.OutcomeUnknown);
+        string testHome = Path.Combine(Path.GetTempPath(), "vericairn-pre-cancelled-" + Guid.NewGuid().ToString("N"));
+        var connection = new RuntimeConnection("unused", "unused", "unused", null, "unused", "unused", "unused", "unused", null, [], "2026-10-18T00:00:00Z");
+        ClientCancelledException probe = await Assert.ThrowsAsync<ClientCancelledException>(() =>
+            new RuntimeConnections(testHome).ProbeAsync(connection, cancellationToken: stop.Token));
+        Assert.False(probe.OutcomeUnknown);
+        Assert.False(Directory.Exists(testHome));
+    }
+
+    [Fact]
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();

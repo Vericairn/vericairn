@@ -39,20 +39,16 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
-            if (existing is not null && VericairnClient.IsAlive(existing))
+            if (existing is not null && context.IsAlive(existing))
             {
                 return context.Fail($"Daemon {existing.ProcessId} already serves this estate; one process owns an estate's live state.");
             }
 
-            using var stop = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, e) =>
-            {
-                e.Cancel = true;
-                stop.Cancel();
-            };
+            using var stop = CancellationTokenSource.CreateLinkedTokenSource(context.CancellationToken);
+            using IDisposable interrupt = context.HandleInterrupt(stop.Cancel);
             using PosixSignalRegistration? hangup = IgnoreHangup();
             var options = new DaemonOptions { Log = line => context.Output.WriteLine($"{RecordParser.FormatTimestamp(DateTimeOffset.UtcNow)} {line}") };
-            DaemonHost host = DaemonHost.StartAsync(root, loopback: loopback, options: options).GetAwaiter().GetResult();
+            DaemonHost host = DaemonHost.StartAsync(root, loopback: loopback, options: options, cancellationToken: context.CancellationToken).GetAwaiter().GetResult();
             context.Output.WriteLine($"vericairnd {CommandContext.VersionText()} serving {host.Service.Root}");
             context.Output.WriteLine($"  {host.Endpoint.Kind}  {host.Endpoint.Address}");
             if (host.Endpoint.Loopback is LoopbackEndpoint published)
@@ -75,7 +71,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         {
             return context.Fail(exception.Message);
         }
-        catch (Exception exception) when (detached)
+        catch (Exception exception) when (detached && ClientFailure.FromException(exception) is null)
         {
             // Nobody reads a detached daemon's streams: an unexpected failure goes to its log, where 'runtime start' finds it.
             return context.Fail($"the daemon stopped on an unexpected {exception.GetType().Name}: {exception.Message}");
@@ -92,7 +88,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             }
 
             DaemonEndpoint? existing = DaemonHost.Discover(root);
-            if (existing is not null && VericairnClient.IsAlive(existing))
+            if (existing is not null && context.IsAlive(existing))
             {
                 return RuntimeStatus(root, json);
             }
@@ -136,7 +132,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             while (DateTimeOffset.UtcNow < deadline)
             {
                 DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-                if (endpoint is not null && endpoint.ProcessId == process.Id && VericairnClient.IsAlive(endpoint))
+                if (endpoint is not null && endpoint.ProcessId == process.Id && context.IsAlive(endpoint))
                 {
                     return RuntimeStatus(root, json);
                 }
@@ -146,7 +142,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
                     return context.Fail($"The daemon exited with code {process.ExitCode} before serving{LogSince(log, logStart)}. Its log is {log}.");
                 }
 
-                Thread.Sleep(200);
+                Task.Delay(200, context.CancellationToken).GetAwaiter().GetResult();
             }
 
             return context.Fail($"The daemon did not start serving within 30 seconds{LogSince(log, logStart)}. Its log is {log}.");
@@ -165,7 +161,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-        if (endpoint is null || !VericairnClient.IsAlive(endpoint))
+        if (endpoint is null || !context.IsAlive(endpoint))
         {
             context.Output.WriteLine(json ? "{\"stopped\":null}" : "no daemon is serving this estate");
             return Clean;
@@ -175,20 +171,20 @@ internal sealed class DaemonLifecycle(CommandContext context)
         {
             using (var client = new VericairnClient(endpoint))
             {
-                client.Shutdown();
+                client.ShutdownAsync(context.CancellationToken).GetAwaiter().GetResult();
             }
 
             var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
-            while (DateTimeOffset.UtcNow < deadline && VericairnClient.IsAlive(endpoint))
+            while (DateTimeOffset.UtcNow < deadline && context.IsAlive(endpoint))
             {
-                Thread.Sleep(200);
+                Task.Delay(200, context.CancellationToken).GetAwaiter().GetResult();
             }
 
-            bool stopped = !VericairnClient.IsAlive(endpoint);
+            bool stopped = !context.IsAlive(endpoint);
             context.Output.WriteLine(json ? JsonSerializer.Serialize(new { stopped = stopped ? endpoint.ProcessId : (int?)null, process = endpoint.ProcessId }) : $"asked daemon {endpoint.ProcessId} to stop; {(stopped ? "stopped" : "still answering")}");
             return stopped ? Clean : HasErrors;
         }
-        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidOperationException)
+        catch (Exception exception) when ((exception is HttpRequestException or IOException or InvalidOperationException) && exception is not IClientOperationFailure)
         {
             return context.Fail(exception.Message);
         }
@@ -202,7 +198,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
         }
 
         DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-        bool alive = endpoint is not null && VericairnClient.IsAlive(endpoint);
+        bool alive = endpoint is not null && context.IsAlive(endpoint);
         string? configured = null;
         try
         {

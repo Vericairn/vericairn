@@ -77,7 +77,7 @@ internal sealed class WorkerOperations(CommandContext context)
 
         return context.WithApi(root, api =>
         {
-            if (options.Detach && api is not VericairnClient)
+            if (options.Detach && !context.UsingDaemon)
             {
                 return context.Fail("--detach leaves the run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or run in the foreground.");
             }
@@ -106,7 +106,7 @@ internal sealed class WorkerOperations(CommandContext context)
                 return Clean;
             }
 
-            RunRow? row = RunConsole.Follow(api, started.Run, options.By);
+            RunRow? row = RunConsole.Follow(context, api, started.Run, options.By);
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));

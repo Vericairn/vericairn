@@ -47,7 +47,7 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
         {
             TimeoutException => new("timed-out", TimeoutMessage(unknown), unknown, 124),
             OperationCanceledException => new("cancelled", CancelledMessage(unknown), unknown, 130),
-            HttpRequestException => new("unavailable", UnavailableMessage(unknown), unknown, 1),
+            HttpRequestException => new("unavailable", UnavailableMessage(unknown), unknown, 2),
             _ => null,
         };
     }
