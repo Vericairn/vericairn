@@ -285,6 +285,14 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         Get<OperatorActionsResponse>("/v1/operator/actions" + CommunicationQuery(recipient, assignment, view))!;
 
     /// <inheritdoc />
+    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request, CancellationToken cancellationToken = default)
+    {
+        using HttpResponseMessage response = http.PostAsJsonAsync(new Uri("/v1/operator/record", UriKind.Relative), request, ProtocolJson.Options, cancellationToken).GetAwaiter().GetResult();
+        response.EnsureSuccessStatusCode();
+        return response.Content.ReadFromJsonAsync<OperatorRecordResponse>(ProtocolJson.Options, cancellationToken).GetAwaiter().GetResult()!;
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />

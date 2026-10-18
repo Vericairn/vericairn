@@ -82,6 +82,8 @@ public static class OperatorActions
             foreach (JsonObject command in item["commands"]!.AsArray().OfType<JsonObject>())
             {
                 text.Append("  Command: ").Append(command["command"]!.GetValue<string>()).Append('\n');
+                if (command["oneStep"]?["command"] is JsonNode oneStep)
+                    text.Append("  Record and merge: ").Append(oneStep.GetValue<string>()).Append('\n');
                 text.Append("    ").Append(command["purpose"]!.GetValue<string>()).Append('\n');
                 text.Append("    Supply JSON on standard input; fill every null with your own words or evidence:\n    ").Append(command["body"]!.ToJsonString()).Append('\n');
             }
@@ -287,11 +289,13 @@ public static class OperatorActions
         if (subject is not null) args.AddRange(["--subject", $"{subject.Type}:{subject.Id}:{subject.ComputedHash}"]);
         if (supersedes is not null) args.AddRange(["--supersedes", supersedes]);
         args.AddRange(["--body", "-"]);
+        List<string> oneStep = ["operator", "record", .. args.Skip(2)];
         // Only fixed command words, validated identifiers and hashes enter the command line. All authored prose stays in JSON stdin.
         item["commands"]!.AsArray().Add(new JsonObject
         {
             ["by"] = by, ["command"] = "vericairn " + string.Join(' ', args), ["arguments"] = Strings(args),
             ["body"] = body, ["purpose"] = purpose,
+            ["oneStep"] = new JsonObject { ["command"] = "vericairn " + string.Join(' ', oneStep), ["arguments"] = Strings(oneStep) },
         });
     }
 

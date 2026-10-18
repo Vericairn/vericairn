@@ -140,6 +140,9 @@ public interface IEstateApi
     /// <summary>Every recorded action waiting on operators, with reasons, exact commands and required input. Presentation never filters the queue; reads sign and record nothing.</summary>
     OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null);
 
+    /// <summary>Sign the operator's own record and carry its isolated commit through recorded repository operations; resume identical input safely.</summary>
+    OperatorRecordResponse OperatorRecord(OperatorRecordRequest request, CancellationToken cancellationToken = default);
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 

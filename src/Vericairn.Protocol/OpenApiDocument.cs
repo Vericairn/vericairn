@@ -54,6 +54,7 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
         ("GET", "/v1/operator/actions"),
+        ("POST", "/v1/operator/record"),
         ("GET", "/v1/goals"),
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
@@ -226,6 +227,11 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "OperatorActionsResponse: text in the selected communication settings, complete canonical JSON (vericairn.operator-actions/1), and hasErrors. Items retain their sources, reasons, waitsOn, inspection command and record-authoring commands with argument arrays and required JSON bodies; null body fields require operator input. No signing or provider access occurs." };
         }
+        else if (path == "/v1/operator/record")
+        {
+            responses["200"] = new JsonObject { ["description"] = "OperatorRecordResponse: the signed record, retained branch and head, last recorded change and exact recovery step. Only ok with completed means the pinned merge and target checks passed.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/OperatorRecordResponse" } } } };
+        }
         else if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
             DaemonResponses(path, responses);
@@ -323,6 +329,11 @@ public static class OpenApiDocument
             return new JsonObject { ["type"] = "object", ["properties"] = props };
         }
 
+        JsonObject operatorRecordRequest = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"),
+            ("supersedes", "string"), ("product", "string"), ("waitSeconds", "integer"), ("reconciliation", "string"));
+        operatorRecordRequest["required"] = new JsonArray("type", "by", "body");
+        operatorRecordRequest["properties"]!["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 240, ["default"] = 120 };
+
         return new JsonObject
         {
             ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
@@ -353,6 +364,8 @@ public static class OpenApiDocument
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
             ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
+            ["OperatorRecordRequest"] = operatorRecordRequest,
+            ["OperatorRecordResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("nextStep", "string"), ("record", "object"), ("branch", "string"), ("head", "string"), ("change", "object"), ("problem", "object")),
             ["ChangesOpenRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("title", "string"), ("body", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesObserveRequest"] = Object(("operation", "string"), ("by", "string"), ("cancel", "string")),
@@ -411,6 +424,7 @@ public static class OpenApiDocument
         "/v1/releases/submit" => "ReleaseSubmitRequest",
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
+        "/v1/operator/record" => "OperatorRecordRequest",
         "/v1/changes/open" => "ChangesOpenRequest",
         "/v1/changes/merge" => "ChangesMergeRequest",
         "/v1/changes/observe" => "ChangesObserveRequest",
@@ -489,6 +503,7 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
+        ("POST", "/v1/operator/record") => "Sign the operator's own record on their admitted device, commit that record alone on a new estate branch, and scan, push, open, wait and merge through recorded changes operations. Requires a clean repository-synced estate at record format 3 and declared checks. Identical input resumes the original action; uncertain effects are observed before retry. waitSeconds bounds each check phase from 0 to 240 (default 120). Synchronous only; not exposed through MCP.",
         ("POST", "/v1/changes/open") => "Record intent and open a pull request from an exact head with a recorded successful scanned push.",
         ("POST", "/v1/changes/merge") => "Record intent and checks, refuse missing or unsuccessful checks, merge pinned to the head, and observe the target run. A failure raises an operator ask.",
         ("POST", "/v1/changes/observe") => "Record an observation under an original change's provider and head; incomplete or uncertain outcomes remain uncertain.",

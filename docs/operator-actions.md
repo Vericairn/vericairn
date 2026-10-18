@@ -53,9 +53,65 @@ body still passes all existing authoring, authority and signing checks.
 
 Inspect before acting. The commands record judgments, starts, results, discharges or observed
 publication; they do not carry out the underlying reserved work. They operate in the selected estate.
-The queue itself signs nothing, holds no key, and offers no operation through MCP. The command that
-will also commit, scan, push and merge a signed record is a later stage, after MERGE-01's operations
-are available.
+The queue itself signs nothing and holds no key. Each authoring command also offers
+`operator record` with the same type, author, subject, superseded record and JSON input. Neither
+operator command is offered through MCP.
+
+## Record and merge in one command
+
+Fill the required body fields, inspect the pinned evidence, and run the item's **Record and merge**
+command on your own admitted device. For example:
+
+```sh
+vericairn operator record acceptance --by <operator-id> --subject release:<candidate-id>:<candidate-hash> --body -
+```
+
+The body comes from standard input; `--body acceptance.json` also accepts a file. The command
+uses the existing record authoring and device signing path, including the device's presence prompt
+where required. It requires a signature even when the estate otherwise permits unsigned records.
+It cannot borrow another principal's authority or device, and it never receives or retains a key.
+
+The estate must use repository-synced storage at record format 3. Its repository must be registered
+as the clone of a resource named by a product's `changes` declaration, as described in
+[Checked repository changes](changes.md). That declaration must name at least one required check.
+The command selects the unique matching product; `--product <product-id>` resolves ambiguity.
+It refuses a different repository, an unavailable provider or adapter, incomplete history, a detached
+head, an in-progress repository operation, and other working-tree or index changes.
+
+After validating your signed record, it creates `operator/<record-id>` from the current head and
+commits that record alone. Local git hooks are disabled for branch creation and commit, and git
+commit signing is disabled; the record retains its own device signature. The runtime invokes MERGE-01's recorded
+push (including its scan), opening, observations and merge. Each check must pass at the exact
+committed head. The merge rechecks the inventory and uses the provider's atomic head condition.
+Finally, recorded observations check the target run at the confirmed merge commit.
+
+`--wait-seconds` bounds each check phase from 0 to 240 seconds, defaulting to 120. Zero observes
+once. Missing or pending checks may become ready during that interval. Failed, skipped, unknown,
+incomplete or stale-head observations stop the command. A successful merge with pending or failed
+target checks remains an incomplete command; a failed target run records MERGE-01's operator ask.
+
+Every stop retains the branch, signed record and any pull request already opened. The output gives
+the last operation and a next step. Supply exactly the same JSON body and authoring arguments to
+resume, even after restarting the runtime. A local checkpoint pins the original record identity,
+hash, branch and base; the runtime verifies the record and commit and continues from the recorded
+operations. It does not sign or commit a second acceptance. The checkpoint contains no input body,
+key or credential and belongs to this clone's runtime storage; resume from that clone.
+
+A known failure needs `--reconciliation <explanation>` after its cause has been resolved. An
+uncertain effect must first be observed under its original operation identity; reconciliation text
+alone never permits a retry. If the host still cannot establish the outcome, follow the explicit
+operator reconciliation procedure in [Checked repository changes](changes.md). Another action
+cannot displace an unfinished action's checkpoint. Keep the original body until the action completes.
+
+The acceptance commit contains only the acceptance. Operation revisions, observations and any
+target-failure ask stay in the estate as separate, uncommitted records. A resumed action tolerates
+only its own untracked receipts; it never stages them or unrelated work. Preserve and commit those
+receipts separately before starting a new action. No branch is automatically deleted or reset.
+
+Git and gh use the user's own login and configuration. There is no token parameter or credential
+retrieval. If the client disconnects or cancels, the runtime lets the current recorded operation
+settle and stops before the next effect. Wait for that operation to settle, then resume the same
+input to inspect its recorded outcome. The synchronous SDK method also accepts a cancellation token.
 
 ## Presentation and API
 
@@ -71,6 +127,17 @@ the same read. The response contains `text`, `json` and `hasErrors`. The JSON do
 `title`, `state`, `why`, `waitsOn`, `references`, `inspect` and `commands`. Ask items also retain
 `recommendation` and `consequence`; obligations retain `resolution` and `gates`. Each command has
 `by`, `command`, an `arguments` array, a required-input `body` and its `purpose`.
+It additionally has `oneStep`, containing the `operator record` command and argument array for
+that same body. The existing authoring command and body remain unchanged.
+
+`POST /v1/operator/record` and the synchronous `VericairnClient.OperatorRecord(request)` method
+accept `OperatorRecordRequest`: `type`, `by`, `body`, optional `subject`, `supersedes`, `product`,
+`waitSeconds` and `reconciliation`. The response carries `identity`, `status`, `message`, `ok`,
+`nextStep`, `record`, `branch`, `head`, the last `change` response and any `problem`. The CLI returns
+0 only when `ok` is true, 1 for a refused, stopped or waiting action, and 2 for input or connection
+failure. `--json` preserves the full response. Authenticated device requests are bound to their own
+principal; all authoring, signature, authority and presence checks remain in force. No asynchronous
+counterpart is added by this stage.
 
 Record errors retain the unresolved items and findings but remove authoring commands. The new CLI
 command returns 0 for a valid read, 1 when the record snapshot has errors, and 2 when it cannot read

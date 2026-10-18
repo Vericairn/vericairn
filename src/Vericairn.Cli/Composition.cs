@@ -25,6 +25,7 @@ internal static class Composition
         registry.RegisterIfAbsent(new GitHubPullRequestProvider());
         registry.PushAdapter ??= new GitPushAdapter();
         registry.SecretScanner ??= new GitleaksScanner();
+        registry.RecordCommitAdapter ??= new GitRecordCommitAdapter();
         registry.RegisterIfAbsent(new GitCommandAdapter());
         registry.RegisterIfAbsent(new ClaudeCodeLauncher());
         registry.RegisterIfAbsent(new CodexLauncher());

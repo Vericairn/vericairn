@@ -60,6 +60,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
         app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
             Results.Json(service.OperatorActions(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
+        app.MapPost($"{v}/operator/record", (OperatorRecordRequest request, HttpContext context) => Results.Json(service.OperatorRecord(request, context.RequestAborted), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
