@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>A status change of a work order.</summary>
 public sealed class WorkStatusType : IRecordType
 {
     /// <summary>Allowed statuses; 'accepted' is never claimed here, it is derived from acceptance records.</summary>
-    public static readonly string[] Statuses = ["planned", "active", "paused", "submitted", "retired"];
+    public static readonly ImmutableArray<string> Statuses = ["planned", "active", "paused", "submitted", "retired"];
 
     /// <inheritdoc />
     public string Name => "work-status";

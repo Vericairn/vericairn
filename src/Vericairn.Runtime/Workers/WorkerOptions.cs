@@ -20,8 +20,12 @@ public sealed record WorkerOptions
 
     internal Func<uint>? WindowsJobInventory { get; init; }
 
-    /// <summary>Host-supplied configurations. Otherwise the launcher supplies one, or native runs read the user's WorkerConfigurationStore.</summary>
-    public IReadOnlyDictionary<string, RunConfiguration> Configurations { get; init; } = new Dictionary<string, RunConfiguration>(StringComparer.Ordinal);
+    /// <summary>Host-supplied configurations, copied on initialization. Otherwise the launcher supplies one, or native runs read the user's WorkerConfigurationStore.</summary>
+    public IReadOnlyDictionary<string, RunConfiguration> Configurations
+    {
+        get;
+        init => field = OptionCollections.Dictionary(value);
+    } = OptionCollections.Dictionary(new Dictionary<string, RunConfiguration>(StringComparer.Ordinal));
 
     /// <summary>The worker's defaults.</summary>
     public static WorkerOptions Default { get; } = new();
@@ -38,14 +42,22 @@ public sealed record WorkerOptions
     /// </summary>
     public TimeSpan StopWait { get; init; } = TimeSpan.FromSeconds(30);
 
-    /// <summary>The length of one of a cap's wall minutes; a minute, and shorter only where a test paces a run.</summary>
-    public TimeSpan Minute { get; init; } = TimeSpan.FromMinutes(1);
+    // Test clock scaling stays inside the runtime's friend assemblies; a cap's public unit is always a minute.
+    internal TimeSpan Minute { get; init; } = TimeSpan.FromMinutes(1);
 
-    /// <summary>The environment a harness's is built from, through the allowlist; this process's own when null.</summary>
-    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+    /// <summary>The environment a harness's is built from, copied on initialization and passed through the allowlist; this process's own when null.</summary>
+    public IReadOnlyDictionary<string, string>? Environment
+    {
+        get;
+        init => field = OptionCollections.OptionalDictionary(value);
+    }
 
-    /// <summary>The vericairn command the agent's MCP server is started with; the one beside this runtime when null, else vericairn on the path.</summary>
-    public IReadOnlyList<string>? Vericairn { get; init; }
+    /// <summary>The vericairn command the agent's MCP server is started with, copied on initialization; the one beside this runtime when null, else vericairn on the path.</summary>
+    public IReadOnlyList<string>? Vericairn
+    {
+        get;
+        init => field = OptionCollections.OptionalList(value);
+    }
 
     /// <summary>The vericairn command: the one configured, the executable beside this runtime, this process when it is vericairn, else vericairn on the path.</summary>
     public IReadOnlyList<string> VericairnCommand()

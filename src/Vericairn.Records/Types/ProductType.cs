@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>A product the estate owns, with its editions and surfaces.</summary>
@@ -10,10 +12,10 @@ public sealed class ProductType : IRecordType
     public string Name => "product";
 
     /// <summary>The roles an artifact a product's release declares can have.</summary>
-    public static readonly string[] ReleaseRoles = ["distributable", "sbom", "notices", "documentation", "other"];
+    public static readonly ImmutableArray<string> ReleaseRoles = ["distributable", "sbom", "notices", "documentation", "other"];
 
     /// <summary>The platform identifiers a declared artifact can be built for.</summary>
-    public static readonly string[] ReleasePlatforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
+    public static readonly ImmutableArray<string> ReleasePlatforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 
     /// <inheritdoc />
     public string Summary => "A product the estate owns: name, summary, editions and surfaces, and optionally how its releases are made (the destination and the artifacts a complete release carries). Details live in design documents.";

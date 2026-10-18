@@ -679,5 +679,12 @@ public sealed record DecisionResponse(string Text, JsonElement Body);
 public static class ProtocolJson
 {
     /// <summary>Camel-case names, no indentation, strings for enums.</summary>
-    public static JsonSerializerOptions Options { get; } = new(JsonSerializerDefaults.Web) { WriteIndented = false };
+    public static JsonSerializerOptions Options { get; } = CreateOptions();
+
+    private static JsonSerializerOptions CreateOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web) { WriteIndented = false };
+        options.MakeReadOnly(populateMissingResolver: true);
+        return options;
+    }
 }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.ObjectModel;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -20,15 +22,15 @@ namespace Vericairn.Records.Estate;
 public static class GoalPredicates
 {
     /// <summary>A predicate's verdicts.</summary>
-    public static readonly string[] Verdicts = ["met", "not-met", "unknown"];
+    public static readonly ImmutableArray<string> Verdicts = ["met", "not-met", "unknown"];
 
     /// <summary>The states a predicate may name, by record type: the states status derives for records of that type.</summary>
-    public static IReadOnlyDictionary<string, IReadOnlyList<string>> States { get; } = new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
+    public static IReadOnlyDictionary<string, IReadOnlyList<string>> States { get; } = new ReadOnlyDictionary<string, IReadOnlyList<string>>(new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal)
     {
         ["ask"] = ["open", "notified", "withdrawn", "answered"],
         ["living-document"] = ["current", "due"],
         ["work-order"] = ["planned", "active", "paused", "submitted", "retired", "accepted", "accepted (earlier revision)"],
-    };
+    });
 
     private enum Match
     {

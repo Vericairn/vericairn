@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -25,13 +26,13 @@ public static class AgentRuns
     public const string WorkerContract = "vericairn.worker/1";
 
     /// <summary>The units a run spends and is charged in: wall-clock minutes, tokens and currency.</summary>
-    public static readonly string[] ChargedUnits = ["wallMinutes", "tokens", "currency"];
+    public static readonly ImmutableArray<string> ChargedUnits = ["wallMinutes", "tokens", "currency"];
 
     /// <summary>How many of a goal's runs may be in flight at once when its budget states no concurrency: an absent cap is not unlimited.</summary>
     public const int DefaultConcurrency = 1;
 
     /// <summary>The statuses of a run that settled with an observed outcome.</summary>
-    public static readonly string[] Settled = ["observed-success", "known-failure"];
+    public static readonly ImmutableArray<string> Settled = ["observed-success", "known-failure"];
 
     /// <summary>One run: its intent, the first record of its operation, and its revisions in order, the latest last.</summary>
     /// <param name="Intent">The first record: the operation recorded as not-started, with its cap, before anything started.</param>
@@ -48,7 +49,7 @@ public static class AgentRuns
         public string Status => EstateModel.BodyString(Latest, "status") ?? "?";
 
         /// <summary>True once it settled with an observed outcome, success or failure.</summary>
-        public bool IsSettled => Array.IndexOf(Settled, Status) >= 0;
+        public bool IsSettled => Settled.IndexOf(Status) >= 0;
 
         /// <summary>True while nothing settled it: not started, dispatched or uncertain.</summary>
         public bool InFlight => !IsSettled && Status != "canceled";
@@ -78,7 +79,7 @@ public static class AgentRuns
         public JsonElement Cap => Intent.Body.TryGetProperty("cap", out JsonElement cap) ? cap : default;
 
         /// <summary>The usage its settlement recorded; undefined while it has none.</summary>
-        public JsonElement Usage => Revisions.FirstOrDefault(r => Array.IndexOf(Settled, EstateModel.BodyString(r, "status")) >= 0) is RecordEnvelope settled
+        public JsonElement Usage => Revisions.FirstOrDefault(r => EstateModel.BodyString(r, "status") is string status && Settled.IndexOf(status) >= 0) is RecordEnvelope settled
             && settled.Body.TryGetProperty("usage", out JsonElement usage) ? usage : default;
 
         /// <summary>A string value of the intent's target.</summary>

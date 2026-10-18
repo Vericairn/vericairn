@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public static class ReleaseFlow
     public const string DispatchAction = "dispatch-release-workflow";
 
     /// <summary>The platform identifiers a release's artifacts can name.</summary>
-    public static readonly string[] Platforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
+    public static readonly ImmutableArray<string> Platforms = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 
     /// <summary>The original identity of releasing a version to a destination through a provider; every retry reconciles under it.</summary>
     public static string Identity(string provider, string destination, string version) => $"{provider}:{destination}:v{version}";

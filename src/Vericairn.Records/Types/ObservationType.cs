@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 
@@ -10,7 +11,7 @@ namespace Vericairn.Records.Types;
 public sealed class ObservationType : IRecordType
 {
     /// <summary>What kinds of subject are observed so far.</summary>
-    public static readonly string[] Kinds = ["repository", "release", "workflow-run", "estate"];
+    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate"];
 
     /// <inheritdoc />
     public string Name => "observation";

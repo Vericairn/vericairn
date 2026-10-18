@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
@@ -11,16 +12,16 @@ namespace Vericairn.Records.Types;
 public sealed class DeviceType : IRecordType
 {
     /// <summary>Connectivity profiles a device may be permitted.</summary>
-    public static readonly string[] Profiles = ["embedded", "local-socket", "loopback", "local-network", "relay"];
+    public static readonly ImmutableArray<string> Profiles = ["embedded", "local-socket", "loopback", "local-network", "relay"];
 
     /// <summary>Platforms.</summary>
-    public static readonly string[] Platforms = ["windows", "linux", "macos", "ios", "android", "other"];
+    public static readonly ImmutableArray<string> Platforms = ["windows", "linux", "macos", "ios", "android", "other"];
 
     /// <summary>Whether each signature needs the owner's presence, from record format 2.</summary>
-    public static readonly string[] Presences = ["required", "none"];
+    public static readonly ImmutableArray<string> Presences = ["required", "none"];
 
     /// <summary>What a device is for, from record format 2: ordinary signing, or the operator's offline recovery.</summary>
-    public static readonly string[] Purposes = ["signing", "recovery"];
+    public static readonly ImmutableArray<string> Purposes = ["signing", "recovery"];
 
     /// <inheritdoc />
     public string Name => "device";
@@ -68,7 +69,7 @@ public sealed class DeviceType : IRecordType
             body.Error("device.public-key", "publicKey", "Not a base64url P-256 SubjectPublicKeyInfo.");
         }
 
-        foreach (string profile in (profiles ?? []).Where(p => Array.IndexOf(Profiles, p) < 0))
+        foreach (string profile in (profiles ?? []).Where(p => Profiles.IndexOf(p) < 0))
         {
             body.Error("body.enum", "profiles", $"Unknown profile '{profile}'. Known: {string.Join(", ", Profiles)}.");
         }
@@ -85,7 +86,7 @@ public sealed class DeviceType : IRecordType
         }
 
         // Custody never claims presence it cannot enforce, and an agent's or a service's device signs unattended.
-        if (presence == "required" && custody is not null && Array.IndexOf(DeviceKeyStores.PresenceKinds, custody) < 0)
+        if (presence == "required" && custody is not null && DeviceKeyStores.PresenceKinds.IndexOf(custody) < 0)
         {
             context.Error("device.presence", $"{custody} custody cannot enforce its owner's presence, so the device cannot claim it.");
         }

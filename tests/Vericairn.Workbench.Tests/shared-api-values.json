@@ -1,0 +1,492 @@
+{
+  "Vericairn.Mcp.McpServer.SupportedProtocolVersions": [
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05"
+  ],
+  "Vericairn.Mcp.Orientation.Harnesses": [
+    "Claude Code",
+    "Codex",
+    "Gemini CLI",
+    "GitHub Copilot",
+    "Cursor",
+    "Windsurf",
+    "aider",
+    "Cline"
+  ],
+  "Vericairn.Records.Estate.AgentRuns.ChargedUnits": [
+    "wallMinutes",
+    "tokens",
+    "currency"
+  ],
+  "Vericairn.Records.Estate.AgentRuns.Settled": [
+    "observed-success",
+    "known-failure"
+  ],
+  "Vericairn.Records.Estate.Asks.Waiting": [
+    "open",
+    "notified"
+  ],
+  "Vericairn.Records.Estate.EstateLayout.AllowedTopLevel": [
+    ".git",
+    ".github",
+    ".gitignore",
+    ".gitattributes",
+    ".mailmap",
+    ".vericairn",
+    "README.md",
+    "LICENSE",
+    "bootstrap",
+    "bootstrap.ps1",
+    "estate",
+    "records",
+    "design",
+    "docs",
+    "objects"
+  ],
+  "Vericairn.Records.Estate.EstateLayout.IgnoredTopLevel": [
+    ".git",
+    ".vericairn"
+  ],
+  "Vericairn.Records.Estate.EstateManifest.Profiles": [
+    "repository-synced",
+    "local-only"
+  ],
+  "Vericairn.Records.Estate.EstateStatus.ReconcileCodes": [
+    "reconcile.successors",
+    "work.duplicate-key",
+    "result.duplicate",
+    "estate.multiple",
+    "record.duplicate-id",
+    "batch.incomplete",
+    "batch.unreadable",
+    "communication.conflict"
+  ],
+  "Vericairn.Records.Estate.GoalPredicates.Verdicts": [
+    "met",
+    "not-met",
+    "unknown"
+  ],
+  "Vericairn.Records.Estate.GoalRules.Ended": [
+    "impossible",
+    "abandoned"
+  ],
+  "Vericairn.Records.Estate.GoalRules.EvaluationVerdicts": [
+    "met",
+    "not-yet",
+    "impossible"
+  ],
+  "Vericairn.Records.Estate.LivingDocuments.FoundationGenerators": [
+    "vericairn.mcp/orientation",
+    "vericairn.docs/notes",
+    "vericairn.records/releases",
+    "vericairn.records/progress"
+  ],
+  "Vericairn.Records.Estate.NextEligible.Dispatching": [
+    "agent",
+    "person",
+    "reserved",
+    "unavailable"
+  ],
+  "Vericairn.Records.Estate.NextEligible.RouteStates": [
+    "agent",
+    "person",
+    "reserved",
+    "unavailable",
+    "running",
+    "assigned",
+    "review",
+    "asked",
+    "answered"
+  ],
+  "Vericairn.Records.Model.RecordParser.HashExcludedKeys": [
+    "hash",
+    "signatures"
+  ],
+  "Vericairn.Records.Model.RecordParser.OptionalKeys": [
+    "subject",
+    "supersedes",
+    "signatures"
+  ],
+  "Vericairn.Records.Model.RecordParser.RequiredKeys": [
+    "format",
+    "type",
+    "id",
+    "at",
+    "by",
+    "body",
+    "hash"
+  ],
+  "Vericairn.Records.Signing.DeviceKeyStores.Format2Kinds": [
+    "windows-cng",
+    "macos-keychain",
+    "linux-secret-service",
+    "file-owner-only",
+    "macos-secure-enclave",
+    "offline"
+  ],
+  "Vericairn.Records.Signing.DeviceKeyStores.Kinds": [
+    "windows-cng",
+    "macos-keychain",
+    "linux-secret-service",
+    "file-owner-only"
+  ],
+  "Vericairn.Records.Signing.DeviceKeyStores.PresenceKinds": [
+    "macos-secure-enclave"
+  ],
+  "Vericairn.Records.Types.AcceptanceType.SubjectTypes": [
+    "work-order",
+    "result",
+    "goal"
+  ],
+  "Vericairn.Records.Types.AskType.States": [
+    "open",
+    "notified",
+    "withdrawn"
+  ],
+  "Vericairn.Records.Types.AssignmentType.RoutedWith": [
+    "run",
+    "ask"
+  ],
+  "Vericairn.Records.Types.Caps.UnitNames": [
+    "wallMinutes",
+    "attemptsPerStep",
+    "tokens",
+    "concurrency",
+    "currency"
+  ],
+  "Vericairn.Records.Types.CredentialReferenceType.Kinds": [
+    "api-token",
+    "oauth-client",
+    "signing-certificate",
+    "ssh-key",
+    "password",
+    "device-key",
+    "other"
+  ],
+  "Vericairn.Records.Types.CredentialReferenceType.Statuses": [
+    "active",
+    "rotated",
+    "revoked",
+    "retired"
+  ],
+  "Vericairn.Records.Types.DecisionType.Resolutions": [
+    "action",
+    "evidence",
+    "review",
+    "decision"
+  ],
+  "Vericairn.Records.Types.DecisionType.Stakes": [
+    "low",
+    "medium",
+    "high",
+    "critical"
+  ],
+  "Vericairn.Records.Types.DeviceType.Platforms": [
+    "windows",
+    "linux",
+    "macos",
+    "ios",
+    "android",
+    "other"
+  ],
+  "Vericairn.Records.Types.DeviceType.Presences": [
+    "required",
+    "none"
+  ],
+  "Vericairn.Records.Types.DeviceType.Profiles": [
+    "embedded",
+    "local-socket",
+    "loopback",
+    "local-network",
+    "relay"
+  ],
+  "Vericairn.Records.Types.DeviceType.Purposes": [
+    "signing",
+    "recovery"
+  ],
+  "Vericairn.Records.Types.DocumentReviewType.CheckOutcomes": [
+    "passed",
+    "failed",
+    "skipped",
+    "not-performed"
+  ],
+  "Vericairn.Records.Types.DocumentReviewType.Independences": [
+    "self",
+    "independent-agent",
+    "operator"
+  ],
+  "Vericairn.Records.Types.DocumentReviewType.Outcomes": [
+    "current",
+    "revised",
+    "needs-change"
+  ],
+  "Vericairn.Records.Types.ExecutionPolicy.Choices": [
+    "model",
+    "effort",
+    "provider",
+    "destination",
+    "dataBoundary",
+    "adapter"
+  ],
+  "Vericairn.Records.Types.GoalStatusType.Statuses": [
+    "active",
+    "paused",
+    "budget-limited",
+    "blocked",
+    "impossible",
+    "abandoned"
+  ],
+  "Vericairn.Records.Types.GoalType.Approvals": [
+    "sponsor-approves",
+    "self-approves-ordinary"
+  ],
+  "Vericairn.Records.Types.GoalType.Kinds": [
+    "finite",
+    "stewardship"
+  ],
+  "Vericairn.Records.Types.GoalType.PlanPolicies": [
+    "proposed-by-planner",
+    "given"
+  ],
+  "Vericairn.Records.Types.HarnessQualificationType.ProbeNames": [
+    "version",
+    "flags",
+    "tools",
+    "configuration",
+    "login",
+    "mcp"
+  ],
+  "Vericairn.Records.Types.LivingDocumentType.Checks": [
+    "names-version",
+    "matches-generator",
+    "links-resolve"
+  ],
+  "Vericairn.Records.Types.LivingDocumentType.Clearers": [
+    "any",
+    "independent",
+    "operator"
+  ],
+  "Vericairn.Records.Types.LivingDocumentType.Kinds": [
+    "authored",
+    "generated"
+  ],
+  "Vericairn.Records.Types.LivingDocumentType.Levels": [
+    "remind",
+    "warn",
+    "refuse"
+  ],
+  "Vericairn.Records.Types.LivingDocumentType.Triggers": [
+    "covers",
+    "release",
+    "upgrade",
+    "decision",
+    "accepted"
+  ],
+  "Vericairn.Records.Types.ObservationType.Kinds": [
+    "repository",
+    "release",
+    "workflow-run",
+    "estate"
+  ],
+  "Vericairn.Records.Types.OperationType.Statuses": [
+    "not-started",
+    "dispatched",
+    "observed-success",
+    "known-failure",
+    "canceled",
+    "uncertain"
+  ],
+  "Vericairn.Records.Types.PossibilityType.Dispositions": [
+    "open",
+    "parked",
+    "adopted",
+    "declined"
+  ],
+  "Vericairn.Records.Types.ProductType.ReleasePlatforms": [
+    "linux-x64",
+    "linux-arm64",
+    "osx-x64",
+    "osx-arm64",
+    "win-x64",
+    "win-arm64"
+  ],
+  "Vericairn.Records.Types.ProductType.ReleaseRoles": [
+    "distributable",
+    "sbom",
+    "notices",
+    "documentation",
+    "other"
+  ],
+  "Vericairn.Records.Types.QualificationType.Outcomes": [
+    "qualified",
+    "measured-in-part",
+    "not-qualified",
+    "non-claim"
+  ],
+  "Vericairn.Records.Types.RecordTypeRegistry.Reserved": [
+    "object"
+  ],
+  "Vericairn.Records.Types.ReleaseType.Platforms": [
+    "any",
+    "linux-x64",
+    "linux-arm64",
+    "osx-x64",
+    "osx-arm64",
+    "win-x64",
+    "win-arm64"
+  ],
+  "Vericairn.Records.Types.ReleaseType.Statuses": [
+    "candidate",
+    "published",
+    "withdrawn"
+  ],
+  "Vericairn.Records.Types.ResultType.CheckOutcomes": [
+    "passed",
+    "failed",
+    "skipped",
+    "not-performed"
+  ],
+  "Vericairn.Records.Types.ResultType.Outcomes": [
+    "completed",
+    "partial",
+    "blocked",
+    "abandoned"
+  ],
+  "Vericairn.Records.Types.Roles.All": [
+    "operator",
+    "builder",
+    "reviewer",
+    "contributor",
+    "service"
+  ],
+  "Vericairn.Records.Types.RosterType.KnownRoles": [
+    "planner",
+    "builder",
+    "reviewer",
+    "evaluator",
+    "release-manager",
+    "publisher",
+    "decider"
+  ],
+  "Vericairn.Records.Types.Scopes.Known": [
+    "local-engineering",
+    "repository-write",
+    "self-accept-ordinary-work",
+    "accept-work",
+    "administer",
+    "spending",
+    "qualify",
+    "manage-estate-policies",
+    "grant-policy-exceptions",
+    "manage-writing-exceptions"
+  ],
+  "Vericairn.Records.Types.VerificationType.EvidenceClasses": [
+    "observation",
+    "report",
+    "attestation",
+    "inference"
+  ],
+  "Vericairn.Records.Types.VerificationType.Observers": [
+    "person",
+    "agent",
+    "automation",
+    "provider"
+  ],
+  "Vericairn.Records.Types.VerificationType.Outcomes": [
+    "passed",
+    "failed",
+    "unknown"
+  ],
+  "Vericairn.Records.Types.VerificationType.Roles": [
+    "self",
+    "independent-agent",
+    "operator",
+    "automation"
+  ],
+  "Vericairn.Records.Types.WorkStatusType.Statuses": [
+    "planned",
+    "active",
+    "paused",
+    "submitted",
+    "retired"
+  ],
+  "Vericairn.Runtime.Providers.ProviderDescriptor.Statuses": [
+    "candidate",
+    "implemented",
+    "qualified",
+    "available"
+  ],
+  "Vericairn.Runtime.Release.ReleaseFlow.Platforms": [
+    "linux-x64",
+    "linux-arm64",
+    "osx-x64",
+    "osx-arm64",
+    "win-x64",
+    "win-arm64"
+  ],
+  "Vericairn.Runtime.Workers.RunSelection.Scopes": [
+    "launcher",
+    "roster",
+    "goal",
+    "assignment",
+    "run"
+  ],
+  "Vericairn.Runtime.Workers.WorkerEnvironment.Allowed": [
+    "PATH",
+    "HOME",
+    "USER",
+    "USERNAME",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "TERM",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_STATE_HOME",
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
+    "SystemRoot",
+    "SystemDrive",
+    "windir",
+    "ComSpec",
+    "PATHEXT",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "ProgramData",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+    "ProgramW6432",
+    "CommonProgramFiles",
+    "CommonProgramFiles(x86)",
+    "CommonProgramW6432",
+    "PUBLIC",
+    "ALLUSERSPROFILE",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "OS",
+    "DOTNET_ROOT",
+    "DOTNET_ROOT_X64",
+    "DOTNET_ROOT_ARM64",
+    "DOTNET_ROOT_X86",
+    "VERICAIRN_HOME",
+    "VERICAIRN_ENCLAVE_HELPER"
+  ],
+  "Vericairn.Runtime.Workers.WorkerEnvironment.McpServer": [
+    "VERICAIRN_HOME",
+    "VERICAIRN_ENCLAVE_HELPER",
+    "DOTNET_ROOT",
+    "DOTNET_ROOT_X64",
+    "DOTNET_ROOT_ARM64",
+    "DOTNET_ROOT_X86"
+  ]
+}

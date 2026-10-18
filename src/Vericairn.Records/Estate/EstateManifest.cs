@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Identity;
@@ -25,7 +26,7 @@ public sealed partial class EstateManifest
     public required string Profile { get; init; }
 
     /// <summary>Profiles this release implements.</summary>
-    public static readonly string[] Profiles = ["repository-synced", "local-only"];
+    public static readonly ImmutableArray<string> Profiles = ["repository-synced", "local-only"];
 
     /// <summary>"source" while Vericairn is built from a pinned commit; "release" once a release is pinned.</summary>
     public required string Mode { get; init; }
@@ -125,7 +126,7 @@ public sealed partial class EstateManifest
                     foreach (JsonProperty property in artifactsReader.Element.EnumerateObject())
                     {
                         string? hash = artifactsReader.Hash(property.Name, true);
-                        if (Array.IndexOf(Types.ReleaseType.Platforms, property.Name) < 0 || property.Name == "any")
+                        if (Types.ReleaseType.Platforms.IndexOf(property.Name) < 0 || property.Name == "any")
                         {
                             artifactsReader.Error("body.enum", property.Name, "Artifact platforms are runtime identifiers such as linux-x64, osx-arm64 or win-x64.");
                         }

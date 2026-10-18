@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -9,7 +10,7 @@ namespace Vericairn.Records.Types;
 public sealed class PossibilityType : IRecordType
 {
     /// <summary>What has become of an idea.</summary>
-    public static readonly string[] Dispositions = ["open", "parked", "adopted", "declined"];
+    public static readonly ImmutableArray<string> Dispositions = ["open", "parked", "adopted", "declined"];
 
     /// <summary>What an adopted idea can become.</summary>
     private static readonly string[] AdoptedAs = ["work-order", "decision", "goal"];

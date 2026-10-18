@@ -66,7 +66,7 @@ public static class GoalView
         {
             reasons.Add("it has not been activated");
         }
-        else if (Array.IndexOf(GoalRules.Ended, status) >= 0)
+        else if (GoalRules.Ended.IndexOf(status) >= 0)
         {
             reasons.Add($"it ended as {status}");
         }

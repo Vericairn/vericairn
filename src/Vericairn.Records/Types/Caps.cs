@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>
@@ -14,7 +16,7 @@ public static class Caps
     public const string Units = "wallMinutes, attemptsPerStep, tokens and concurrency (positive integers) and currency ({amount in minor units, unit: three upper-case letters}); an absent unit is not an unlimited one";
 
     /// <summary>The units by name, in the order a budget is shown.</summary>
-    public static readonly string[] UnitNames = ["wallMinutes", "attemptsPerStep", "tokens", "concurrency", "currency"];
+    public static readonly ImmutableArray<string> UnitNames = ["wallMinutes", "attemptsPerStep", "tokens", "concurrency", "currency"];
 
     /// <summary>
     /// What a caps object grants, unit by unit in the order of <see cref="UnitNames"/>: the cap in words, or null for a unit it does

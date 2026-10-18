@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>Who fills each role of the estate's work, in order of preference, from record format 2 (the estate's design/goals.md § 6).</summary>
 public sealed class RosterType : IRecordType
 {
     /// <summary>The roles the goals design names; an estate may name others.</summary>
-    public static readonly string[] KnownRoles = ["planner", "builder", "reviewer", "evaluator", "release-manager", "publisher", "decider"];
+    public static readonly ImmutableArray<string> KnownRoles = ["planner", "builder", "reviewer", "evaluator", "release-manager", "publisher", "decider"];
 
     /// <inheritdoc />
     public string Name => "roster";

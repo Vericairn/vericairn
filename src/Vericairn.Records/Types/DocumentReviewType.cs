@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -14,13 +15,13 @@ namespace Vericairn.Records.Types;
 public sealed class DocumentReviewType : IRecordType
 {
     /// <summary>current: the content holds; revised: it was changed for the trigger; needs-change: it is stale and stays due.</summary>
-    public static readonly string[] Outcomes = ["current", "revised", "needs-change"];
+    public static readonly ImmutableArray<string> Outcomes = ["current", "revised", "needs-change"];
 
     /// <summary>How independent the reviewer is of the document's content, as for a review.</summary>
-    public static readonly string[] Independences = ["self", "independent-agent", "operator"];
+    public static readonly ImmutableArray<string> Independences = ["self", "independent-agent", "operator"];
 
     /// <summary>The outcomes of a check run at the clearance.</summary>
-    public static readonly string[] CheckOutcomes = ["passed", "failed", "skipped", "not-performed"];
+    public static readonly ImmutableArray<string> CheckOutcomes = ["passed", "failed", "skipped", "not-performed"];
 
     /// <inheritdoc />
     public string Name => "document-review";
