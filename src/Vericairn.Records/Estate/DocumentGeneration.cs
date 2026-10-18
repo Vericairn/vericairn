@@ -75,6 +75,13 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
             throw new ArgumentException("The source path or content hash is invalid.", nameof(bytes));
         return new(kind, identity, hash, repository, path, [.. bytes], null, null, null, null, null, null);
     }
+
+    /// <summary>Already redacted local metadata, without a fictional repository or machine path.</summary>
+    public static DocumentSourceSnapshot LocalMetadata(string identity, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        return new("local-inspection", identity, ContentHash.Sha256(bytes), null, null, [.. bytes], null, null, null, null, null, null);
+    }
 }
 
 /// <summary>Interface version 1: the complete authorized selection and explicit parameters, with no ambient access.</summary>
@@ -175,6 +182,9 @@ public static class DocumentGeneration
         if (sources.IsDefault || sources.Any(s => !descriptor.SourceKinds.Contains(s.Kind) || !ContentHash.IsValid(s.Hash)
             || string.IsNullOrWhiteSpace(s.Identity) || s.Bytes.IsDefault
             || (s.Kind == "record" ? !descriptor.RecordTypes.Contains(s.RecordType ?? string.Empty) || !ValidRecord(s)
+                : s.Kind == "local-inspection" ? s.Repository is not null || s.Path is not null || s.RecordType is not null || s.Body is not null
+                    || s.At is not null || s.Title is not null || s.Supersedes is not null || s.Subject is not null || s.Author is not null || s.RecordFormat is not null
+                    || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash
                 : string.IsNullOrWhiteSpace(s.Repository) || s.Path is null || !DocumentPatterns.IsSafeSourcePath(s.Path) || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash))
             || sources.Select(s => (s.Kind, s.Identity)).Distinct().Count() != sources.Length)
             return "The source selection is inconsistent with the declared contract.";

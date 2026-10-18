@@ -83,7 +83,7 @@ internal sealed class RecordCompanionGenerator : IDocumentGenerator
             + (pages.Count > 1 ? ". Partial page; read every page at this same source basis for full detail.\n\n" : ". Complete selected detail.\n\n") + pages[page - 1]);
     }
 
-    private static IEnumerable<(JsonElement Value, string Path)> Select(JsonElement value, string[] segments, int at, string path)
+    internal static IEnumerable<(JsonElement Value, string Path)> Select(JsonElement value, string[] segments, int at, string path)
     {
         if (at == segments.Length) { yield return (value, path); yield break; }
         string segment = segments[at];

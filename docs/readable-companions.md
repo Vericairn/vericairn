@@ -89,3 +89,40 @@ record format is distinct from the format in which a charter was recorded.
 Manifest and artifact-map coverage is registered through `DocumentCoverage`.
 This generator refuses repository declarations; neither reader writes a file or
 record. Snapshot selection is a read model for future surfaces, not a new operation.
+
+## Local metadata inspectors
+
+`LocalCompanions` supplies runtime read models for clone identity observations,
+device custody, effective worker choices and launcher capabilities, runtime
+settings, certificate dates, connections, write outcomes, run observations,
+retained context accounting and recovery conditions. Adapters supply an explicit
+observation instant and a complete selected snapshot. Readers never open ambient
+storage, probe a launcher, contact an endpoint or infer present liveness.
+
+`vericairn.local/inspectors` contract 1 takes `format=1`, `audience=Internal`,
+`selection=item|list`, `field`, `index` and `page`. The runtime projection removes
+all fields outside each metadata schema before calculating the input digest.
+Missing or invalid metadata remains unknown. Root rows have canonical metadata
+order; nested observations retain source order. Registered nested collections
+support list and one-based item views. An incomplete snapshot is unavailable,
+distinct from an empty complete list. Large lists use labeled bounded pages.
+
+Coverage includes bounded no-reader reasons for private keys, recovery secrets,
+pairing codes, bearer values, replay entries, copied environments, raw logs,
+context bodies, tool configuration, machine bindings and storage internals.
+All renditions omit machine paths, including local and shareable views. Only
+projected canonical metadata can enter the local generator; direct submissions
+containing extra fields fail with no bytes or digest. Error messages omit the
+original exception and payload. Changes to excluded fields cannot change a
+metadata rendition or its digest.
+
+Worker choices show their explicit origin and observed compatibility. Launcher
+availability stays unknown until separately observed. A clone adapter checks a
+binding against the supplied repository identity before supplying its finding;
+bindings and exception messages never enter the output. The write ledger keeps
+intent/outcome identities and existing operation route templates, with no request
+arguments. Certificate dates use the requested instant and establish no trust.
+Device admission remains distinct from key possession; run observations remain
+distinct from contributor claims or recorded acceptance. Retained context shows
+hashes, byte accounting and unknown tokens without originals or presentations.
+These are read models for later surfaces; no command or API operation is added.
