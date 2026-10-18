@@ -19,14 +19,14 @@ needs attention, with compact, current items. Its [release notes](docs/releases/
 ## 0.8.0 — planned
 
 Estate policies and recurring maintenance duties help keep required work current. Readable views make
-records easier to inspect, an optional efficiency adapter helps reduce eligible agent context, and
-client operations can be cancelled. The release gate reads documents kept in other repositories at
+records easier to inspect, and client operations can be cancelled. The release gate reads documents kept in other repositories at
 those repositories' own commits. Commands show what needs the operator's attention and carry authorized
 work through checked pull requests and merges.
 
 ## 0.8.1 — planned
 
-Commands record exact document revisions and observe NuGet publication, listing and deprecation.
+Commands record exact document revisions and observe NuGet publication, listing and deprecation. An
+optional efficiency adapter helps reduce eligible agent context.
 
 ## 0.8.2 — planned
 

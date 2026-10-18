@@ -54,7 +54,7 @@ only recognized instruction files is allowed by the native scan; skills, other e
 Harness qualification is machine-local too: paired local-network devices are refused. The
 [software guide](docs/software.md#explicit-execution-and-environment-admission-run-01-070) describes the setup and
 admission checks. The efficiency Adapter
-is absent until the planned 0.8.0 work, Remote is not built, and context tokens remain unknown without a
+is absent until the planned 0.8.1 work, Remote is not built, and context tokens remain unknown without a
 qualified local tokenizer. Spending and containment limits remain as described in the guides.
 The seventh live Codex run committed the permitted file in its independent workspace on macOS; settlement
 audited the commit and fetched its branch into the registered clone. Only the workspace's own `.git` is
