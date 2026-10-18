@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
@@ -49,7 +50,7 @@ public sealed record RunPolicySource(string Scope, string Source, JsonElement Po
 public static class RunSelection
 {
     /// <summary>The precedence shared by every launcher, which may support fewer scopes.</summary>
-    public static readonly string[] Scopes = ["launcher", "roster", "goal", "assignment", "run"];
+    public static readonly ImmutableArray<string> Scopes = ["launcher", "roster", "goal", "assignment", "run"];
 
     /// <summary>Resolve choices and retain every contributing source, including choices later overridden.</summary>
     public static JsonObject Resolve(RunConfiguration configuration, RunCapabilities capabilities, IEnumerable<RunPolicySource> sources, JsonElement? overrides, JsonElement cap)
@@ -72,7 +73,7 @@ public static class RunSelection
             layers.Add(new("run", "explicit-run", JsonSerializer.SerializeToElement(new { choices = explicitChoices })));
         }
 
-        layers = layers.OrderBy(s => Array.IndexOf(Scopes, s.Scope)).ToList();
+        layers = layers.OrderBy(s => Scopes.IndexOf(s.Scope)).ToList();
         var requested = new JsonObject();
         var provenance = new JsonArray();
         foreach (RunPolicySource source in layers)

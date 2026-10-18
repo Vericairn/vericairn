@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -10,10 +11,10 @@ namespace Vericairn.Records.Types;
 public sealed class DecisionType : IRecordType
 {
     /// <summary>How much rides on a decision, from record format 2.</summary>
-    public static readonly string[] Stakes = ["low", "medium", "high", "critical"];
+    public static readonly ImmutableArray<string> Stakes = ["low", "medium", "high", "critical"];
 
     /// <summary>How an obligation a decision leaves is resolved, from record format 2.</summary>
-    public static readonly string[] Resolutions = ["action", "evidence", "review", "decision"];
+    public static readonly ImmutableArray<string> Resolutions = ["action", "evidence", "review", "decision"];
 
     /// <inheritdoc />
     public string Name => "decision";

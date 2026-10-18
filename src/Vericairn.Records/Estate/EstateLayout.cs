@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.ObjectModel;
+
 namespace Vericairn.Records.Estate;
 
 /// <summary>Where things live in an estate repository.</summary>
@@ -28,14 +30,14 @@ public static class EstateLayout
     public const long MaxObjectBytes = 8 * 1024 * 1024;
 
     /// <summary>Entries allowed at the repository root, git's metadata (.gitignore, .gitattributes, .mailmap) among them.</summary>
-    public static readonly IReadOnlySet<string> AllowedTopLevel = new HashSet<string>(StringComparer.Ordinal)
+    public static readonly IReadOnlySet<string> AllowedTopLevel = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal)
     {
         ".git", ".github", ".gitignore", ".gitattributes", ".mailmap", ".vericairn", "README.md", "LICENSE", "bootstrap", "bootstrap.ps1",
         "estate", RecordsDirectory, DesignDirectory, DocsDirectory, ObjectsDirectory,
-    };
+    });
 
     /// <summary>Entries never scanned or validated.</summary>
-    public static readonly IReadOnlySet<string> IgnoredTopLevel = new HashSet<string>(StringComparer.Ordinal) { ".git", ".vericairn" };
+    public static readonly IReadOnlySet<string> IgnoredTopLevel = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal) { ".git", ".vericairn" });
 
     /// <summary>Repository-relative path with forward slashes.</summary>
     public static string Relative(string root, string fullPath)

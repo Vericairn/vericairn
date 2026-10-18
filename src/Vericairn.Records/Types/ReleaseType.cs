@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -10,10 +11,10 @@ namespace Vericairn.Records.Types;
 public sealed class ReleaseType : IRecordType
 {
     /// <summary>Release states: a candidate is recorded before any publication; published is recorded after the publication is observed; withdrawn keeps the identity.</summary>
-    public static readonly string[] Statuses = ["candidate", "published", "withdrawn"];
+    public static readonly ImmutableArray<string> Statuses = ["candidate", "published", "withdrawn"];
 
     /// <summary>Runtime identifiers an artifact may target.</summary>
-    public static readonly string[] Platforms = ["any", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
+    public static readonly ImmutableArray<string> Platforms = ["any", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"];
 
     /// <summary>Keys a published revision may change relative to the candidate it supersedes; everything else must be identical.</summary>
     private static readonly string[] PublicationKeys = ["status", "publishedAt", "url"];

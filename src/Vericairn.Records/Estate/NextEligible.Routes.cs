@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -28,10 +29,10 @@ public static partial class NextEligible
     /// assigned (with the person it is assigned to), review (an agent's result awaits review), asked (an ask about it waits) and
     /// answered (no principal is available, and the principal asked answered, so is not asked again).
     /// </summary>
-    public static readonly string[] RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered"];
+    public static readonly ImmutableArray<string> RouteStates = ["agent", "person", "reserved", "unavailable", "running", "assigned", "review", "asked", "answered"];
 
     /// <summary>The route states the one-step operation acts on; every other state holds the step.</summary>
-    public static readonly string[] Dispatching = ["agent", "person", "reserved", "unavailable"];
+    public static readonly ImmutableArray<string> Dispatching = ["agent", "person", "reserved", "unavailable"];
 
     /// <summary>The route of an eligible step from this machine.</summary>
     /// <param name="Role">The role it is carried in.</param>
@@ -51,7 +52,7 @@ public static partial class NextEligible
     public sealed record Route(string Role, string? Reserved, Routing.Source Source, IReadOnlyList<Routing.Candidate> Candidates, string State, string? Principal, string? Launcher, RecordEnvelope? Assignment, RecordEnvelope? Ask, AgentRuns.Run? Run, IReadOnlyList<string> Budget, IReadOnlyList<string> Custody, string Reason, RecordEnvelope? Exception = null)
     {
         /// <summary>True when the one-step operation acts on it.</summary>
-        public bool Dispatches => Array.IndexOf(Dispatching, State) >= 0;
+        public bool Dispatches => Dispatching.IndexOf(State) >= 0;
 
         /// <summary>True when the goal's budget allows it now.</summary>
         public bool BudgetAllows => Budget.Count == 0;

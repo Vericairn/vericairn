@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -11,13 +12,13 @@ namespace Vericairn.Records.Types;
 public sealed class GoalType : IRecordType
 {
     /// <summary>A finite goal ends when it is done; a stewardship goal holds a standing condition.</summary>
-    public static readonly string[] Kinds = ["finite", "stewardship"];
+    public static readonly ImmutableArray<string> Kinds = ["finite", "stewardship"];
 
     /// <summary>Who plans the work: a planner proposes work orders, or the sponsor gives them.</summary>
-    public static readonly string[] PlanPolicies = ["proposed-by-planner", "given"];
+    public static readonly ImmutableArray<string> PlanPolicies = ["proposed-by-planner", "given"];
 
     /// <summary>Who approves a proposed plan.</summary>
-    public static readonly string[] Approvals = ["sponsor-approves", "self-approves-ordinary"];
+    public static readonly ImmutableArray<string> Approvals = ["sponsor-approves", "self-approves-ordinary"];
 
     /// <inheritdoc />
     public string Name => "goal";

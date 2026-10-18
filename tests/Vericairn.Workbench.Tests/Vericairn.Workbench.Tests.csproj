@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <EmbeddedResource Include="shared-api-values.json" />
     <Compile Include="../Vericairn.Records.Tests/TestEstate.cs" Link="Fixtures/TestEstate.cs" />
   </ItemGroup>
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -190,13 +191,13 @@ public static class EstateStatus
     /// batch.incomplete, a batch of records this machine stopped storing part-way, which the runtime reports from its journal;
     /// and batch.unreadable, a local recovery journal the runtime cannot safely judge.
     /// </summary>
-    public static readonly string[] ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict"];
+    public static readonly ImmutableArray<string> ReconcileCodes = ["reconcile.successors", "work.duplicate-key", "result.duplicate", "estate.multiple", "record.duplicate-id", "batch.incomplete", "batch.unreadable", "communication.conflict"];
 
     /// <summary>The findings that are reconcile tasks, sorted.</summary>
     public static IReadOnlyList<Finding> ReconcileTasks(FindingList findings)
     {
         ArgumentNullException.ThrowIfNull(findings);
-        return findings.Sorted().Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).ToList();
+        return findings.Sorted().Where(f => ReconcileCodes.IndexOf(f.Code) >= 0).ToList();
     }
 
     /// <summary>The latest explicit estate observation by a person, ordered by observed time then recorded time and id. Ordinary reads and automation do not count.</summary>
@@ -262,7 +263,7 @@ public static class EstateStatus
             }).ToArray()),
             ["findings"] = new JsonArray(model.Findings.Concat(checks).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["severity"] = f.Severity.ToString().ToLowerInvariant(), ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
-            ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => Array.IndexOf(ReconcileCodes, f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
+            ["reconcile"] = new JsonArray(model.Findings.Concat(checks).Where(f => ReconcileCodes.IndexOf(f.Code) >= 0).OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal)
                 .Select(f => (JsonNode)new JsonObject { ["code"] = f.Code, ["location"] = f.Location, ["message"] = f.Message }).ToArray()),
         };
         using JsonDocument document = JsonDocument.Parse(status.ToJsonString());

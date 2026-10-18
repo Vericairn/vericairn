@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 
@@ -38,19 +39,19 @@ public interface IDeviceKeyStore
 public static class DeviceKeyStores
 {
     /// <summary>Custody kinds a device record of record format 1 may claim.</summary>
-    public static readonly string[] Kinds = ["windows-cng", "macos-keychain", "linux-secret-service", "file-owner-only"];
+    public static readonly ImmutableArray<string> Kinds = ["windows-cng", "macos-keychain", "linux-secret-service", "file-owner-only"];
 
     /// <summary>The custody of a recovery device's key: exported once when it was made, encrypted with its owner's passphrase, and kept off every machine.</summary>
     public const string OfflineKind = "offline";
 
     /// <summary>Custody kinds a device record of record format 2 may claim: format 1's, the macOS Secure Enclave, and a recovery key kept offline.</summary>
-    public static readonly string[] Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind];
+    public static readonly ImmutableArray<string> Format2Kinds = [.. Kinds, SecureEnclaveCustody.Kind, OfflineKind];
 
     /// <summary>Custody kinds that can enforce their owner's presence at every signature.</summary>
-    public static readonly string[] PresenceKinds = [SecureEnclaveCustody.Kind];
+    public static readonly ImmutableArray<string> PresenceKinds = [SecureEnclaveCustody.Kind];
 
     /// <summary>Whether a new device needs its owner's presence when nobody says: a person's does wherever its custody enforces it; an agent's or a service's never does.</summary>
-    public static bool PresenceByDefault(bool person, string custodyKind) => person && Array.IndexOf(PresenceKinds, custodyKind) >= 0;
+    public static bool PresenceByDefault(bool person, string custodyKind) => person && PresenceKinds.IndexOf(custodyKind) >= 0;
 
     /// <summary>
     /// The strongest store this machine offers: CNG on Windows, where no key file exists; on a Mac with a Secure Enclave and the
@@ -92,7 +93,7 @@ public static class DeviceKeyStores
             "secret-service" or SecretServiceCustody.Kind => throw new PlatformNotSupportedException($"Secret-service custody needs Linux with a running secret service and {SecretServiceCustody.Tool} (libsecret)."),
             _ => throw new ArgumentException($"Unknown custody '{custody}'. Use file, secure-enclave on a Mac, secret-service on Linux, or cng on Windows.", nameof(custody)),
         };
-        if (presence && Array.IndexOf(PresenceKinds, store.Kind) < 0)
+        if (presence && PresenceKinds.IndexOf(store.Kind) < 0)
         {
             throw new ArgumentException($"{store.Kind} custody cannot enforce its owner's presence, and custody never claims presence it cannot enforce.", nameof(presence));
         }

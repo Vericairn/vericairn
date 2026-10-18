@@ -1448,7 +1448,7 @@ public sealed partial class EstateService
     private static JsonObject Charges(IReadOnlyDictionary<string, long> charge, JsonElement cap)
     {
         var json = new JsonObject();
-        foreach ((string unit, long value) in charge.OrderBy(c => Array.IndexOf(AgentRuns.ChargedUnits, c.Key)))
+        foreach ((string unit, long value) in charge.OrderBy(c => AgentRuns.ChargedUnits.IndexOf(c.Key)))
         {
             json[unit] = unit == "currency" ? new JsonObject { ["amount"] = value, ["unit"] = AgentRuns.CurrencyUnit(cap) } : value;
         }

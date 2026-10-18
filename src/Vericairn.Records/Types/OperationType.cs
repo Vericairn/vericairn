@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
@@ -15,7 +16,7 @@ namespace Vericairn.Records.Types;
 public sealed class OperationType : IRecordType
 {
     /// <summary>The states of an external operation, in the product's state language.</summary>
-    public static readonly string[] Statuses = ["not-started", "dispatched", "observed-success", "known-failure", "canceled", "uncertain"];
+    public static readonly ImmutableArray<string> Statuses = ["not-started", "dispatched", "observed-success", "known-failure", "canceled", "uncertain"];
 
     private static readonly Dictionary<string, string[]> Transitions = new(StringComparer.Ordinal)
     {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -10,7 +11,7 @@ namespace Vericairn.Records.Types;
 public sealed class AskType : IRecordType
 {
     /// <summary>The states an asker records; answered is derived from the decision that names the ask.</summary>
-    public static readonly string[] States = ["open", "notified", "withdrawn"];
+    public static readonly ImmutableArray<string> States = ["open", "notified", "withdrawn"];
 
     /// <inheritdoc />
     public string Name => "ask";

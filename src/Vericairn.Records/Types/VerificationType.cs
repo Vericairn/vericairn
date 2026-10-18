@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 
 namespace Vericairn.Records.Types;
@@ -9,16 +10,16 @@ namespace Vericairn.Records.Types;
 public sealed class VerificationType : IRecordType
 {
     /// <summary>Observed outcomes; unknown stays unknown.</summary>
-    public static readonly string[] Outcomes = ["passed", "failed", "unknown"];
+    public static readonly ImmutableArray<string> Outcomes = ["passed", "failed", "unknown"];
 
     /// <summary>Who or what performed the check.</summary>
-    public static readonly string[] Roles = ["self", "independent-agent", "operator", "automation"];
+    public static readonly ImmutableArray<string> Roles = ["self", "independent-agent", "operator", "automation"];
 
     /// <summary>How the evidence was obtained, from record format 2.</summary>
-    public static readonly string[] EvidenceClasses = ["observation", "report", "attestation", "inference"];
+    public static readonly ImmutableArray<string> EvidenceClasses = ["observation", "report", "attestation", "inference"];
 
     /// <summary>What kind of observer made the claim, from record format 2.</summary>
-    public static readonly string[] Observers = ["person", "agent", "automation", "provider"];
+    public static readonly ImmutableArray<string> Observers = ["person", "agent", "automation", "provider"];
 
     /// <inheritdoc />
     public string Name => "verification";

@@ -166,7 +166,7 @@ public static class EstateLoader
             IRecordType? type = RecordTypeRegistry.Find(record.Type);
             if (type is null)
             {
-                string hint = Array.IndexOf(RecordTypeRegistry.Reserved, record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
+                string hint = RecordTypeRegistry.Reserved.IndexOf(record.Type) >= 0 ? " It is reserved for a later release." : string.Empty;
                 findings.Error("record.unknown-type", record.ExpectedPath, $"Unknown record type '{record.Type}'.{hint}");
                 continue;
             }

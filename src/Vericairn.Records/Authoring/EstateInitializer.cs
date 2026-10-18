@@ -64,7 +64,7 @@ public static class EstateInitializer
             throw new InvalidOperationException("This directory already holds an estate; initialization never overwrites records or a manifest.");
         }
 
-        if (Array.IndexOf(EstateManifest.Profiles, initialization.Profile) < 0)
+        if (EstateManifest.Profiles.IndexOf(initialization.Profile) < 0)
         {
             throw new ArgumentException($"Unknown profile '{initialization.Profile}'. Known: {string.Join(", ", EstateManifest.Profiles)}.", nameof(initialization));
         }

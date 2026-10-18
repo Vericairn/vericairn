@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -32,7 +33,7 @@ public sealed class AssignmentType : IRecordType
     ];
 
     /// <summary>The records routing stores an assignment together with.</summary>
-    public static readonly string[] RoutedWith = ["run", "ask"];
+    public static readonly ImmutableArray<string> RoutedWith = ["run", "ask"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)
