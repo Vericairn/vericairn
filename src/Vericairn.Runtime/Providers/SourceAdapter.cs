@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Providers;
 
@@ -25,8 +26,8 @@ public sealed record RecentCommit(string Commit, string At, string Summary);
 public sealed record RepositoryObservation(string Commit, string? Branch, string? Remote, string RootCommit, bool Clean, int Modified, int Untracked, IReadOnlyList<string> Tags, IReadOnlyList<RecentCommit> Recent, string AsOf);
 
 /// <summary>
-/// The git adapter contract, version 1: read-only observation of a repository. It preserves uncommitted work, promises nothing
-/// across repositories, and never publishes; integration and remote publication are provider operations, not adapter ones.
+/// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
+/// work and never publishes; integration and remote publication are provider operations, not adapter ones.
 /// </summary>
 public interface ISourceAdapter
 {
@@ -50,6 +51,13 @@ public interface ISourceAdapter
     /// Returns null for unsupported, shallow, missing or unreadable history, or when no revision matches.
     /// </summary>
     byte[]? ReadFileAtHash(string root, string relativePath, string hash) => null;
+
+    /// <summary>
+    /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.
+    /// Null means workspace preparation is unsupported. The implementation must preserve the workspace contract's isolation
+    /// and never load agent-controlled configuration while observing or retaining work.
+    /// </summary>
+    IWorkspaceProvider? Workspaces => null;
 }
 
 /// <summary>A source adapter that replays recorded observations: a genuinely different implementation of the contract for conformance tests and offline fixtures; it qualifies no live repository.</summary>

@@ -305,6 +305,9 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         Get<OperatorActionsResponse>("/v1/operator/actions" + CommunicationQuery(recipient, assignment, view))!;
 
     /// <inheritdoc />
+    public OperatorRecordResponse OperatorRecord(OperatorRecordRequest request) => Post<OperatorRecordRequest, OperatorRecordResponse>("/v1/operator/record", request)!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />

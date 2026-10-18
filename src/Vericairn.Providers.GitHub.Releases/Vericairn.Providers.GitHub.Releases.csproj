@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The anonymous GitHub release source for client update checks, depending only on Records and the platform.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Providers.GitHub" />
+    <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+  </ItemGroup>
+
+</Project>

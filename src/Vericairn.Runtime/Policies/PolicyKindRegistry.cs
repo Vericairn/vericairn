@@ -27,7 +27,8 @@ internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> reg
         kind == FoundationPolicyKinds.RevisionLine ? ["repository", "product"] : ["estate", "product", "work-orders"],
         kind == FoundationPolicyKinds.RevisionLine ? [PolicyBasis.RepositoryContract] : [], 100000, 100000,
         FoundationPolicyKinds.Validate, FoundationPolicyKinds.Evaluate)).Append(new(Vericairn.Records.Types.DutyRecords.Kind, 1, implementationDigest,
-            ["estate", "product"], [], 100000, RecurringDuty.MaximumOccurrences, RecurringDuty.ValidateRegistration, RecurringDuty.Evaluate)));
+            ["estate", "product"], [], 100000, RecurringDuty.MaximumOccurrences, RecurringDuty.ValidateRegistration, RecurringDuty.Evaluate))
+        .Append(new(ReleaseEntry.Kind, 1, implementationDigest, ["estate", "product", "repository"], [], 100000, 100000, ReleaseEntry.Validate, ReleaseEntry.Evaluate)));
 
     internal IReadOnlyList<PolicyFinding> Evaluate(PolicyRuleContext context)
     {

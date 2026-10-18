@@ -12,7 +12,7 @@ using Vericairn.Records.Estate;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>A scope observation, not a sandbox or an attribution of who made a concurrent edit.</summary>
 internal static class WorkspaceScopeAudit
