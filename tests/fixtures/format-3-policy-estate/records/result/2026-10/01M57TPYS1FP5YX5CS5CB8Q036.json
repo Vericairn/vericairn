@@ -1,0 +1,79 @@
+{
+  "at": "2026-10-13T14:00:18Z",
+  "body": {
+    "checks": [
+      {
+        "name": "inventory",
+        "outcome": "passed",
+        "summary": "Inventory checked."
+      }
+    ],
+    "duties": [
+      {
+        "coverage": "Inspected the declared inventory.",
+        "occurrence": {
+          "kind": "interval",
+          "number": 0
+        },
+        "policy": {
+          "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+          "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+          "type": "estate-policy"
+        },
+        "proofs": [],
+        "rule": "monthly",
+        "scope": {
+          "objects": [
+            "sha256:453202f86cea292a3c0494e1ea89c76907d123cb808bfa988107fd1932bcfbcb"
+          ],
+          "records": [
+            {
+              "hash": "sha256:b9981fd036009e8345a766bec65b63745125a53a8d7216394c90f224e1477c8a",
+              "id": "01M57TPYPA4E37QXJ9YZGM2FTS",
+              "type": "decision"
+            }
+          ],
+          "repositories": [
+            {
+              "commit": "1111111111111111111111111111111111111111",
+              "record": {
+                "hash": "sha256:3e4c720394c197f30acd1fd5c21601742d350dc8ce26198004a8502b792bb626",
+                "id": "01M57TPYPBZKR5291T0ZPZV759",
+                "type": "resource"
+              }
+            }
+          ]
+        },
+        "subject": {
+          "hash": "sha256:8fbcfff689fd9cebc0e7b52381f8bfd9388ba3aac2f4b0607585320e34c1f6d6",
+          "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "type": "estate"
+        }
+      }
+    ],
+    "evidence": [],
+    "limitations": [],
+    "nextStep": "Review the exact result.",
+    "outcome": "completed",
+    "outputs": [],
+    "summary": "Checked the inventory.",
+    "unresolvedEffects": []
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:962f1998199531efc479518895af13a524e246b7d12d1790801b9de4bbc06ab7",
+  "id": "01M57TPYS1FP5YX5CS5CB8Q036",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "0QgVWS2cLseBi0SxGUtmn6TAGvWt9gwe5yNY4i3LEpwS4qRNshNijR4Kxz9tgU4ADMp399KR2XXvEt7eoIOwtA"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:2df21446321a9ac939d8efdf92d3dda25a853c594e6471296cb35e91ed118889",
+    "id": "01M57TPYS1FP5YX5CS5CB8Q034",
+    "type": "attempt"
+  },
+  "type": "result"
+}

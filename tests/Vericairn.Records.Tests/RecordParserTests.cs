@@ -56,7 +56,7 @@ public class RecordParserTests
 
     [Theory]
     [InlineData("""{"format":"vericairn.record/1","type":"work-status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":{},"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000","extra":1}""", "record.envelope")]
-    [InlineData("""{"format":"vericairn.record/3","type":"work-status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":{},"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}""", "record.format")]
+    [InlineData("""{"format":"vericairn.record/4","type":"work-status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":{},"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}""", "record.format")]
     [InlineData("""{"format":"vericairn.record/1","type":"Work Status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":{},"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}""", "record.type")]
     [InlineData("""{"format":"vericairn.record/1","type":"work-status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00.000Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":{},"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}""", "record.at")]
     [InlineData("""{"format":"vericairn.record/1","type":"work-status","id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-10-13T14:00:00Z","by":"01ARZ3NDEKTSV4RRFFQ69G5FAV","body":[],"hash":"sha256:0000000000000000000000000000000000000000000000000000000000000000"}""", "record.body")]

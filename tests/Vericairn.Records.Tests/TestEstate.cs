@@ -44,10 +44,10 @@ public sealed class TestEstate : IDisposable
     public DateTimeOffset Clock { get; private set; } = new(2026, 10, 13, 12, 0, 0, TimeSpan.Zero);
 
     /// <summary>Moves the manifest to another record format, as an upgrade does; records added afterwards state that format unless a test names another.</summary>
-    public void MoveTo(long recordFormat)
+    public void MoveTo(long recordFormat, bool writeManifest = true)
     {
         RecordFormat = recordFormat;
-        WriteManifest(Estate.Id);
+        if (writeManifest) WriteManifest(Estate.Id);
     }
 
     /// <summary>Sets the clock, so a test can write a record that claims an earlier time than the records before it.</summary>

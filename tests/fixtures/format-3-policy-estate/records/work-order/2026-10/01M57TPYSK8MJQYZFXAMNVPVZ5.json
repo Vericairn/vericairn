@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T14:00:30Z",
+  "body": {
+    "deliverables": [
+      "report"
+    ],
+    "exitQuestion": "Was the inventory checked?",
+    "inputs": [],
+    "intent": "Perform the declared checks.",
+    "key": "TASK-5",
+    "kind": "ordinary",
+    "scope": [
+      "test inventory"
+    ],
+    "title": "Maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:cd4e6e9907fe85a3bb8b4f590002890d05e7aae7bea31a588a501f2870c8e99c",
+  "id": "01M57TPYSK8MJQYZFXAMNVPVZ5",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "EGvXKZKt2iV86m3slfi6sDIAUpKyZopYEOblt9cAnn8e2ktSznPxGGpwArih_WOV7Xy8p3pUzn5GEaURRz3uIg"
+    }
+  ],
+  "type": "work-order"
+}

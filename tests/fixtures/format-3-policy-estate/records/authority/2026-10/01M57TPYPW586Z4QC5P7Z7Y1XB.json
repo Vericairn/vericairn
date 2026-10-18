@@ -1,0 +1,65 @@
+{
+  "at": "2026-10-13T14:00:01Z",
+  "body": {
+    "basis": "01M57TPYPA4E37QXJ9YZGM2FTS",
+    "bounds": [
+      {
+        "actions": [
+          "grant",
+          "revoke",
+          "reconcile"
+        ],
+        "levels": [
+          "refuse"
+        ],
+        "maxExceptionDays": 2,
+        "policies": [
+          "01M57TPYPJKBXGK2AHXZEYBYDT"
+        ],
+        "rules": [
+          "monthly"
+        ],
+        "scope": "grant-policy-exceptions",
+        "targets": [
+          {
+            "kind": "occurrence",
+            "occurrence": {
+              "kind": "interval",
+              "number": 0
+            },
+            "policy": {
+              "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+              "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+              "type": "estate-policy"
+            },
+            "rule": "monthly",
+            "subject": {
+              "hash": "sha256:8fbcfff689fd9cebc0e7b52381f8bfd9388ba3aac2f4b0607585320e34c1f6d6",
+              "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+              "type": "estate"
+            }
+          }
+        ]
+      }
+    ],
+    "conditions": [],
+    "expires": "2027-01-01T00:00:00Z",
+    "grantee": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "reserved": [],
+    "scope": [
+      "grant-policy-exceptions"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:b0ef94cfbafc43fe515658c9991c3ceec2f6fa28e590fe242f98bd94ec87fd22",
+  "id": "01M57TPYPW586Z4QC5P7Z7Y1XB",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "VriYK9gmxsKgoyZ4NDAzPNHsXzM9CDJPUu6aEthugOc4RpK6H-TWTwbaSTcBYwdbyZfhpnC6FAgR5XYMDiQDHA"
+    }
+  ],
+  "type": "authority"
+}

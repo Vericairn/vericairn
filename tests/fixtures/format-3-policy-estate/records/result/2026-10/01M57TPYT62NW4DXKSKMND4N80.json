@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-13T14:00:33Z",
+  "body": {
+    "checks": [
+      {
+        "name": "inventory",
+        "outcome": "passed",
+        "summary": "Inventory checked."
+      }
+    ],
+    "duties": [
+      {
+        "coverage": "Inspected the declared inventory.",
+        "occurrence": {
+          "kind": "release",
+          "publication": {
+            "hash": "sha256:a040b23332b66a0964e522b047dff4d4ef52a70208662647de92f6c44b1dbfb0",
+            "id": "01M57TPYSK8MJQYZFXAMNVPVZ3",
+            "type": "release"
+          }
+        },
+        "policy": {
+          "hash": "sha256:3e72748eaac8536a07e1ad82f0bd6731218a90ee261afa62c68b5586eec9b4dd",
+          "id": "01M57TPYPQ5YVFK1TMWA8A9Q59",
+          "type": "estate-policy"
+        },
+        "proofs": [],
+        "rule": "monthly",
+        "scope": {
+          "objects": [],
+          "records": [],
+          "repositories": []
+        },
+        "subject": {
+          "hash": "sha256:532e1a91f638d88a73702c62151a441f5afd2591730e7f602dabc25659f006fe",
+          "id": "01M57TPYPBZKR5291T0ZPZV757",
+          "type": "product"
+        }
+      }
+    ],
+    "evidence": [],
+    "limitations": [],
+    "nextStep": "Review the exact result.",
+    "outcome": "completed",
+    "outputs": [],
+    "summary": "Checked the inventory.",
+    "unresolvedEffects": []
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:4ae4f5ba1426e8a9750b3437fca99b2a8b20038b073b1bacaee58919a888c41a",
+  "id": "01M57TPYT62NW4DXKSKMND4N80",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "485g14j3AZwsxE72aeHIbiUdd9FXoP6QnD3qUc-tCqoaMcL2qmqF2Fl3EA5TAtSAoGdNTJ9Fgdua_Ek2cOUcgQ"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:ffdd74fdd930e3bae297ee792489e22fb0830d170bff22e9fc80848cd599321e",
+    "id": "01M57TPYT62NW4DXKSKMND4N7Y",
+    "type": "attempt"
+  },
+  "type": "result"
+}

@@ -879,17 +879,21 @@ workspace and reachable-history observation, not filesystem isolation or proof o
 change. Uncommitted changes reverted before settlement and commits no longer reachable from the run branch are
 invisible. Git administration itself and changes outside the workspace are not inventoried as changed paths.
 
-## The synthetic migration
+## Record-format migrations
 
 The move from record format 1 to 2 (`record-format-2`, [record-format-v2.md](record-format-v2.md)) stages nothing:
 no record is ever rewritten, so the step only moves the manifest's format, and the tests check that every record
 file is byte for byte what it was. When the estate holds admissions recorded without a signature, the move anchors
 them: the migration record lists them by id and hash, and the upgrade is refused unless the operator, or a
-principal with the `administer` scope, applies it with an admitted device held on this machine. The rest of the
-upgrade path is proven by a synthetic migration in the tests: a step from format 2 to a pretend format 3 stages a
-file through `MigrationContext`, the upgrade writes the staged files, the manifest and the migration record only
-once every step succeeded, a failing migration changes nothing, and a manifest beyond the formats this binary
-knows is refused rather than misread. Migrations never rewrite records; they stage other files.
+principal with the `administer` scope, applies it with an admitted device held on this machine.
+
+POLICY-01 adds `record-format-3` for the planned 0.8.0 release
+([record-format-v3.md](record-format-v3.md)). This step also stages no file and infers no policy, duty, authority,
+placement or exception. The manifest supplies the refusal boundary for older runtimes. Reapplying the installed
+target makes no change. Fixture tests preserve every original record byte and include a refuse-level duty when
+checking a format-2 reader's refusal. Synthetic steps additionally test staged files and rollback: every step must
+succeed before publication, and a failed step or refused migration record leaves the prior files and directories.
+Migrations never rewrite records.
 
 ## Progress claims (0.7.0)
 

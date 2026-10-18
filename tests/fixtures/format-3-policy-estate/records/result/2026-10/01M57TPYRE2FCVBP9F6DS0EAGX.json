@@ -1,0 +1,116 @@
+{
+  "at": "2026-10-13T14:00:12Z",
+  "body": {
+    "checks": [
+      {
+        "name": "inventory",
+        "outcome": "passed",
+        "summary": "Inventory checked."
+      }
+    ],
+    "duties": [
+      {
+        "coverage": "Inspected the declared inventory.",
+        "occurrence": {
+          "kind": "interval",
+          "number": 0
+        },
+        "policy": {
+          "hash": "sha256:d85368e57e1c711af9858644a18cb8ecc0d4050460870848ae0f2ec4a17c5d47",
+          "id": "01M57TPYPT8X19X6KJQAR1FP02",
+          "type": "estate-policy"
+        },
+        "proofs": [
+          {
+            "clause": "restore",
+            "kind": "result-verification"
+          },
+          {
+            "clause": "source",
+            "records": [
+              {
+                "hash": "sha256:6ad88ba92eea60a1646bbc67718daa610b571416fd1920f99a289aca4e0d1d4f",
+                "id": "01M57TPYPX9WQBKRKTV3H8067N",
+                "type": "verification"
+              }
+            ]
+          },
+          {
+            "clause": "operation",
+            "records": [
+              {
+                "hash": "sha256:6bc5b35d7e79701412c32b087353bcdd49127a477a1ad6711b95cd84923c952e",
+                "id": "01M57TPYPZ8PW162RQ4EB1EKJ1",
+                "type": "operation"
+              }
+            ]
+          },
+          {
+            "clause": "retirement",
+            "records": [
+              {
+                "hash": "sha256:89a2e0492b6535dabfe8a8878839e7e6bfcea945de068127e501bba0e59c43d1",
+                "id": "01M57TPYPRHGXRPZF8H21Y11B8",
+                "type": "retirement"
+              }
+            ]
+          },
+          {
+            "clause": "obligation",
+            "records": [
+              {
+                "hash": "sha256:d8e9efd9a7ccf9a9fc989e2204e8070b9f8e483e11d1c5f19621123e0459e5ff",
+                "id": "01M57TPYPZ8PW162RQ4EB1EKJ3",
+                "type": "discharge"
+              }
+            ]
+          }
+        ],
+        "rule": "monthly",
+        "scope": {
+          "objects": [],
+          "records": [],
+          "repositories": [
+            {
+              "commit": "1111111111111111111111111111111111111111",
+              "record": {
+                "hash": "sha256:3e4c720394c197f30acd1fd5c21601742d350dc8ce26198004a8502b792bb626",
+                "id": "01M57TPYPBZKR5291T0ZPZV759",
+                "type": "resource"
+              }
+            }
+          ]
+        },
+        "subject": {
+          "hash": "sha256:8fbcfff689fd9cebc0e7b52381f8bfd9388ba3aac2f4b0607585320e34c1f6d6",
+          "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "type": "estate"
+        }
+      }
+    ],
+    "evidence": [],
+    "limitations": [],
+    "nextStep": "Review the exact result.",
+    "outcome": "completed",
+    "outputs": [],
+    "summary": "Checked the inventory.",
+    "unresolvedEffects": []
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:23d78316cf2eea2ddc96fb0a0c110d021ee1bcd816c0f8359e5b797347464959",
+  "id": "01M57TPYRE2FCVBP9F6DS0EAGX",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "LT-_b6ZHAfNQnzMAQ1kFGKBfkBbDKSpvTjLYm8lFeB_vzMu_CEleHBSmibiHbFeUBStPUmxsTcbaY1V9iALtZg"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:88247dd1ad5d1d62e0f996d71cc509e35dbd410f70baa4609c589d6f3a222473",
+    "id": "01M57TPYRDKPAHE8SC456NQPB9",
+    "type": "attempt"
+  },
+  "type": "result"
+}
