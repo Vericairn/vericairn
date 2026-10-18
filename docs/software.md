@@ -3,6 +3,14 @@
 How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
 
+## Checked repository changes (unreleased)
+
+The additive `changes push`, `changes open`, `changes merge` and `changes observe`
+commands record their intent and observed outcome. Pushes require a successful
+scan of their exact commits; merges require declared checks at their pinned head.
+The [checked repository changes guide](changes.md) describes declarations,
+authority, target-run observations and recovery from uncertain effects.
+
 ## Personal communication (0.7.0, COMMS-01)
 
 Communication has five independent fields: optional progress frequency, status

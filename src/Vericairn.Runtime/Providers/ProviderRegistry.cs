@@ -14,9 +14,41 @@ public sealed class ProviderRegistry
 {
     private readonly object gate = new();
     private readonly Dictionary<string, IReleaseProvider> releases = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IPullRequestProvider> pullRequests = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ISourceAdapter> sources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IAgentLauncher> launchers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IWorkspaceProvider> workspaces = new(StringComparer.Ordinal);
+
+    /// <summary>The host's adapter for checked pushes. No implementation is selected implicitly by the runtime.</summary>
+    public IPushAdapter? PushAdapter { get; set; }
+
+    /// <summary>The host's scanner for exactly the commits being pushed.</summary>
+    public ISecretScanner? SecretScanner { get; set; }
+
+    /// <summary>Registers a pull-request provider and returns the previous implementation.</summary>
+    public IPullRequestProvider? Register(IPullRequestProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate)
+        {
+            IPullRequestProvider? previous = pullRequests.GetValueOrDefault(provider.Provider);
+            pullRequests[provider.Provider] = provider;
+            return previous;
+        }
+    }
+
+    /// <summary>Registers a pull-request provider only when no implementation is already registered.</summary>
+    public bool RegisterIfAbsent(IPullRequestProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate) return pullRequests.TryAdd(provider.Provider, provider);
+    }
+
+    /// <summary>The implementation serving exactly the recorded provider, or null.</summary>
+    public IPullRequestProvider? PullRequests(string provider)
+    {
+        lock (gate) return pullRequests.GetValueOrDefault(provider);
+    }
 
     /// <summary>The registry of this process, which the host fills before any operation runs.</summary>
     public static ProviderRegistry Current { get; } = new();

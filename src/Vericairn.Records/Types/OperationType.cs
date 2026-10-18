@@ -52,6 +52,9 @@ public sealed class OperationType : IRecordType
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
         new("reconciliation", "string", false, "How an uncertain or failed outcome was settled before a retry; required when a retry is dispatched."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
+        new("checks", "object[]", false, "For repository changes: name, head, status and optional conclusion for every reported check. A merge admits only successful checks of its exact head.", 3),
+        new("requiredChecks", "string[]", false, "The exact check names from the pinned product declaration; none guessed.", 3),
+        new("scan", "object", false, "For a push: tool, version, range, verdict and optional findingCount. Only aggregate scan facts; never matched text, findings or process output.", 3),
         new("cap", "object", false, "For an agent-run: what the run may spend, recorded before it starts and kept in every revision; wallMinutes is required. A run that names its goal starts only while the goal is active, with the units its budget grants, within what remains of them, its concurrency and its attempts per step. Units: " + Caps.Units + ".", 2),
         new("usage", "object", false, "For an agent-run once settled: what it spent as the harness reported it, and the units its cap states that were not reported (unreported), which are charged at the cap.", 2),
         new("scope", "object", false, "Worker scope audit at settlement: changed count, outsideCount, repository-relative outside paths (at most 1000), and optional problem when incomplete. Outside changes need attention, never acceptance.", 2),
@@ -451,6 +454,7 @@ public sealed class OperationType : IRecordType
             }
         }
 
+        ChangeOperationRules.Read(context);
         ExecutionRecord.Read(context, status);
         body.NoOtherKeys();
         if (context.Format >= 2)
@@ -466,6 +470,11 @@ public sealed class OperationType : IRecordType
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("operation.author", $"Principal {context.Record.By} has no principal record.");
+        }
+        else if (ChangeOperationRules.IsChange(context.Record))
+        {
+            if (!ChangeOperationRules.AuthorizedWhen(context))
+                context.Error("operation.repository-write", "Repository changes require repository-write authority in force.");
         }
         else if (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering) && !SponsorsRun(context))
         {

@@ -32,6 +32,7 @@ public sealed class ProductType : IRecordType
         new("summary", "string", true, "The product in a sentence."),
         new("editions", "object[]", true, "name, slug, summary, optional license (SPDX expression)."),
         new("surfaces", "object[]", true, "name, slug, summary: runtime, Workbench, Remote, CLI, SDK, websites."),
+        new("changes", "object", false, "Checked repository changes: provider, repository resource id, target branch and requiredChecks (exact host check names, including each required platform). An empty or absent declaration authorizes no merge.", 3),
         new("release", "object", false, "How the product's releases are made: destination (provider id and its settings, string values), checksums (the asset that lists the others' hashes) and artifacts (name with {version} and optionally {platform}, role distributable|sbom|notices|documentation|other, platforms). Read by release 0.4.2, the first published release to read it, and later (0.4.0, which introduced it, was withdrawn)."),
     ];
 
@@ -113,6 +114,19 @@ public sealed class ProductType : IRecordType
             }
 
             release.NoOtherKeys();
+        }
+
+        BodyReader? changes = body.Since(3, "changes") ? body.Nested("changes", false) : null;
+        if (changes is not null)
+        {
+            changes.Text("provider", true, 100, Patterns.Slug, "a provider id");
+            string? repository = changes.Ulid("repository", true);
+            if (context.RequireReference("changes.repository", repository, "resource") is { } resource
+                && Estate.EstateModel.BodyString(resource, "kind") != "repository")
+                changes.Error("product.changes", "repository", "Changes require a repository resource.");
+            changes.Text("target", true, 200);
+            changes.StringArray("requiredChecks", true, allowEmpty: true, maxItemLength: 200);
+            changes.NoOtherKeys();
         }
 
         body.NoOtherKeys();
