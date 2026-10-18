@@ -90,6 +90,22 @@ public class PolicyBasisTests
     }
 
     [Fact]
+    public void TheReleasePinAndArtifactMapAreCopiedAndIncludedInTheBasis()
+    {
+        var artifacts = new Dictionary<string, string>(StringComparer.Ordinal) { ["linux-x64"] = "original" };
+        EstateModel model = Model([Policy("a", "policy")]);
+        model.Manifest = new() { Estate = "estate", RecordFormat = 3, Profile = "repository-synced", Mode = "release", Repository = "Example/product", Version = "0.8.0", Artifacts = artifacts };
+        var basis = PolicyBasis.Recorded(model);
+        string expected = PolicyEvaluator.Evaluate(basis).Canonical();
+        artifacts["linux-x64"] = "changed";
+        Assert.Equal("original", basis.Model.Manifest!.Artifacts!["linux-x64"]);
+        Assert.Equal(expected, PolicyEvaluator.Evaluate(basis).Canonical());
+        Assert.NotEqual(basis.Digest, PolicyBasis.Recorded(model).Digest);
+        model.Manifest = new() { Estate = "estate", RecordFormat = 3, Profile = "repository-synced", Mode = "release", Repository = "Example/product", Version = "0.9.0", Artifacts = basis.Model.Manifest.Artifacts };
+        Assert.NotEqual(basis.Digest, PolicyBasis.Recorded(model).Digest);
+    }
+
+    [Fact]
     public void ConflictingSourceEntriesStillHaveACompleteOrderIndependentBasis()
     {
         EstateModel model = Model([Policy("a", "policy")]);
