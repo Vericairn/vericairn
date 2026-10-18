@@ -19,6 +19,7 @@
     <Using Include="Xunit" />
     <Using Include="Vericairn.TestSupport" />
     <Compile Include="../TestSupport/FakeReleaseProvider.cs" Link="TestSupport/FakeReleaseProvider.cs" />
+    <Compile Include="../TestSupport/SilentPeer.cs" Link="TestSupport/SilentPeer.cs" />
   </ItemGroup>
 
   <ItemGroup>
