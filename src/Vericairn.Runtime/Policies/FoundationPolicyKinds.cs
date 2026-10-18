@@ -19,6 +19,13 @@ internal static partial class FoundationPolicyKinds
     internal const string RevisionLine = "vericairn.estate/revision-line";
     internal const string Consistency = "vericairn.estate/work-state-consistency";
 
+    internal static void Validate(PolicyRuleContext context)
+    {
+        // Each version's closed parameter reader runs before any selected subject is returned, including
+        // the zero-subject case. Keep it with that kind's interpretation to avoid schema/evaluator drift.
+        if (context.Parameters.ValueKind != JsonValueKind.Object) throw new PolicyParameterException("Rule parameters must be an object.");
+    }
+
     internal static IReadOnlyList<PolicyFinding> Evaluate(PolicyRuleContext context)
     {
         if (!Get(context.Rule, "version").TryGetInt64Safe(out long version) || version != 1) return [context.Unavailable("The exact rule kind version is not installed.")];

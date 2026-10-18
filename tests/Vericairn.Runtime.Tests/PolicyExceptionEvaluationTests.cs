@@ -111,7 +111,7 @@ public class PolicyExceptionEvaluationTests
         body["targets"] = new JsonArray(new JsonObject { ["kind"] = "file", ["repository"] = fixture.Estate.Estate.Id, ["path"] = file.Path, ["hash"] = file.Hash });
         fixture.Add("policy-exception", body, subject: policy.Reference);
         PolicyEvaluation EvaluateFile(PolicyFile value) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(fixture.Estate.Clock), PolicyTimeOrigin.Preview,
-            [new(fixture.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, true, [value])]));
+            [new(fixture.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, true, [value])], implementations: FoundationPolicyTests.Kinds.Implementations), FoundationPolicyTests.Kinds);
         Assert.Equal("excepted", Assert.Single(EvaluateFile(file).Findings).Disposition);
         Assert.Equal("none", Assert.Single(EvaluateFile(PolicyBasisTests.File(file.Path, "# Changed\nStill missing." )).Findings).Disposition);
         Assert.Equal("none", Assert.Single(EvaluateFile(file with { Path = "docs/renamed.md" }).Findings).Disposition);
@@ -141,7 +141,7 @@ public class PolicyExceptionEvaluationTests
         fixture.Add("policy-exception", body, subject: policy.Reference);
         fixture.AssertValid();
         var submission = new PolicySubmission(release.Reference, product.Id, "1.0.0", commit);
-        PolicyEvaluation EvaluateSubmission(PolicySubmission value) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(fixture.Estate.Clock), PolicyTimeOrigin.Submission, submission: value));
+        PolicyEvaluation EvaluateSubmission(PolicySubmission value) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(fixture.Estate.Clock), PolicyTimeOrigin.Submission, implementations: FoundationPolicyTests.Kinds.Implementations, submission: value), FoundationPolicyTests.Kinds);
         Assert.Equal("excepted", Assert.Single(EvaluateSubmission(submission).Findings).Disposition);
         Assert.Equal("none", Assert.Single(EvaluateSubmission(submission with { Version = "1.0.1" }).Findings).Disposition);
         Assert.Equal("none", Assert.Single(EvaluateSubmission(submission with { Commit = new string('2', 40) }).Findings).Disposition);
@@ -172,5 +172,5 @@ public class PolicyExceptionEvaluationTests
     };
 
     private static RecordEnvelope Grant(PolicyFixture fixture, RecordEnvelope policy, RecordEnvelope target, RecordEnvelope? authority = null) => fixture.Add("policy-exception", Body(fixture, target, authority), builder: authority is not null, subject: policy.Reference);
-    internal static PolicyEvaluation Evaluate(PolicyFixture fixture, DateTimeOffset? at = null) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(at ?? fixture.Estate.Clock), PolicyTimeOrigin.Preview));
+    internal static PolicyEvaluation Evaluate(PolicyFixture fixture, DateTimeOffset? at = null) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(at ?? fixture.Estate.Clock), PolicyTimeOrigin.Preview, implementations: FoundationPolicyTests.Kinds.Implementations), FoundationPolicyTests.Kinds);
 }

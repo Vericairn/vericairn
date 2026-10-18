@@ -43,7 +43,7 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
         foreach (RecordEnvelope record in basis.Records)
         foreach (string field in PolicyRecords.ProseFields)
             if (EstateModel.BodyString(record, field) is { } text)
-                candidates.AddRange(WritingScanner.Scan(text, record.ExpectedPath + "#body." + field).Select(o => (new WritingLocation("record", record.Id, field), o)));
+                candidates.AddRange(WritingScanner.Scan(text, RecordPath(record) + "#body." + field).Select(o => (new WritingLocation("record", record.Id, field), o)));
         return Match(basis, candidates, diagnostics, complete);
 
         void Missing(string location, string message)
@@ -74,7 +74,7 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
             if (matches.Length > 0) excepted.Add(occurrence); else warnings.Add(occurrence);
         }
         if (complete)
-            foreach (RecordEnvelope entry in entries.Where(e => counts[e.Id] == 0)) findings.Add(new(Severity.Warning, "writing.exception-unused", entry.ExpectedPath, "writing exception unused: `" + EstateModel.BodyString(entry, "token") + "`"));
+            foreach (RecordEnvelope entry in entries.Where(e => counts[e.Id] == 0)) findings.Add(new(Severity.Warning, "writing.exception-unused", RecordPath(entry), "writing exception unused: `" + EstateModel.BodyString(entry, "token") + "`"));
         return new(basis.Digest, WritingScanner.Contract, complete, [.. warnings], [.. excepted], entries.Select(e => new WritingEntry(e.Reference, EstateModel.BodyString(e, "token")!,
             basis.Model.ById[PolicyWork.Identity(basis.Model, e)].By, EstateModel.BodyString(e, "reason")!, Get(e.Body, "scope").ValueKind == JsonValueKind.Undefined ? null : Get(e.Body, "scope"), complete ? counts[e.Id] : null)).ToImmutableArray(),
             findings.OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Code, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal).ThenBy(f => f.Severity).ToImmutableArray());

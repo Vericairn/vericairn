@@ -12,6 +12,7 @@ namespace Vericairn.Runtime.Tests;
 
 public class FoundationPolicyTests
 {
+    internal static readonly PolicyKindRegistry Kinds = PolicyKindRegistry.Foundation(PolicyBasis.Hash("foundation conformance implementation"));
     private static readonly string[] OrderIds = ["order"];
     private static readonly string[] MarkdownPaths = ["docs/*.md"];
     private static readonly string[] AllPaths = ["**"];
@@ -226,9 +227,9 @@ public class FoundationPolicyTests
         var parameters = new { @class = "obligation-past-gate", maxAgeDays = 0, gates = new[] { new { subject = Reference(decision), obligation = "check", conditions = new[] { new { kind = "release-submission", product = "product", version = "1.0.0" } } } } };
         RecordEnvelope policy = P(FoundationPolicyKinds.Staleness, parameters);
         PolicyBasis basis = Basis([policy, decision]);
-        Assert.Equal("satisfied", Assert.Single(PolicyEvaluator.Evaluate(basis).Findings).Verdict);
+        Assert.Equal("satisfied", Assert.Single(PolicyEvaluator.Evaluate(basis, Kinds).Findings).Verdict);
         var submission = new PolicySubmission(new("release", "candidate", "exact"), "product", "1.0.0", new string('1', 40));
-        PolicyEvaluation live = PolicyEvaluator.Evaluate(new(basis.Model, basis.AsOf, PolicyTimeOrigin.Submission, submission: submission));
+        PolicyEvaluation live = PolicyEvaluator.Evaluate(new(basis.Model, basis.AsOf, PolicyTimeOrigin.Submission, implementations: Kinds.Implementations, submission: submission), Kinds);
         Assert.Equal("unmet", Assert.Single(live.Findings).Verdict);
         RecordEnvelope intent = R("operation", "intent", new { action = Vericairn.Runtime.Release.ReleaseFlow.DispatchAction, target = new { product = "product", version = "1.0.0" } }, "2026-01-01T12:00:00Z");
         Assert.Equal(intent.Reference, Assert.Single(Evaluate([policy, decision, intent]).Findings).Anchor);
@@ -251,11 +252,11 @@ public class FoundationPolicyTests
     internal static PolicyEvaluation Run(string kind, object parameters, RecordEnvelope[] records, string at = "2026-01-02T00:00:00Z", object? selection = null, PolicyRepository[]? repositories = null) =>
         Evaluate([P(kind, parameters, selection: selection), .. records], at, repositories);
 
-    internal static PolicyEvaluation Evaluate(RecordEnvelope[] records, string at = "2026-01-02T00:00:00Z", PolicyRepository[]? repositories = null) => PolicyEvaluator.Evaluate(Basis(records, at, repositories));
+    internal static PolicyEvaluation Evaluate(RecordEnvelope[] records, string at = "2026-01-02T00:00:00Z", PolicyRepository[]? repositories = null) => PolicyEvaluator.Evaluate(Basis(records, at, repositories), Kinds);
 
     internal static PolicyBasis Basis(RecordEnvelope[] records, string at = "2026-01-02T00:00:00Z", PolicyRepository[]? repositories = null) => new(PolicyBasisTests.Model([
         R("principal", "operator", new { kind = "human", roles = OperatorRoles }, by: "operator"),
-        R("estate", "estate", new { @operator = "operator" }), R("product", "product", new { }), .. records]), at, PolicyTimeOrigin.Preview, repositories);
+        R("estate", "estate", new { @operator = "operator" }), R("product", "product", new { }), .. records]), at, PolicyTimeOrigin.Preview, repositories, implementations: Kinds.Implementations);
 
     internal static RecordEnvelope P(string kind, object parameters, string key = "policy", object? selection = null) => R("estate-policy", key, new
     {

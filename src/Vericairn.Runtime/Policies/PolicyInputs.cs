@@ -21,6 +21,7 @@ internal static class PolicyInputs
     internal static IEnumerable<JsonElement> Items(JsonElement value) => PolicyRecords.Items(value);
     internal static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
     internal static string Time(DateTimeOffset value) => RecordParser.FormatTimestamp(value);
+    internal static string RecordPath(RecordEnvelope record) => "records/" + record.Type + "/" + (record.At.Length >= 7 ? record.At[..7] : "invalid-time") + "/" + record.Id + ".json";
 
     internal static void Shape(JsonElement value, string[] required, params string[] optional)
     {

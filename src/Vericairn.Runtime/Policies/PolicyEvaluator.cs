@@ -11,7 +11,7 @@ namespace Vericairn.Runtime.Policies;
 
 internal static class PolicyEvaluator
 {
-    internal static PolicyEvaluation Evaluate(PolicyBasis basis)
+    internal static PolicyEvaluation Evaluate(PolicyBasis basis, PolicyKindRegistry? registry = null)
     {
         string? unavailable = basis.UnavailableReason();
         List<PolicyFinding> findings = [];
@@ -27,12 +27,12 @@ internal static class PolicyEvaluator
                 else if (starts > basis.Time) findings.Add(context.Finding(new("policy", context.Identity, policy.Reference), "", "satisfied", "Policy activation is in the future.", "Activation at " + EstateModel.BodyString(policy, "startsAt"), "Wait for activation.", disposition: "scheduled", subjects: 0));
                 else
                 {
-                    try { findings.AddRange(FoundationPolicyKinds.Evaluate(context)); }
+                    try { findings.AddRange(registry is null ? [context.Unavailable("The exact rule kind and version are not installed.")] : registry.Evaluate(context)); }
                     catch (PolicyInputException error) { findings.Add(context.Unavailable(error.Message)); }
                     catch (PolicyParameterException error)
                     {
                         findings.Add(context.Unavailable(error.Message));
-                        parameterErrors.Add(new(Severity.Error, "policy.parameters", policy.ExpectedPath + "#" + context.Key, error.Message));
+                        parameterErrors.Add(new(Severity.Error, "policy.parameters", PolicyInputs.RecordPath(policy) + "#" + context.Key, error.Message));
                     }
                 }
             }
