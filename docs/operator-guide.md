@@ -90,7 +90,9 @@ Legacy linked worktrees require preservation and `git worktree remove`, not sile
 FIX-20 recognizes the Vericairn credential stores, `gh auth token`, `gh auth status --show-token`,
 `git credential fill` and Git credential-helper `get`, as well as additional write forms. Recognized
 credentials and outside writes request containment; null-device output is exempt from outside-write
-classification. Ordinary outside reads, network attempts and unverified effects remain warnings. The
+classification. Ordinary outside reads, network attempts and unverified effects remain warnings. Listing
+the Vericairn home itself, including a recursive listing, and reading a per-clone `live.db` are outside-read
+warnings; they do not request a stop. Independently recognized credential paths retain their critical signals. The
 command audit observes harness reports that can arrive after execution and cannot enforce isolation.
 The [software guide](software.md#command-observations-070) lists recognized forms and remaining gaps.
 

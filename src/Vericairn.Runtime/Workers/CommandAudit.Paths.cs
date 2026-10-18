@@ -49,7 +49,7 @@ public static partial class CommandAudit
         });
     }
 
-    private static bool CredentialPath(string path, string? working, IReadOnlyDictionary<string, string> environment)
+    private static bool CredentialPath(string path, string? working, IReadOnlyDictionary<string, string> environment, bool copiesTree)
     {
         if (SecretPath().IsMatch(path.Replace('\\', '/'))) return true;
         string? resolved = ResolvePath(path, working);
@@ -57,6 +57,9 @@ public static partial class CommandAudit
         if (SecretPath().IsMatch(resolved.Replace('\\', '/'))) return true;
         string? home = CredentialHome(environment, working);
         if (home is null) return false;
+        // A recursive source contains the same stores when it names the home or an ancestor.
+        // Listings and ordinary file reads do not acquire this classification.
+        if (copiesTree && LexicallyInside(home, resolved)) return true;
         string relative = Path.GetRelativePath(home, resolved).Replace('\\', '/');
         // File/CNG/Secure Enclave/Secret Service stores all use keys/. Connections retain pairing
         // identities. RuntimeIdentity and RuntimeCertificate live beside EstateLocations' live.db.

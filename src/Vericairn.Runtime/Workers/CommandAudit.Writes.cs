@@ -34,32 +34,73 @@ public static partial class CommandAudit
             case "rsync":
             case "install":
             case "cp":
+            case "scp":
+            case "ditto":
+            case "mv":
                 var operands = new List<string>();
                 string? destination = null;
                 bool dryRun = false;
+                bool copiesTree = executable is "ditto" or "mv";
                 bool directories = executable == "install" && values.Any(v => v is "-d" or "--directory");
                 bool options = true;
                 for (int i = 0; i < args.Length; i++)
                 {
                     string value = values[i];
                     if (options && value == "--") { options = false; continue; }
-                    if (options && executable == "rsync" && (value == "--dry-run" || value.StartsWith('-') && !value.StartsWith("--", StringComparison.Ordinal) && value.Contains('n', StringComparison.Ordinal))) dryRun = true;
+                    if (options && executable is "cp" or "rsync" or "scp" && (value is "--recursive" or "--archive"
+                        || ShortFlag(value, executable == "cp" ? "rRa" : executable == "rsync" ? "ra" : "r", executable == "cp" ? "tS" : executable == "rsync" ? "eBfTM" : "PiSFoJclDX"))) copiesTree = true;
+                    if (options && executable == "rsync" && value is "--no-recursive" or "--no-r") copiesTree = false;
+                    if (options && executable == "ditto" && value == "-x") copiesTree = false;
+                    if (options && executable == "rsync" && (value == "--dry-run" || ShortFlag(value, "n", "eBfTM"))) dryRun = true;
                     if (options && executable != "rsync" && value is "-t" or "--target-directory") { if (++i < args.Length) destination = args[i]; continue; }
                     if (options && executable != "rsync" && value.StartsWith("--target-directory=", StringComparison.Ordinal)) { destination = SuffixWord(args[i], 19); continue; }
                     if (options && executable != "rsync" && value.StartsWith("-t", StringComparison.Ordinal) && value.Length > 2) { destination = SuffixWord(args[i], 2); continue; }
+                    if (options && executable == "scp" && value is "-i" or "-F")
+                    {
+                        if (++i < args.Length) AddShellPath(paths, args[i], PathAccess.Read, context);
+                        continue;
+                    }
                     if (options && (executable == "install" && value is "-m" or "--mode" or "-o" or "--owner" or "-g" or "--group" or "-S" or "--suffix"
+                        || executable == "ditto" && value is "--arch" or "--bom"
+                        || executable == "scp" && value is "-P" or "-i" or "-S" or "-F" or "-o" or "-J" or "-c" or "-l"
                         || executable == "rsync" && value is "-e" or "--rsh" or "--exclude" or "--include" or "--filter" or "-f" or "--exclude-from" or "--include-from" or "--files-from")) { i++; continue; }
                     if (options && value.StartsWith('-')) continue;
                     operands.Add(args[i]);
                 }
                 for (int i = 0; i < operands.Count; i++)
                 {
-                    string value = Value(operands[i]);
-                    if (executable == "rsync" && RemotePath(value)) { codes.Add("network"); codes.Add("audit-unverified"); continue; }
-                    AddShellPath(paths, operands[i], !dryRun && (directories || destination is null && i == operands.Count - 1) ? PathAccess.Write : PathAccess.Read, context);
+                    string value = ShellPath(operands[i], context);
+                    if (executable is "rsync" or "scp" && RemotePath(value)) { codes.Add("network"); codes.Add("audit-unverified"); continue; }
+                    bool source = !directories && (destination is not null || i < operands.Count - 1);
+                    AddShellPath(paths, operands[i], !dryRun && (!source || executable == "mv") ? PathAccess.Write : PathAccess.Read, context, source && copiesTree && !dryRun);
                 }
                 if (destination is not null) AddShellPath(paths, destination, PathAccess.Write, context);
                 return true;
+            case "Copy-Item":
+                var copySources = new List<string>();
+                string? copyDestination = null;
+                bool recurse = false;
+                for (int i = 0; i < args.Length; i++)
+                {
+                    string value = values[i];
+                    if (value.Equals("-Recurse", StringComparison.OrdinalIgnoreCase)) recurse = true;
+                    else if (value.Equals("-Path", StringComparison.OrdinalIgnoreCase) || value.Equals("-LiteralPath", StringComparison.OrdinalIgnoreCase))
+                    { if (++i < args.Length) copySources.Add(args[i]); }
+                    else if (value.Equals("-Destination", StringComparison.OrdinalIgnoreCase)) { if (++i < args.Length) copyDestination = args[i]; }
+                    else if (!value.StartsWith('-')) copySources.Add(args[i]);
+                }
+                if (copyDestination is null && copySources.Count > 1) { copyDestination = copySources[^1]; copySources.RemoveAt(copySources.Count - 1); }
+                foreach (string source in copySources) AddShellPath(paths, source, copyDestination is null ? PathAccess.Write : PathAccess.Read, context, recurse);
+                AddShellPath(paths, copyDestination ?? ".", PathAccess.Write, context);
+                return true;
+            case "zip":
+                InspectZip(args, paths, codes, context);
+                return true;
+            case "make":
+            case "gmake":
+                return InspectMake(args, paths, codes, context);
+            case "defaults":
+                return InspectDefaults(args, paths, codes, context);
             case "dd":
                 foreach (string argument in args)
                 {
@@ -151,18 +192,31 @@ public static partial class CommandAudit
     {
         bool extract = false;
         bool create = false;
-        var sources = new List<string>();
+        var sources = new List<(string Word, CommandContext Context)>();
         var archives = new List<string>();
         CommandContext target = context.Copy();
+        bool recursive = true;
+        bool options = true;
         for (int i = 0; i < args.Length; i++)
         {
             string value = Value(args[i]);
-            if (value is "--extract" or "--get") extract = true;
+            if (options && value == "--") { options = false; continue; }
+            if (!options) { sources.Add((args[i], target.Copy())); continue; }
+            if (value == "--no-recursion") recursive = false;
+            else if (value == "--recursion") recursive = true;
+            else if (value is "--extract" or "--get") extract = true;
             else if (value is "--create" or "--append" or "--update") create = true;
             else if (value is "-C" or "--directory" && i + 1 < args.Length) target.Working = ResolveDirectory(args[++i], target, codes);
             else if (value.StartsWith("--directory=", StringComparison.Ordinal)) target.Working = ResolveDirectory(SuffixWord(args[i], 12), target, codes);
             else if (value is "-f" or "--file" && i + 1 < args.Length) archives.Add(args[++i]);
             else if (value.StartsWith("--file=", StringComparison.Ordinal)) archives.Add(SuffixWord(args[i], 7));
+            else if (value is "-T" or "--files-from")
+            {
+                codes.Add("audit-unverified");
+                if (++i < args.Length) AddShellPath(paths, args[i], PathAccess.Read, context);
+            }
+            else if (value.StartsWith("--files-from=", StringComparison.Ordinal)) { codes.Add("audit-unverified"); AddShellPath(paths, SuffixWord(args[i], 13), PathAccess.Read, context); }
+            else if (value is "--exclude" or "--exclude-from" or "-X" or "--transform" or "--use-compress-program" or "-I") i++;
             else if (value.StartsWith("-C", StringComparison.Ordinal) && value.Length > 2) target.Working = ResolveDirectory(SuffixWord(args[i], 2), target, codes);
             else if (value.StartsWith('-') && !value.StartsWith("--", StringComparison.Ordinal) || i == 0 && value.All(char.IsAsciiLetter))
             {
@@ -175,11 +229,12 @@ public static partial class CommandAudit
                     else if (i + 1 < args.Length) archives.Add(args[++i]);
                 }
             }
-            else if (!value.StartsWith('-')) sources.Add(args[i]);
+            else if (!value.StartsWith('-')) sources.Add((args[i], target.Copy()));
         }
         foreach (string archive in archives.Where(a => a != "-")) AddShellPath(paths, archive, create ? PathAccess.Write : PathAccess.Read, context);
         if (extract) AddPath(paths, ".", PathAccess.Write, target);
-        foreach (string source in sources) AddShellPath(paths, source, extract ? PathAccess.Write : PathAccess.Read, target);
+        foreach ((string source, CommandContext sourceContext) in sources)
+            AddShellPath(paths, source, extract ? PathAccess.Write : PathAccess.Read, extract ? target : sourceContext, create && recursive);
         if (!extract && !create && archives.Count == 0) codes.Add("audit-unverified");
     }
 
@@ -190,8 +245,8 @@ public static partial class CommandAudit
         string? command = commandIndex >= 0 ? values[commandIndex] : null;
         bool credentialHelper = command is not null && command.StartsWith("credential-", StringComparison.Ordinal) && command.Length > 11;
         bool credentialCommand = command == "credential" || credentialHelper;
-        string? operation = commandIndex >= 0 && commandIndex + 1 < values.Length ? values[commandIndex + 1] : null;
-        if (command == "credential" && operation == "fill" || credentialHelper && operation == "get") codes.Add("credentials");
+        string? operation = commandIndex >= 0 ? CredentialOperation(values, commandIndex + 1) : null;
+        if (command == "credential" && operation == "fill" || credentialHelper && operation is "get" or "store" or "erase") codes.Add("credentials");
         if (command is "fetch" or "pull" or "push" or "clone" or "ls-remote") codes.Add("network");
         bool pathsOnly = false;
         var operands = new List<string>();
@@ -263,5 +318,18 @@ public static partial class CommandAudit
             if (!operand.Contains("://", StringComparison.Ordinal) && (reads || PathLike(operand)))
                 AddShellPath(paths, operand, reads ? PathAccess.Read : PathAccess.Unknown, git);
         }
+    }
+
+    private static string? CredentialOperation(string[] values, int start)
+    {
+        for (int i = start; i < values.Length; i++)
+        {
+            string value = values[i];
+            if (value is "--help" or "-h" or "--version") return null;
+            if (value == "--") return i + 1 < values.Length ? values[i + 1] : null;
+            if (value is "--file" or "-f" or "--socket" or "--timeout") { i++; continue; }
+            if (!value.StartsWith('-')) return value;
+        }
+        return null;
     }
 }

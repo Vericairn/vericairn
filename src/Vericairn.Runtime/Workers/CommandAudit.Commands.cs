@@ -6,7 +6,8 @@ namespace Vericairn.Runtime.Workers;
 public static partial class CommandAudit
 {
     private static bool Separator(string word) => word is ";" or "&&" or "||" or "|" or "&" or "\n" or "\r\n";
-    private static string Value(string word) => word.Length >= 2 && word[0] is '\'' or '"' && word[^1] == word[0] ? word[1..^1] : word;
+    private static string Value(string word) => word.Length >= 2 && word[0] is '\'' or '"' && word[^1] == word[0]
+        ? word[0] == '\'' ? word[1..^1].Replace("'\"'\"'", "'", StringComparison.Ordinal) : word[1..^1] : word;
     private static string SuffixWord(string word, int prefix) => word.Length != Value(word).Length
         ? word[0] + Value(word)[prefix..] + word[^1] : word[prefix..];
     private static string Executable(string word)
@@ -16,6 +17,9 @@ public static partial class CommandAudit
     }
 
     private static bool InspectCommand(string command, List<InvocationPath> paths, HashSet<string> codes, Func<string, bool> isReadOnly, CommandContext context, int depth)
+        => InspectTokens(ShellTokens(command, codes), paths, codes, isReadOnly, ref context, depth);
+
+    private static bool InspectTokens(ShellToken[] tokens, List<InvocationPath> paths, HashSet<string> codes, Func<string, bool> isReadOnly, ref CommandContext context, int depth)
     {
         if (depth > 8)
         {
@@ -23,18 +27,31 @@ public static partial class CommandAudit
             return false;
         }
 
-        ShellToken[] tokens = ShellTokens(command, codes);
         bool reads = true;
         CommandContext? pipeline = null;
         for (int start = 0; start < tokens.Length;)
         {
-            int end = start;
+            int close = tokens[start].Text is "(" or "{" ? GroupEnd(tokens, start, codes) : -1;
+            int end = close >= 0 ? close + 1 : start;
             while (end < tokens.Length && !Separator(tokens[end].Text)) end++;
             string? separator = end < tokens.Length ? tokens[end].Text : null;
             CommandContext before = context.Copy();
             if (separator == "|") pipeline ??= before;
             bool segmentReads = false;
-            if (!Check(() => segmentReads = InspectSimple(tokens[start..end], paths, codes, isReadOnly, context, depth), codes)) context.Working = null;
+            CommandContext current = context;
+            if (!Check(() =>
+            {
+                if (close < 0) segmentReads = InspectSimple(tokens[start..end], paths, codes, isReadOnly, current, depth);
+                else
+                {
+                    CommandContext group = current.Copy();
+                    segmentReads = InspectTokens(tokens[(start + 1)..close], paths, codes, isReadOnly, ref group, depth + 1);
+                    if (tokens[start].Text == "{") current = group;
+                    // Group redirects are opened in the caller's directory, before the body runs.
+                    segmentReads &= InspectSimple(tokens[(close + 1)..end], paths, codes, isReadOnly, before.Copy(), depth);
+                }
+            }, codes)) current.Working = null;
+            context = current;
             reads &= segmentReads;
             // A pipeline/background child cannot change the parent's directory or variables. The
             // failure branch of || cannot assume that a preceding cd/assignment succeeded.
@@ -50,6 +67,23 @@ public static partial class CommandAudit
         return reads;
     }
 
+    private static int GroupEnd(ShellToken[] tokens, int start, HashSet<string> codes)
+    {
+        var closing = new Stack<string>();
+        for (int i = start; i < tokens.Length; i++)
+        {
+            string word = tokens[i].Text;
+            if (word is "(" or "{") closing.Push(word == "(" ? ")" : "}");
+            else if (word is ")" or "}")
+            {
+                if (closing.Count == 0 || closing.Pop() != word) break;
+                if (closing.Count == 0) return i;
+            }
+        }
+        codes.Add("audit-unverified");
+        return -1;
+    }
+
     private static bool InspectSimple(ShellToken[] input, List<InvocationPath> paths, HashSet<string> codes, Func<string, bool> isReadOnly, CommandContext context, int depth)
     {
         var arguments = new List<string>();
@@ -60,6 +94,9 @@ public static partial class CommandAudit
             ShellToken item = input[i];
             if (item.Input is not null) { bodies.Add(item); continue; }
             string word = item.Text;
+            // Parentheses here were not a command group. Substitutions and other unsupported
+            // syntax remain uncertain, even when an enclosing echo would ignore its operands.
+            if (word is "(" or ")") codes.Add("audit-unverified");
             if (!word.StartsWith('\'') && SecretEnvironment().IsMatch(word)) codes.Add("credentials");
             if (!word.StartsWith('\'') && (word.Contains("$(", StringComparison.Ordinal) || word.Contains('`', StringComparison.Ordinal))) codes.Add("audit-unverified");
             if (word is ">" or ">>" or ">|" or "&>" or "&>>" or ">&" or "<" or "<&")
@@ -104,6 +141,8 @@ public static partial class CommandAudit
         if (executable is "printenv" or "cmdkey" or "secret-tool" or "Get-StoredCredential" or "security" or "op" or "pass"
             || executable == "gpg" && values.Any(v => v.StartsWith("--export-secret", StringComparison.Ordinal))
             || executable == "gh" && GitHubTokenOutput(values)) codes.Add("credentials");
+        if (executable.StartsWith("git-credential-", StringComparison.Ordinal)
+            && CredentialOperation(values, 0) is "get" or "store" or "erase") codes.Add("credentials");
 
         if (executable is "cd" or "chdir" or "Set-Location")
         {
@@ -222,8 +261,8 @@ public static partial class CommandAudit
             || value.Equals("t", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void AddShellPath(List<InvocationPath> paths, string word, PathAccess access, CommandContext context) =>
-        paths.Add(new InvocationPath(ShellPath(word, context), access, context.Working));
+    private static void AddShellPath(List<InvocationPath> paths, string word, PathAccess access, CommandContext context, bool copiesTree = false) =>
+        paths.Add(new InvocationPath(ShellPath(word, context), access, context.Working, copiesTree));
 
     private static string ShellPath(string word, CommandContext context) => word.StartsWith('\'') && word.EndsWith('\'')
         ? Value(word) : ExpandPath(word.Replace("\"", "", StringComparison.Ordinal), context.ExpansionEnvironment ?? context.Environment);
@@ -256,16 +295,25 @@ public static partial class CommandAudit
         while (start < args.Count)
         {
             string wrapper = Executable(args[start]);
-            if (wrapper is not ("env" or "sudo" or "nohup" or "time" or "nice" or "timeout" or "command" or "exec" or "busybox")) break;
+            if (wrapper is not ("env" or "sudo" or "doas" or "nohup" or "time" or "nice" or "timeout" or "command" or "exec" or "busybox")) break;
             start++;
-            while (start < args.Count && args[start].StartsWith('-'))
+            while (start < args.Count && Value(args[start]).StartsWith('-'))
             {
                 string option = Value(args[start++]);
                 if (option == "--") break;
+                if (wrapper == "doas" && option.StartsWith("-C", StringComparison.Ordinal))
+                {
+                    // Configuration check; it reads a file but does not execute the child.
+                    if (option.Length > 2) AddShellPath(paths, SuffixWord(args[start - 1], 2), PathAccess.Read, context);
+                    else if (start < args.Count) AddShellPath(paths, args[start], PathAccess.Read, context);
+                    else codes.Add("audit-unverified");
+                    return args.Count;
+                }
                 bool value = wrapper switch
                 {
                     "env" => option is "-u" or "--unset" or "-C" or "--chdir" or "-S" or "--split-string",
                     "sudo" => option is "-u" or "--user" or "-g" or "--group" or "-h" or "--host" or "-p" or "--prompt" or "-C" or "--close-from" or "-D" or "--chdir",
+                    "doas" => option == "-u",
                     "nice" => option is "-n" or "--adjustment",
                     "timeout" => option is "-s" or "--signal" or "-k" or "--kill-after",
                     "time" => option is "-f" or "--format" or "-o" or "--output",

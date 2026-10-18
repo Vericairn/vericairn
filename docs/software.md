@@ -955,7 +955,8 @@ objects. A directory supplied to a classified Git read is a read target, and cop
 `rsync -n`/`--dry-run` and `patch --dry-run` targets are classified as reads.
 Mutating or helper-executing options such as `find -delete`, `rg --pre` and `git diff --output` are not reads.
 
-The remaining warning-only cases are ordinary outside reads (`scope-read`), recognizable network attempts (`network`),
+The remaining warning-only cases are ordinary outside reads (`scope-read`), including listing the Vericairn home
+itself (`ls` or `ls -R`) and reading a per-clone `live.db`, recognizable network attempts (`network`),
 and uncertainty (`audit-unverified`): unresolved variables or command substitutions; unclassified outside-looking
 operands, including helper-executing forms; unknown working directories; paths whose physical containment cannot be
 verified; remote `rsync` operands; opaque interpreter input (including `osascript`); and `xargs`, whose input-supplied

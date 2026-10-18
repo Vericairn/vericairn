@@ -449,6 +449,9 @@ internal static class FakeHarness
             case "watch-codex-command-input":
                 Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = File.ReadAllText(report + ".command") } }));
                 return 0;
+            case "watch-codex-command-array-input":
+                Emit(JsonSerializer.Serialize(new { type = "item.started", item = new { id = "c1", type = "command_execution", command = JsonSerializer.Deserialize<string[]>(File.ReadAllText(report + ".command")) } }));
+                return 0;
             case "watch-codex-workspace-change":
                 Emit("""{"type":"item.started","item":{"id":"c1","type":"command_execution","command":"touch README.md"}}""");
                 File.WriteAllText("README.md", "A change outside the brief, inside the workspace.\n");
