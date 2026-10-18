@@ -20,7 +20,7 @@ public static partial class CommandAudit
         int cursor = 0;
         while (cursor < command.Length)
         {
-            Match match = ShellWords().Match(command, cursor);
+            Match match = Match(ShellWords(), command, cursor);
             if (!match.Success) break;
             cursor = match.Index + match.Length;
             string word = match.Value;
@@ -55,7 +55,7 @@ public static partial class CommandAudit
 
             if (word is "<<" or "<<-" or "<<<")
             {
-                Match argument = ShellWords().Match(command, cursor);
+                Match argument = Match(ShellWords(), command, cursor);
                 if (!argument.Success || Separator(argument.Value) || argument.Value.StartsWith('<') || argument.Value.StartsWith('>'))
                 {
                     codes.Add("audit-unverified");

@@ -21,7 +21,7 @@ public static partial class CommandAudit
     private static bool NullDevice(string path) => path == "/dev/null" || OperatingSystem.IsWindows()
         && (path.Equals("$null", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(path.Replace('\\', '/')).Equals("NUL", StringComparison.OrdinalIgnoreCase));
 
-    private static bool Unresolved(string path) => path.IndexOfAny(['~', '$', '`']) >= 0 || PercentExpansion().IsMatch(path);
+    private static bool Unresolved(string path) => path.IndexOfAny(['~', '$', '`']) >= 0 || IsMatch(PercentExpansion(), path);
 
     private static string? ResolvePath(string path, string? working)
     {
@@ -42,7 +42,7 @@ public static partial class CommandAudit
             if (!string.IsNullOrWhiteSpace(home)) path = home.TrimEnd('/', '\\') + path[1..];
         }
 
-        return PathExpansion().Replace(path, match =>
+        return Replace(PathExpansion(), path, match =>
         {
             string name = match.Groups["name"].Value;
             return environment.TryGetValue(name, out string? value) ? value : match.Value;
@@ -51,10 +51,10 @@ public static partial class CommandAudit
 
     private static bool CredentialPath(string path, string? working, IReadOnlyDictionary<string, string> environment, bool copiesTree)
     {
-        if (SecretPath().IsMatch(path.Replace('\\', '/'))) return true;
+        if (IsMatch(SecretPath(), path.Replace('\\', '/'))) return true;
         string? resolved = ResolvePath(path, working);
         if (resolved is null) return false;
-        if (SecretPath().IsMatch(resolved.Replace('\\', '/'))) return true;
+        if (IsMatch(SecretPath(), resolved.Replace('\\', '/'))) return true;
         string? home = CredentialHome(environment, working);
         if (home is null) return false;
         // A recursive source contains the same stores when it names the home or an ancestor.
@@ -63,7 +63,7 @@ public static partial class CommandAudit
         string relative = Path.GetRelativePath(home, resolved).Replace('\\', '/');
         // File/CNG/Secure Enclave/Secret Service stores all use keys/. Connections retain pairing
         // identities. RuntimeIdentity and RuntimeCertificate live beside EstateLocations' live.db.
-        return VericairnCredentialRelativePath().IsMatch(relative);
+        return IsMatch(VericairnCredentialRelativePath(), relative);
     }
 
     private static string? CredentialHome(IReadOnlyDictionary<string, string> environment, string? working)

@@ -742,7 +742,10 @@ charged at its cap.
   including merged side branches. All changed paths count, including changes restored in the worktree or a later
   commit. The pinned original object/reference directory is read through isolated Git metadata that loads no
   agent-writable configuration, replacement refs, grafts, attributes or external diff drivers. Renamed, deleted,
-  untracked and ignored changes count. Missing history, non-regular files or references, an unavailable helper or a deadline mark the audit incomplete;
+  and non-ignored untracked changes count. FIX-26 excludes ignored untracked output before content reads and
+  omits the worker's untracked brief files from comparison; tracked files still count even when ignored. A complete committed audit remains
+  available for guarded branch retention when the file inventory is incomplete. Missing history, non-regular files
+  or references, an unavailable helper or a deadline mark the audit incomplete;
   each inventory and the pattern comparison have a 30-second deadline, with bounded helper cleanup. Outside changes or
   incomplete audit are flagged in the observed summary. At most 1000 outside names are listed; unsafe names are hashed.
   Committed history shares the settlement inventory's deadline, with at most 10,000 new commits and 100,000 distinct

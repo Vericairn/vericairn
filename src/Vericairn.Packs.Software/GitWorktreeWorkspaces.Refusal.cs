@@ -61,7 +61,7 @@ public sealed partial class GitWorktreeWorkspaces
         };
 
         bool ExportMatches(string name, string fingerprint, string content) => exported is { Problem: null }
-            && exported.Files.GetValueOrDefault(name) == fingerprint && !fingerprint.StartsWith("link:", StringComparison.Ordinal)
+            && exported.RunFiles?.GetValueOrDefault(name) == fingerprint && !fingerprint.StartsWith("link:", StringComparison.Ordinal)
             && fingerprint.EndsWith(":" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(content))), StringComparison.Ordinal);
     }
 }

@@ -294,7 +294,7 @@ public static partial class CommandAudit
                 if (value.StartsWith('-')) continue;
                 if (i > commandIndex && command is not null && GitReadCommands.Contains(command) && GitObjectPath(value))
                 {
-                    if (SecretPath().IsMatch(value[(value.IndexOf(':', StringComparison.Ordinal) + 1)..].Replace('\\', '/'))) codes.Add("credentials");
+                    if (IsMatch(SecretPath(), value[(value.IndexOf(':', StringComparison.Ordinal) + 1)..].Replace('\\', '/'))) codes.Add("credentials");
                     continue;
                 }
             }
