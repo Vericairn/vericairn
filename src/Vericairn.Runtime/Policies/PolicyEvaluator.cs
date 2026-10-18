@@ -37,7 +37,7 @@ internal static class PolicyEvaluator
                 }
             }
         }
-        ImmutableArray<PolicyFinding> ordered = findings.OrderBy(f => f.PolicyKey, StringComparer.Ordinal).ThenBy(f => f.Rule, StringComparer.Ordinal)
+        ImmutableArray<PolicyFinding> ordered = PolicyExceptions.Apply(basis, findings).OrderBy(f => f.PolicyKey, StringComparer.Ordinal).ThenBy(f => f.Rule, StringComparer.Ordinal)
             .ThenBy(f => f.Target.Identity, StringComparer.Ordinal).ThenBy(f => f.Item, StringComparer.Ordinal).ThenBy(f => f.Policy.Id, StringComparer.Ordinal).ToImmutableArray();
         ImmutableArray<PolicyRuleSummary> rules = ordered.GroupBy(f => (f.Policy, f.Rule)).Select(g => new PolicyRuleSummary(g.Key.Policy, g.Key.Rule,
             g.Where(f => f.SubjectCount > 0).Select(f => f.Target.Identity).Distinct(StringComparer.Ordinal).Count(), g.Count(f => f.Verdict == "satisfied"), g.Count(f => f.Verdict == "unmet"),
