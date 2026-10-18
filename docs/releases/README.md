@@ -9,7 +9,7 @@ The [0.7.3 set](0.7.3/README.md) documents FIX-19, UPDATE-01, FIX-20, FIX-21 and
 independent worker workspace repositories and sandboxed Codex commits; a disclosed, machine-local daily
 check for newer releases; broader credential and write recognition in the command audit; safe concurrent
 use of loaded and rotated runtime certificates with handshake diagnostics; and compact, current required
-attention across surfaces. Its notes render the estate's records with `--from 0.7.2 --to 0.7.3`.
+attention across surfaces. Its notes render the estate's records with `--from 0.7.2 --to 0.7.3`. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`.
 The estate's release record establishes publication and platform qualification. The source build retains
 `0.7.3-dev`; the earlier sets and their checksums remain unchanged.
 
