@@ -100,6 +100,9 @@ public sealed class BodyReader
 
     /// <summary>Reads a string restricted to a set of values.</summary>
     public string? Enum(string name, bool required, params string[] allowed)
+        => Enum(name, required, (IReadOnlyList<string>)allowed);
+
+    internal string? Enum(string name, bool required, IReadOnlyList<string> allowed)
     {
         string? text = Text(name, required, 200);
         if (text is null)
@@ -107,7 +110,7 @@ public sealed class BodyReader
             return null;
         }
 
-        if (Array.IndexOf(allowed, text) < 0)
+        if (!allowed.Contains(text, StringComparer.Ordinal))
         {
             findings.Error("body.enum", Field(name), $"'{name}' must be one of: {string.Join(", ", allowed)}.");
             return null;

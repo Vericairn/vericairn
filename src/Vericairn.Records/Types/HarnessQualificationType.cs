@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -13,7 +14,7 @@ public sealed class HarnessQualificationType : IRecordType
     private static readonly string[] IdentityFields = ["launcher", "version", "probes"];
 
     /// <summary>The complete probe set; raw outputs, local paths and login material are never fields.</summary>
-    public static readonly string[] ProbeNames = ["version", "flags", "tools", "configuration", "login", "mcp"];
+    public static readonly ImmutableArray<string> ProbeNames = ["version", "flags", "tools", "configuration", "login", "mcp"];
 
     /// <inheritdoc />
     public string Name => "harness-qualification";

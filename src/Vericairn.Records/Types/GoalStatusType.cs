@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -10,7 +11,7 @@ namespace Vericairn.Records.Types;
 public sealed class GoalStatusType : IRecordType
 {
     /// <summary>The statuses a goal moves through after it is proposed.</summary>
-    public static readonly string[] Statuses = ["active", "paused", "budget-limited", "blocked", "impossible", "abandoned"];
+    public static readonly ImmutableArray<string> Statuses = ["active", "paused", "budget-limited", "blocked", "impossible", "abandoned"];
 
     /// <inheritdoc />
     public string Name => "goal-status";
@@ -73,7 +74,7 @@ public sealed class GoalStatusType : IRecordType
         {
             context.Error("goal-status.first", "A goal starts when its sponsor activates it, or ends unstarted when its sponsor abandons it.");
         }
-        else if (previous is not null && EstateModel.BodyString(previous, "status") is { } last && Array.IndexOf(GoalRules.Ended, last) >= 0)
+        else if (previous is not null && EstateModel.BodyString(previous, "status") is { } last && GoalRules.Ended.IndexOf(last) >= 0)
         {
             context.Error("goal-status.ended", $"The goal ended as {last}; a new objective is a new goal.");
         }

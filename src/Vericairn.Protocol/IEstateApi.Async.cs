@@ -245,6 +245,22 @@ public partial interface IEstateApi
     Task<ReleaseResponse> ReleaseObserveAsync(ReleaseObserveRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(ReleaseObserve), () => ReleaseObserve(request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="ChangesPush"/>; a stopped observation does not undo an effect.</summary>
+    Task<ChangeResponse> ChangesPushAsync(ChangesPushRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ChangesPush), () => ChangesPush(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="ChangesOpen"/>; a stopped observation does not undo an effect.</summary>
+    Task<ChangeResponse> ChangesOpenAsync(ChangesOpenRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ChangesOpen), () => ChangesOpen(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="ChangesMerge"/>; a stopped observation does not undo an effect.</summary>
+    Task<ChangeResponse> ChangesMergeAsync(ChangesMergeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ChangesMerge), () => ChangesMerge(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="ChangesObserve"/>; a stopped observation does not undo an effect.</summary>
+    Task<ChangeResponse> ChangesObserveAsync(ChangesObserveRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ChangesObserve), () => ChangesObserve(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Upgrade"/>; a stopped observation does not undo an effect.</summary>
     Task<(UpgradeResponse? Plan, Problem? Problem)> UpgradeAsync(UpgradeRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Upgrade), () => Upgrade(request), true, this as IClientOperationLifetime, cancellationToken);

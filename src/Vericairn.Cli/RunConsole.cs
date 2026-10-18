@@ -109,7 +109,7 @@ internal static class RunConsole
         }
 
         var parts = new List<string>();
-        foreach (JsonProperty unit in element.EnumerateObject().OrderBy(p => Array.IndexOf(Caps.UnitNames, p.Name) is int at and >= 0 ? at : Caps.UnitNames.Length))
+        foreach (JsonProperty unit in element.EnumerateObject().OrderBy(p => Caps.UnitNames.IndexOf(p.Name) is int at and >= 0 ? at : Caps.UnitNames.Length))
         {
             if (unit.Name == "unreported")
             {

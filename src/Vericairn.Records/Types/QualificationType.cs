@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
@@ -9,7 +10,7 @@ namespace Vericairn.Records.Types;
 public sealed class QualificationType : IRecordType
 {
     /// <summary>What the observations establish for a profile; a non-claim is a result, not a gap.</summary>
-    public static readonly string[] Outcomes = ["qualified", "measured-in-part", "not-qualified", "non-claim"];
+    public static readonly ImmutableArray<string> Outcomes = ["qualified", "measured-in-part", "not-qualified", "non-claim"];
 
     /// <summary>What a qualification rests on.</summary>
     private static readonly string[] EvidenceTypes = ["verification", "review", "observation"];

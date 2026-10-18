@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -16,7 +17,7 @@ namespace Vericairn.Mcp;
 public sealed class McpServer
 {
     /// <summary>Protocol revisions this server speaks; the first is the one it proposes.</summary>
-    public static readonly string[] SupportedProtocolVersions = ["2025-06-18", "2025-03-26", "2024-11-05"];
+    public static readonly ImmutableArray<string> SupportedProtocolVersions = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
     private readonly ToolRegistry tools;
     private readonly string version;

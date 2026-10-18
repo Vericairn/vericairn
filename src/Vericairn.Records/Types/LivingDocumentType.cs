@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -13,19 +14,19 @@ namespace Vericairn.Records.Types;
 public sealed class LivingDocumentType : IRecordType
 {
     /// <summary>Written by a person or an agent, or produced by a generator.</summary>
-    public static readonly string[] Kinds = ["authored", "generated"];
+    public static readonly ImmutableArray<string> Kinds = ["authored", "generated"];
 
     /// <summary>What a due document does: an attention item, also an estate check warning, also a closed release gate.</summary>
-    public static readonly string[] Levels = ["remind", "warn", "refuse"];
+    public static readonly ImmutableArray<string> Levels = ["remind", "warn", "refuse"];
 
     /// <summary>The foundation's triggers; a pack's are named namespace/name.</summary>
-    public static readonly string[] Triggers = ["covers", "release", "upgrade", "decision", "accepted"];
+    public static readonly ImmutableArray<string> Triggers = ["covers", "release", "upgrade", "decision", "accepted"];
 
     /// <summary>The foundation's checks; a pack's are named namespace/name.</summary>
-    public static readonly string[] Checks = ["names-version", "matches-generator", "links-resolve"];
+    public static readonly ImmutableArray<string> Checks = ["names-version", "matches-generator", "links-resolve"];
 
     /// <summary>Who may clear a due document.</summary>
-    public static readonly string[] Clearers = ["any", "independent", "operator"];
+    public static readonly ImmutableArray<string> Clearers = ["any", "independent", "operator"];
 
     /// <summary>The foundation's source: a file of the estate's own repository.</summary>
     public const string EstateFile = "estate-file";
@@ -121,7 +122,7 @@ public sealed class LivingDocumentType : IRecordType
 
         foreach (string check in checks ?? [])
         {
-            if (Array.IndexOf(Checks, check) < 0 && !Patterns.Contribution.IsMatch(check))
+            if (Checks.IndexOf(check) < 0 && !Patterns.Contribution.IsMatch(check))
             {
                 body.Error("document.check", "checks", $"'{check}' is neither one of the foundation's checks ({string.Join(", ", Checks)}) nor a pack's named namespace/name.");
             }

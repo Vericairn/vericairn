@@ -128,6 +128,11 @@ public class DocsTests
             Assert.Contains("records new", commands);
             Assert.Contains("estate upgrade", commands);
             Assert.Contains("updates configure", commands);
+            foreach (string action in new[] { "push", "open", "merge", "observe" })
+            {
+                Assert.Contains("changes " + action, commands);
+                Assert.Contains("POST /v1/changes/" + action, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            }
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
             Assert.Contains("operator list", commands);

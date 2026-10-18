@@ -304,6 +304,22 @@ public sealed partial class VericairnClient
     public Task<ReleaseResponse> ReleaseObserveAsync(ReleaseObserveRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<ReleaseResponse>(nameof(ReleaseObserve), async token => (await PostAsync<ReleaseObserveRequest, ReleaseResponse>("/v1/releases/observe", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReleaseObserve)), cancellationToken);
 
+    /// <summary>The cancellable ChangesPush operation, with a deadline covering the complete response.</summary>
+    public Task<ChangeResponse> ChangesPushAsync(ChangesPushRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<ChangeResponse>(nameof(ChangesPush), async token => (await PostAsync<ChangesPushRequest, ChangeResponse>("/v1/changes/push", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ChangesPush)), cancellationToken);
+
+    /// <summary>The cancellable ChangesOpen operation, with a deadline covering the complete response.</summary>
+    public Task<ChangeResponse> ChangesOpenAsync(ChangesOpenRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<ChangeResponse>(nameof(ChangesOpen), async token => (await PostAsync<ChangesOpenRequest, ChangeResponse>("/v1/changes/open", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ChangesOpen)), cancellationToken);
+
+    /// <summary>The cancellable ChangesMerge operation, with a deadline covering the complete response.</summary>
+    public Task<ChangeResponse> ChangesMergeAsync(ChangesMergeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<ChangeResponse>(nameof(ChangesMerge), async token => (await PostAsync<ChangesMergeRequest, ChangeResponse>("/v1/changes/merge", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ChangesMerge)), cancellationToken);
+
+    /// <summary>The cancellable ChangesObserve operation, with a deadline covering the complete response.</summary>
+    public Task<ChangeResponse> ChangesObserveAsync(ChangesObserveRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<ChangeResponse>(nameof(ChangesObserve), async token => (await PostAsync<ChangesObserveRequest, ChangeResponse>("/v1/changes/observe", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ChangesObserve)), cancellationToken);
+
     /// <summary>The cancellable Upgrade operation, with a deadline covering the complete response.</summary>
     public Task<(UpgradeResponse? Plan, Problem? Problem)> UpgradeAsync(UpgradeRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<(UpgradeResponse? Plan, Problem? Problem)>(nameof(Upgrade), async token => (await PostOrProblemAsync<UpgradeRequest, UpgradeResponse>("/v1/estate/upgrade", request, cancellationToken: token).ConfigureAwait(false)), true, OperationTimeout?.Invoke(nameof(Upgrade)), cancellationToken);

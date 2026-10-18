@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.RegularExpressions;
 
 namespace Vericairn.Records.Types;
@@ -9,7 +10,7 @@ namespace Vericairn.Records.Types;
 public static partial class ExecutionPolicy
 {
     /// <summary>Portable selection fields. A value is an identity, never a local binding or a credential.</summary>
-    public static readonly string[] Choices = ["model", "effort", "provider", "destination", "dataBoundary", "adapter"];
+    public static readonly ImmutableArray<string> Choices = ["model", "effort", "provider", "destination", "dataBoundary", "adapter"];
 
     /// <summary>Reads an optional execution policy from its parent.</summary>
     public static void Read(BodyReader parent)

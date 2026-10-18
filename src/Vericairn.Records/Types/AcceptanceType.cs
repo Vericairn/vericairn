@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -30,7 +31,7 @@ public sealed class AcceptanceType : IRecordType
     ];
 
     /// <summary>The subject types whose acceptance follows rules of their own: a work order, a result toward one, and a goal.</summary>
-    public static readonly string[] SubjectTypes = ["work-order", "result", "goal"];
+    public static readonly ImmutableArray<string> SubjectTypes = ["work-order", "result", "goal"];
 
     /// <inheritdoc />
     public void Validate(ValidationContext context)

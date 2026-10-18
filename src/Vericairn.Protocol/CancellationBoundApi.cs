@@ -366,6 +366,30 @@ public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken can
     public Task<ReleaseResponse> ReleaseSubmitAsync(ReleaseSubmitRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ReleaseSubmitAsync(request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public ChangeResponse ChangesPush(ChangesPushRequest request) => inner.ChangesPushAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<ChangeResponse> ChangesPushAsync(ChangesPushRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ChangesPushAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesOpen(ChangesOpenRequest request) => inner.ChangesOpenAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<ChangeResponse> ChangesOpenAsync(ChangesOpenRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ChangesOpenAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesMerge(ChangesMergeRequest request) => inner.ChangesMergeAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<ChangeResponse> ChangesMergeAsync(ChangesMergeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ChangesMergeAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesObserve(ChangesObserveRequest request) => inner.ChangesObserveAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<ChangeResponse> ChangesObserveAsync(ChangesObserveRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ChangesObserveAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request) => inner.ReleaseObserveAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

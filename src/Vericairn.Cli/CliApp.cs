@@ -27,6 +27,7 @@ internal static class CliApp
         root.Subcommands.Add(new DevicesCommand(context));
         root.Subcommands.Add(new ConnectionsCommand(context));
         root.Subcommands.Add(new ReleaseCommand(context));
+        root.Subcommands.Add(new ChangesCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
         root.Subcommands.Add(new CheckCommand(context));
         root.Subcommands.Add(new RuntimeCommand(context));

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -21,7 +22,7 @@ namespace Vericairn.Records.Estate;
 public static class Asks
 {
     /// <summary>The states that still wait on the principal the ask is put to: open, and notified, whose delivery stays unknown.</summary>
-    public static readonly string[] Waiting = ["open", "notified"];
+    public static readonly ImmutableArray<string> Waiting = ["open", "notified"];
 
     /// <summary>How many asks one delivery carries to a principal: at most three, the rest waiting in order.</summary>
     public const int PerDelivery = 3;
@@ -62,7 +63,7 @@ public static class Asks
     }
 
     /// <summary>True when the state still waits on the principal the ask is put to.</summary>
-    public static bool IsWaiting(string state) => Array.IndexOf(Waiting, state) >= 0;
+    public static bool IsWaiting(string state) => Waiting.IndexOf(state) >= 0;
 
     /// <summary>
     /// What waits on each principal, or on the one named: every current ask still waiting on it, oldest first by the time its first

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -15,13 +16,13 @@ namespace Vericairn.Records.Model;
 public static partial class RecordParser
 {
     /// <summary>Envelope keys every record must have.</summary>
-    public static readonly IReadOnlySet<string> RequiredKeys = new HashSet<string>(StringComparer.Ordinal) { "format", "type", "id", "at", "by", "body", "hash" };
+    public static readonly IReadOnlySet<string> RequiredKeys = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal) { "format", "type", "id", "at", "by", "body", "hash" });
 
     /// <summary>Envelope keys a record may have.</summary>
-    public static readonly IReadOnlySet<string> OptionalKeys = new HashSet<string>(StringComparer.Ordinal) { "subject", "supersedes", "signatures" };
+    public static readonly IReadOnlySet<string> OptionalKeys = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal) { "subject", "supersedes", "signatures" });
 
     /// <summary>Envelope keys excluded from the hash.</summary>
-    public static readonly IReadOnlySet<string> HashExcludedKeys = new HashSet<string>(StringComparer.Ordinal) { "hash", "signatures" };
+    public static readonly IReadOnlySet<string> HashExcludedKeys = new ReadOnlySet<string>(new HashSet<string>(StringComparer.Ordinal) { "hash", "signatures" });
 
     /// <summary>Record type names: kebab-case.</summary>
     public static Regex TypePattern => TypeRegex();
