@@ -72,6 +72,11 @@ public static class OpenApiDocument
         ("POST", "/v1/runs/{id}/stop"),
         ("POST", "/v1/releases/submit"),
         ("POST", "/v1/releases/observe"),
+        ("POST", "/v1/changes/push"),
+        ("POST", "/v1/changes/open"),
+        ("POST", "/v1/changes/merge"),
+        ("POST", "/v1/changes/observe"),
+
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/estate/export"),
         ("GET", "/v1/reconcile"),
@@ -220,6 +225,11 @@ public static class OpenApiDocument
         {
             DaemonResponses(path, responses);
         }
+        else if (method == "POST" && path.StartsWith("/v1/changes/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject { ["description"] = "ChangeResponse: recorded intent, observed effect and exact-head evidence; uncertainty never authorizes retry.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ChangeResponse" } } } };
+        }
         else if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
@@ -337,6 +347,11 @@ public static class OpenApiDocument
             ["TakeoverRequest"] = Object(("assignment", "string"), ("by", "string"), ("contributor", "string"), ("note", "string")),
             ["TakeoverResponse"] = Object(("message", "string"), ("ok", "boolean"), ("assignment", "object"), ("stops", "array"), ("problem", "object")),
             ["DeviceRecoveryRequest"] = Object(("principal", "string"), ("name", "string"), ("output", "string"), ("passphrase", "string")),
+            ["ChangesPushRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
+            ["ChangesOpenRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("title", "string"), ("body", "string"), ("by", "string"), ("reconciliation", "string")),
+            ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
+            ["ChangesObserveRequest"] = Object(("operation", "string"), ("by", "string"), ("cancel", "string")),
+            ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
@@ -390,6 +405,11 @@ public static class OpenApiDocument
         "/v1/runs/{id}/stop" => "RunStopRequest",
         "/v1/releases/submit" => "ReleaseSubmitRequest",
         "/v1/releases/observe" => "ReleaseObserveRequest",
+        "/v1/changes/push" => "ChangesPushRequest",
+        "/v1/changes/open" => "ChangesOpenRequest",
+        "/v1/changes/merge" => "ChangesMergeRequest",
+        "/v1/changes/observe" => "ChangesObserveRequest",
+
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/estate/export" => "ExportRequest",
         "/v1/objects" => "ObjectBytes",
@@ -462,6 +482,10 @@ public static class OpenApiDocument
         ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. The principal recording the run (by) is the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
+        ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
+        ("POST", "/v1/changes/open") => "Record intent and open a pull request from an exact head with a recorded successful scanned push.",
+        ("POST", "/v1/changes/merge") => "Record intent and checks, refuse missing or unsuccessful checks, merge pinned to the head, and observe the target run. A failure raises an operator ask.",
+        ("POST", "/v1/changes/observe") => "Record an observation under an original change's provider and head; incomplete or uncertain outcomes remain uncertain.",
         ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",
         ("POST", "/v1/estate/upgrade") => "Plan or apply an upgrade to a published release.",
         ("POST", "/v1/estate/export") => "Write a verified export to a path on the runtime's machine; no keys or authority travel with it.",

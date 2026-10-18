@@ -191,6 +191,11 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/runs/{id}/stop"] = typeof(RunStopRequest),
         ["POST /v1/releases/submit"] = typeof(ReleaseSubmitRequest),
         ["POST /v1/releases/observe"] = typeof(ReleaseObserveRequest),
+        ["POST /v1/changes/push"] = typeof(ChangesPushRequest),
+        ["POST /v1/changes/open"] = typeof(ChangesOpenRequest),
+        ["POST /v1/changes/merge"] = typeof(ChangesMergeRequest),
+        ["POST /v1/changes/observe"] = typeof(ChangesObserveRequest),
+
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
         ["GET /v1/reconcile"] = null,
@@ -253,6 +258,11 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(GoalAcceptRequest)] = (_, r, d) => Acting(((GoalAcceptRequest)r).By, d),
         [typeof(ReleaseSubmitRequest)] = (_, r, d) => Acting(((ReleaseSubmitRequest)r).By, d),
         [typeof(ReleaseObserveRequest)] = (_, r, d) => Acting(((ReleaseObserveRequest)r).By, d),
+        [typeof(ChangesPushRequest)] = (_, r, d) => Acting(((ChangesPushRequest)r).By, d),
+        [typeof(ChangesOpenRequest)] = (_, r, d) => Acting(((ChangesOpenRequest)r).By, d),
+        [typeof(ChangesMergeRequest)] = (_, r, d) => Acting(((ChangesMergeRequest)r).By, d),
+        [typeof(ChangesObserveRequest)] = (_, r, d) => Acting(((ChangesObserveRequest)r).By, d),
+
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),
         [typeof(RunStartRequest)] = (_, r, d) => Acting(((RunStartRequest)r).By, d),

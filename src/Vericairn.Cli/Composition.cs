@@ -22,6 +22,9 @@ internal static class Composition
     {
         ArgumentNullException.ThrowIfNull(registry);
         registry.RegisterIfAbsent(new GitHubReleaseProvider());
+        registry.RegisterIfAbsent(new GitHubPullRequestProvider());
+        registry.PushAdapter ??= new GitPushAdapter();
+        registry.SecretScanner ??= new GitleaksScanner();
         registry.RegisterIfAbsent(new GitCommandAdapter());
         registry.RegisterIfAbsent(new ClaudeCodeLauncher());
         registry.RegisterIfAbsent(new CodexLauncher());

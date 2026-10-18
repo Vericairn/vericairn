@@ -18,15 +18,12 @@ public sealed class TestHome : IDisposable
 {
     private readonly string? created;
 
-    /// <summary>Sets the home unless the environment already names one.</summary>
+    /// <summary>Creates a test-owned home without inspecting or using an inherited home.</summary>
     public TestHome()
     {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);
-            Directory.CreateDirectory(created);
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, created);
-        }
+        created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(created);
+        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, created);
     }
 
     /// <summary>Removes the home this fixture created, once every test has finished.</summary>
