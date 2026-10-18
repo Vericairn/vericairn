@@ -42,14 +42,14 @@ internal static partial class CliApp
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
         root.Subcommands.Add(new McpCommand(context));
         root.Subcommands.Add(new ContextCommand(context));
-        root.Subcommands.Add(UpdatesFamily(jsonOption));
+        root.Subcommands.Add(new UpdatesCommand(context));
 
-        var status = new Command("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command. --json is identical on every machine for the same records and includes complete record-derived attention references. Human status also shows labelled local worker concerns. " + UpdateHelp);
+        var status = new Command("status", "Show the estate's current state derived from its records, with compact required attention resolved from current evidence. Each item names its exact source and inspection command. --json is identical on every machine for the same records and includes complete record-derived attention references. Human status also shows labelled local worker concerns. " + UpdateNotices.Help);
         var observeStatus = new Option<bool>("--observe") { Description = "Explicitly record that a person observed status; requires --by. Ordinary reads record nothing." };
         var observer = new Option<string?>("--by") { Description = "The observing human principal; used only with --observe." };
         status.Options.Add(observeStatus);
         status.Options.Add(observer);
-        status.SetAction(parseResult => Commands.WithUpdates(updates, () => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult))));
+        status.SetAction(parseResult => UpdateNotices.Run(context, updates, () => Commands.Status(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(observeStatus), parseResult.GetValue(observer), presentation.Read(parseResult))));
         root.Subcommands.Add(status);
 
         var progress = new Command("progress", "Show the estate's recorded progress with latest local agent claims and worker observations labelled separately: where the estate stands, the work orders by state, each published release and what it contained, what comes next by release, the next eligible work and what waits on the operator. Required attention names only open obligations with exact references and inspection commands; ordinary after ordering is planning. --json includes complete attention references.");
@@ -82,12 +82,12 @@ internal static partial class CliApp
         decisions.SetAction(parseResult => Commands.Decisions(parseResult.GetValue(estateOption)!, parseResult.GetValue(decisionIdArgument), parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
         root.Subcommands.Add(decisions);
 
-        var doctor = new Command("doctor", "Check this machine's prerequisites. " + UpdateHelp);
-        doctor.SetAction(parseResult => Commands.WithUpdates(updates, () => Commands.Doctor(parseResult.GetValue(estateOption)!)));
+        var doctor = new Command("doctor", "Check this machine's prerequisites. " + UpdateNotices.Help);
+        doctor.SetAction(parseResult => UpdateNotices.Run(context, updates, () => Commands.Doctor(parseResult.GetValue(estateOption)!)));
         root.Subcommands.Add(doctor);
 
-        var version = new Command("version", "Print the version. " + UpdateHelp);
-        version.SetAction(_ => Commands.WithUpdates(updates, Commands.Version));
+        var version = new Command("version", "Print the version. " + UpdateNotices.Help);
+        version.SetAction(_ => UpdateNotices.Run(context, updates, Commands.Version));
         root.Subcommands.Add(version);
         return root;
     }
