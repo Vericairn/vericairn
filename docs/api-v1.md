@@ -1141,7 +1141,7 @@ Codex and Claude Code qualify only for the exact versions and isolation evidence
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
-The efficiency Adapter is unsupported (EFF-01, 0.8.0); only `disabled` is allowed. Remote is not built.
+The efficiency Adapter is unsupported (EFF-01, 0.8.1); only `disabled` is allowed. Remote is not built.
 These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 

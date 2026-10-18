@@ -271,7 +271,7 @@ public sealed partial class EstateService
                     body["dispatchedAt"] = Now();
                     body["reconciliation"] = reconciliation;
                 }
-                WriteOutcome written = NewRecord(new("operation", by, Element(body), $"product:{configuration.Product.Id}", prior?.Id));
+                WriteOutcome written = NewRecord(new("operation", by, EstateServiceValues.Element(body), $"product:{configuration.Product.Id}", prior?.Id));
                 if (!written.Ok) throw new ChangeWriteException(written.Problem!);
                 claim = new(configuration, by, body, written.Written!);
                 changeEffects.Add(identity);
@@ -366,7 +366,7 @@ public sealed partial class EstateService
         lock (gate)
         {
             RequireChangeAuthority(original.By);
-            WriteOutcome intent = NewRecord(new("operation", original.By, Element(body), $"operation:{original.Written.Id}"));
+            WriteOutcome intent = NewRecord(new("operation", original.By, EstateServiceValues.Element(body), $"operation:{original.Written.Id}"));
             if (!intent.Ok) throw new ChangeWriteException(intent.Problem!);
             observation = new(original.Configuration, original.By, body, intent.Written!);
             DispatchChange(observation, checkDeclaration: false);
@@ -416,7 +416,7 @@ public sealed partial class EstateService
                     string op = EstateModel.BodyString(model.Current("estate").Single(), "operator")!;
                     JsonObject body = new() { ["to"] = op, ["state"] = "open", ["question"] = "The target branch's run failed at the recorded merge commit. How should it be corrected?",
                         ["recommendation"] = "Inspect the recorded failing checks and prepare a corrective change.", ["consequence"] = "The failed target run remains unresolved." };
-                    WriteOutcome result = NewRecord(new("ask", claim.By, Element(body), $"operation:{claim.Written.Id}:{claim.Written.Hash}"));
+                    WriteOutcome result = NewRecord(new("ask", claim.By, EstateServiceValues.Element(body), $"operation:{claim.Written.Id}:{claim.Written.Hash}"));
                     if (!result.Ok) throw new ChangeWriteException(result.Problem!);
                     ask = result.Written;
                 }
@@ -442,7 +442,7 @@ public sealed partial class EstateService
         JsonObject next = claim.Body.DeepClone().AsObject();
         next["status"] = status;
         string subject = claim.Action == "change-observe" ? $"operation:{claim.Body["target"]!["operation"]!.GetValue<string>()}" : $"product:{claim.Configuration.Product.Id}";
-        WriteOutcome saved = NewRecord(new("operation", claim.By, Element(next), subject, claim.Written.Id));
+        WriteOutcome saved = NewRecord(new("operation", claim.By, EstateServiceValues.Element(next), subject, claim.Written.Id));
         if (!saved.Ok) throw new ChangeWriteException(saved.Problem!);
         claim.Body = next;
         claim.Written = saved.Written!;
@@ -475,4 +475,13 @@ public sealed partial class EstateService
     private static bool ChangeOperationRulesForRuntime(RecordEnvelope record) => record.Type == "operation" && EstateModel.BodyString(record, "action") is "change-push" or "change-open" or "change-merge";
     private static string? ChangeText(JsonElement value, string name) => value.ValueKind == JsonValueKind.Object && value.TryGetProperty(name, out JsonElement text) && text.ValueKind == JsonValueKind.String ? text.GetString() : null;
     private static string Now() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+
+    private RecordEnvelope? CurrentOperation(string identity)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            return model.Current("operation").FirstOrDefault(o => EstateModel.BodyString(o, "identity") == identity);
+        }
+    }
 }

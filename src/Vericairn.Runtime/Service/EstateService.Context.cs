@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 
