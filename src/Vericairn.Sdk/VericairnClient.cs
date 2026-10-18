@@ -3,8 +3,6 @@
 
 using System.Buffers.Text;
 using System.IO.Pipes;
-using System.Net;
-using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -20,7 +18,7 @@ namespace Vericairn.Sdk;
 /// the local network a paired device presents a certificate its key issued, has the runtime identity it pinned prove each
 /// connection, and signs every request. It presents, requests and observes; it never evaluates authority.
 /// </summary>
-public sealed class VericairnClient : IEstateApi, IDisposable
+public sealed partial class VericairnClient : IEstateApi, IDisposable
 {
     private readonly HttpClient http;
     private readonly LocalNetworkCredential? credential;
@@ -56,7 +54,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
                 }
             },
         };
-        http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = TimeSpan.FromMinutes(5) };
+        http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = Timeout.InfiniteTimeSpan };
     }
 
     private VericairnClient(DaemonEndpoint endpoint, LoopbackEndpoint loopback, IRequestSigner? signer)
@@ -74,13 +72,14 @@ public sealed class VericairnClient : IEstateApi, IDisposable
             },
         };
         HttpMessageHandler chain = signer is null ? handler : new SigningHandler(signer, handler);
-        http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = TimeSpan.FromMinutes(5) };
+        http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = Timeout.InfiniteTimeSpan };
     }
 
     private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout)
     {
         Endpoint = new DaemonEndpoint("local-network", connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
         Transport = "local-network";
+        OperationTimeout = _ => timeout;
         credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
         LocalNetworkCredential own = credential;
         var handler = new SocketsHttpHandler
@@ -92,7 +91,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
 
         // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP,
         // each signed for this estate and the runtime identity the device paired with.
-        http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
+        http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = Timeout.InfiniteTimeSpan };
     }
 
     /// <summary>The endpoint this client talks to.</summary>
@@ -143,272 +142,223 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public HealthResponse Health() => Get<HealthResponse>("/v1/health")!;
+    public HealthResponse Health() => HealthAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
-    {
-        try
-        {
-            return Get<CommunicationProfile>("/v1/communication" + CommunicationQuery(recipient, assignment, view))!;
-        }
-        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This runtime does not support communication settings.");
-        }
-    }
+    public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null) => CommunicationAsync(recipient, assignment, view).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome CommunicationSet(CommunicationSetRequest request) => Post<CommunicationSetRequest, WriteOutcome>("/v1/communication", request)!;
+    public WriteOutcome CommunicationSet(CommunicationSetRequest request) => CommunicationSetAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) => Post<CommunicationDelegateRequest, WriteOutcome>("/v1/communication/delegations", request)!;
+    public WriteOutcome CommunicationDelegate(CommunicationDelegateRequest request) => CommunicationDelegateAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public StatusResponse Status() => Get<StatusResponse>("/v1/status")!;
+    public StatusResponse Status() => StatusAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome ObserveEstate(EstateObserveRequest request) => Post<EstateObserveRequest, WriteOutcome>("/v1/status/observations", request)!;
+    public WriteOutcome ObserveEstate(EstateObserveRequest request) => ObserveEstateAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ProgressResponse Progress() => Get<ProgressResponse>("/v1/progress")!;
+    public ProgressResponse Progress() => ProgressAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public HandoffResponse Handoff(long? maxBytes = null) => Get<HandoffResponse>("/v1/handoff" + (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
+    public HandoffResponse Handoff(long? maxBytes = null) => HandoffAsync(maxBytes).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ResumeResponse ResumeHandoff(HandoffPackage package) => Post<HandoffPackage, ResumeResponse>("/v1/resume", package)!;
+    public ResumeResponse ResumeHandoff(HandoffPackage package) => ResumeHandoffAsync(package).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null)
-    {
-        string query = CommunicationQuery(recipient, assignment, view);
-        if (maxBytes is not null)
-        {
-            query += (query.Length == 0 ? "?" : "&") + "maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        }
+    public BriefResponse? BriefContext(string workOrder, long? maxBytes = null, string? recipient = null, string? assignment = null, CommunicationValues? view = null) => BriefContextAsync(workOrder, maxBytes, recipient, assignment, view).GetAwaiter().GetResult();
 
-        return Get<BriefResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) + "/brief" + query, allowNotFound: true);
-    }
-
     /// <inheritdoc />
-    public ContextResponse Context(string workOrder, long? maxBytes = null) => Get<ContextResponse>("/v1/context/work/" + Uri.EscapeDataString(workOrder) +
-        (maxBytes is null ? string.Empty : "?maxBytes=" + maxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)))!;
+    public ContextResponse Context(string workOrder, long? maxBytes = null) => ContextAsync(workOrder, maxBytes).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ContextReadResponse ContextRead(string pin) => Get<ContextReadResponse>("/v1/context/original/" + Uri.EscapeDataString(pin))!;
+    public ContextReadResponse ContextRead(string pin) => ContextReadAsync(pin).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ContextReadResponse ContextRead(string manifest, string source) => Get<ContextReadResponse>("/v1/context/" + Uri.EscapeDataString(manifest) + "/sources/" + Uri.EscapeDataString(source))!;
+    public ContextReadResponse ContextRead(string manifest, string source) => ContextReadAsync(manifest, source).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public FindingsResponse Validate() => Get<FindingsResponse>("/v1/validate")!;
+    public FindingsResponse Validate() => ValidateAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public FindingsResponse Check() => Get<FindingsResponse>("/v1/check")!;
+    public FindingsResponse Check() => CheckAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public RecordResponse? Record(string id) => Get<RecordResponse>("/v1/records/" + Uri.EscapeDataString(id), allowNotFound: true);
+    public RecordResponse? Record(string id) => RecordAsync(id).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<RecordResponse> Records(string type) => Get<List<RecordResponse>>("/v1/records?type=" + Uri.EscapeDataString(type))!;
+    public IReadOnlyList<RecordResponse> Records(string type) => RecordsAsync(type).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome NewRecord(NewRecordRequest request) => Post<NewRecordRequest, WriteOutcome>("/v1/records", request)!;
+    public WriteOutcome NewRecord(NewRecordRequest request) => NewRecordAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public DecisionsResponse Decisions() => Get<DecisionsResponse>("/v1/decisions")!;
+    public DecisionsResponse Decisions() => DecisionsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public DecisionResponse? Decision(string id) => Get<DecisionResponse>("/v1/decisions/" + Uri.EscapeDataString(id), allowNotFound: true);
+    public DecisionResponse? Decision(string id) => DecisionAsync(id).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
-        Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief" + CommunicationQuery(recipient, assignment, view), allowNotFound: true);
+    public BriefResponse? BriefFor(string workOrder, string? recipient = null, string? assignment = null, CommunicationValues? view = null) => BriefForAsync(workOrder, recipient, assignment, view).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public BriefResponse? Brief(string workOrder) => Get<BriefResponse>("/v1/work/" + Uri.EscapeDataString(workOrder) + "/brief", allowNotFound: true);
+    public BriefResponse? Brief(string workOrder) => BriefAsync(workOrder).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ObserveResponse? Observe(string workOrder) => Get<ObserveResponse>("/v1/work/" + Uri.EscapeDataString(workOrder), allowNotFound: true);
+    public ObserveResponse? Observe(string workOrder) => ObserveAsync(workOrder).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome Assign(AssignRequest request) => Post<AssignRequest, WriteOutcome>("/v1/work/assign", request)!;
+    public WriteOutcome Assign(AssignRequest request) => AssignAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome Attempt(AttemptRequest request) => Post<AttemptRequest, WriteOutcome>("/v1/work/attempt", request)!;
+    public WriteOutcome Attempt(AttemptRequest request) => AttemptAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WorkProgressResponse WorkProgress(WorkProgressRequest request) => Post<WorkProgressRequest, WorkProgressResponse>("/v1/work/progress", request)!;
+    public WorkProgressResponse WorkProgress(WorkProgressRequest request) => WorkProgressAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome Result(ResultRequest request) => Post<ResultRequest, WriteOutcome>("/v1/work/result", request)!;
+    public WriteOutcome Result(ResultRequest request) => ResultAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome Amend(AmendRequest request) => Post<AmendRequest, WriteOutcome>("/v1/work/amend", request)!;
+    public WriteOutcome Amend(AmendRequest request) => AmendAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<DeviceRow> Devices() => Get<List<DeviceRow>>("/v1/devices")!;
+    public IReadOnlyList<DeviceRow> Devices() => DevicesAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceCreate(DeviceCreateRequest request) => Post<DeviceCreateRequest, WriteOutcome>("/v1/devices", request)!;
+    public WriteOutcome DeviceCreate(DeviceCreateRequest request) => DeviceCreateAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceAdmit(AdmitRequest request) => Post<AdmitRequest, WriteOutcome>("/v1/devices/admit", request)!;
+    public WriteOutcome DeviceAdmit(AdmitRequest request) => DeviceAdmitAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRename(DeviceRenameRequest request) => Post<DeviceRenameRequest, WriteOutcome>("/v1/devices/rename", request)!;
+    public WriteOutcome DeviceRename(DeviceRenameRequest request) => DeviceRenameAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRotate(DeviceRotateRequest request) => Post<DeviceRotateRequest, WriteOutcome>("/v1/devices/rotate", request)!;
+    public WriteOutcome DeviceRotate(DeviceRotateRequest request) => DeviceRotateAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRecovery(DeviceRecoveryRequest request) => Post<DeviceRecoveryRequest, WriteOutcome>("/v1/devices/recovery", request)!;
+    public WriteOutcome DeviceRecovery(DeviceRecoveryRequest request) => DeviceRecoveryAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DeviceRevoke(RevokeRequest request) => Post<RevokeRequest, WriteOutcome>("/v1/devices/revoke", request)!;
+    public WriteOutcome DeviceRevoke(RevokeRequest request) => DeviceRevokeAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<ReleaseRow> Releases() => Get<List<ReleaseRow>>("/v1/releases")!;
+    public IReadOnlyList<ReleaseRow> Releases() => ReleasesAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<DocumentRow> Documents() => Get<List<DocumentRow>>("/v1/documents")!;
+    public IReadOnlyList<DocumentRow> Documents() => DocumentsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => Post<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request)!;
+    public WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request) => DocumentReviewAsync(declaration, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public AsksResponse Asks(string? principal = null) => Get<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal))!;
+    public AsksResponse Asks(string? principal = null) => AsksAsync(principal).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
+    public IReadOnlyList<GoalRow> Goals() => GoalsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public GoalResponse? Goal(string id) => Get<GoalResponse>("/v1/goals/" + Uri.EscapeDataString(id), allowNotFound: true);
+    public GoalResponse? Goal(string id) => GoalAsync(id).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public NextResponse? GoalNext(string goal) => Get<NextResponse>(GoalPath(goal, "next"), allowNotFound: true);
+    public NextResponse? GoalNext(string goal) => GoalNextAsync(goal).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => Post<GoalStepRequest, GoalStepResponse>(GoalPath(goal, "step"), request)!;
+    public GoalStepResponse GoalStep(string goal, GoalStepRequest request) => GoalStepAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public TakeoverResponse WorkTakeover(TakeoverRequest request) => Post<TakeoverRequest, TakeoverResponse>("/v1/work/takeover", request)!;
+    public TakeoverResponse WorkTakeover(TakeoverRequest request) => WorkTakeoverAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalPropose(GoalProposeRequest request) => Post<GoalProposeRequest, WriteOutcome>("/v1/goals", request)!;
+    public WriteOutcome GoalPropose(GoalProposeRequest request) => GoalProposeAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalActivate(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "activate"), request)!;
+    public WriteOutcome GoalActivate(string goal, GoalActionRequest request) => GoalActivateAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalPause(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "pause"), request)!;
+    public WriteOutcome GoalPause(string goal, GoalActionRequest request) => GoalPauseAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalResume(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "resume"), request)!;
+    public WriteOutcome GoalResume(string goal, GoalActionRequest request) => GoalResumeAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalStop(string goal, GoalActionRequest request) => Post<GoalActionRequest, WriteOutcome>(GoalPath(goal, "stop"), request)!;
+    public WriteOutcome GoalStop(string goal, GoalActionRequest request) => GoalStopAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request) => Post<GoalEvaluateRequest, WriteOutcome>(GoalPath(goal, "evaluate"), request)!;
+    public WriteOutcome GoalEvaluate(string goal, GoalEvaluateRequest request) => GoalEvaluateAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome GoalAccept(string goal, GoalAcceptRequest request) => Post<GoalAcceptRequest, WriteOutcome>(GoalPath(goal, "accept"), request)!;
+    public WriteOutcome GoalAccept(string goal, GoalAcceptRequest request) => GoalAcceptAsync(goal, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<ProviderRow> Providers() => Get<List<ProviderRow>>("/v1/providers")!;
+    public IReadOnlyList<ProviderRow> Providers() => ProvidersAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<ProviderRow> Launchers() => Get<List<ProviderRow>>("/v1/launchers")!;
+    public IReadOnlyList<ProviderRow> Launchers() => LaunchersAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public WriteOutcome QualifyHarness(HarnessQualifyRequest request) => Post<HarnessQualifyRequest, WriteOutcome>("/v1/harness-qualifications", request)!;
+    public WriteOutcome QualifyHarness(HarnessQualifyRequest request) => QualifyHarnessAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public RunResponse RunStart(RunStartRequest request) => Post<RunStartRequest, RunResponse>("/v1/runs", request)!;
+    public RunResponse RunStart(RunStartRequest request) => RunStartAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public RunsResponse Runs() => Get<RunsResponse>("/v1/runs")!;
+    public RunsResponse Runs() => RunsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public RunStopResponse RunStop(string run, RunStopRequest request) => Post<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request)!;
+    public RunStopResponse RunStop(string run, RunStopRequest request) => RunStopAsync(run, request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
+    public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => ReleaseSubmitAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request) => Post<ReleaseObserveRequest, ReleaseResponse>("/v1/releases/observe", request)!;
+    public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request) => ReleaseObserveAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request) => PostOrProblem<UpgradeRequest, UpgradeResponse>("/v1/estate/upgrade", request);
+    public (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request) => UpgradeAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public (ExportResponse? Export, Problem? Problem) Export(ExportRequest request) => PostOrProblem<ExportRequest, ExportResponse>("/v1/estate/export", request);
+    public (ExportResponse? Export, Problem? Problem) Export(ExportRequest request) => ExportAsync(request).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<ReconcileTask> Reconcile() => Get<List<ReconcileTask>>("/v1/reconcile")!;
+    public IReadOnlyList<ReconcileTask> Reconcile() => ReconcileAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public string RecoverInspect()
-    {
-        using HttpResponseMessage response = http.GetAsync(new Uri("/v1/recover/inspect", UriKind.Relative)).GetAwaiter().GetResult();
-        return response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult();
-    }
+    public string RecoverInspect() => RecoverInspectAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public IReadOnlyList<ObjectRow> Objects() => Get<List<ObjectRow>>("/v1/objects")!;
+    public IReadOnlyList<ObjectRow> Objects() => ObjectsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public (ObjectStored? Stored, Problem? Problem) ObjectPut(byte[] bytes)
-    {
-        using var content = new ByteArrayContent(bytes);
-        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-        using HttpResponseMessage response = http.PostAsync(new Uri("/v1/objects", UriKind.Relative), content).GetAwaiter().GetResult();
-        return response.IsSuccessStatusCode
-            ? (response.Content.ReadFromJsonAsync<ObjectStored>(ProtocolJson.Options).GetAwaiter().GetResult(), null)
-            : (null, ReadProblem(response));
-    }
+    public (ObjectStored? Stored, Problem? Problem) ObjectPut(byte[] bytes) => ObjectPutAsync(bytes).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public byte[]? ObjectGet(string hash)
-    {
-        using HttpResponseMessage response = http.GetAsync(new Uri("/v1/objects/" + Uri.EscapeDataString(hash), UriKind.Relative)).GetAwaiter().GetResult();
-        return response.StatusCode == HttpStatusCode.NotFound ? null : response.EnsureSuccessStatusCode().Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-    }
+    public byte[]? ObjectGet(string hash) => ObjectGetAsync(hash).GetAwaiter().GetResult();
 
     /// <inheritdoc />
-    public FindingsResponse ObjectsVerify() => Get<FindingsResponse>("/v1/objects/verify")!;
+    public FindingsResponse ObjectsVerify() => ObjectsVerifyAsync().GetAwaiter().GetResult();
 
     /// <summary>Asks the daemon to stop.</summary>
-    public void Shutdown()
-    {
-        using HttpResponseMessage response = http.PostAsync(new Uri("/v1/shutdown", UriKind.Relative), null).GetAwaiter().GetResult();
-        response.EnsureSuccessStatusCode();
-    }
+    public void Shutdown() => ShutdownAsync().GetAwaiter().GetResult();
 
     /// <summary>
     /// Asks the daemon for a pairing code under an administrator's authority, from 0.6.0: on the runtime's own machine, over the local
     /// socket or loopback. The code is shown once; a problem when it cannot be issued.
     /// </summary>
-    public (PairingIssued? Issued, Problem? Problem) IssuePairing(PairingIssueRequest request) => PostOrProblem<PairingIssueRequest, PairingIssued>("/v1/pairings", request);
+    public (PairingIssued? Issued, Problem? Problem) IssuePairing(PairingIssueRequest request) => IssuePairingAsync(request).GetAwaiter().GetResult();
 
     /// <summary>Replaces the runtime certificate now, from 0.6.0; on the runtime's own machine. A problem when the daemon serves no TLS profile.</summary>
-    public (CertificateRotated? Rotated, Problem? Problem) RotateCertificate(CertificateRotateRequest request) => PostOrProblem<CertificateRotateRequest, CertificateRotated>("/v1/runtime/certificate", request);
+    public (CertificateRotated? Rotated, Problem? Problem) RotateCertificate(CertificateRotateRequest request) => RotateCertificateAsync(request).GetAwaiter().GetResult();
 
     /// <summary>The runtime identity's proof for a nonce over this connection's certificate, from 0.6.0; null when the runtime has no identity.</summary>
-    public RuntimeIdentityProof? RuntimeIdentity(string nonce)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(nonce);
-        return Get<RuntimeIdentityProof>(RuntimeIdentityScheme.Path + "?nonce=" + Uri.EscapeDataString(nonce), allowNotFound: true);
-    }
+    public RuntimeIdentityProof? RuntimeIdentity(string nonce) => RuntimeIdentityAsync(nonce).GetAwaiter().GetResult();
 
     /// <summary>The OpenAPI document the daemon serves.</summary>
-    public string OpenApi()
-    {
-        using HttpResponseMessage response = http.GetAsync(new Uri(OpenApiDocument.Path, UriKind.Relative)).GetAwaiter().GetResult();
-        return response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult();
-    }
+    public string OpenApi() => OpenApiAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />
     public void Dispose()
@@ -432,62 +382,6 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     private static string GoalPath(string goal, string action) => "/v1/goals/" + Uri.EscapeDataString(goal) + "/" + action;
 
     private static string Fingerprint(X509Certificate certificate) => "sha256:" + Convert.ToHexStringLower(SHA256.HashData(certificate.GetRawCertData()));
-
-    private static Problem ReadProblem(HttpResponseMessage response)
-    {
-        try
-        {
-            return response.Content.ReadFromJsonAsync<Problem>(ProtocolJson.Options).GetAwaiter().GetResult() ?? new Problem("refused", response.ReasonPhrase ?? "refused", []);
-        }
-        catch (JsonException)
-        {
-            return new Problem("refused", response.ReasonPhrase ?? "refused", []);
-        }
-    }
-
-    private T? Get<T>(string path, bool allowNotFound = false)
-        where T : class
-    {
-        using HttpResponseMessage response = http.GetAsync(new Uri(path, UriKind.Relative)).GetAwaiter().GetResult();
-        if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
-        {
-            return null;
-        }
-
-        response.EnsureSuccessStatusCode();
-        return response.Content.ReadFromJsonAsync<T>(ProtocolJson.Options).GetAwaiter().GetResult();
-    }
-
-    private TResponse? Post<TRequest, TResponse>(string path, TRequest request)
-        where TResponse : class
-    {
-        using HttpResponseMessage response = http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options).GetAwaiter().GetResult();
-        if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK or HttpStatusCode.Conflict)
-        {
-            return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
-        }
-
-        response.EnsureSuccessStatusCode();
-        return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
-    }
-
-    private (TResponse? Response, Problem? Problem) PostOrProblem<TRequest, TResponse>(string path, TRequest request)
-        where TResponse : class
-    {
-        using HttpResponseMessage response = http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options).GetAwaiter().GetResult();
-        if (response.IsSuccessStatusCode)
-        {
-            return (response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult(), null);
-        }
-
-        if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity or HttpStatusCode.Unauthorized)
-        {
-            return (null, ReadProblem(response));
-        }
-
-        response.EnsureSuccessStatusCode();
-        return (null, null);
-    }
 
     /// <summary>
     /// Adds the device, time and signature headers to every request: version 1 on loopback, and version 2, bound to the estate and the
