@@ -36,8 +36,8 @@ Canonical output and ordinary content checks remain owned by `DocumentRendering`
 
 ## Revision registers
 
-The following contract-1 generators accept exactly `format=1`, `audience=Internal`
-and `selection=all-revisions`. Their declarations use the listed directory followed
+For repository members the following contract-1 generators accept `format=1`,
+`audience=Internal` and `selection=all-revisions`. Their declarations use the listed directory followed
 by `/{month}/{date}-{slug}-{id}.md`.
 
 | Generator | Type | Directory |
@@ -69,3 +69,23 @@ historical; expiry and other current findings require the owning evaluator.
 The existing releases region overload still accepts its original product-identity
 list and emits the original table. Named inputs select the versioned revision
 contract and cannot silently reinterpret a legacy region declaration.
+
+## On-demand collections and manifest
+
+`DocumentOnDemand.Records` requires an explicit record snapshot digest and either
+`all-revisions` or `current`. The existing estate model supplies current lineage
+selection, including reconciliation; an invalid or conflicting basis is unavailable.
+The corresponding registered generator renders the collection. The selected
+snapshot, selection, row count and page appear in the rendition. A stale snapshot
+fails rather than silently refreshing. Only a complete authorized selection can
+render an empty list. Collection requests cannot acquire repository ownership.
+
+`vericairn.estate/manifest` contract 1 takes `format=1` and `audience=Internal`.
+`DocumentOnDemand.Manifest` supplies the exact manifest bytes, matching verified
+estate basis and explicit snapshot. The reader explains the runtime and artifact
+pins, the recorded or default storage profile, the original and selected current
+charter, their original formats, and migration history. The manifest's current
+record format is distinct from the format in which a charter was recorded.
+Manifest and artifact-map coverage is registered through `DocumentCoverage`.
+This generator refuses repository declarations; neither reader writes a file or
+record. Snapshot selection is a read model for future surfaces, not a new operation.

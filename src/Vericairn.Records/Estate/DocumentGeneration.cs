@@ -82,8 +82,19 @@ public sealed record DocumentGenerationContext(int InterfaceVersion, DocumentGen
     ImmutableDictionary<string, string> Parameters, string Selection, string? Region,
     ImmutableArray<DocumentSourceSnapshot> Sources)
 {
+    /// <summary>An explicit on-demand snapshot; absent for committed revision members.</summary>
+    public string? SnapshotIdentity { get; init; }
+
+    /// <summary>The one-based page within that on-demand snapshot.</summary>
+    public int Page { get; init; } = 1;
+
     /// <summary>A digest of this member's own source identities and parameters, independent of its enclosing output commit.</summary>
-    public string InputDigest => ContentHash.Sha256(Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(new
+    public string InputDigest => SnapshotIdentity is null ? SourceDigest : ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(new
+    {
+        generation = SourceDigest, snapshot = SnapshotIdentity, page = Page,
+    })));
+
+    private string SourceDigest => ContentHash.Sha256(Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(new
     {
         contract = Generator.ContractVersion,
         generator = Generator.Id,

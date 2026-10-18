@@ -3,6 +3,8 @@
 
 using System.Collections.Immutable;
 using System.Text;
+using System.Globalization;
+using Vericairn.Records.Hashing;
 
 namespace Vericairn.Records.Estate;
 
@@ -24,8 +26,8 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
         var register = Registers.Single(r => r.Id == id);
         Id = id;
         Descriptor = new(id, 1, "vericairn.records/companions/1", CompanionImplementation.Hash,
-            new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"], ["selection"] = ["all-revisions"] }.ToImmutableDictionary(StringComparer.Ordinal),
-            [register.Type], ["record"], ["item", "all-revisions"], "text/markdown", "Source UTC time then ordinal revision identity; nested arrays retain recorded order", "Internal", "record-revision")
+            new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"], ["selection"] = ["all-revisions", "current"] }.ToImmutableDictionary(StringComparer.Ordinal),
+            [register.Type], ["record"], ["item", "list", "all-revisions", "current"], "text/markdown", "Source UTC time then ordinal revision identity; nested arrays retain recorded order", "Internal", "record-revision")
         {
             RequiredPattern = "docs/registers/" + register.Directory + "/{month}/{date}-{slug}-{id}.md",
             PartialOverviewFields = ["title", "type", "id", "hash", "at", "by", "format", "subject", "supersedes"],
@@ -37,6 +39,7 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
 
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {
+        if (context.Selection == "list") return Collection(context);
         if (context.Region is not null || context.Selection != "item") return DocumentRenderResult.Error("A revision file renders exactly one member; collections require an on-demand selection.");
         DocumentSourceSnapshot[] primary = context.Sources.Where(s => !context.Sources.Any(other => other.Supersedes == s.Identity)).ToArray();
         if (primary.Length != 1) return DocumentRenderResult.Error("A revision item requires one exact source and only its predecessor.");
@@ -60,5 +63,19 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
             content.Append(block);
         }
         return DocumentRenderResult.Success(content.ToString());
+    }
+
+    private static DocumentRenderResult Collection(DocumentGenerationContext context)
+    {
+        if (!ContentHash.IsValid(context.SnapshotIdentity)) return DocumentRenderResult.Unavailable("A collection requires an explicit on-demand snapshot.");
+        if (context.Region is not null || context.Page < 1) return DocumentRenderResult.Error("A collection requires a valid on-demand page.");
+        if (context.Sources.Any(s => !RecordCompanionText.KnownFields(s))) return DocumentRenderResult.Unavailable("A source schema is unavailable.");
+        string header = "# Recorded " + RecordCompanionText.Label(context.Generator.RecordTypes[0]) + " revisions\n\nInternal; on demand only. Snapshot: "
+            + context.SnapshotIdentity + ". Selection: " + context.Parameters["selection"] + ".\n\nGenerator: " + DocumentMarkdown.Text(context.Generator.Id)
+            + "; contract 1. Input digest: " + context.InputDigest + ".\n\nSelected revisions: " + context.Sources.Length.ToString(CultureInfo.InvariantCulture)
+            + ". Current selection means the owning record model's lineage choice at this snapshot; it is not a live health, readiness or policy verdict.\n\n";
+        return RecordCompanionGenerator.Pages(header, context.Sources.IsEmpty ? ["None (complete authorized selection).\n\n"]
+            : context.Sources.Select(source => "- " + DocumentMarkdown.Link(source.Identity, source.Path!) + ": " + DocumentMarkdown.Text(source.Title!)
+                + "; " + source.At + "; " + source.Hash + ". Inspect this exact source or its registered item reader for all recorded fields.\n\n"), context.Page);
     }
 }

@@ -30,6 +30,7 @@ public static class DocumentGenerators
     {
         [ReleasesTable.Name] = new ReleasesTable(), [ProgressRegion.Name] = new ProgressRegion(),
         [RecordCompanionGenerator.Name] = new RecordCompanionGenerator(),
+        [ManifestCompanionGenerator.Name] = new ManifestCompanionGenerator(),
     };
 
     static DocumentGenerators()
