@@ -1,0 +1,32 @@
+{
+  "at": "2026-10-13T12:00:20Z",
+  "body": {
+    "kept": "01M57TPYPKSJAAV071H48M0D17",
+    "note": "Retain both removals, keeping one current.",
+    "policyAuthority": {
+      "hash": "sha256:02e3b7a46516e73e06b62feb107edf795ec9af7e7e5410aa41a19dd05ef6e6de",
+      "id": "01M57TPYPJKBXGK2AHXZEYBYDW",
+      "type": "authority"
+    },
+    "withdrawn": [
+      "01M57TPYPMCEBXQX7B1SC5002R"
+    ]
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:991a0c0875cb9f368bcfaa778b452465e91a389893016402c447c8b15be255b7",
+  "id": "01M57TPYPMCEBXQX7B1SC5002T",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "dLiKPeu6yjII69n6IuxHBuZBTh99twzN-yl8-8b28ynrT56drhmZ6rW1Q--hzH9BGl3mvPF4G7B-3KqSKugGhw"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:ec7dfb49c3223e7697e7e6561b335b9ccfbbfa610fea0c5d24373bed0db71924",
+    "id": "01M57TPYPKSJAAV071H48M0D15",
+    "type": "writing-exception"
+  },
+  "type": "reconciliation"
+}

@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-13T12:00:03Z",
+  "body": {
+    "agent": {
+      "product": "Example Agent",
+      "vendor": "Example"
+    },
+    "kind": "agent",
+    "name": "Test Builder",
+    "roles": [
+      "builder"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:2e7ec886167acf1d72a9f5c9bcc57731d5e8e4150629d3ac65bd5cf77db76bc5",
+  "id": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "type": "principal"
+}

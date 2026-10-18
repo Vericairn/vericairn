@@ -34,6 +34,8 @@ public sealed class WorkOrderType : IRecordType
         new("after", "ulid[]", false, "Work orders this one starts after, so the next eligible work can be derived; never itself, never a cycle.", 2),
         new("blockedBy", "reference[]", false, "What holds it: asks, decisions, operations or work orders, as {type, id, hash?}.", 2),
         new("role", "string", false, "The role of the roster whose principals carry it: planner, builder, reviewer, evaluator, release-manager, publisher, decider, or a role the estate names; builder when omitted. A step whose role is publisher or decider is a reserved action: it reaches only a person who holds it, or an agent a grant in force covers, and otherwise becomes an ask.", 2),
+        new("placement", "object", false, "Tagged release (carrier identity, product identity, version) or backlog (key). Placement grants no authority.", 3),
+        new("releasePlan", "object", false, "The product identity and exact version this work order carries; it may place itself in its own plan.", 3),
     ];
 
     /// <summary>The records that can hold a work order.</summary>
@@ -102,6 +104,7 @@ public sealed class WorkOrderType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
+        PolicyPlacement.Validate(context);
         string? key = body.Text("key", true, 40, Patterns.WorkKey, "an upper-case key such as M0 or DESIGN-01");
         body.Enum("kind", true, "milestone", "ordinary");
         body.Text("title", true, 200);

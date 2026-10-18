@@ -35,7 +35,9 @@ public sealed class MigrationContext
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
         ArgumentNullException.ThrowIfNull(bytes);
-        if (Path.IsPathRooted(relativePath) || relativePath.Contains("..", StringComparison.Ordinal) || relativePath.StartsWith("records/", StringComparison.Ordinal) || relativePath == EstateLayout.ManifestPath)
+        if (Path.IsPathRooted(relativePath) || relativePath.Contains('\\', StringComparison.Ordinal) || relativePath.Contains(':', StringComparison.Ordinal) ||
+            relativePath.Split('/').Any(part => part is "" or "." or "..") || relativePath.StartsWith("records/", StringComparison.OrdinalIgnoreCase) || relativePath.Equals("records", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.Equals(EstateLayout.ManifestPath, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException("A migration stages repository-relative files outside records/ and never the manifest.", nameof(relativePath));
         }
@@ -77,9 +79,9 @@ public sealed record UpgradePlan(string FromPin, string ToPin, long FromFormat, 
 /// <summary>Upgrades an estate to a published release: one reviewable change to the manifest plus a migration record, forward-only.</summary>
 public static class EstateUpgrade
 {
-    private static IReadOnlyList<IRecordFormatMigration> migrations = [new RecordFormat2Migration()];
+    private static IReadOnlyList<IRecordFormatMigration> migrations = [new RecordFormat2Migration(), new RecordFormat3Migration()];
 
-    /// <summary>Record-format migrations this release knows: format 1 to 2.</summary>
+    /// <summary>Record-format migrations this release knows: format 1 to 2 to 3.</summary>
     public static IReadOnlyList<IRecordFormatMigration> Migrations => migrations;
 
     /// <summary>Substitutes the known migrations for a synthetic set, for tests of the upgrade path; restored on dispose.</summary>
@@ -200,6 +202,19 @@ public static class EstateUpgrade
         public long ToFormat => 2;
 
         public string Summary => "records written from now on state record format 2 and follow its rules; every record already written keeps its bytes, hash and format";
+
+        public void Apply(MigrationContext context) => ArgumentNullException.ThrowIfNull(context);
+    }
+
+    private sealed class RecordFormat3Migration : IRecordFormatMigration
+    {
+        public string Name => "record-format-3";
+
+        public long FromFormat => 2;
+
+        public long ToFormat => 3;
+
+        public string Summary => "new records may carry signed policies and duty evidence; historical bytes stay unchanged, and no policy, duty, exception, placement or authority is inferred";
 
         public void Apply(MigrationContext context) => ArgumentNullException.ThrowIfNull(context);
     }

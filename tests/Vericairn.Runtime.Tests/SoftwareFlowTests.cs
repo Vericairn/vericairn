@@ -231,7 +231,7 @@ public class SoftwareFlowTests
 
         var synthetic = new SyntheticMigration(2, 3, fail: false);
         using (RecordFormats.Extend(3))
-        using (EstateUpgrade.UseMigrations([.. EstateUpgrade.Migrations, synthetic]))
+        using (EstateUpgrade.UseMigrations([.. EstateUpgrade.Migrations.Where(m => m.FromFormat != 2), synthetic]))
         {
             using (var service = EstateService.Open(estate.Root))
             {
@@ -261,6 +261,7 @@ public class SoftwareFlowTests
         }
 
         // Beyond this process's knowledge, a format-3 manifest is refused rather than misread.
+        using var olderReader = RecordFormats.ReadThrough(2);
         InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() => EstateService.Open(estate.Root));
         Assert.Contains("record format 3", refused.Message, StringComparison.Ordinal);
     }

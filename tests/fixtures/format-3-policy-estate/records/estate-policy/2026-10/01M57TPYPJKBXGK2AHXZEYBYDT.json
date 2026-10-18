@@ -1,0 +1,71 @@
+{
+  "at": "2026-10-13T12:00:15Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "authority": {
+          "hash": "sha256:9e2d813123aae493d6239fec12a517586deae26def5b98d17028d00f70057908",
+          "id": "01M57TPYPC5P4Q97ZMQ1A1X4XC",
+          "type": "authority"
+        },
+        "decision": {
+          "hash": "sha256:3ed439848a1ed19a0fff4d674c91982afbd1d9e450761735d807c187e1a58ecd",
+          "id": "01M57TPYPDNNK55WGGWZHGPTB9",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "maintenance",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "every": 1,
+            "firstDueAt": "2026-10-13T13:00:00Z",
+            "kind": "interval",
+            "unit": "months"
+          },
+          "subject": {
+            "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+            "type": "estate"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+  "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "zdPvtzALJxt084b9gZc4fh4M9FyoGKwZURzO_UooaZGLaXbGtnnGEg3hKeypxvF_ifzxS-tmeg8BkesyuF5NmQ"
+    }
+  ],
+  "type": "estate-policy"
+}

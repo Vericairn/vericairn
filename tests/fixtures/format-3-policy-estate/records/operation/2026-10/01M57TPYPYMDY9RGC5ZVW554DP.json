@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T14:00:05Z",
+  "body": {
+    "action": "inspect",
+    "evidence": [],
+    "identity": "fixture-inspection",
+    "intent": "Fixture observation only.",
+    "provider": "example",
+    "status": "not-started",
+    "target": {}
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:fac2cb179ed715e11bd38d9ab3d0f486deb92206552907d469894605b7910681",
+  "id": "01M57TPYPYMDY9RGC5ZVW554DP",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "ljVY5nfHCvCzDUewXYTKbaXo9Ow4_S4LFZa367Rt6L9zg9arf0K_zrr8ywnUkxh7SiNXqzfpAHhtBSIu9ftQ8A"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:8fbcfff689fd9cebc0e7b52381f8bfd9388ba3aac2f4b0607585320e34c1f6d6",
+    "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+    "type": "estate"
+  },
+  "type": "operation"
+}

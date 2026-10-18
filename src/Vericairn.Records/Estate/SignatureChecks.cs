@@ -30,9 +30,9 @@ public static class SignatureChecks
                 {
                     findings.Error("signature.admission-unsigned", record.ExpectedPath, "In an estate at record format 2 an admission is signed: by a device already admitted or, for the operator's first device, by the device it admits. An unsigned one counts only when the signed migration that moved the estate to format 2 lists it; otherwise, whatever format or date it states, it admits and revokes nothing.");
                 }
-                else if (required && string.CompareOrdinal(record.At, estate!.At) > 0)
+                else if (PolicyAuthority.RequiresSignature(model, record) || (required && string.CompareOrdinal(record.At, estate!.At) > 0))
                 {
-                    findings.Error("signature.required", record.ExpectedPath, "This estate requires signed records; author it on an admitted device.");
+                    findings.Error("signature.required", record.ExpectedPath, "This record requires an admitted-device signature, including under an optional charter signature policy.");
                 }
 
                 continue;
@@ -46,6 +46,20 @@ public static class SignatureChecks
             Rotation(model, record, findings);
             RecoveryUse(model, record, rootOperator, firstAuthority, anchored, findings);
         }
+    }
+
+    /// <summary>Verifies attribution at authorship, including admission and key history, without changing any record.</summary>
+    public static bool IsAuthentic(EstateModel model, RecordEnvelope record)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(record);
+        if (record.Signatures.Count == 0 || record.DeclaredHash != record.ComputedHash) return false;
+        string? rootOperator = model.CurrentEstate is { } estate ? EstateModel.BodyString(estate, "operator") : null;
+        var findings = new FindingList();
+        foreach (RecordSignature signature in record.Signatures)
+            Verify(model, record, signature, rootOperator, FirstAuthority(model, rootOperator)?.Id, findings, Anchored(model));
+        Rotation(model, record, findings);
+        return !findings.HasErrors;
     }
 
     /// <summary>True when the id names a recovery device, one whose key is kept offline for emergency access.</summary>

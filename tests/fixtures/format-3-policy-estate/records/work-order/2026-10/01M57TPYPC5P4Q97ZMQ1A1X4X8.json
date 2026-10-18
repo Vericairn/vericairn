@@ -1,0 +1,39 @@
+{
+  "at": "2026-10-13T12:00:11Z",
+  "body": {
+    "deliverables": [
+      "fixture"
+    ],
+    "exitQuestion": "Does placement round trip?",
+    "inputs": [],
+    "intent": "Exercise typed placement.",
+    "key": "REL-1",
+    "kind": "ordinary",
+    "placement": {
+      "carrier": "01M57TPYPC5P4Q97ZMQ1A1X4X8",
+      "kind": "release",
+      "product": "01M57TPYPBZKR5291T0ZPZV757",
+      "version": "0.8.0"
+    },
+    "releasePlan": {
+      "product": "01M57TPYPBZKR5291T0ZPZV757",
+      "version": "0.8.0"
+    },
+    "scope": [
+      "test fixtures"
+    ],
+    "title": "Fixture release"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:30ad747f31c0f99417f8e4e168e4d455ff5492beb03d656920fdaaeb7092f691",
+  "id": "01M57TPYPC5P4Q97ZMQ1A1X4X8",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "bGdqWpZ14hFvLHtiWAiGdRu-RjLYx8zPN8vkvGpWVdioJbVUfrQPcQlisPyqngM8XGC9ovl91seveOKf5OX6BQ"
+    }
+  ],
+  "type": "work-order"
+}

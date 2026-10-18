@@ -49,6 +49,15 @@ public static class Scopes
     /// <summary>Qualify and revoke exact harness versions from probes; only human grantees can exercise it.</summary>
     public const string Qualify = "qualify";
 
+    /// <summary>Manage approved estate-policy definitions within explicit typed bounds.</summary>
+    public const string ManageEstatePolicies = "manage-estate-policies";
+
+    /// <summary>Grant and revoke finite policy exceptions within explicit typed bounds.</summary>
+    public const string GrantPolicyExceptions = "grant-policy-exceptions";
+
+    /// <summary>Add and remove exact spacing tokens within explicit typed bounds.</summary>
+    public const string ManageWritingExceptions = "manage-writing-exceptions";
+
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify];
+    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions];
 }

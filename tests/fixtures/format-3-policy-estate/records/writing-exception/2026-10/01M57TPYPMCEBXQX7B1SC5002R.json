@@ -1,0 +1,47 @@
+{
+  "at": "2026-10-13T12:00:19Z",
+  "body": {
+    "basis": {
+      "grant": {
+        "hash": "sha256:02e3b7a46516e73e06b62feb107edf795ec9af7e7e5410aa41a19dd05ef6e6de",
+        "id": "01M57TPYPJKBXGK2AHXZEYBYDW",
+        "type": "authority"
+      },
+      "kind": "authority"
+    },
+    "code": "writing.spacing",
+    "reason": "An intentional service name.",
+    "removalReason": "Fixture removal preserves the original spelling and scope.",
+    "scope": {
+      "paths": [
+        {
+          "repository": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "selectors": [
+            "docs/*.md"
+          ]
+        }
+      ],
+      "records": [
+        {
+          "field": "summary",
+          "record": "01M57TPYPA4E37QXJ9YZGM2FTS"
+        }
+      ]
+    },
+    "state": "removed",
+    "token": "Open311"
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:50a2989a79ebf404d1b8be05953330a907f507155da52f5f54bc03bae7d5fb25",
+  "id": "01M57TPYPMCEBXQX7B1SC5002R",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "tnuMJtbRCpgIQJGFDYPr4BbGs22ity-W3t9vfEsE99jg9ZXhrPWdfPj0BHYENCBaXyp45U1vD6h24pW5UXIFAQ"
+    }
+  ],
+  "supersedes": "01M57TPYPKSJAAV071H48M0D15",
+  "type": "writing-exception"
+}

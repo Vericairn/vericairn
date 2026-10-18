@@ -1973,6 +1973,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (response, null);
             }
 
+            if (plan.Migrations.Count == 0 && File.ReadAllBytes(Path.Combine(session.Root, EstateLayout.ManifestPath)).AsSpan().SequenceEqual(EstateUpgrade.ManifestAfter(session.Manifest, plan)))
+            {
+                return (response, null);
+            }
+
             if (request.By is null || !Ulid.IsValid(request.By))
             {
                 return (null, new Problem("refused", "The principal applying the upgrade must be a ULID.", []));
@@ -2018,6 +2023,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             var changes = new List<string> { $"{EstateLayout.ManifestPath} pinned to {plan.ToPin} with the artifact hashes of release {plan.Release.Id}" };
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
+            var createdDirectories = new HashSet<string>(StringComparer.Ordinal);
             string manifestPath = Path.Combine(session.Root, EstateLayout.ManifestPath);
             previousContents[EstateLayout.ManifestPath] = File.ReadAllBytes(manifestPath);
             try
@@ -2026,6 +2032,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 {
                     string full = Path.Combine(session.Root, relative.Replace('/', Path.DirectorySeparatorChar));
                     previousContents[relative] = File.Exists(full) ? File.ReadAllBytes(full) : null;
+                    string? parent = Path.GetDirectoryName(full);
+                    while (parent is not null && parent != session.Root && !Directory.Exists(parent))
+                    {
+                        createdDirectories.Add(parent);
+                        parent = Path.GetDirectoryName(parent);
+                    }
                     Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                     File.WriteAllBytes(full, bytes);
                     changes.Add($"{relative} written by the migrations");
@@ -2035,7 +2047,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
-                RestoreFiles(session.Root, previousContents);
+                RestoreFiles(session.Root, previousContents, createdDirectories);
                 return (null, new Problem("refused", $"The upgrade could not write its files and was undone: {exception.Message}", []));
             }
 
@@ -2043,7 +2055,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement, Format: Math.Min(plan.ToFormat, RecordFormats.Current)), model);
             if (!outcome.Ok)
             {
-                RestoreFiles(session.Root, previousContents);
+                RestoreFiles(session.Root, previousContents, createdDirectories);
                 return (null, outcome.Problem);
             }
 
@@ -2420,7 +2432,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
     }
 
-    private static void RestoreFiles(string root, IReadOnlyDictionary<string, byte[]?> previousContents)
+    private static void RestoreFiles(string root, IReadOnlyDictionary<string, byte[]?> previousContents, IReadOnlySet<string> createdDirectories)
     {
         foreach ((string relative, byte[]? bytes) in previousContents)
         {
@@ -2433,6 +2445,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             {
                 File.WriteAllBytes(full, bytes);
             }
+        }
+
+        foreach (string directory in createdDirectories.OrderByDescending(p => p.Length))
+        {
+            if (Directory.Exists(directory) && !Directory.EnumerateFileSystemEntries(directory).Any()) Directory.Delete(directory);
         }
     }
 
