@@ -11,6 +11,7 @@ using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Workers;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 

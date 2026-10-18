@@ -23,6 +23,7 @@ using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Upgrade;
 using Vericairn.Runtime.Workers;
+using static Vericairn.Runtime.Service.EstateServiceValues;
 
 namespace Vericairn.Runtime.Service;
 
@@ -38,11 +39,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private readonly object gate = new();
     private readonly HashSet<string> releaseDispatches = new(StringComparer.Ordinal);
     private readonly EstateSession session;
+    private readonly EstateRecordAccess recordAccess;
+    private readonly RunAdmissionService runAdmission;
     private readonly string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
 
     private EstateService(EstateSession session)
     {
         this.session = session;
+        recordAccess = new EstateRecordAccess(gate, session,
+            (draft, model) => WriteLocked(draft, model),
+            (draft, model) => AuthorLocked(draft, model),
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal);
+        runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
+            (model, files, order, maxBytes, recipient, assignment) =>
+                BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
     }
 
     /// <summary>
@@ -1952,12 +1962,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private static ReleaseResponse ReleaseProblem(string identity, string status, Problem problem) =>
         new(identity, status, problem.Message, false, Problem: problem);
 
-    private static JsonElement Element(JsonObject body)
-    {
-        using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-        return document.RootElement.Clone();
-    }
-
     /// <inheritdoc />
     public (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request)
     {
@@ -2822,9 +2826,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             : null;
     }
 
-    private static RecordEnvelope? Latest(EstateModel model, string id, string type) =>
-        model.ById.TryGetValue(id, out RecordEnvelope? record) && record.Type == type ? model.Latest(record) : null;
-
     private static bool TryParseSubject(string subject, out RecordReference? reference)
     {
         reference = null;
@@ -2848,8 +2849,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         at is not null && RecordParser.IsTimestamp(at)
             ? DateTimeOffset.ParseExact(at, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal)
             : null;
-
-    private static WriteOutcome Refuse(string message) => WriteOutcome.Fail(new Problem("refused", message, []));
 
     private static WriteOutcome NotFound(string message) => WriteOutcome.Fail(new Problem("not-found", message, []));
 
