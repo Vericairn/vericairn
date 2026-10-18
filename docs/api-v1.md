@@ -1,14 +1,18 @@
 # API version 1
 
-This maintained document describes published 0.7.2 and labels main's unreleased changes for planned 0.7.3.
-Main is 0.7.3-dev, carrying FIX-19, UPDATE-01, FIX-20 and FIX-21; none is in a published release.
+This maintained document describes 0.7.3: independent worker repositories (FIX-19), machine-local
+release notices (UPDATE-01), command-audit corrections (FIX-20), safe concurrent use of loaded and
+rotated TLS certificates (FIX-21), and compact current attention (FIX-22). Release checks add no estate
+API route and do not run through ordinary SDK calls. The existing 0.7.2 fixes remain:
 FIX-13 adds exact-commit release document checks
 and settlement of process attention asks; FIX-15 claims dispatch identities before provider effects;
 FIX-16 validates before publishing records and exposes unreadable recovery journals; FIX-18 adds
 Codex max effort, run-owned execution observations and corrected worker signals. FIX-14 hardens the
 CLI/runtime export restore path without adding an HTTP restore route. API v1 remains additive and
 record format 2 is unchanged. The 0.7.0 candidate's features shipped in 0.7.1 with FIX-12;
-the release index retains the withdrawn candidates' history. All eight 0.7.2 NuGet packages are published; the [release index](releases/README.md#nuget-publication-setup) records the publication sequence.
+the release index retains the withdrawn candidates' history. All eight 0.7.2 NuGet packages are published;
+the [release index](https://github.com/Vericairn/vericairn/blob/main/docs/releases/README.md#nuget-publication-setup)
+records the publication sequence. Availability of 0.7.3 packages follows its own publication workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -204,12 +208,13 @@ rotation refuses the new certificate on its next connection and is made again fr
 command makes its client. Paired devices on the local network pin the runtime identity instead (below), so a
 rotation leaves them working.
 
-**On main for planned 0.7.3 (FIX-21, unreleased).** Before a loaded or replacement certificate is made
+**In 0.7.3 (FIX-21).** Before a loaded or replacement certificate is made
 available to either TLS listener, its managed extensions are decoded on the loading thread. Concurrent first
 handshakes therefore read complete usage values, including Server Authentication. When `DaemonOptions.Log`
 is configured, server-side handshake exceptions are reported with only the exception type and message,
 without exception stacks, inner exceptions, peer certificates or request data. This preparation and handshake
-logging are absent from published 0.7.2.
+logging correct the first-use race present since 0.6.1. Other authentication, trust, network and
+resource-limit failures can still reject a handshake; the change does not relax transport checks.
 
 Loopback, like the local-network listener, accepts TLS 1.2 only. Offers limited to TLS 1.0, 1.1 or 1.3
 are refused during the handshake, before any HTTP request is read.
@@ -629,7 +634,10 @@ and applies to every launcher. The default location is unchanged; a configured r
 at `<root>/<estate>/<branch-slug>`. Invalid roots refuse before intent. A root changed after intent refuses
 dispatch and settles as an uncharged known failure. Workspace paths never enter records. See the
 [software guide](software.md#explicit-execution-and-environment-admission-run-01-070) for root validation
-and reuse of an existing branch workspace. Published 0.7.2 uses linked worktrees, whose external Git metadata prevents a sandboxed Codex commit. Main uses independent workspace repositories (FIX-19), with guarded branch retention after settlement; that behavior is unreleased and planned for 0.7.3.
+and reuse of an existing branch workspace. In 0.7.3, FIX-19 uses independent workspace repositories,
+with only their own `.git` added to Codex's writable roots and guarded branch retention after settlement.
+The seventh live Codex run committed on macOS; this does not qualify other platforms. Transfer failure
+is a local worker warning, without rewriting the settlement. Legacy linked worktrees require explicit cleanup.
 Choose a root outside a home holding `.claude`, `.codex`, `.agents` or `.mcp.json`; the root and its ancestors
 cannot contain these markers. Codex separately inspects the user's own `~/.agents`, so moving a workspace
 does not admit user skills or other customization there. An empty ordinary directory or recognized instruction
@@ -864,7 +872,7 @@ when the agent recorded no new attempt on its exact assignment during the run. I
 operation evidence and shown by CLI settlement and `worker runs`, with a compact reference in status attention, without changing `observed-success`
 or CLI exit-code semantics.
 
-In published 0.7.2, FIX-18 also adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
+From 0.7.2, FIX-18 adds `scope-read`, a warning for a classified read outside the run's workspace; it raises
 attention without requesting a stop. Reads inside the workspace do not require change permission.
 Confidently identified write targets outside the workspace and launch-supplied temporary directory retain critical
 `scope` signals. Outside-looking operands of unclassified invocations and opaque code produce `audit-unverified`
@@ -873,8 +881,10 @@ detections remain critical for reads and writes. Run admission refuses a brief w
 interpretable repository-relative `permittedChanges` pattern, explaining forms such as `path:NOTES.md`;
 prose can remain beside a pattern. No request or response fields change.
 
-**On main for planned 0.7.3 (FIX-20, unreleased).** The audit recognizes the Vericairn home's credential
-stores, token-output commands and more outside-write forms, including literal targets in interpreter code.
+**In 0.7.3 (FIX-20).** The audit recognizes the Vericairn home's credential
+stores, `gh auth token`, `gh auth status --show-token`, `git credential fill`, Git credential-helper `get`
+and more outside-write forms, including literal targets in interpreter code. Recognized credentials and
+outside writes request a stop; events can arrive after execution, so this is not an enforcement boundary.
 Interpreter input retains `audit-unverified` alongside any independently recognized critical signal; a warning
 alone does not request a stop. Null-device output is exempt from outside-write classification. These changes
 reuse the existing signal codes and API fields. [Command observations](software.md#command-observations-070)
@@ -1088,7 +1098,8 @@ and use the existing attention/stop behavior. No original command audit is filte
 Codex and Claude Code qualify only for the exact versions and isolation evidence documented in the
 [software guide](software.md#native-inventory-qualification-run-02-and-run-03). A different exact version requires a current human qualification with matching local probes;
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
-records the builder's five live Codex observations for the 0.7.2 path and their limits, followed by the unreleased FIX-19 workspace work for 0.7.3.
+records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
+and guarded branch retention for 0.7.3.
 The efficiency Adapter is unsupported (EFF-01, 0.8.0); only `disabled` is allowed. Remote is not built.
 These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).

@@ -73,22 +73,21 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This maintained document describes published 0.7.2, carrying FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18.
-Main is now 0.7.3-dev and also carries FIX-19's independent workspace repositories, UPDATE-01's newer-release
-notice, FIX-20's command-audit corrections and FIX-21's concurrent TLS handshake correction for planned 0.7.3.
-These changes are unreleased and are labeled below or in [the API guide](api-v1.md#transports); the
-[frozen 0.7.2 guide](releases/0.7.2/software.md) describes the published workspace and audit behavior.
+This maintained document describes 0.7.3: FIX-19's independent workspace repositories, UPDATE-01's
+newer-release notice, FIX-20's command-audit corrections, FIX-21's concurrent TLS handshake correction
+and FIX-22's current required attention. The [API guide](api-v1.md#transports) describes certificate
+preparation and handshake diagnostics. Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
-0.7.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
-execution contracts. It corrects identifier ordering, release gates and dispatch, notes and attention,
-export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
+0.7.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
+execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
+attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
 Installation of another version requires its publication and successful package workflow. The
 [communication qualification report](communication-qualification.md) retains its original evidence and deferrals.
 
 ## Context packages (0.7.0)
 
-In 0.7.2, the foundation's context package preserves exact originals apart from
+In 0.7.3, the foundation's context package preserves exact originals apart from
 derived presentation. `vericairn context prepare <work-order>` computes the step's
 working instructions, effects and pinned inputs. Only optional documents named
 by the work, its inputs or governing decisions enter the selection.
@@ -400,11 +399,10 @@ For a previous set that records no window, as 0.5.2's and earlier sets do, they 
 notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
 explicit start). Until the version's publication is recorded they end at the second before they are generated.
 
-The 0.7.2 notes render the estate's records with
-`vericairn docs notes --from 0.7.1 --to 0.7.2 --out docs/releases/0.7.2 --since 2026-10-17T05:25:00Z`,
-with the operator's approved Security section on F-01 first. The start is exclusive and deliberately
-widens the previous set's end, 2026-10-17T05:25:37Z, by 37 seconds. The manifest records the exact window;
-the overlap can repeat records and changes no earlier set.
+The 0.7.3 notes render the estate's records with
+`vericairn docs notes --from 0.7.2 --to 0.7.3 --out docs/releases/0.7.3`.
+Their exclusive start follows 0.7.2's recorded end; the manifest records the exact window.
+The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against
 `docs/releases/frozen-sha256.json`: changed bytes, missing files and added files fail the guard. Published and withdrawn
@@ -480,11 +478,10 @@ adapter and GitHub provider still ship inside the command line; they are not sep
 
 ## Coding agents: the worker and its launchers
 
-**Workspace version boundary.** The independent workspace repositories, writable workspace Git administration
-and guarded branch retention described in this section are FIX-19 on main, unreleased for planned 0.7.3.
-Published 0.7.2 uses linked worktrees; the fifth live Codex run could edit and author its signed attempt/result
-but could not commit because the shared Git administration was outside its sandbox. The builder must preserve
-and commit those changes. This distinction also applies to the configuration and cleanup instructions below.
+**Workspace behavior in 0.7.3.** FIX-19 gives each workspace its own repository and writable Git
+administration, then retains the audited branch with a guarded update. The seventh live Codex run
+committed successfully on macOS. Earlier linked worktrees require preservation and removal before
+reuse; the worker does not silently convert them. This live qualification is limited to macOS.
 
 The worker contract, `vericairn.worker/1` (the estate's `design/goals.md` § 7), carries one assignment with a coding agent
 toward its work order's exit question. It lives in the runtime; the launchers that start a harness (contract
@@ -889,11 +886,10 @@ resume reports a newly completed phase as an added record.
 
 ## Command observations (0.7.0)
 
-**On main for planned 0.7.3, unreleased.** The audit below includes FIX-20's corrections. Published 0.7.2
-retains the two warnings from its independent candidate review: incomplete recognition of the Vericairn
-home's credential reads and several write forms, and null-device redirection that can wrongly stop a run.
-The [frozen 0.7.2 guide](releases/0.7.2/software.md#command-observations-070) describes that earlier audit.
-FIX-20 corrects the recognized cases below on main; it does not change any published release.
+**Command audit in 0.7.3.** FIX-20 corrects recognition of the Vericairn home's credential reads,
+token-output commands and additional write forms, and excludes null-device output from outside-write
+classification. These corrections retire the corresponding 0.7.2 review limits for the recognized
+cases below. The audit remains a signal over reported invocations, not an enforcement boundary.
 
 The worker reads Claude Code assistant `tool_use` blocks from stream-json and Codex `item.started`, `item.updated`, and `item.completed` JSON events for command execution, file changes, MCP calls and web searches. It ignores assistant prose, tool results and command output. Invocation identity plus a canonical input hash deduplicates lifecycle events; the recent identity cache is bounded to 4096 entries.
 
@@ -1414,28 +1410,29 @@ and changed exactly the permitted `NOTES.md`, 40 bytes. This confirms estate-onl
 the requested live worker path. Its commit failed because the linked worktree's Git directory was outside the
 sandbox.
 
-**Unreleased workspace observations for planned 0.7.3.** FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
+**Workspace observations for 0.7.3.** FIX-19 replaces that layout with independent workspace repositories and guarded retention of the audited
 branch. The sixth live run of `eb12a8e` recorded its cap, the observed model at `max`, usage and the signed attempt
 and result, and changed exactly `NOTES.md`. Its commit still failed: Codex protects `.git` even inside a writable
 workspace. Round two adds only the independent workspace's `.git` as an explicit writable root, verified by the
 installed schema and the local sandbox probe described above. Tests cover the exact generated permission, the
 fake harness's probe and dispatch, refusal of other writable roots and shared Git administration, hostile workspace
 configuration, scope violations, concurrent branch moves, recovery and both cleanup layouts. The seventh live
-run of `36c90ba` committed exactly the permitted `NOTES.md` in its own workspace repository; settlement audited
+run of `36c90ba`, on macOS, committed exactly the permitted `NOTES.md` in its own workspace repository; settlement audited
 the commit and fetched its branch into the registered clone, whose `.git` the agent could not write.
 Three-platform CI on `c400386` passed on macOS and Linux. Its Windows failures exposed native-versus-Git path
 comparisons, a staging ref lock beyond Git's default path limit, and read-only objects left for assembly cleanup.
 Round three normalizes the comparisons, explicitly enables long paths in isolated Git commands, and uses the same
 link-safe cleanup for product scratch repositories and test workspaces. Main includes subsequent Windows path
 and cleanup corrections. The macOS observations listed here alone do not establish their Windows behavior.
-FIX-19 is now on main after 0.7.2's publication; it remains unreleased, planned for 0.7.3.
-FIX-20, also on main and unreleased for planned 0.7.3, adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
+FIX-19 ships in 0.7.3; its live committing qualification remains macOS-only.
+FIX-20 in 0.7.3 adds a reported-command regression matrix for credential reads/copies/listings and their expansions,
 write forms through every supported wrapper, directory changes, opaque inputs and null devices. Stand-in worker
 runs check that credential and outside-write signals request containment, while null redirects and opaque warnings
 settle without a scope stop. These tests run no reported credential or outside-write command and establish no new
 live-harness or platform qualification. Release qualification requires three-platform checks on the exact candidate. The command audit
-remains a signal over harness reports, which can arrive after execution; the sandbox and settlement audit remain the
-boundaries. FIX-20 adds no public CLI, API, SDK, record type, signal code, package or lock-file change.
+remains a signal over harness reports, which can arrive after execution. Operating-system isolation remains
+necessary; the settlement audit observes scope after exit. FIX-20 adds no public CLI, API, SDK, record type,
+signal code, package or lock-file change.
 Observed-success and live qualification do not accept the agent's work.
 The executable and entry-file hashes must be explicitly admitted by the operator; version output is not vendor
 attestation. Environment and filesystem inspection is not an operating-system sandbox or a hard network firewall.
@@ -1448,13 +1445,14 @@ The efficiency Adapter remains disabled and has no implementation here. Any requ
 refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.0. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
 
-## Newer-release notices (unreleased, planned 0.7.3)
+## Newer-release notices (0.7.3)
 
-UPDATE-01 on main adds a shared machine-local check for CLI `version`, `doctor` and `status`, and Workbench.
+UPDATE-01 in 0.7.3 adds a shared machine-local check for CLI `version`, `doctor` and `status`, and Workbench.
 It makes at most one unauthenticated request per 24 hours to the public latest-release endpoint, counting
-failed attempts, with no identifiers or usage telemetry. `vericairn updates configure --enabled false`
+failed attempts, with no identifiers or usage telemetry. It reaches only GitHub and ignores system proxies;
+cookies, credentials, redirects and trace propagation are disabled. `vericairn updates configure --enabled false`
 disables requests; cached knowledge remains usable offline. Notices explain the tool, archive and estate
 upgrade routes and never install or upgrade anything. Estate checks use existing release records and local
 cached knowledge to warn about an older pin without making a network request; canonical status stays unchanged.
-These commands and notices are absent from published 0.7.2. See [Workbench](workbench.md#release-notices-unreleased-planned-073)
+See [Workbench](workbench.md#release-notices-073)
 for the desktop behavior.
