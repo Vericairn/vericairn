@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Vericairn.Protocol;
 using Vericairn.Sdk;
 
@@ -38,11 +39,14 @@ public class ContextApiTests
         }
 
         Assert.Null(client.Brief("C-1")!.Problem);
-        Assert.Equal(harness.Host.Service.BriefContext("C-1")!.Markdown, client.BriefContext("C-1")!.Markdown);
+        // Each read states when it observed the communication profile, so two reads a second apart differ only there.
+        Assert.Equal(WithoutObservationTime(harness.Host.Service.BriefContext("C-1")!.Markdown), WithoutObservationTime(client.BriefContext("C-1")!.Markdown));
         Assert.Equal("context-over-budget", client.BriefContext("C-1", 1)!.Problem!.Code);
         Assert.Empty(harness.Host.Service.Objects());
         Assert.Equal(writes, LocalNetworkLedger.Read(directory).Count);
         Assert.True(harness.Host.Service.DeviceRevoke(new RevokeRequest(paired.Device, harness.Estate.OperatorId, "Withdraw read permission.")).Ok);
         Assert.Throws<HttpRequestException>(() => client.ContextRead("unknown"));
     }
+
+    private static string WithoutObservationTime(string markdown) => Regex.Replace(markdown, @"Freshness: [^;\n]+;", "Freshness: (observed);");
 }
