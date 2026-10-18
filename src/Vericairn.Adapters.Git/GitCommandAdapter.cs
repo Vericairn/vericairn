@@ -28,8 +28,11 @@ public sealed class GitCommandAdapter : ISourceAdapter
         "git-command",
         ISourceAdapter.Contract,
         "implemented",
-        ["inspect"],
+        ["inspect", "read-file-at-hash"],
         ["Requires git on the PATH.", "Observes the working tree and history only; it never fetches, commits, pushes or changes the index beyond git's own status refresh."]);
+
+    /// <inheritdoc />
+    public byte[]? ReadFileAtHash(string root, string relativePath, string hash) => GitDocumentHistory.Read(root, relativePath, hash);
 
     /// <inheritdoc />
     public bool IsRepository(string path)

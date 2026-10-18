@@ -22,8 +22,14 @@ editable ledger. Its `vericairn.context-manifest/1` pins the declared basis and
 exact source identities; it is distinct from the estate release manifest.
 Retrieval pins carry the source identity themselves: record id, record hash and
 byte hash, or document path, revision record and byte hash. Reads write nothing
-and need no retained manifest. Documents are available only while working-tree
-bytes match; record custody is immutable. Only dispatch retains context, in the
+and need no retained manifest. In 0.7.3, documents require matching working-tree
+bytes. FIX-27 for 0.8.0 also allows required originals from the estate's own local
+Git history, verified against the pinned SHA-256 hash; their pins carry
+`history: "local"`. Shallow or missing history and hash mismatches still refuse,
+with guidance to restore the pinned bytes or use a complete local clone. No
+fetch or revision substitution occurs. Optional documents and pins without the
+marker keep their working-tree-only behavior; record custody is immutable.
+Only dispatch retains context, in the
 worker's local run directory under the Vericairn home, never estate objects or
 records.
 Record canonical hashes and original-file byte hashes are separate. Originals
