@@ -1980,188 +1980,23 @@ internal static partial class Commands
 
 
 
-    /// <summary>The git adapter registered in this process; tests register a recorded one.</summary>
     internal static ISourceAdapter? SourceAdapter
     {
-        get
-        {
-            Composition.Register(ProviderRegistry.Current);
-            return ProviderRegistry.Current.Source("git");
-        }
-
-        set
-        {
-            if (value is null)
-            {
-                ProviderRegistry.Current.RemoveSource("git");
-            }
-            else
-            {
-                ProviderRegistry.Current.Register(value);
-            }
-        }
+        get => CommandProviders.SourceAdapter;
+        set => CommandProviders.SourceAdapter = value;
     }
 
-    /// <summary>The implementation registered for the github-releases provider in this process; tests register the in-memory one and restore the previous afterwards.</summary>
     internal static IReleaseProvider? ReleaseProvider
     {
-        get
-        {
-            Composition.Register(ProviderRegistry.Current);
-            return ProviderRegistry.Current.Release("github-releases");
-        }
-
-        set
-        {
-            if (value is null)
-            {
-                ProviderRegistry.Current.RemoveRelease("github-releases");
-            }
-            else
-            {
-                ProviderRegistry.Current.Register(value);
-            }
-        }
+        get => CommandProviders.ReleaseProvider;
+        set => CommandProviders.ReleaseProvider = value;
     }
 
-    private static ISourceAdapter? GitAdapter(out int failure)
-    {
-        ISourceAdapter? adapter = SourceAdapter;
-        failure = adapter is null ? Fail("No git adapter is available in this distribution; repositories cannot be observed here.") : Clean;
-        return adapter;
-    }
+    private static ISourceAdapter? GitAdapter(out int failure) => CommandProviders.Git(context: Context, out failure);
 
-    public static int SourcesInspect(string path, bool json)
-    {
-        try
-        {
-            ISourceAdapter? adapter = GitAdapter(out int failure);
-            if (adapter is null)
-            {
-                return failure;
-            }
 
-            RepositoryObservation observation = adapter.Inspect(path);
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(observation, ProtocolJson.Options));
-            }
-            else
-            {
-                PrintObservation(observation);
-                Console.Out.WriteLine("Read-only: nothing in the repository changed.");
-            }
 
-            return Clean;
-        }
-        catch (ProviderRefusedException exception)
-        {
-            return Fail(exception.Message);
-        }
-    }
 
-    public static int SourcesAdopt(string root, string path, string by, string name, string role, string visibility, string? notes, bool json)
-    {
-        RepositoryObservation observation;
-        try
-        {
-            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
-        }
-        catch (ProviderRefusedException exception)
-        {
-            return Fail(exception.Message);
-        }
-
-        return WithApi(root, api =>
-        {
-            WriteOutcome resource = api.NewRecord(new NewRecordRequest("resource", by, Element(SourceAdoption.ResourceBody(name, role, visibility, observation, notes))));
-            if (!resource.Ok)
-            {
-                return ReportOutcome(resource, json);
-            }
-
-            WriteOutcome observed = api.NewRecord(new NewRecordRequest("observation", by, Element(SourceAdoption.ObservationBody(observation)), $"resource:{resource.Written!.Id}:{resource.Written.Hash}"));
-            if (!observed.Ok)
-            {
-                return ReportOutcome(observed, json);
-            }
-
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { resource = resource.Written, observation = observed.Written, commit = observation.Commit, clean = observation.Clean }, ProtocolJson.Options));
-            }
-            else
-            {
-                Console.Out.WriteLine($"resource     {resource.Written.Id}  {resource.Written.Path}");
-                Console.Out.WriteLine($"observation  {observed.Written!.Id}  {observed.Written.Path}");
-                PrintObservation(observation);
-                Console.Out.WriteLine("Adopted by observation only: the repository is a resource the estate uses and does not own; uncommitted work is preserved and nothing in it changed.");
-            }
-
-            return Clean;
-        });
-    }
-
-    /// <summary>Registers this machine's clone of an adopted repository, for the sources that read it, such as living documents of other repositories; nothing is recorded.</summary>
-    public static int SourcesClone(string root, string resourceId, string path, bool json)
-    {
-        RepositoryObservation observation;
-        try
-        {
-            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
-        }
-        catch (ProviderRefusedException exception)
-        {
-            return Fail(exception.Message);
-        }
-
-        return WithApi(root, api =>
-        {
-            RecordResponse? resource = api.Record(resourceId);
-            if (resource is null || resource.Type != "resource" || !resource.Current)
-            {
-                return Fail($"No current resource has id {resourceId}.");
-            }
-
-            // The clone is the repository the resource names: by its root commit where recorded, else by its GitHub remote.
-            JsonElement location = resource.Envelope.GetProperty("body").GetProperty("location");
-            string? rootCommit = location.TryGetProperty("rootCommit", out JsonElement r) ? r.GetString() : null;
-            string? github = location.TryGetProperty("github", out JsonElement g) ? g.GetString() : null;
-            bool matches = rootCommit is not null ? rootCommit == observation.RootCommit : github is not null && string.Equals(SourceAdoption.GitHubRepository(observation.Remote), github, StringComparison.OrdinalIgnoreCase);
-            if (!matches)
-            {
-                return Fail($"That working tree is not the repository of resource {resource.Id}: its {(rootCommit is not null ? "root commit" : "GitHub remote")} differs.");
-            }
-
-            RepositoryClones.Register(api.Health().Estate, resource.Id, path);
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { resource = resource.Id, commit = observation.Commit }) : $"Registered this machine's clone of resource {resource.Id} at {observation.Commit[..12]}; the path stays in this machine's configuration, never in a record.");
-            return Clean;
-        });
-    }
-
-    public static int SourcesObserve(string root, string path, string resourceId, string by, bool json)
-    {
-        RepositoryObservation observation;
-        try
-        {
-            observation = (GitAdapter(out int failure) ?? throw new ProviderRefusedException("No git adapter is available in this distribution; repositories cannot be observed here.")).Inspect(path);
-        }
-        catch (ProviderRefusedException exception)
-        {
-            return Fail(exception.Message);
-        }
-
-        return WithApi(root, api =>
-        {
-            RecordResponse? resource = api.Record(resourceId);
-            if (resource is null || resource.Type != "resource" || !resource.Current)
-            {
-                return Fail($"No current resource has id {resourceId}.");
-            }
-
-            return ReportOutcome(api.NewRecord(new NewRecordRequest("observation", by, Element(SourceAdoption.ObservationBody(observation)), $"resource:{resource.Id}:{resource.Hash}")), json);
-        });
-    }
 
     public static int CheckRun(string root, string resourceId, string by, string path, string role, string? summary, int timeoutSeconds, string[] command, bool json)
     {
@@ -2319,24 +2154,8 @@ internal static partial class Commands
     private static Dictionary<string, string>? ParseSettings(string[] settings, out string? problem) => CommandSettings.Parse(settings, out problem);
 
 
-    private static void PrintObservation(RepositoryObservation observation)
-    {
-        Console.Out.WriteLine($"commit      {observation.Commit}{(observation.Branch is null ? "  (detached)" : "  on " + observation.Branch)}");
-        Console.Out.WriteLine($"remote      {(SourceAdoption.IsNetworkRemote(observation.Remote) ? observation.Remote : observation.Remote is null ? "none" : "a path on this machine (not recorded)")}");
-        Console.Out.WriteLine($"identity    root commit {observation.RootCommit}{(SourceAdoption.GitHubRepository(observation.Remote) is string github ? ", github " + github : string.Empty)}");
-        Console.Out.WriteLine($"working     {(observation.Clean ? "clean" : $"{observation.Modified} modified, {observation.Untracked} untracked")}");
-        Console.Out.WriteLine($"tags        {(observation.Tags.Count == 0 ? "none" : string.Join(", ", observation.Tags))}");
-        foreach (RecentCommit commit in observation.Recent)
-        {
-            Console.Out.WriteLine($"  {commit.Commit[..12]}  {commit.At}  {commit.Summary}");
-        }
-    }
 
-    private static JsonElement Element(Json.JsonObject body)
-    {
-        using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
-        return document.RootElement.Clone();
-    }
+    private static JsonElement Element(Json.JsonObject body) => CommandJson.Element(body);
 
     /// <summary>Runs an operation against the estate's API: the daemon's when one answers for this estate, the embedded runtime otherwise.</summary>
     private static int WithApi(string root, Func<IEstateApi, int> operation) =>

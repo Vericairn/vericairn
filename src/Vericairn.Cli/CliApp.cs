@@ -34,7 +34,7 @@ internal static partial class CliApp
         root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
         root.Subcommands.Add(ConnectionsFamily(jsonOption));
         root.Subcommands.Add(new ReleaseCommand(context));
-        root.Subcommands.Add(SourcesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new SourcesCommand(context));
         root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(new RecoverCommand(context));
@@ -276,53 +276,6 @@ internal static partial class CliApp
     }
 
 
-    private static Command SourcesFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var sources = new Command("sources", "Repositories the estate uses: inspect read-only, adopt as a resource, observe again, and register this machine's clone.");
-        var pathArgument = new Argument<string>("path") { Description = "Path of a git working tree on this machine; never recorded." };
-        var inspect = new Command("inspect", "Observe a repository read-only: commit, branch, remote, working-tree state, tags, recent history.");
-        inspect.Arguments.Add(pathArgument);
-        inspect.SetAction(parseResult => Commands.SourcesInspect(parseResult.GetValue(pathArgument)!, parseResult.GetValue(jsonOption)));
-        sources.Subcommands.Add(inspect);
-
-        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
-        var nameOption = new Option<string>("--name") { Description = "Display name of the resource.", Required = true };
-        var roleOption = new Option<string>("--role") { Description = "What the estate uses the repository for.", Required = true };
-        var visibilityOption = new Option<string>("--visibility") { Description = "public, private or n/a.", DefaultValueFactory = _ => "private" };
-        var notesOption = new Option<string?>("--notes") { Description = "Free text." };
-        var adopt = new Command("adopt", "Adopt a repository as a resource by observation: a resource record and a first observation; nothing in the repository changes.");
-        adopt.Arguments.Add(pathArgument);
-        adopt.Options.Add(byOption);
-        adopt.Options.Add(nameOption);
-        adopt.Options.Add(roleOption);
-        adopt.Options.Add(visibilityOption);
-        adopt.Options.Add(notesOption);
-        adopt.SetAction(parseResult => Commands.SourcesAdopt(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(pathArgument)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(nameOption)!,
-            parseResult.GetValue(roleOption)!,
-            parseResult.GetValue(visibilityOption)!,
-            parseResult.GetValue(notesOption),
-            parseResult.GetValue(jsonOption)));
-        sources.Subcommands.Add(adopt);
-
-        var resourceOption = new Option<string>("--resource") { Description = "Resource record id of the adopted repository.", Required = true };
-        var observe = new Command("observe", "Record a fresh observation of an adopted repository.");
-        observe.Arguments.Add(pathArgument);
-        observe.Options.Add(resourceOption);
-        observe.Options.Add(byOption);
-        observe.SetAction(parseResult => Commands.SourcesObserve(parseResult.GetValue(estateOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(resourceOption)!, parseResult.GetValue(byOption)!, parseResult.GetValue(jsonOption)));
-        sources.Subcommands.Add(observe);
-
-        var clone = new Command("clone", "Register this machine's clone of an adopted repository, so that living documents in it can be read at a commit; the path is machine configuration, never a record.");
-        clone.Arguments.Add(pathArgument);
-        clone.Options.Add(resourceOption);
-        clone.SetAction(parseResult => Commands.SourcesClone(parseResult.GetValue(estateOption)!, parseResult.GetValue(resourceOption)!, parseResult.GetValue(pathArgument)!, parseResult.GetValue(jsonOption)));
-        sources.Subcommands.Add(clone);
-        return sources;
-    }
 
     private static Command CheckFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
