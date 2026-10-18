@@ -36,7 +36,7 @@ internal static partial class CliApp
         root.Subcommands.Add(new ReleaseCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
         root.Subcommands.Add(new CheckCommand(context));
-        root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new RuntimeCommand(context));
         root.Subcommands.Add(new RecoverCommand(context));
         root.Subcommands.Add(new ObjectsCommand(context));
         root.Subcommands.Add(new DocsCommand(context));
@@ -95,51 +95,6 @@ internal static partial class CliApp
 
 
 
-    private static Command RuntimeFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var runtime = new Command("runtime", "The daemon that owns an estate's live state on this machine: serve, start, stop, status, install, uninstall, configure (the local-network profile) and rotate (its certificate).");
-        var noLoopbackOption = new Option<bool>("--no-loopback") { Description = "Disable the pinned loopback TLS endpoint. The local socket and any configured local-network listener remain available." };
-        var serve = new Command("serve", "Serve the estate in this process until stopped (Ctrl+C or 'runtime stop'); refuses when a daemon already serves it.");
-        var detachedOption = new Option<bool>("--detached") { Description = "Write the daemon's output to its log beside the estate's live store instead of the standard streams; 'runtime start' serves this way." };
-        serve.Options.Add(noLoopbackOption);
-        serve.Options.Add(detachedOption);
-        serve.SetAction(parseResult => Commands.RuntimeServe(parseResult.GetValue(estateOption)!, !parseResult.GetValue(noLoopbackOption), parseResult.GetValue(detachedOption)));
-        runtime.Subcommands.Add(serve);
-        var start = new Command("start", "Start a daemon for the estate in the background and wait until it answers.");
-        start.SetAction(parseResult => Commands.RuntimeStart(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(start);
-        var stop = new Command("stop", "Ask the daemon serving the estate to stop; closing a client never stops it.");
-        stop.SetAction(parseResult => Commands.RuntimeStop(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(stop);
-        var status = new Command("status", "Whether a daemon serves the estate and where, or whether commands run the embedded runtime.");
-        status.SetAction(parseResult => Commands.RuntimeStatus(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(status);
-        var planOption = new Option<bool>("--plan") { Description = "Show the unit and the commands without installing anything." };
-        var install = new Command("install", "Install the daemon as a per-user service that starts at login (launchd agent, systemd user unit or a logon task).");
-        install.Options.Add(planOption);
-        install.SetAction(parseResult => Commands.RuntimeInstall(parseResult.GetValue(estateOption)!, parseResult.GetValue(planOption), parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(install);
-        var uninstall = new Command("uninstall", "Remove the per-user service installed by 'runtime install'.");
-        uninstall.SetAction(parseResult => Commands.RuntimeUninstall(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(uninstall);
-        var localNetworkOption = new Option<string?>("--local-network") { Description = "The address and port the local-network profile listens on from the runtime's next start, an IP address of this machine such as 192.168.1.20:7443; 'off' turns it off. Off unless set." };
-        var configure = new Command("configure", "Configure the runtime of this estate on this machine; without options, show the configuration. Nothing listens beyond the local socket and loopback unless an address is set.");
-        var allowPublicOption = new Option<bool>("--allow-public") { Description = "With --local-network, allow a wildcard address (every interface) or one other networks can reach; such an address is refused without it." };
-        configure.Options.Add(localNetworkOption);
-        configure.Options.Add(allowPublicOption);
-        configure.SetAction(parseResult => Commands.RuntimeConfigure(parseResult.GetValue(estateOption)!, parseResult.GetValue(localNetworkOption), parseResult.GetValue(allowPublicOption), parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(configure);
-        var compromisedOption = new Option<bool>("--compromised") { Description = "The certificate's key may be known to someone else: also close every open connection, so nothing continues under it." };
-        var identityOption = new Option<bool>("--identity") { Description = "The runtime identity's key may be known to someone else: replace the identity too; every paired device then pairs again." };
-        var reasonOption = new Option<string?>("--reason") { Description = "Why, for the runtime's log." };
-        var rotate = new Command("rotate", "Replace the runtime certificate now (it is also replaced on a schedule before it expires). Paired devices keep working, since they pin the runtime identity, which signs the certificate in use; loopback clients read the new one from the endpoint file.");
-        rotate.Options.Add(compromisedOption);
-        rotate.Options.Add(identityOption);
-        rotate.Options.Add(reasonOption);
-        rotate.SetAction(parseResult => Commands.RuntimeRotate(parseResult.GetValue(estateOption)!, parseResult.GetValue(compromisedOption), parseResult.GetValue(identityOption), parseResult.GetValue(reasonOption), parseResult.GetValue(jsonOption)));
-        runtime.Subcommands.Add(rotate);
-        return runtime;
-    }
 
 
 
