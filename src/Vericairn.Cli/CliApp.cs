@@ -38,7 +38,7 @@ internal static partial class CliApp
         root.Subcommands.Add(CheckFamily(estateOption, jsonOption));
         root.Subcommands.Add(RuntimeFamily(estateOption, jsonOption));
         root.Subcommands.Add(RecoverFamily(estateOption));
-        root.Subcommands.Add(ObjectsFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new ObjectsCommand(context));
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
         root.Subcommands.Add(McpFamily(estateOption, jsonOption));
         root.Subcommands.Add(new ContextCommand(context));
@@ -487,22 +487,6 @@ internal static partial class CliApp
         return recover;
     }
 
-    private static Command ObjectsFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var objects = new Command("objects", "Content-addressed objects: put, list, verify.");
-        var fileArgument = new Argument<string>("file") { Description = "File whose bytes become an object." };
-        var put = new Command("put", "Store a file's bytes as an object named by their hash.");
-        put.Arguments.Add(fileArgument);
-        put.SetAction(parseResult => Commands.ObjectsPut(parseResult.GetValue(estateOption)!, parseResult.GetValue(fileArgument)!, parseResult.GetValue(jsonOption)));
-        objects.Subcommands.Add(put);
-        var list = new Command("list", "List held objects.");
-        list.SetAction(parseResult => Commands.ObjectsList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        objects.Subcommands.Add(list);
-        var verify = new Command("verify", "Read every object and check its bytes against its name.");
-        verify.SetAction(parseResult => Commands.ObjectsVerify(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        objects.Subcommands.Add(verify);
-        return objects;
-    }
 
     private static Command ConnectionsFamily(Option<bool> jsonOption)
     {

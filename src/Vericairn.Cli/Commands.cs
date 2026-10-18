@@ -1388,50 +1388,8 @@ internal static partial class Commands
         }
     }
 
-    public static int ObjectsPut(string root, string file, bool json)
-    {
-        byte[] bytes;
-        try
-        {
-            bytes = File.ReadAllBytes(file);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return Fail(exception.Message);
-        }
 
-        return WithApi(root, api =>
-        {
-            (ObjectStored? stored, Problem? problem) = api.ObjectPut(bytes);
-            if (stored is null)
-            {
-                return Fail(problem?.Message ?? "refused");
-            }
 
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { hash = stored.Hash, bytes = stored.Bytes, store = stored.Store }) : $"{stored.Hash}  {stored.Bytes} bytes  ({stored.Store})");
-            return Clean;
-        });
-    }
-
-    public static int ObjectsList(string root, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<ObjectRow> rows = api.Objects();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows.Select(r => r.Hash)));
-        }
-        else
-        {
-            foreach (ObjectRow row in rows)
-            {
-                Console.Out.WriteLine(row.Hash);
-            }
-        }
-
-        return Clean;
-    });
-
-    public static int ObjectsVerify(string root, bool json) => WithApi(root, api => ReportFindings(api.ObjectsVerify(), json));
 
     public static int DevicesCreate(string root, string principal, string name, string? custody, bool? presence, string[] profiles, bool json) =>
         WithApi(root, api => ReportOutcome(api.DeviceCreate(new DeviceCreateRequest(principal, name, custody, profiles.Length == 0 ? null : profiles, presence)), json));
