@@ -58,7 +58,7 @@ internal static partial class Commands
                 }
 
                 StatusResponse observed = api.Status();
-                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : StatusPresentation(api, observed, presentation));
+                Console.Out.Write(json ? CanonicalJson.SerializePretty(observed.Json) : CommandPresentation.Status(api, observed, presentation));
                 return observed.HasErrors ? HasErrors : Clean;
             });
         }
@@ -76,7 +76,7 @@ internal static partial class Commands
         return WithApi(root, api =>
         {
             StatusResponse status = api.Status();
-            Console.Out.Write(json ? CanonicalJson.SerializePretty(status.Json) : StatusPresentation(api, status, presentation));
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(status.Json) : CommandPresentation.Status(api, status, presentation));
             return status.HasErrors ? HasErrors : Clean;
         });
     }
@@ -85,7 +85,7 @@ internal static partial class Commands
     public static int Progress(string root, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
         ProgressResponse progress = api.Progress();
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : ProtectedPresentation(api, "status", "estate progress", progress.Text, presentation) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, presentation?.Recipient, () => progress)));
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(progress.Json) : CommandPresentation.Protected(api, "status", "estate progress", progress.Text, presentation) + CommunicationPresentation.RenderAttention(CommunicationPresentation.Attention(api, presentation?.Recipient, () => progress)));
         return progress.HasErrors ? HasErrors : Clean;
     });
 
@@ -118,7 +118,7 @@ internal static partial class Commands
             file.Write(Encoding.UTF8.GetBytes(package));
         }
 
-        Console.Out.Write(json ? package : ContextTextMeasurement.Presentation(ProtectedPresentation(api, "handoff", response.Package.Hash, response.Text, presentation)).Text);
+        Console.Out.Write(json ? package : ContextTextMeasurement.Presentation(CommandPresentation.Protected(api, "handoff", response.Package.Hash, response.Text, presentation)).Text);
         return Clean;
     });
 
@@ -155,7 +155,7 @@ internal static partial class Commands
             return Fail($"No current work order has key or id {key}.");
         }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : ProtectedPresentation(api, "result", key, observe.Text, presentation));
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : CommandPresentation.Protected(api, "result", key, observe.Text, presentation));
         return Clean;
     });
 
@@ -796,7 +796,7 @@ internal static partial class Commands
         if (id is null)
         {
             DecisionsResponse decisions = api.Decisions();
-            Console.Out.Write(json ? CanonicalJson.SerializePretty(decisions.Json) : ProtectedPresentation(api, "decision", "decision index", decisions.Text, presentation));
+            Console.Out.Write(json ? CanonicalJson.SerializePretty(decisions.Json) : CommandPresentation.Protected(api, "decision", "decision index", decisions.Text, presentation));
             return Clean;
         }
 
@@ -806,7 +806,7 @@ internal static partial class Commands
             return Fail($"No decision has id {id}.");
         }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : ProtectedPresentation(api, "decision", id, decision.Text, presentation));
+        Console.Out.Write(json ? CanonicalJson.SerializePretty(decision.Body) : CommandPresentation.Protected(api, "decision", id, decision.Text, presentation));
         return Clean;
     });
 
@@ -1471,4 +1471,6 @@ internal static partial class Commands
 
     internal static int Fail(string message) =>
         Context.Fail(message);
+
+
 }

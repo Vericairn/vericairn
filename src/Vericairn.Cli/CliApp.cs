@@ -21,11 +21,11 @@ internal static partial class CliApp
         var root = new RootCommand("Vericairn: records, estates and the tools that keep them honest.");
         root.Options.Add(estateOption);
         root.Options.Add(jsonOption);
-        var presentation = new PresentationOptions();
+        PresentationOptions presentation = context.Presentation;
         root.Options.Add(presentation.Recipient);
         root.Options.Add(presentation.Assignment);
         root.Options.Add(presentation.Depth);
-        root.Subcommands.Add(CommunicationFamily(estateOption, jsonOption, presentation));
+        root.Subcommands.Add(new CommunicationCommand(context));
         root.Subcommands.Add(new RecordsCommand(context));
         root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption, presentation));

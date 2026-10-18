@@ -38,6 +38,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         Recursive = true,
     };
 
+    public PresentationOptions Presentation { get; } = new();
+
     // Resolve the console writers at execution time, including when a caller captures output after building the tree.
     public TextWriter Output => output ?? Console.Out;
     public TextWriter Error => error ?? Console.Error;
