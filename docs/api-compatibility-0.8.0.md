@@ -119,7 +119,10 @@ accessors. Previously they retained caller-owned collections. Construction,
 object initialization and `with` assignment now copy the supplied collection into
 owned read-only storage. Null optional collections stay null; values and order
 stay the same. Dictionary copies preserve the key comparison of standard mutable
-and immutable dictionary implementations. Nested worker configuration inventories
+and immutable dictionary implementations. An opaque dictionary view does not expose
+its comparer; its copied keys use ordinal lookup. To retain a different comparison,
+supply a dictionary that exposes its comparer. Already immutable dictionary storage
+can be shared safely. Nested worker configuration inventories
 are owned at their corresponding record boundaries, so copying only the outer
 configuration dictionary cannot leave a mutable path into the worker.
 
@@ -142,6 +145,27 @@ configuration dictionary cannot leave a mutable path into the worker.
 | `Vericairn.Runtime.Workers.RunCapabilities.Providers` | `public IReadOnlyList<string> { get; init; }`; caller-owned | Same signature; owned snapshot |
 | `Vericairn.Runtime.Workers.RunCapabilities.Destinations` | `public IReadOnlyList<string> { get; init; }`; caller-owned | Same signature; owned snapshot |
 | `Vericairn.Runtime.Workers.RunCapabilities.DataBoundaries` | `public IReadOnlyList<string> { get; init; }`; caller-owned | Same signature; owned snapshot |
+
+The scalar properties below are declared explicitly alongside the copied properties
+to retain their original serialization order. Both columns include their public
+`get; init;` accessors; their values and ownership are unchanged.
+
+| Exported member | Old synthesized shape | New explicit shape |
+| --- | --- | --- |
+| `Vericairn.Runtime.Workers.RunConfiguration.Name` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunConfiguration.Launcher` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunConfiguration.Policy` | `public JsonElement { get; init; }` | `public JsonElement { get; init; }` |
+| `Vericairn.Runtime.Workers.RunConfiguration.EnvironmentPolicy` | `public RunEnvironmentPolicy? { get; init; }` | `public RunEnvironmentPolicy? { get; init; }` |
+| `Vericairn.Runtime.Workers.RunComponent.Id` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunComponent.Kind` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunComponent.Version` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunComponent.Hash` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunComponent.ConfigurationHash` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunEnvironmentPolicy.Id` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.WorkerConfiguration.Model` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.WorkerConfiguration.Effort` | `public string { get; init; }` | `public string { get; init; }` |
+| `Vericairn.Runtime.Workers.RunCapabilities.ProviderDefault` | `public bool { get; init; }` | `public bool { get; init; }` |
+| `Vericairn.Runtime.Workers.RunCapabilities.ClosedEnvironment` | `public bool { get; init; }` | `public bool { get; init; }` |
 
 The positional constructor and generated `Deconstruct` signatures of
 `RunConfiguration`, `RunEnvironmentPolicy`, `RunComponent`, `WorkerConfiguration`

@@ -17,7 +17,28 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Effort">Default native effort.</param>
 /// <param name="AllowedModels">Permitted selectors; only the default model when omitted.</param>
 /// <param name="AllowedEfforts">Permitted native efforts; the launcher's vocabulary when omitted.</param>
-public sealed record WorkerConfiguration(string Model, string Effort, IReadOnlyList<string>? AllowedModels = null, IReadOnlyList<string>? AllowedEfforts = null);
+public sealed record WorkerConfiguration(string Model, string Effort, IReadOnlyList<string>? AllowedModels = null, IReadOnlyList<string>? AllowedEfforts = null)
+{
+    /// <summary>Default model selector.</summary>
+    public string Model { get; init; } = Model;
+
+    /// <summary>Default native effort.</summary>
+    public string Effort { get; init; } = Effort;
+
+    /// <summary>Permitted selectors; only the default model when omitted. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string>? AllowedModels
+    {
+        get;
+        init => field = OptionCollections.OptionalList(value);
+    } = OptionCollections.OptionalList(AllowedModels);
+
+    /// <summary>Permitted native efforts; the launcher's vocabulary when omitted. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string>? AllowedEfforts
+    {
+        get;
+        init => field = OptionCollections.OptionalList(value);
+    } = OptionCollections.OptionalList(AllowedEfforts);
+}
 
 /// <summary>Owner-only launcher choices and workspace placement under VericairnHome, read afresh for each run by the CLI and daemon.</summary>
 public sealed partial class WorkerConfigurationStore

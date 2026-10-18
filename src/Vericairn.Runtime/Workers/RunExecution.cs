@@ -21,12 +21,60 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Destinations">Logical routes it uses.</param>
 /// <param name="Dependencies">Other component identities in the inventory.</param>
 public sealed record RunComponent(string Id, string Kind, string Version, string Hash, string ConfigurationHash,
-    IReadOnlyList<string> Environment, IReadOnlyList<string> Destinations, IReadOnlyList<string> Dependencies);
+    IReadOnlyList<string> Environment, IReadOnlyList<string> Destinations, IReadOnlyList<string> Dependencies)
+{
+    /// <summary>Logical component or tool name.</summary>
+    public string Id { get; init; } = Id;
+
+    /// <summary>harness, tool, skill, plugin, hook, mcp, helper, dependency or configuration.</summary>
+    public string Kind { get; init; } = Kind;
+
+    /// <summary>Reported version, or unknown.</summary>
+    public string Version { get; init; } = Version;
+
+    /// <summary>Digest of the component's exact content.</summary>
+    public string Hash { get; init; } = Hash;
+
+    /// <summary>Digest of its effective configuration, excluding credentials and machine bindings.</summary>
+    public string ConfigurationHash { get; init; } = ConfigurationHash;
+
+    /// <summary>The environment variable names it needs, never their values. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Environment
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Environment);
+
+    /// <summary>Logical routes it uses. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Destinations
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Destinations);
+
+    /// <summary>Other component identities in the inventory. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Dependencies
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Dependencies);
+}
 
 /// <summary>A local admission policy for the complete harness dependency tree.</summary>
 /// <param name="Id">The policy's portable identity.</param>
 /// <param name="Components">The exact inventory admitted by the operator's configuration.</param>
-public sealed record RunEnvironmentPolicy(string Id, IReadOnlyList<RunComponent> Components);
+public sealed record RunEnvironmentPolicy(string Id, IReadOnlyList<RunComponent> Components)
+{
+    /// <summary>The policy's portable identity.</summary>
+    public string Id { get; init; } = Id;
+
+    /// <summary>The exact inventory admitted by the operator's configuration. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<RunComponent> Components
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Components);
+}
 
 /// <summary>What a launcher's preflight established after preparing isolated configuration, before intent or dispatch.</summary>
 /// <param name="Components">Everything effectively loaded, including user and repository configuration and dependencies.</param>

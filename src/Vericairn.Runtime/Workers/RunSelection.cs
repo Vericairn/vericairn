@@ -21,7 +21,41 @@ namespace Vericairn.Runtime.Workers;
 /// <param name="Settings">Local launcher settings.</param>
 /// <param name="EnvironmentPolicy">The closed inventory admitted for this configuration.</param>
 /// <param name="Efforts">Optional narrower native effort allowlist; it cannot add to the launcher's vocabulary.</param>
-public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null, IReadOnlyList<string>? Efforts = null);
+public sealed record RunConfiguration(string Name, string Launcher, JsonElement Policy, IReadOnlyList<string> Models, IReadOnlyDictionary<string, string>? Settings = null, RunEnvironmentPolicy? EnvironmentPolicy = null, IReadOnlyList<string>? Efforts = null)
+{
+    /// <summary>Portable configuration identity.</summary>
+    public string Name { get; init; } = Name;
+
+    /// <summary>The launcher served.</summary>
+    public string Launcher { get; init; } = Launcher;
+
+    /// <summary>Explicit choices and restrictions, in the recorded execution-policy form.</summary>
+    public JsonElement Policy { get; init; } = Policy;
+
+    /// <summary>The model selectors this configuration admits; no ambient model is admitted. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Models
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Models);
+
+    /// <summary>Local launcher settings. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyDictionary<string, string>? Settings
+    {
+        get;
+        init => field = OptionCollections.OptionalDictionary(value);
+    } = OptionCollections.OptionalDictionary(Settings);
+
+    /// <summary>The closed inventory admitted for this configuration.</summary>
+    public RunEnvironmentPolicy? EnvironmentPolicy { get; init; } = EnvironmentPolicy;
+
+    /// <summary>Optional narrower native effort allowlist; it cannot add to the launcher's vocabulary. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string>? Efforts
+    {
+        get;
+        init => field = OptionCollections.OptionalList(value);
+    } = OptionCollections.OptionalList(Efforts);
+}
 
 /// <summary>The scopes and values a launcher implements, independently of a configuration's narrower restrictions.</summary>
 /// <param name="Scopes">Supported choice scopes, in precedence order.</param>
@@ -34,6 +68,47 @@ public sealed record RunConfiguration(string Name, string Launcher, JsonElement 
 public sealed record RunCapabilities(IReadOnlyList<string> Scopes, IReadOnlyList<string> Efforts, IReadOnlyList<string> Providers,
     IReadOnlyList<string> Destinations, IReadOnlyList<string> DataBoundaries, bool ProviderDefault = false, bool ClosedEnvironment = false)
 {
+    /// <summary>Supported choice scopes, in precedence order. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Scopes
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Scopes);
+
+    /// <summary>The harness's own effort vocabulary; empty only when there is no effort control. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Efforts
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Efforts);
+
+    /// <summary>Supported model-provider identities. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Providers
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Providers);
+
+    /// <summary>Supported logical inference destinations. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> Destinations
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(Destinations);
+
+    /// <summary>Supported protection policies, not inferred from a prompt. Copied into owned read-only storage on initialization.</summary>
+    public IReadOnlyList<string> DataBoundaries
+    {
+        get;
+        init => field = OptionCollections.List(value);
+    } = OptionCollections.List(DataBoundaries);
+
+    /// <summary>Whether an explicit provider-default effort choice is supported.</summary>
+    public bool ProviderDefault { get; init; } = ProviderDefault;
+
+    /// <summary>Whether the launcher implements complete effective inventory inspection and inherited environment controls.</summary>
+    public bool ClosedEnvironment { get; init; } = ClosedEnvironment;
+
     /// <summary>A launcher without execution support admits no choices.</summary>
     public static RunCapabilities Unsupported { get; } = new([], [], [], [], []);
 }
