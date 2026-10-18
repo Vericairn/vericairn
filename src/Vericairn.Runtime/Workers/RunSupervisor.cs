@@ -103,6 +103,10 @@ public sealed class RunSupervisor
             new Thread(() => Pump(process.StandardOutput, false)) { IsBackground = true, Name = "vericairn-run-output" },
             new Thread(() => Pump(process.StandardError, true)) { IsBackground = true, Name = "vericairn-run-errors" },
         ];
+        // Publish startup before either reader can mutate state or publish a newer stop observation.
+        // Staging an initial snapshot concurrently would let it replace that newer observation later.
+        Save();
+        options.BeforeReadersStart?.Invoke(directory);
         foreach (Thread reader in readers)
         {
             reader.Start();
@@ -180,7 +184,6 @@ public sealed class RunSupervisor
         try
         {
             var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention, execution, environment);
-            supervisor.Save();
             return supervisor;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
