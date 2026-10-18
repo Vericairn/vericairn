@@ -24,11 +24,13 @@ public static class DocumentCoverage
     public const int Version = 1;
     private static readonly Dictionary<string, DocumentCoverageDescriptor> Installed = new(StringComparer.Ordinal);
 
+    static DocumentCoverage() => Register(RecordKinds, RecordCompanions.Coverage);
+
     /// <summary>The admitted record registry and its declared collection fields. Owners add deeper and non-record collections.</summary>
     public static ImmutableArray<DocumentManagedKind> RecordKinds => [.. RecordTypeRegistry.All.SelectMany(type =>
         new[] { new DocumentManagedKind("record/" + type.Name, "record/" + type.Name) }
         .Concat(type.Fields.Where(f => f.Kind.EndsWith("[]", StringComparison.Ordinal)).Select(f =>
-            new DocumentManagedKind("record/" + type.Name + "#" + f.Name, "record/" + type.Name + "#" + f.Name))))];
+            new DocumentManagedKind("record/" + type.Name + "#" + f.Name, "record/" + type.Name + "#" + f.Name)))), .. RecordCollections.Nested];
 
     /// <summary>All installed descriptors, ordered by kind for deterministic inspection and CI.</summary>
     public static ImmutableArray<DocumentCoverageDescriptor> All

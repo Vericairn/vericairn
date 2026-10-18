@@ -26,7 +26,11 @@ public interface IDocumentGenerator
 /// <summary>The generators installed here: the foundation's, and those packs register. Registering one makes its name available.</summary>
 public static class DocumentGenerators
 {
-    private static readonly Dictionary<string, IDocumentGenerator> Installed = new(StringComparer.Ordinal) { [ReleasesTable.Name] = new ReleasesTable(), [ProgressRegion.Name] = new ProgressRegion() };
+    private static readonly Dictionary<string, IDocumentGenerator> Installed = new(StringComparer.Ordinal)
+    {
+        [ReleasesTable.Name] = new ReleasesTable(), [ProgressRegion.Name] = new ProgressRegion(),
+        [RecordCompanionGenerator.Name] = new RecordCompanionGenerator(),
+    };
 
     /// <summary>Installs a generator; a pack registers its own.</summary>
     public static void Register(IDocumentGenerator generator)
