@@ -22,7 +22,7 @@ public sealed class ChangesApiTests
     [Fact(Timeout = 30000)]
     public async Task AllFourSdkOperationsRoundTripTheirRecordedOutcomesThroughTheLocalApi()
     {
-        using var estate = new TestEstate(2);
+        using var estate = new TestEstate(3);
         string repository = estate.Add("resource", estate.OperatorId, """{"kind":"repository","name":"Widget","role":"Source","location":{"github":"Example/widget"},"visibility":"private"}""").Id;
         string product = estate.Add("product", estate.OperatorId, $$"""
             {"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Commands."}],

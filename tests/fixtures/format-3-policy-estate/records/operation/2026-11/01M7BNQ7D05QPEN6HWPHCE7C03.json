@@ -1,0 +1,53 @@
+{
+  "at": "2026-11-14T00:01:08Z",
+  "body": {
+    "action": "change-push",
+    "dispatchedAt": "2026-11-14T00:01:07Z",
+    "evidence": [],
+    "identity": "fixture-change-push",
+    "intent": "Exercise a checked repository change in the fixture.",
+    "observed": {
+      "at": "2026-11-14T00:01:08Z",
+      "reference": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "summary": "The fixture records the simulated repository outcome."
+    },
+    "provider": "example",
+    "requiredChecks": [
+      "tests (linux-x64)",
+      "tests (osx-arm64)",
+      "tests (win-x64)"
+    ],
+    "scan": {
+      "findingCount": 0,
+      "range": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb..aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "tool": "fixture-scanner",
+      "verdict": "passed",
+      "version": "1.0.0"
+    },
+    "status": "observed-success",
+    "target": {
+      "base": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "destination": "Example/example",
+      "head": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "product": "01M7BNQ4F8QD5RDKQB40G9YF2S",
+      "productHash": "sha256:14cb1941d0ad4ead31337969383928ffc3f0c70194cda9a1bdb0413c1a684cfa",
+      "repository": "01M57TPYPBZKR5291T0ZPZV759",
+      "repositoryHash": "sha256:3e4c720394c197f30acd1fd5c21601742d350dc8ce26198004a8502b792bb626",
+      "source": "work/fixture-change",
+      "target": "main"
+    }
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:447908c6c0a6089088905cc4c36cd61c991e327da456dee2ccc77be0dd8f0547",
+  "id": "01M7BNQ7D05QPEN6HWPHCE7C03",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "AxfET_jcjQfg7XmoJuw3pNsRk6I4UTN1Hl2AOerbyl9QDFsfhmeUYomEidF93Rx1W8TbZLDQjS2S0_olZaL27Q"
+    }
+  ],
+  "supersedes": "01M7BNQ6DRS13NZP6FAQ2RT57Q",
+  "type": "operation"
+}

@@ -38,7 +38,7 @@ public class PolicyGoldenFixtureTests
             Assert.Equal(CanonicalJson.Serialize(record.Body), CanonicalJson.Serialize(rebuilt.Envelope.Body));
             Assert.Equal(record.Signatures, parsed.Signatures);
         }
-        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "estate-policy" or "policy-exception" or "writing-exception"))
+        foreach (RecordEnvelope record in model.Records.Where(r => r.Type is "estate-policy" or "policy-exception" or "writing-exception" or "product" or "operation"))
             Assert.True(SignatureChecks.IsAuthentic(model, record));
     }
 
