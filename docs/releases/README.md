@@ -74,6 +74,7 @@ the macOS Secure Enclave helper nor Workbench.
 | `software.md` | a person, frozen copy | The software journey as released: the git adapter, checks, the release provider |
 | `workbench.md` | a person, frozen copy | Workbench as released: what exists, the keyboard, running it, the probe, limitations (declared from 0.4.0) |
 | `mcp.md` | a person, frozen copy | The MCP server as released: protocol subset, tools, running it, qualification, limitations (declared from 0.4.0) |
+| `required-attention.md` | a person, frozen copy | From 0.7.3, exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
 | `release-notes.md` | `vericairn docs notes` | What changed, from the estate's records since the previous set's notes ended (before 0.6.0, since the previous publication) |

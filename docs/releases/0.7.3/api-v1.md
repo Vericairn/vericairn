@@ -658,7 +658,7 @@ FIX-12's credential scan still exempts only validated device `body.publicKey` an
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -676,8 +676,8 @@ changed transport settings refuse launch. Claude Code excludes user, project and
 and enables no plugins, alongside strict MCP configuration. Detected managed settings and known organization logins
 refuse launch; remote or undetected managed policy is not qualified and managed accounts are unsupported. A
 configuration refusal after intent but before process launch settles as an uncharged known failure. These controls
-do not isolate same-user files or keychains. FIX-18's five live Codex runs qualify only the reported run
-path; they do not qualify other accounts, versions or platforms, or Claude Code live sign-in. See
+do not isolate same-user files or keychains. The seven live Codex runs include FIX-19's successful macOS
+commit and qualify only the reported path, not other accounts, versions or platforms, or Claude Code live sign-in. See
 [software.md](software.md#native-inventory-qualification-run-02-and-run-03) for those observations and
 [the configuration limits](software.md#harness-configuration-and-workspace-exports).
 

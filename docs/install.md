@@ -133,9 +133,9 @@ include that native helper; use the macOS archive when you need the bundled help
 Workbench continues to use its own archive, with the `vericairn` executable beside it; the tool package installs the command
 line only. See the [Workbench draft](workbench.md).
 
-On POSIX, the bounded Git and gh runner requires the runtime to run under an init process, not as PID 1,
+On POSIX, the repository adapter and release provider's bounded Git and gh runner requires the runtime to run under an init process, not as PID 1,
 without ignored `SIGCHLD`, automatic child reaping or an independent child reaper. Unsupported hosts refuse
-before launching a command. Each Git command has 30 seconds, each gh command two minutes, and each output
+before launching a command. Each adapter Git command has 30 seconds, each provider gh command two minutes, and each output
 stream has a 4,194,304-character limit; [software.md](software.md#release-providers-and-the-products-release-profile)
 describes containment and uncertain dispatch.
 

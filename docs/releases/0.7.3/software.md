@@ -658,8 +658,9 @@ the ledger of every goal with a run or active now: each unit's budget, spend and
 new run would be fenced. The runs' own files, their state, output and MCP configuration, stay under the Vericairn home on
 the machine that ran them, never in a record or a repository.
 
-Limitations: launcher protocol tests use stand-in processes. FIX-18 adds the five live Codex observations
-listed below; those observations qualify only their exact run path, not other harnesses or accounts.
+Limitations: launcher protocol tests use stand-in processes. The seven live Codex observations
+listed below include FIX-19's successful macOS commit; they qualify only the reported run path, not other
+harnesses, accounts or platforms.
 RUN-02 supplies the shipped baselines for exactly Codex `0.159.0-alpha.12.1` and Claude Code `2.1.296`. RUN-03 lets an
 authorized human qualify another exact installed version from the same local probes, without a product release.
 Stand-in executables test version, help, feature and MCP probes, admission, dispatch and refusal. Installed harness
@@ -673,7 +674,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.7.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
