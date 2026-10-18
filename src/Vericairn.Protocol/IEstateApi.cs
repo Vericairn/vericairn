@@ -7,7 +7,7 @@ namespace Vericairn.Protocol;
 /// The operations of one open estate. The runtime implements it; the daemon serves it; the SDK calls it; the CLI uses either.
 /// Every operation returns what the runtime observed, never what a client assumed, and authority is evaluated behind it, never in front.
 /// </summary>
-public interface IEstateApi
+public partial interface IEstateApi
 {
     /// <summary>The daemon's or embedded runtime's identity and what it serves.</summary>
     HealthResponse Health();

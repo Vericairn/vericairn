@@ -27,6 +27,10 @@ public interface IEstateConnection : IDisposable
 
     /// <summary>Re-discovers the daemon.</summary>
     void Refresh();
+
+    /// <summary>Re-discovers the daemon without blocking the UI thread.</summary>
+    Task RefreshAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync("Connect", () => { Refresh(); return true; }, false, cancellationToken);
 }
 
 /// <summary>The production connection: discovers the daemon's endpoint file and connects to its local socket.</summary>
@@ -38,7 +42,6 @@ public sealed class DaemonConnection : IEstateConnection
     public DaemonConnection(string root)
     {
         Root = root;
-        Refresh();
     }
 
     /// <inheritdoc />
@@ -54,15 +57,20 @@ public sealed class DaemonConnection : IEstateConnection
     public string Where { get; private set; } = "no daemon answers for this estate";
 
     /// <inheritdoc />
-    public void Refresh()
+    public void Refresh() => RefreshAsync().GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public async Task RefreshAsync(CancellationToken cancellationToken = default)
     {
         client?.Dispose();
         client = null;
         try
         {
             DaemonEndpoint? endpoint = DaemonDiscovery.Discover(Root);
-            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
+            if (endpoint is not null)
             {
+                using var probe = new VericairnClient(endpoint);
+                if ((await probe.HealthAsync(cancellationToken).ConfigureAwait(false)).Api != ApiVersion.Current) return;
                 client = new VericairnClient(endpoint);
                 Where = $"{endpoint.Kind} endpoint, process {endpoint.ProcessId}, since {endpoint.StartedAt}";
                 return;

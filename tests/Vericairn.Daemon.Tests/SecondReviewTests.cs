@@ -531,6 +531,12 @@ public class SecondReviewTests
         {
             HttpRequestException refused = Assert.Throws<HttpRequestException>(() => lan.NewRecord(new NewRecordRequest("work-order", harness.Estate.BuilderId, order.RootElement)));
             Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+            ClientRefusedException asynchronous = await Assert.ThrowsAsync<ClientRefusedException>(() =>
+                lan.NewRecordAsync(new NewRecordRequest("work-order", harness.Estate.BuilderId, order.RootElement), TestContext.Current.CancellationToken));
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, asynchronous.StatusCode);
+            Assert.Equal("refused", ClientFailure.FromException(asynchronous)!.Code);
+            Assert.False(asynchronous.OutcomeUnknown);
+            Assert.Contains("so it writes nothing", asynchronous.Message, StringComparison.Ordinal);
         }
 
         Assert.DoesNotContain(harness.Socket.Records("work-order"), r => r.Envelope.GetProperty("body").GetProperty("key").GetString() == "W-C4");

@@ -25,15 +25,17 @@ internal static class LocalNetworkTransport
     /// </summary>
     public static X509ChainPolicy OfflineChainPolicy() => new() { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck };
 
-    public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken)
+    public static async ValueTask<Stream> ConnectAsync(RuntimeConnection connection, IRequestSigner signer, LocalNetworkCredential credential, CancellationToken cancellationToken, bool classifyRefusal = false)
     {
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         SslStream? tls = null;
+        TlsScreenStream? screen = null;
         try
         {
             await socket.ConnectAsync(connection.Host, connection.Port, cancellationToken).ConfigureAwait(false);
             // The screen refuses a runtime certificate that names an address to fetch before this machine's TLS reads it.
-            tls = new SslStream(new TlsScreenStream(new NetworkStream(socket, ownsSocket: true)), leaveInnerStreamOpen: false);
+            screen = new TlsScreenStream(new NetworkStream(socket, ownsSocket: true));
+            tls = new SslStream(screen, leaveInnerStreamOpen: false);
             X509Certificate2 own = credential.Current();
             byte[]? presented = null;
             await tls.AuthenticateAsClientAsync(
@@ -46,7 +48,7 @@ internal static class LocalNetworkTransport
             await ProveAsync(tls, connection, signer, RuntimeIdentityScheme.CertificateFingerprint(presented ?? []), RuntimeIdentityScheme.CertificateFingerprint(own.RawData), cancellationToken).ConfigureAwait(false);
             return tls;
         }
-        catch
+        catch (Exception exception)
         {
             if (tls is not null)
             {
@@ -57,6 +59,8 @@ internal static class LocalNetworkTransport
                 socket.Dispose();
             }
 
+            if (classifyRefusal && (screen?.RefusedPeer == true || exception is System.Security.Authentication.AuthenticationException or RuntimeConnectionException))
+                throw new ClientRefusedException(exception.Message, exception);
             throw;
         }
     }

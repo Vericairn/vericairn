@@ -15,14 +15,6 @@ namespace Vericairn.Workbench.Tests;
 [Collection("workbench")]
 public class ProgressTests(HeadlessFixture fixture)
 {
-    static ProgressTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task HomeSummarizesTheProgressReportAndOpensTheWholeOfItKeyboardOnly()
     {
@@ -37,7 +29,7 @@ public class ProgressTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
 
             // Home shows one row per section of the report, worded in the state language.
             Assert.Equal(["Where the estate stands", "Work orders", "Published releases", "What comes next", "Next eligible work", "Waits on the operator"], shell.Progress.Select(r => r.Heading));
@@ -47,14 +39,22 @@ public class ProgressTests(HeadlessFixture fixture)
             Assert.StartsWith("pinned to source Vericairn/vericairn@0123456789ab · record format 3 · check: 0 errors, 0 warnings", shell.Progress[0].Detail, StringComparison.Ordinal);
 
             // Ctrl+Shift+P opens the whole report as the runtime renders it, and the keyboard lands in it.
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.P, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.P, null); });
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.P, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.P, null);
+                await shell.PendingOperation;
+            });
             ProgressDocument page = Assert.IsType<ProgressDocument>(shell.SelectedDocument);
             Assert.EndsWith(shell.Api!.Progress().Text, page.Text, StringComparison.Ordinal);
             Assert.Contains("    milestone work orders submitted: 1\n", page.Text, StringComparison.Ordinal);
 
             // A record written meanwhile, and F5: the summary and the open report follow the runtime, in place.
             Assert.True(shell.Api.NewRecord(new NewRecordRequest("work-order", op, Seed.Json("""{"key":"W-2","kind":"ordinary","title":"Ship the widget","intent":"Progress.","scope":["widget"],"exitQuestion":"Is it shipped?","inputs":[],"deliverables":["widget"]}"""))).Ok);
-            await fixture.Ui(() => window.KeyPress(Key.F5, RawInputModifiers.None, PhysicalKey.F5, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.F5, RawInputModifiers.None, PhysicalKey.F5, null);
+                await shell.PendingOperation;
+            });
             Assert.Same(page, shell.Documents.OfType<ProgressDocument>().Single());
             Assert.Contains("    W-2  ordinary   Ship the widget [work-order ", page.Text, StringComparison.Ordinal);
             Assert.Equal("3 current: 2 planned; 1 submitted, awaiting acceptance", shell.Progress[1].Detail);
@@ -63,18 +63,19 @@ public class ProgressTests(HeadlessFixture fixture)
             string assignment = shell.Api.Assign(new AssignRequest("W-1", op, op, brief.RootElement)).Written!.Id;
             string attempt = shell.Api.Attempt(new AttemptRequest(assignment, op, "widget repository", "Build it.")).Written!.Id;
             Assert.True(shell.Api.WorkProgress(new WorkProgressRequest(attempt, op, "build", "A live claim.")).Ok);
-            await fixture.Ui(shell.RefreshProgress);
+            await fixture.UiAsync(() => shell.RefreshProgressAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Contains("A live claim.", page.Text, StringComparison.Ordinal);
             Assert.DoesNotContain(shell.Progress, row => row.Heading == "Agent claim · build");
 
             // Enter on a row of the summary opens the report again once it was closed.
             await fixture.Ui(() => shell.Close(page));
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 ListBox list = window.FindControl<ListBox>("ProgressList")!;
                 list.SelectedIndex = 1;
                 list.Focus();
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             Assert.IsType<ProgressDocument>(shell.SelectedDocument);
         }
