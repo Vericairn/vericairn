@@ -7,7 +7,9 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-Release 0.7.3 carries five changes after published 0.7.2. FIX-19 gives each worker run an independent
+The current published release is [0.7.3](https://github.com/Vericairn/vericairn/releases/tag/v0.7.3),
+published on October 18, 2026 at 05:00:34 UTC, tag `v0.7.3`, commit `b4f4bca`.
+It carries five changes after published 0.7.2. FIX-19 gives each worker run an independent
 workspace repository, permits Codex to commit within its own `.git`, and fetches the audited branch into
 the registered clone after settlement. UPDATE-01 adds a disclosed daily check for newer published releases,
 disabled with `vericairn updates configure --enabled false`. FIX-20 recognizes Vericairn credential reads,
@@ -24,7 +26,7 @@ The fix binds restored bytes to the verified inventory; it does not authenticate
 Release 0.7.1 carried the withdrawn 0.7.0 candidate's work with
 FIX-12: a machine-local workspace root, current assignment-holder checks and precise treatment of validated
 public keys and signatures. Its earlier frozen set remains unchanged. All eight command-line and library
-packages are available at 0.7.2 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
+packages are available at 0.7.3 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
 records publication and the earlier 0.7.1 recovery.
 
 Ordinary source builds retain `0.7.3-dev`. The maintained guides describe 0.7.3; earlier release sets
@@ -75,8 +77,7 @@ withdrawn before publication and why; their sets stay as the record of what was 
 documents at `docs/` are the maintained drafts. The 0.7.3 set carries the five changes described above;
 the earlier sets remain frozen, including 0.7.0's withdrawn candidate.
 
-The preceding 0.7.2 command line was qualified on `linux-x64`, `osx-arm64` and `win-x64`, where its tests ran;
-0.7.3 qualification is established by its own release record and checks at the release commit.
+For 0.7.3, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
 The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
 any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
 as the [install guide](docs/releases/0.7.3/install.md) describes.
@@ -86,8 +87,7 @@ release and pins the one it runs on.
 
 ## Install the command line and SDK
 
-Once 0.7.3's accepted release is published and its NuGet workflow succeeds, install the command line
-with the .NET 10 SDK on Linux, macOS or Windows:
+The 0.7.3 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
 
 ```sh
 dotnet tool install --global dotnet-vc --version 0.7.3
@@ -110,7 +110,7 @@ dotnet add package Vericairn --version 0.7.3
 ```
 
 `Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
-and assemblies. The release also packages `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp`;
+and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.7.3;
 the SDK front door does not embed a runtime or daemon. See the [SDK guide](docs/api-v1.md#the-sdk).
 The packages contain Community code only.
 Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
@@ -152,8 +152,8 @@ The following capabilities are in 0.7.3.
   when an agent sponsors it; no tool a coding agent is
   given can activate, fund or accept one, and only its sponsor, or an operator for a goal an agent sponsors,
   revises it. `vericairn worker` carries one of a goal's assignments with a coding agent (the worker contract
-  `vericairn.worker/1`): through an admitted Claude Code or Codex `/goal` run, in a git worktree on
-  a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
+  `vericairn.worker/1`): through an admitted Claude Code or Codex `/goal` run, in a workspace repository of
+  its own on a work branch, with each run's cap from the goal's budget recorded before it starts and its observed usage
   after, unknown usage charged at the cap, a stop's facts kept apart, and nothing launched while an operator's
   or the sponsor's key on the machine signs without presence, unless the sponsor recorded a custody exception for
   the goal, with its reason and its expiry. `vericairn goal next` routes a goal's eligible steps by
