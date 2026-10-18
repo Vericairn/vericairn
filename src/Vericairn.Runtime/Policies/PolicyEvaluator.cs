@@ -15,6 +15,7 @@ internal static class PolicyEvaluator
     {
         string? unavailable = basis.UnavailableReason();
         List<PolicyFinding> findings = [];
+        List<Finding> parameterErrors = [];
         foreach (RecordEnvelope policy in basis.Model.Current("estate-policy"))
         {
             if (EstateModel.BodyString(policy, "state") != "active") continue;
@@ -24,15 +25,24 @@ internal static class PolicyEvaluator
                 if (unavailable is not null) findings.Add(context.Unavailable(unavailable));
                 else if (DutyRecords.Time(EstateModel.BodyString(policy, "startsAt")) is not { } starts) findings.Add(context.Unavailable("The policy activation is unavailable."));
                 else if (starts > basis.Time) findings.Add(context.Finding(new("policy", context.Identity, policy.Reference), "", "satisfied", "Policy activation is in the future.", "Activation at " + EstateModel.BodyString(policy, "startsAt"), "Wait for activation.", disposition: "scheduled", subjects: 0));
-                else findings.Add(context.Unavailable("The exact rule kind and version are not installed."));
+                else
+                {
+                    try { findings.AddRange(FoundationPolicyKinds.Evaluate(context)); }
+                    catch (PolicyInputException error) { findings.Add(context.Unavailable(error.Message)); }
+                    catch (PolicyParameterException error)
+                    {
+                        findings.Add(context.Unavailable(error.Message));
+                        parameterErrors.Add(new(Severity.Error, "policy.parameters", policy.ExpectedPath + "#" + context.Key, error.Message));
+                    }
+                }
             }
         }
         ImmutableArray<PolicyFinding> ordered = findings.OrderBy(f => f.PolicyKey, StringComparer.Ordinal).ThenBy(f => f.Rule, StringComparer.Ordinal)
             .ThenBy(f => f.Target.Identity, StringComparer.Ordinal).ThenBy(f => f.Item, StringComparer.Ordinal).ThenBy(f => f.Policy.Id, StringComparer.Ordinal).ToImmutableArray();
         ImmutableArray<PolicyRuleSummary> rules = ordered.GroupBy(f => (f.Policy, f.Rule)).Select(g => new PolicyRuleSummary(g.Key.Policy, g.Key.Rule,
-            g.Sum(f => f.SubjectCount), g.Count(f => f.Verdict == "satisfied"), g.Count(f => f.Verdict == "unmet"),
+            g.Where(f => f.SubjectCount > 0).Select(f => f.Target.Identity).Distinct(StringComparer.Ordinal).Count(), g.Count(f => f.Verdict == "satisfied"), g.Count(f => f.Verdict == "unmet"),
             g.Count(f => f.Verdict == "unavailable"), g.Count(f => f.Disposition == "excepted"))).ToImmutableArray();
-        ImmutableArray<Finding> diagnostics = basis.Findings;
+        ImmutableArray<Finding> diagnostics = basis.Findings.AddRange(parameterErrors.OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal));
         if (unavailable is not null) diagnostics = diagnostics.Add(new(Severity.Warning, "policy.basis-unavailable", "policy-basis", unavailable));
         return new(basis.Digest, basis.AsOf, basis.Origin, unavailable is null && ordered.All(f => f.Verdict != "unavailable"), diagnostics, ordered, rules);
     }

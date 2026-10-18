@@ -12,7 +12,7 @@ using Vericairn.Records.Types;
 
 namespace Vericairn.Runtime.Policies;
 
-internal sealed record PolicyFile(string Path, string Hash, ImmutableArray<byte> Bytes, bool Available = true);
+internal sealed record PolicyFile(string Path, string Hash, ImmutableArray<byte> Bytes, bool Available = true, bool IsLink = false);
 internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files);
 internal sealed record PolicyObject(string Hash, ImmutableArray<byte> Bytes, bool Available = true);
 internal sealed record PolicyImplementation(string Kind, int Version, string Digest);
@@ -54,7 +54,7 @@ internal sealed class PolicyBasis
         {
             contract = Contract, RecordDigest, Findings, complete, asOf, origin, submission,
             successors = Model.SupersededBy.OrderBy(p => p.Key, StringComparer.Ordinal),
-            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
+            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
         });
