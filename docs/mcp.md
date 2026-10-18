@@ -8,7 +8,7 @@
 
 ## Tools
 
-For 0.7.2, retaining the context contract shipped in 0.7.1, `context_prepare` computes the same context package as
+For 0.7.3, retaining the context contract shipped in 0.7.1, `context_prepare` computes the same context package as
 `vericairn context prepare <work-order>`. `context_read` takes `pin`, the
 self-contained `vc1_` identity in a source entry, and returns the same identity
 and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
@@ -59,10 +59,10 @@ Every tool description describes and never directs: nothing a tool returns, and 
 
 ## Running it
 
-After 0.7.2's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.7.3's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
-dotnet tool install --global dotnet-vc
+dotnet tool install --global dotnet-vc --version 0.7.3
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 
@@ -164,7 +164,12 @@ qualification. FIX-18's five live Codex runs exercised max effort, tools and cor
 recorded its cap, execution, usage, signed attempt/result and permitted file change through estate-only MCP
 pre-approval. The baseline's MCP list omits approvals and tool lists, so that approval check rests on the exact
 generated configuration and isolation checks. Other accounts, versions and platforms remain unqualified
-by these runs. The worker's linked worktree keeps Git metadata outside the Codex sandbox, so changes stay
-uncommitted for review; FIX-19 makes the workspace a repository of its own. The stock
+by these runs. In 0.7.3, FIX-19 gives the workspace its own repository and adds only its `.git` to Codex's
+writable roots. The seventh live run committed on macOS and settlement fetched its audited branch into
+the registered clone; this live qualification is macOS-only. FIX-20 requests a stop for recognized
+credential and outside-write commands, while null-device output is exempt and unverified effects remain
+warnings. The audit is a signal, not an enforcement boundary. UPDATE-01 does not initiate release checks
+through MCP; `estate_check` can report the cached `manifest.release-behind` warning. FIX-21's certificate
+preparation and handshake diagnostics apply when MCP reaches a daemon through TLS. The stock
 CLI/daemon setup and admission checks are described in [software.md](software.md#explicit-execution-and-environment-admission-run-01-070).
 Remote is not built or qualified by these features.

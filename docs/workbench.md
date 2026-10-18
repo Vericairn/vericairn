@@ -2,17 +2,19 @@
 
 `vericairn-workbench` is the desktop: a client of the daemon through the SDK and the runtime's manager, never its host. It opens no live store and evaluates no authority; estate state comes from the runtime's responses, rendered with the same state language as the command line (the golden file at `docs/state-language.json`, checked by tests against the presentation library and the runtime's own strings). The shell also shows separately labelled machine-local release information.
 
-The current published release is 0.7.2. The release-notice section below describes main's unreleased
-UPDATE-01 work for planned 0.7.3; published 0.7.2 has no newer-release notice. The other capabilities and
-qualification limits apply to 0.7.2.
+This guide describes Workbench in 0.7.3: UPDATE-01 adds release notices and FIX-22 makes required
+attention compact and current. The shared runtime includes FIX-19's independent worker repositories,
+FIX-20's command-audit corrections and FIX-21's concurrent TLS certificate preparation and diagnostics.
+Workbench retains the qualification and control limits below.
 
-## Release notices (unreleased, planned 0.7.3)
+## Release notices (0.7.3)
 
 The shell discloses a check for newer published Vericairn releases, including before an estate is open.
 At opening and while it stays open, Workbench shares the CLI's cache and limit of one unauthenticated
 GitHub request per rolling 24 hours, including failed attempts. The request sends no identifiers,
 installed version, estate data or usage telemetry. Network failures are silent and retain cached
-knowledge; drafts and prereleases do not count. The check runs asynchronously without blocking the UI.
+knowledge; drafts and prereleases do not count. The check reaches only GitHub, ignores system proxies
+and disables cookies, credentials, redirects and trace propagation. It runs asynchronously without blocking the UI.
 
 A newer-release notice gives its version, release-notes link, NuGet tool command, archive download page
 and estate upgrade command. Nothing installs or upgrades automatically. Disable requests for both clients

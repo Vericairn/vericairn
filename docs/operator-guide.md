@@ -1,9 +1,8 @@
-# Operator guide: release notices and upgrades
+# Operator guide: 0.7.3 changes
 
-This working source documents UPDATE-01 for 0.7.3. The existing estate workflows are in the
-[0.7.2 operator guide](releases/0.7.2/operator-guide.md); published builds keep their own frozen guide
-in the [release index](releases/README.md). This page is the source for the release-notice section of
-the next operator guide.
+This maintained guide describes the five changes in 0.7.3. The complete estate workflows are in the
+[0.7.3 operator guide](releases/0.7.3/operator-guide.md); earlier releases keep their own frozen guides
+in the [release index](releases/README.md).
 
 ## Learning of a release
 
@@ -15,7 +14,8 @@ for the network on its UI thread. The daemon, MCP and ordinary SDK estate calls 
 
 The request contains no credentials, installed version, user, machine or estate identity, estate data
 or usage telemetry. GitHub requires the constant `User-Agent: Vericairn` header. Cookies, redirects and
-trace propagation are disabled. Drafts, prereleases and invalid responses do not replace the cached answer.
+trace propagation are disabled. The check reaches only GitHub and ignores system proxies. Drafts,
+prereleases and invalid responses do not replace the cached answer.
 Network failures are silent and preserve previous knowledge. A check never fails an otherwise working
 command, installs software, authors a record or moves an estate's pin.
 
@@ -67,3 +67,37 @@ relevant items; ordinary `after` ordering remains planning. Quiet settings do no
 hide required attention, and an unavailable resolution stays unknown. Open the
 item to read the complete record before acting. See [required attention](required-attention.md)
 for the precise rules, including historical corrections that have no typed closure.
+
+Canonical status JSON derives attention from records alone and agrees on machines holding the same
+records. Human status, progress and Workbench also show labelled local worker observations. A machine
+cannot infer resolution from prose, unrelated acceptance or absent records; complete typed evidence is
+needed. A later passing verification matches the exact subject, method, environment and command.
+Retiring a work order does not withdraw a review's current result subject. Acknowledging an item, quiet
+settings or settling a run does not dispose of every worker signal.
+
+## Worker repositories and command observations
+
+FIX-19 gives each workspace its own repository, with read-only object borrowing from the registered clone.
+Codex's sandbox adds only that workspace's `.git` to its writable roots. The seventh live run committed
+successfully on macOS; live qualification on other platforms is not established by that run.
+After settlement, the worker fetches the audited branch head for review with a guarded reference update.
+Incomplete audits, changed workspace heads, checked-out destination branches and concurrent clone branch
+moves refuse transfer and leave a local `audit-unverified` warning. Preserve the workspace and reconcile
+before retrying. Uncommitted changes remain in it. Worker Git disables hooks and ambient configuration.
+Borrowed objects depend on the clone; preserve work before pruning objects or removing either repository.
+Legacy linked worktrees require preservation and `git worktree remove`, not silent conversion.
+
+FIX-20 recognizes the Vericairn credential stores, `gh auth token`, `gh auth status --show-token`,
+`git credential fill` and Git credential-helper `get`, as well as additional write forms. Recognized
+credentials and outside writes request containment; null-device output is exempt from outside-write
+classification. Ordinary outside reads, network attempts and unverified effects remain warnings. The
+command audit observes harness reports that can arrive after execution and cannot enforce isolation.
+The [software guide](software.md#command-observations-070) lists recognized forms and remaining gaps.
+
+## Runtime certificate concurrency
+
+FIX-21 initializes the typed extension caches of loaded and rotated certificates before publishing
+them to TLS listeners, correcting the concurrent first-use race present since 0.6.1. When daemon logging
+is configured, handshake failures include exception type and message without stacks, inner exceptions,
+peer certificates or request data. Other trust, authentication, network and resource failures can still
+reject a handshake. The [API transport guide](api-v1.md#transports) retains the existing trust and rotation rules.

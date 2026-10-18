@@ -1,7 +1,8 @@
 # Installing Vericairn
 
-This installation draft includes UPDATE-01's release check for 0.7.3, following 0.7.2's FIX-13, FIX-14,
-FIX-15, FIX-16 and FIX-18. Earlier sets stay frozen, including the withdrawn 0.7.0 candidate carried in 0.7.1 with FIX-12.
+This guide describes 0.7.3: independent worker repositories (FIX-19), release notices (UPDATE-01),
+command-audit corrections (FIX-20), concurrent TLS certificate preparation and diagnostics (FIX-21),
+and current required attention (FIX-22). Earlier sets stay frozen, including the withdrawn 0.7.0 candidate carried in 0.7.1 with FIX-12.
 NuGet distribution becomes available after the operator publishes a release and its publication workflow succeeds.
 The `0.0.1-reserved` packages reserve names; they are not the product. For the currently published build, use its frozen guide in the [release index](releases/README.md).
 The NuGet workflow verifies the exact package assets the operator publishes against that release's own
@@ -58,7 +59,8 @@ The sole source is GitHub's
 [latest-release endpoint](https://api.github.com/repos/Vericairn/vericairn/releases/latest).
 The request is unauthenticated and contains no installed version, machine, user or estate identifier,
 estate data or usage telemetry. Its only application header is the constant `User-Agent: Vericairn`
-required by GitHub; cookies, credentials, tracing headers and redirects are disabled. Drafts and
+required by GitHub; cookies, credentials, tracing headers and redirects are disabled. System proxies
+are ignored, so a network requiring one may leave only cached information available. Drafts and
 prereleases are ignored. The check waits at most two seconds for the network and never fails a command.
 Offline or on a failed response, it keeps the last successful answer without an error message.
 
@@ -131,9 +133,9 @@ include that native helper; use the macOS archive when you need the bundled help
 Workbench continues to use its own archive, with the `vericairn` executable beside it; the tool package installs the command
 line only. See the [Workbench draft](workbench.md).
 
-On POSIX, the bounded Git and gh runner requires the runtime to run under an init process, not as PID 1,
+On POSIX, the repository adapter and release provider's bounded Git and gh runner requires the runtime to run under an init process, not as PID 1,
 without ignored `SIGCHLD`, automatic child reaping or an independent child reaper. Unsupported hosts refuse
-before launching a command. Each Git command has 30 seconds, each gh command two minutes, and each output
+before launching a command. Each adapter Git command has 30 seconds, each provider gh command two minutes, and each output
 stream has a 4,194,304-character limit; [software.md](software.md#release-providers-and-the-products-release-profile)
 describes containment and uncertain dispatch.
 
@@ -164,7 +166,7 @@ choices, including each default. With no model allowlist only the default model 
 allowlist the launcher's supported efforts are allowed. Setting replaces that launcher's defaults and
 allowlists. It never widens the qualified inventory or adds tools, servers, variables or routes.
 
-Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max` in 0.7.2. For example, `dotnet vc worker configure --launcher codex --model gpt-6-astra --effort max` stores
+Codex accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max` in 0.7.3. For example, `dotnet vc worker configure --launcher codex --model gpt-6-astra --effort max` stores
 that selection. The inventory probes do not validate a model's effort support; the harness validates it at launch.
 An observed nonzero exit, including an effort refusal, is recorded as `known-failure`. See the
 [execution guide](software.md#explicit-execution-and-environment-admission-run-01-070) for the admission and usage limits.
@@ -196,9 +198,11 @@ back to the default. The CLI and daemon reread it for each run, without a restar
 
 New workspaces go under `<root>/<estate>/<branch-slug>`; slashes in the branch become hyphens.
 With no root configured, the location remains `<VericairnHome>/estates/<estate>/workspaces/<branch-slug>`.
-An existing worktree for the branch is reused anywhere under the selected root. A worktree elsewhere is
-refused with its location: preserve its work, then use `git worktree remove` with that path from the
-registered clone, or select a root containing it. Changing the root does not move a worktree.
+Each new workspace is an independent repository with its own `.git`, borrowing the registered clone's
+objects read-only. An existing independent workspace for the branch is reused only under the selected
+root. A workspace elsewhere is refused: preserve its work before removing that directory, or select a
+root containing it. Changing the root does not move it. Legacy linked worktrees are refused; preserve
+their committed and uncommitted work, then use `git worktree remove` from the registered clone before retrying.
 Workspace paths stay local and never enter records. Moving workspaces changes their ancestors; separately
 discovered user skills and managed configuration still face the same native checks.
 In particular, a Codex run is refused while the user's own `~/.agents` contains skills or other customization,
@@ -213,11 +217,25 @@ was named explicitly or routed, without an intent or charge. Existing runs still
 
 The Codex launcher enables the ordinary code-mode tool host and pre-approves only the estate MCP server's
 tools; the server still enforces the acting principal's authority. Global approval policy is unset.
-Five live runs exercised the fixes; the fifth recorded cap, max execution, usage, signed attempt/result
-and exactly the permitted file change. They do not qualify other accounts, versions, platforms or billing.
-A worker-launched Codex run cannot yet commit: its git worktree metadata lies outside the sandbox.
-Changes stay uncommitted in the worktree for review; FIX-19 makes the workspace a repository of its own.
+The seventh live run committed the permitted file on macOS. FIX-19 adds exactly the independent workspace's
+own `.git` to Codex's writable roots; the registered clone's `.git` stays protected. Settlement audits the
+run branch and fetches the audited head into the clone with a guarded reference update. An incomplete audit,
+changed head, checked-out destination or concurrent branch move refuses transfer and leaves a local warning;
+preserve the workspace for review. Uncommitted work stays there. Worker Git ignores ambient configuration
+and disables hooks. Borrowed objects depend on the registered clone: preserve work before pruning its objects
+or removing it. This live qualification is macOS-only and does not qualify other accounts, versions or billing.
 The brief must contain at least one interpretable permitted path pattern; prose alone refuses before intent.
+
+FIX-20 requests a stop for recognized credential access and outside writes, including token-output commands;
+null-device output does not trigger an outside-write stop. Ordinary outside reads, network attempts and
+unverified effects still warn. Reports can arrive after execution; the audit does not isolate credentials
+or prove that unreported activity did not occur. See [command observations](software.md#command-observations-070).
+
+FIX-21 prepares loaded and rotated runtime certificates before concurrent TLS use, correcting the race
+present since 0.6.1. Handshake diagnostics retain exception type and message when daemon logging is configured;
+trust, authentication and transport failures remain possible. FIX-22 shows current required attention on
+every surface, with unknown resolution visible. A fix in prose or unavailable evidence cannot close an item;
+see [required attention](required-attention.md).
 
 The efficiency Adapter is absent until the planned 0.8.0 work; enabling it is refused. Remote is not built.
 Context payloads are measured in bytes; tokens and model fit remain unknown without a qualified local tokenizer.

@@ -249,6 +249,28 @@
       "release-notes.md": "sha256:e97dfbad6802f50578ad50cc423159037c87224ec2bbfc48ae0500668f752c33",
       "software.md": "sha256:4738e816493c42217e3077369b5aefbe0a3938586b2f8845ae2bdeca529a7455",
       "workbench.md": "sha256:ad2302acd15fe59a5ec796c0d5684856a639e5a3d2499ee63de0d0c262f35335"
+    },
+    "0.7.3": {
+      "README.md": "sha256:bf2d5bcb2fa57e9209052edb24313f4bf6d95d59c426cbacfd06f54755661d6c",
+      "api-reference.md": "sha256:053826e820021ca8ef386bfe2dc551d8b5bc6fcf27a9592efd9f376b6195d0d5",
+      "api-v1.md": "sha256:c49e9e0310fa32f9882e4d827942c54f3315afedd569c1dd034d73252af25ffc",
+      "api.md": "sha256:c49e9e0310fa32f9882e4d827942c54f3315afedd569c1dd034d73252af25ffc",
+      "cli-reference.md": "sha256:9a4b579bbc0075dc06348bc5713b40f8f0a678d40732b0493b3811b3a0289208",
+      "communication-adoption.md": "sha256:5fa43fe0bd5acb5ff388cdfb45c54fe33738b76fd62c090fcdecaa2e273ed212",
+      "communication-qualification.md": "sha256:3a7d423436c5b9dfcab0ce5dc26a2682079b38003016d7de1f9f28cbcc9d5c4d",
+      "install.md": "sha256:240fbc3a403250ee586da89d7ea9bfd3e1789428aae338769841394d3558a406",
+      "limitations-and-platforms.md": "sha256:664d276515034fb103f55ecc0c430945b0639cb0f5c8b31f987af8125194b201",
+      "manifest.json": "sha256:1e3a43229fdcab414f27792044005378d043e8bf25f77de1f6334efb1fd1bbc4",
+      "mcp.md": "sha256:4f4d711962a1aa8bbffeea2134d96f212b9105e95f86db61fc73068aa53c1546",
+      "operator-guide.md": "sha256:03cabf316d5231f6a476c882fe0d0ea4fb08f25537cd0fd7f07e2b51d84a41c3",
+      "record-format-v1.md": "sha256:981b05ecb71b6da54b18e5100bac3f5cc5d47b1399e7d6828c0eca0ab0720f27",
+      "record-format-v2.md": "sha256:49206eb107c696b48d9bd8ac5ecec814f9cc5dba73994c6f08f706bb0b795197",
+      "record-format.md": "sha256:044fcae8d6dd6679e263ad5101d91da3612e6bb5a41a664b4a2ff1741c7e0a77",
+      "record-reference.md": "sha256:1f63bb35959462a4d5fd2f129eb62a545cf624c49f09f015d1f938c26c1dcfb9",
+      "release-notes.md": "sha256:b6077c031d298769ef8556f809536ece04fabdfd44e6645d00a9b4d4602d1222",
+      "required-attention.md": "sha256:3080114a240a8501ce9b926a807623db0be333b7b3c4de23fa7f2ec99402c4a2",
+      "software.md": "sha256:fb9a1e7af5a8525e1d59d681b01a98d01eb9cdf11123a2ac6ac3d6e260a239c9",
+      "workbench.md": "sha256:d857a718727ddcc384442ae7dd41c720d02ba8e895294547201e03da2ab9b5d8"
     }
   }
 }
