@@ -61,6 +61,14 @@ public static partial class NextEligible
     /// <summary>The planned work orders nothing holds, by key.</summary>
     public static IReadOnlyList<Item> Eligible(EstateModel model) => Derive(model).Where(i => i.Eligible).ToList();
 
+    /// <summary>The recorded after and blockedBy relations of a work order, including one already assigned or active.</summary>
+    public static IReadOnlyList<Relation> Relations(EstateModel model, RecordEnvelope order)
+    {
+        ArgumentNullException.ThrowIfNull(model);
+        ArgumentNullException.ThrowIfNull(order);
+        return Relations(model, order, EstateStatus.WorkItems(model).ToDictionary(i => i.Id, i => i.Status, StringComparer.Ordinal));
+    }
+
     private static List<Relation> Relations(EstateModel model, RecordEnvelope order, IReadOnlyDictionary<string, string> status)
     {
         var relations = new List<Relation>();
