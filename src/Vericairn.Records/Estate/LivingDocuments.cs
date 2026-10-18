@@ -68,6 +68,9 @@ public static class LivingDocuments
         /// <summary>The resource record of the repository that holds it; null for the estate's own repository.</summary>
         public string? Repository => EstateModel.BodyString(Declaration, "repository");
 
+        /// <summary>The repository commit selected for this release comparison; null when no commit is available or needed.</summary>
+        public string? ComparisonCommit { get; init; }
+
         /// <summary>True when a trigger is newer than the latest clearance.</summary>
         public bool Due => Level is not null;
 
@@ -105,16 +108,40 @@ public static class LivingDocuments
     }
 
     /// <summary>
-    /// The declarations of a product at the exact commit its release builds. Repository covered paths are read at that commit,
-    /// never at a clone's HEAD; the estate's own files and record triggers retain their usual rules.
+    /// The declarations of a product at commits of their own repositories. Repositories in <paramref name="releaseRepositories"/>
+    /// use the exact release commit; others use their own HEAD, or the reviewed commit when HEAD is its ancestor.
+    /// Omitting the set applies the release commit to all repositories.
+    /// The selected commit is retained for the content comparison; estate files and record triggers retain their usual rules.
     /// </summary>
-    public static IReadOnlyList<State> AtReleaseCommit(EstateModel model, string product, string commit)
+    public static IReadOnlyList<State> AtReleaseCommit(EstateModel model, string product, string? commit, IReadOnlySet<string>? releaseRepositories = null)
     {
         ArgumentNullException.ThrowIfNull(model);
-        ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        if (releaseRepositories is null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(commit);
+        }
+
         return model.Current("living-document").Where(d => NamesProduct(model, d, product))
             .OrderBy(d => EstateModel.BodyString(d, "path"), StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
-            .Select(d => Evaluate(model, d, commit)).ToList();
+            .Select(d =>
+            {
+                string? repository = EstateModel.BodyString(d, "repository");
+                IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(d, "source"));
+                bool releaseRepository = releaseRepositories is null || (repository is not null && releaseRepositories.Contains(repository));
+                string? at = repository is null ? null
+                    : releaseRepository ? commit : source?.Head(model, d);
+                State state = Evaluate(model, d, at);
+                if (!releaseRepository && at is not null && state.Clearance is { Type: "document-review" } review &&
+                    review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&
+                    content.TryGetProperty("commit", out JsonElement reviewed) && reviewed.ValueKind == JsonValueKind.String &&
+                    reviewed.GetString() is string reviewedCommit && reviewedCommit != at && source!.IsAncestor(model, d, at, reviewedCommit))
+                {
+                    at = reviewedCommit;
+                    state = Evaluate(model, d, at);
+                }
+
+                return state with { ComparisonCommit = at };
+            }).ToList();
     }
 
     /// <summary>
@@ -230,7 +257,7 @@ public static class LivingDocuments
         var notes = new List<string>();
 
         // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
-        // estate's own files are read from its working tree; another repository's at the release commit when given, otherwise HEAD.
+        // estate's own files are read from its working tree; another repository's at its selected commit when given, otherwise HEAD.
         IReadOnlyList<string> coveredPaths = CoveredPaths(declaration);
         RecordEnvelope? coveredReview = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
         string? at = null;

@@ -246,9 +246,16 @@ public class DocsTests
             WorkOrder(root, scratch, op, "W-1", "2026-09-01T00:45:00Z");
             string release = $$"""{"version":"0.1.0","repository":"Example/widget","commit":"0123456789abcdef0123456789abcdef01234567","status":"candidate","artifacts":[{"name":"widget-0.1.0-linux-x64.zip","hash":"sha256:{{new string('1', 64)}}","bytes":10,"platform":"linux-x64"}],"recordFormat":{"reads":[1,2],"writes":2},"evidence":[],"qualified":[],"signing":"unsigned developer build","limitations":[]}""";
             CliHarness.Outcome candidate = CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--at", "2026-09-01T01:00:00Z", "--body", CliHarness.WriteJson(scratch, "candidate.json", release));
-            CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.Id}:{candidate.Hash}", "--at", "2026-09-01T01:01:00Z", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted 0.1.0.","basis":[],"self":true}"""));
+            string releaseAcceptance = CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.Id}:{candidate.Hash}", "--at", "2026-09-01T01:01:00Z", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted 0.1.0.","basis":[],"self":true}""")).Id;
             CliHarness.Ok("--estate", root, "--json", "records", "new", "release", "--by", op, "--subject", $"product:{product}", "--supersedes", candidate.Id, "--at", "2026-09-01T01:02:00Z", "--body", CliHarness.WriteJson(scratch, "published.json", release.Replace("\"status\":\"candidate\"", "\"status\":\"published\",\"publishedAt\":\"2026-09-01T01:02:00Z\",\"url\":\"https://example.invalid/releases/0.1.0\"", StringComparison.Ordinal)));
             WorkOrder(root, scratch, op, "W-2", "2026-09-01T02:00:00Z");
+
+            // Ordinary work can be self-accepted by a builder with authority, but it stays out of release acceptances.
+            string builder = CliHarness.Ok("--estate", root, "--json", "records", "new", "principal", "--by", op, "--body", CliHarness.WriteJson(scratch, "builder.json", """{"kind":"agent","name":"Builder","roles":["builder"],"agent":{"vendor":"Example","product":"Example Agent"}}""")).Id;
+            string decision = CliHarness.Ok("--estate", root, "--json", "records", "new", "decision", "--by", op, "--body", CliHarness.WriteJson(scratch, "decision.json", $$"""{"title":"Ordinary work","stake":"low","notAuthorized":[],"statement":"The builder may accept its ordinary work.","summary":"Ordinary work delegation.","synthesis":"Release acceptance remains with the operator.","effects":["Grant ordinary work self-acceptance."],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-09-01T02:00:00Z"}""")).Id;
+            CliHarness.Ok("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", CliHarness.WriteJson(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["self-accept-ordinary-work"],"reserved":[],"conditions":[],"basis":"{{decision}}"}"""));
+            CliHarness.Outcome ordinary = WorkOrder(root, scratch, builder, "W-3", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow));
+            string ordinaryAcceptance = CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", builder, "--subject", $"work-order:{ordinary.Id}:{ordinary.Hash}", "--body", CliHarness.WriteJson(scratch, "self-accept.json", """{"statement":"Accepted ordinary work.","basis":[],"self":true}""")).Id;
 
             // A format-2 admission has no legacy scope; its notes must not invent an empty scope label.
             string device = CliHarness.Ok("--estate", root, "--json", "devices", "create", "--principal", op, "--name", "Notes device", "--custody", "file").Id;
@@ -274,6 +281,9 @@ public class DocsTests
             Assert.Contains("## The release itself\n\nNone in this window.", notes, StringComparison.Ordinal);
             Assert.Contains("## Other releases recorded in this window\n\n- 0.1.0 candidate", notes, StringComparison.Ordinal);
             Assert.Contains("- 0.1.0 published", notes, StringComparison.Ordinal);
+            string acceptances = notes.Split("## Milestone and release acceptances\n", StringSplitOptions.None)[1].Split("\n## ", StringSplitOptions.None)[0];
+            Assert.Contains($"release 0.1.0: \"Accepted 0.1.0.\" (acceptance {releaseAcceptance},", acceptances, StringComparison.Ordinal);
+            Assert.DoesNotContain(ordinaryAcceptance, acceptances, StringComparison.Ordinal);
             JsonElement window = JsonDocument.Parse(File.ReadAllText(Path.Combine(output, "manifest.json"))).RootElement.GetProperty("notes");
             Assert.Equal("2026-09-01T00:30:00Z", window.GetProperty("from").GetString());
             Assert.True(string.CompareOrdinal(window.GetProperty("to").GetString(), "2026-09-01T02:00:00Z") >= 0);
@@ -344,7 +354,7 @@ public class DocsTests
         Assert.Contains("complete: 0 errors", outcome.Out, StringComparison.Ordinal);
     }
 
-    private static void WorkOrder(string root, string scratch, string by, string key, string at) =>
+    private static CliHarness.Outcome WorkOrder(string root, string scratch, string by, string key, string at) =>
         CliHarness.Ok("--estate", root, "--json", "records", "new", "work-order", "--by", by, "--at", at, "--body", CliHarness.WriteJson(scratch, key + ".json", $$"""{"key":"{{key}}","kind":"ordinary","title":"Work {{key}}","intent":"Exercise the notes.","scope":["notes"],"exitQuestion":"Done?","inputs":[],"deliverables":["notes"]}"""));
 
     private static void CheckExplicitNotesStart(string root, string output)

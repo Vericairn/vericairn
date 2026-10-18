@@ -272,6 +272,15 @@ public class LivingDocumentJourneyTests
             }
 
             provider.HeadSha = GitOutput(repo, "rev-parse", "HEAD");
+            CliHarness.Outcome unreviewed = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
+            Assert.Equal(2, unreviewed.Code);
+            Assert.Contains("no review has cleared its content", unreviewed.Out + unreviewed.Err, StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+            foreach (string path in new[] { "README.md", "docs/releases/README.md" })
+            {
+                CliHarness.Ok("--estate", root, "--json", "docs", "review", path, "--by", op, "--outcome", "current", "--summary", "Checked the initial documentation.", "--commit", provider.HeadSha);
+            }
+
             Publish(root, scratch, provider, op, builder, product, "0.2.0");
             JsonElement due = CliHarness.Ok("--estate", root, "--json", "status").Json.GetProperty("documents");
             Assert.Equal(2, due.EnumerateArray().Count(d => d.GetProperty("state").GetString() == "due" && d.GetProperty("reasons")[0].GetProperty("summary").GetString()!.StartsWith("release 0.2.0 was published", StringComparison.Ordinal)));

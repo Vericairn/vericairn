@@ -293,10 +293,12 @@ provider refuses before any effect (`ProviderRefusedException`, for example not 
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
 earlier release reads none. From 0.7.2, `ResolveCommit` resolves the requested build ref at the provider to an
-exact commit for the living-document gate. Its default returns unknown, so an older provider can still dispatch
-releases without repository document checks, but cannot bypass those checks. GitHub resolves through its commits
-API; the runtime compares the registered clone at that commit and refuses with fetch guidance if it is absent.
-The actual run commit is checked again before a candidate is recorded, since a branch can move after submission.
+exact commit for the living-document gate. Its default returns unknown, which refuses submission when refuse-level
+documents in the release repository need that commit. Documents in other repositories use their own registered HEAD
+commits, or the reviewed commit when HEAD is its ancestor. GitHub resolves through its commits API; the runtime compares
+the release repository's registered clone at that commit and refuses with fetch guidance if it is absent. The actual
+run commit and the other repositories' commits are checked again before a candidate is recorded, since a branch can
+move after submission.
 
 The Git adapter and GitHub provider share a bounded command runner. Each git command has thirty seconds,
 and each gh command two minutes, covering launch, concurrent stdout and stderr reads, and exit. Each stream
@@ -346,19 +348,27 @@ The release as intent, then observed effect:
    or reconciled until the call returns. While a living document of the product is due at level
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
-   derives repository `covers` triggers and compares reviewed document bytes at the exact commit resolved
-   by the provider for the requested release ref. An unknown commit, missing contribution or absent local
-   Git object refuses the applicable gate; fetch the exact commit into the registered clone and review
-   there. The clone's HEAD need not move. The runtime neither fetches nor checks out anything, and the
-   intent records the comparisons. Estate-file checks still read the estate's working tree.
+   derives repository `covers` triggers and compares reviewed document bytes at a commit of each
+   document's own repository. Documents in the release repository use the exact commit resolved by
+   the provider for the requested release ref; that clone's HEAD need not move. Documents in other
+   repositories use their registered clones' HEAD commits, or the reviewed commit when HEAD is its ancestor.
+   Newer or divergent HEADs still require review when content or covered paths changed. Repository identity
+   follows resource revisions and the provider's location keys at the effective release destination,
+   including a request override. A missing clearing review,
+   unknown required commit, missing contribution or absent local Git object refuses the applicable
+   gate. A document with no registered clone is reported as not compared; the independent review
+   reads it at a commit of its own repository. The runtime neither fetches nor checks out anything,
+   and the intent records the comparisons. Estate-file checks still read the estate's working tree.
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that
    operation records, never another. While the run is in progress or the draft is incomplete by the
    product's profile, no candidate is recorded and what is missing is printed. A receiptless intent is
    first revised to uncertain, even when observation then waits for a run or draft. When the run succeeded and the
-   draft is complete, the runtime checks living documents again at the observed build commit before
-   recording success or a candidate. A moved ref can therefore require a new review and observation.
+   draft is complete, the runtime checks living documents again before recording success or a candidate:
+   the release repository at the observed build commit, and other repositories at their own HEAD commits
+   or newer reviewed commits under the same ancestry rule.
+   A moved ref in either repository can therefore require a new review and observation.
    After that check the operation becomes `observed-success` and a `release` record with status
    `candidate` is written with every asset's platform and the bill of materials and notices taken from
    the profile, with the run as evidence, and with the release's own record formats: those the manifest
@@ -398,6 +408,9 @@ previous end is refused before writing either file, as is a previous set whose e
 For a previous set that records no window, as 0.5.2's and earlier sets do, they begin at the end its
 notes state, to the minute, and with no previous set at the previous publication (also the latest permitted
 explicit start). Until the version's publication is recorded they end at the second before they are generated.
+The "Milestone and release acceptances" section includes every operator acceptance of a release in that
+window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
+including a builder's acceptance of its own ordinary work, stay out of that section.
 
 The 0.7.3 notes render the estate's records with
 `vericairn docs notes --from 0.7.2 --to 0.7.3 --out docs/releases/0.7.3`.

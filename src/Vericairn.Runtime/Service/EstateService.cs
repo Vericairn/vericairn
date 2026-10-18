@@ -1268,41 +1268,46 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <summary>
-    /// Reads each refuse-level document of the product (named by any revision of its record) in another repository at the commit a
-    /// release would build, where a clone of it is registered here: those whose bytes differ from their latest review, and what was
-    /// compared or could not be.
+    /// Reads each refuse-level repository document at its selected commit, where a clone is registered here: those whose bytes
+    /// differ from their latest review, and what was compared or could not be. Covered paths use the same selected commit.
     /// </summary>
-    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, string commit)
+    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, IReadOnlySet<string> releaseRepositories)
     {
         var changed = new List<string>();
         var compared = new List<string>();
         foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && d.DeclaresRefuse))
         {
-            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
-            string? resolved = source?.Resolve(model, document.Declaration, commit);
-            if (resolved != commit)
-            {
-                RecordEnvelope? repository = model.ById.GetValueOrDefault(document.Repository!);
-                bool registered = repository is not null && model.Manifest is not null &&
-                    model.Chain(model.Latest(repository)).Any(id => RepositoryClones.Find(model.Manifest.Estate, id) is not null);
-                if (registered || source?.Head(model, document.Declaration) is not null)
-                {
-                    changed.Add($"{document.Path}: the registered clone of {EstateModel.BodyString(repository!, "name")} ({document.Repository}) does not contain release commit {commit}; fetch that repository's clone, then retry");
-                }
-                else
-                {
-                    compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at release commit {commit}");
-                }
-
-                continue;
-            }
-
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
             string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
             string clearedAt = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("commit", out JsonElement at) ? at.GetString() ?? "?" : "?";
             if (clearedHash is null)
             {
+                changed.Add($"{document.Path}: no review has cleared its content");
+                continue;
+            }
+
+            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
+            string? commit = document.ComparisonCommit;
+            string? resolved = commit is null ? null : source?.Resolve(model, document.Declaration, commit);
+            if (commit is null || resolved != commit)
+            {
+                RecordEnvelope? repository = model.ById.GetValueOrDefault(document.Repository!);
+                bool registered = repository is not null && model.Manifest is not null &&
+                    model.Chain(model.Latest(repository)).Any(id => RepositoryClones.Find(model.Manifest.Estate, id) is not null);
+                if (registered || source?.Head(model, document.Declaration) is not null)
+                {
+                    string missing = commit is null ? "has no readable HEAD commit"
+                        : $"does not contain {(releaseRepositories.Contains(document.Repository!) ? "release" : "repository")} commit {commit}";
+                    changed.Add($"{document.Path}: the registered clone of {EstateModel.BodyString(repository!, "name")} ({document.Repository}) {missing}; fetch that repository's clone, then retry");
+                }
+                else
+                {
+                    string where = releaseRepositories.Contains(document.Repository!) ? $"release commit {commit}"
+                        : $"a commit of its own repository (latest review: {clearedAt})";
+                    compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at {where}");
+                }
+
                 continue;
             }
 
@@ -1323,25 +1328,33 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         return (changed, compared);
     }
 
-    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit)
+    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit, ProviderDescriptor provider, string destination)
     {
+        IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
         // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
-        if (commit is null && NeedsReleaseCommit(model, product))
+        if (commit is null && NeedsReleaseCommit(model, product, repositories))
         {
             return (["The exact release commit is unavailable for the product's living documents; resolve it at the build provider before submitting again"], []);
         }
 
-        IReadOnlyList<LivingDocuments.State> documents = commit is null
-            ? LivingDocuments.Derive(model).Where(d => LivingDocuments.NamesProduct(model, d.Declaration, product)).ToList()
-            : LivingDocuments.AtReleaseCommit(model, product, commit);
-        (List<string> changed, List<string> compared) = commit is null ? ([], []) : CompareLivingDocuments(model, documents, commit);
+        IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
+        (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories);
         changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
         return (changed, compared);
     }
 
-    private static bool NeedsReleaseCommit(EstateModel model, string product) =>
-        model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is not null &&
+    private static bool NeedsReleaseCommit(EstateModel model, string product, IReadOnlySet<string> repositories) =>
+        model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is string repository && repositories.Contains(repository) &&
             LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
+
+    // Match the effective build destination, including request overrides, through the provider's resource location keys.
+    // Every revision of a matching resource denotes the same repository, including an older declaration or clone registration.
+    private static HashSet<string> ReleaseRepositories(EstateModel model, ProviderDescriptor provider, string destination) =>
+        model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository" &&
+            r.Body.TryGetProperty("location", out JsonElement location) && location.ValueKind == JsonValueKind.Object &&
+            provider.ServedLocations.Any(key => location.TryGetProperty(key, out JsonElement value) && value.ValueKind == JsonValueKind.String &&
+                string.Equals(value.GetString(), destination, key == "github" ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+            .SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
     /// The reviewer's independence of the content, as the record's rules judge it from the estate's records: self when it revised the
@@ -1456,7 +1469,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            needsCommit = NeedsReleaseCommit(model, request.Product);
+            needsCommit = NeedsReleaseCommit(model, request.Product, ReleaseRepositories(model, provider.Descriptor, destination));
         }
 
         // Resolve at the build provider, not at a potentially stale clone. Provider I/O never holds the service gate.
@@ -1504,16 +1517,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             // The living-document gate: the product's documents due at level refuse, or unavailable while they declare it, refuse the
             // submission before any intent is recorded, all named at once, so a refused release costs no build.
-            (List<string> changed, List<string> compared) = ReleaseDocumentChecks(session.Load(), request.Product, releaseCommit);
+            (List<string> changed, List<string> compared) = ReleaseDocumentChecks(session.Load(), request.Product, releaseCommit, provider.Descriptor, destination);
             if (changed.Count > 0)
             {
-                return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each again at that commit, then submit again; nothing was recorded.");
+                return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each at its repository's required commit, then submit again; nothing was recorded.");
             }
 
             JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
             if (compared.Count > 0)
             {
-                intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at the commit being released: " + string.Join("; ", compared) + "." });
+                intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at their repository commits: " + string.Join("; ", compared) + "." });
             }
 
             if (current is null)
@@ -1719,10 +1732,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
                     lock (gate)
                     {
-                        (List<string> changed, _) = ReleaseDocumentChecks(session.Load(), product, built);
+                        (List<string> changed, _) = ReleaseDocumentChecks(session.Load(), product, built, provider.Descriptor, destination);
                         if (changed.Count > 0)
                         {
-                            return ReleaseProblem(identity, status, "refused", $"Release {request.Version} waits for its living documents at built commit {built}: {string.Join(" | ", changed)}. Review at that commit, then observe again; no candidate was recorded.");
+                            return ReleaseProblem(identity, status, "refused", $"Release {request.Version} waits for its living documents for built commit {built}: {string.Join(" | ", changed)}. Review each at its repository's required commit, then observe again; no candidate was recorded.");
                         }
                     }
                 }
