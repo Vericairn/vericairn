@@ -89,6 +89,36 @@ public class PolicyBasisTests
         Assert.NotEqual(basis.Digest, new PolicyBasis(basis.Model, basis.AsOf, basis.Origin, [Repository("a") with { Files = [File("docs/a.md", "different bytes")] }]).Digest);
     }
 
+    [Fact]
+    public void ConflictingSourceEntriesStillHaveACompleteOrderIndependentBasis()
+    {
+        EstateModel model = Model([Policy("a", "policy")]);
+        PolicyFile file = File("docs/test.md", "original");
+        PolicyFile[] files = [file, file with { Available = false }, file with { IsLink = true }, file with { Bytes = [1, 2, 3] }];
+        PolicyRepository[] repositories = [Repository("a") with { Files = [.. files] }, Repository("a") with { Complete = false }];
+        PolicyObject[] objects = [new(file.Hash, file.Bytes), new(file.Hash, [3, 2, 1]), new(file.Hash, file.Bytes, Available: false)];
+        var first = new PolicyBasis(model, "2026-01-01T00:00:00Z", PolicyTimeOrigin.Preview, repositories, objects);
+        var reversed = new PolicyBasis(model, first.AsOf, first.Origin, repositories.Reverse().Select(r => r with { Files = r.Files.Reverse().ToImmutableArray() }), objects.Reverse());
+        Assert.Equal(first.Digest, reversed.Digest);
+        Assert.Equal(PolicyEvaluator.Evaluate(first).Canonical(), PolicyEvaluator.Evaluate(reversed).Canonical());
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("invalid")]
+    public void MalformedRuleVersionsPreserveTheInputErrorWithoutCrashing(string? version)
+    {
+        RecordEnvelope original = Policy("a", "policy");
+        var body = System.Text.Json.Nodes.JsonNode.Parse(original.Body.GetRawText())!.AsObject();
+        if (version is null) body["rules"]![0]!.AsObject().Remove("version"); else body["rules"]![0]!["version"] = version;
+        RecordEnvelope invalid = FoundationPolicyTests.R(original.Type, original.Id, body);
+        Finding error = new(Severity.Error, "fixture.version", "records/policy", "Invalid rule version.");
+        PolicyEvaluation result = PolicyEvaluator.Evaluate(new(Model([invalid], [error]), "2026-01-01T00:00:00Z", PolicyTimeOrigin.Preview));
+        Assert.Equal(1, result.Errors);
+        Assert.Contains(error, result.Diagnostics);
+        Assert.Equal("unavailable", Assert.Single(result.Findings).Verdict);
+    }
+
     internal static EstateModel Model(IEnumerable<RecordEnvelope> records, IEnumerable<Finding>? diagnostics = null)
     {
         var items = records.ToArray();

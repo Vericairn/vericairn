@@ -98,6 +98,35 @@ public class WritingEvaluationTests
         Assert.Equal(2, WritingEvaluation.Evaluate(new(basis.Model, "2036-01-01T00:00:00Z", PolicyTimeOrigin.Preview, [repository])).ExceptedCount);
     }
 
+    [Fact]
+    public void ASharedScannerDiagnosticIsCountedOnceAndUnreadSourcesKeepTheirWarnings()
+    {
+        using var fixture = new PolicyFixture();
+        fixture.Add("writing-exception", PolicyFixture.WritingBody());
+        PolicyBasis original = Basis(fixture, "Open311 Open311");
+        EstateModel model = fixture.Estate.Load();
+        foreach (SpacingOccurrence occurrence in WritingScanner.Scan("Open311 Open311", "docs/test.md")) model.Findings.Add(occurrence.Diagnostic);
+        Finding unavailable = Assert.Single(WritingScanner.Scan("Open311", "docs/unavailable.md")).Diagnostic;
+        model.Findings.Add(unavailable);
+        WritingEvaluation result = WritingEvaluation.Evaluate(new(model, original.AsOf, original.Origin, original.Repositories));
+        Assert.Equal(2, result.ExceptedCount);
+        Assert.Equal(1, result.WarningCount);
+        Assert.Equal(unavailable, Assert.Single(result.Diagnostics));
+    }
+
+    [Fact]
+    public void ATimeBeforeTheExceptionWasRecordedCannotUseThatException()
+    {
+        using var fixture = new PolicyFixture();
+        fixture.Add("writing-exception", PolicyFixture.WritingBody());
+        PolicyBasis original = Basis(fixture, "Open311");
+        WritingEvaluation result = WritingEvaluation.Evaluate(new(original.Model, "2026-10-13T12:00:00Z", PolicyTimeOrigin.Preview, original.Repositories));
+        Assert.False(result.Complete);
+        Assert.Equal(0, result.ExceptedCount);
+        Assert.Single(result.Warnings);
+        Assert.Contains(result.Diagnostics, d => d.Code == "writing.basis-unavailable");
+    }
+
     private static WritingEvaluation Evaluate(PolicyFixture fixture, string text, string path = "docs/test.md", bool complete = true) => WritingEvaluation.Evaluate(Basis(fixture, text, path, complete));
     private static PolicyBasis Basis(PolicyFixture fixture, string text, string path = "docs/test.md", bool complete = true) => PolicyBasis.Recorded(fixture.Estate.Load(),
         [new(fixture.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, complete, [PolicyBasisTests.File(path, text)])]);

@@ -72,10 +72,27 @@ internal static class PolicyWork
         return latest;
     }
 
-    internal static bool Accepted(EstateModel model, RecordEnvelope order, DateTimeOffset at) =>
-        model.OfType("acceptance").Any(a => CurrentAt(model, a, at) && a.Subject is { } subject &&
-            (subject == order.Reference || model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) && result.Type == "result" &&
-                subject == result.Reference && CurrentAt(model, result, at) && WorkView.OrderOfResult(model, result)?.Id == order.Id));
+    internal static RecordEnvelope? Acceptance(EstateModel model, RecordEnvelope order, DateTimeOffset at)
+    {
+        RecordEnvelope[] acceptances = model.OfType("acceptance").Where(a => CurrentAt(model, a, at)).ToArray();
+        RecordEnvelope? exact = acceptances.FirstOrDefault(a => a.Subject == order.Reference);
+        if (exact is not null) return exact;
+        RecordEnvelope[] resultAcceptances = acceptances.Where(a => a.Subject is { Type: "result" } subject && model.ById.TryGetValue(subject.Id, out RecordEnvelope? result) &&
+            subject == result.Reference && WorkView.OrderOfResult(model, result)?.Reference == order.Reference).ToArray();
+        if (resultAcceptances.Length == 0) return null;
+        IReadOnlyList<RecordEnvelope> current = Results(model, order, at);
+        return resultAcceptances.FirstOrDefault(a => current.Any(r => a.Subject == r.Reference));
+    }
+
+    internal static bool Accepted(EstateModel model, RecordEnvelope order, DateTimeOffset at) => Acceptance(model, order, at) is not null;
+
+    internal static RecordEnvelope? OrderOfEvent(EstateModel model, RecordEnvelope record) => record.Type switch
+    {
+        "assignment" => WorkView.OrderOfAssignment(model, record),
+        "attempt" => WorkView.AssignmentOfAttempt(model, record) is { } assignment ? WorkView.OrderOfAssignment(model, assignment) : null,
+        "result" => WorkView.OrderOfResult(model, record),
+        _ => null,
+    };
 
     internal static bool Planned(EstateModel model, RecordEnvelope order, DateTimeOffset at) =>
         !Accepted(model, order, at) && (Status(model, order, at) is not { } status || EstateModel.BodyString(status, "status") == "planned");

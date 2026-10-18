@@ -15,6 +15,64 @@ namespace Vericairn.Runtime.Tests;
 
 public class DutyProofEvaluationTests
 {
+    [Fact]
+    public void EndingDebtRetainsTheEarlierWithdrawnJudgment()
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope policy = f.Policy(); f.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        RecordEnvelope result = f.Result(f.DutyLink(policy)); RecordEnvelope passed = f.Review(result);
+        RecordEnvelope adverse = f.Review(result, outcome: "fail");
+        JsonObject body = PolicyFixture.Body(policy); body["dutyDispositions"] = new JsonArray(f.Disposition(policy));
+        f.Policy(body, policy);
+        PolicyFinding ended = Number(Evaluate(f), 0);
+        Assert.Equal("ended-unmet", ended.Disposition);
+        Assert.False(ended.Duty!.Completed);
+        DutyCompletionPeriod history = Assert.Single(ended.Duty.Completions);
+        Assert.Equal(passed.At, history.From); Assert.Equal(adverse.At, history.Until);
+    }
+
+    [Fact]
+    public void ADeclaredUnreviewedRouteIsLabeledAndLaterAdmissionLossDoesNotEraseSignedWork()
+    {
+        using var f = new PolicyFixture();
+        JsonObject body = f.PolicyBody(); Parameters(body)["discharge"]!["review"] = "none";
+        RecordEnvelope policy = f.Policy(body); f.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        RecordEnvelope result = f.Result(f.DutyLink(policy));
+        PolicyFinding first = Number(Evaluate(f), 0);
+        Assert.Equal(result.At, first.Duty!.CompletedAt);
+        Assert.Contains("unreviewed claim", first.Actual, StringComparison.Ordinal);
+        RecordEnvelope admission = Assert.Single(f.Estate.Load().Current("admission"), a => a.Subject == f.BuilderDevice.Reference);
+        JsonObject revoked = PolicyFixture.Body(admission); revoked["status"] = "revoked"; revoked["revokedAt"] = RecordParser.FormatTimestamp(f.Estate.Clock.AddSeconds(1));
+        f.Add("admission", revoked, subject: admission.Subject, supersedes: admission.Id);
+        Assert.Equal(result.At, Number(Evaluate(f), 0).Duty!.CompletedAt);
+    }
+
+    [Theory]
+    [InlineData("valid", "satisfied")]
+    [InlineData("proof-commit", "unmet")]
+    [InlineData("inventory-commit", "unavailable")]
+    [InlineData("missing-inventory", "unavailable")]
+    public void RepositoryVerificationRequiresTheExactDeclaredCommitAndCompleteInventory(string fault, string verdict)
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope repository = f.Add("resource", new JsonObject { ["kind"] = "repository", ["name"] = "Fixture source", ["role"] = "Test exact commit proof.", ["location"] = new JsonObject { ["github"] = "Example/example" }, ["visibility"] = "private" });
+        JsonObject body = f.PolicyBody(); Parameters(body)["subject"] = PolicyFixture.Ref(repository, false);
+        JsonObject clause = VerificationClause("duty-subject"); clause["commitSource"] = "result-scope"; clause["repository"] = repository.Id;
+        Parameters(body)["discharge"]!["records"] = new JsonArray(clause);
+        RecordEnvelope policy = f.Policy(body); f.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        string commit = new('1', 40); JsonObject observation = VerificationBody();
+        if (fault == "proof-commit") observation["commit"] = new string('2', 40);
+        RecordEnvelope verification = f.Add("verification", observation, subject: repository.Reference);
+        JsonObject link = f.DutyLink(policy); link["subject"] = PolicyFixture.Ref(repository);
+        link["scope"]!["repositories"]!.AsArray().Add(new JsonObject { ["record"] = PolicyFixture.Ref(repository), ["commit"] = commit });
+        link["proofs"] = new JsonArray(new JsonObject { ["clause"] = "restore", ["records"] = new JsonArray(PolicyFixture.Ref(verification)) });
+        f.Review(f.Result(link));
+        PolicyRepository source = new(repository.Id, fault == "inventory-commit" ? new string('2', 40) : commit, PolicyBasis.RepositoryContract, true, []);
+        PolicyFinding finding = Number(Evaluate(f, "2026-10-20T14:00:00Z", repositories: fault == "missing-inventory" ? [] : [source]), 0);
+        Assert.Equal(verdict, finding.Verdict);
+        Assert.Equal(fault == "valid", finding.Duty!.Completed);
+    }
+
     internal static JsonObject VerificationBody(string method = "restore") => new()
     {
         ["method"] = method, ["commit"] = new string('1', 40), ["environment"] = new JsonObject { ["platform"] = "test" }, ["role"] = "operator", ["outcome"] = "passed",

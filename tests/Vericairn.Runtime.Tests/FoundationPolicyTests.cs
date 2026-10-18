@@ -17,6 +17,7 @@ public class FoundationPolicyTests
     private static readonly string[] MarkdownPaths = ["docs/*.md"];
     private static readonly string[] AllPaths = ["**"];
     private static readonly string[] OperatorRoles = ["operator"];
+    private static readonly string[] AcceptedCase = ["accepted-still-open"];
     [Theory]
     [InlineData("2026-01-01T23:59:59Z", "satisfied")]
     [InlineData("2026-01-02T00:00:00Z", "unmet")]
@@ -98,6 +99,23 @@ public class FoundationPolicyTests
     }
 
     [Fact]
+    public void AcceptanceOfAnEarlierAttemptsResultDoesNotAcceptANewAttemptOrResetItsAgeToCreation()
+    {
+        RecordEnvelope order = Order();
+        RecordEnvelope assignment = R("assignment", "assignment", new { contributor = "author" }, subject: order.Reference);
+        RecordEnvelope first = R("attempt", "first", new { }, "2026-01-01T01:00:00Z", assignment.Reference);
+        RecordEnvelope result = R("result", "result", new { outcome = "completed" }, "2026-01-01T02:00:00Z", first.Reference);
+        RecordEnvelope accepted = R("acceptance", "accepted", new { }, "2026-01-01T03:00:00Z", result.Reference);
+        RecordEnvelope next = R("attempt", "next", new { }, "2026-01-02T12:00:00Z", assignment.Reference);
+        RecordEnvelope status = R("work-status", "status", new { status = "planned" }, "2026-01-01T00:00:00Z", order.Reference);
+        RecordEnvelope[] records = [order, assignment, first, result, accepted, next, status];
+        PolicyFinding age = Assert.Single(Run(FoundationPolicyKinds.Staleness, new { @class = "planned-without-release", maxAgeDays = 1 }, records, "2026-01-03T00:00:00Z").Findings);
+        Assert.Equal("satisfied", age.Verdict);
+        Assert.Equal(next.Reference, age.Anchor);
+        Assert.Equal("satisfied", Assert.Single(Run(FoundationPolicyKinds.Consistency, new { cases = AcceptedCase }, records, "2026-01-03T00:00:00Z").Findings).Verdict);
+    }
+
+    [Fact]
     public void AskNotificationPreservesItsAnchorAndOnlyAnswerOrWithdrawalEndsWaiting()
     {
         RecordEnvelope ask = R("ask", "question", new { state = "open" });
@@ -168,6 +186,18 @@ public class FoundationPolicyTests
         Assert.Equal(verdict, finding.Verdict);
         Assert.Equal("docs/new.md", finding.Target.Path);
         Assert.NotNull(finding.Target.Hash);
+    }
+
+    [Theory]
+    [InlineData("```\n# Example title\nRevision 1, January 1, 2026. Example.\n```", "unmet")]
+    [InlineData("# Title\n~~~\nRevision 1, January 1, 2026. Example.\n~~~\nMissing revision.", "unmet")]
+    [InlineData("# Title\n~~~\nExample text.\n~~~\nRevision 1, January 1, 2026. Actual revision.", "satisfied")]
+    [InlineData("   # Title\n\nRevision 1, January 1, 2026. Actual revision.", "satisfied")]
+    public void CodeExamplesCannotSupplyTheDocumentsTitleOrRevisionProse(string text, string verdict)
+    {
+        PolicyEvaluation result = Run(FoundationPolicyKinds.RevisionLine, new { selectors = MarkdownPaths, style = "estate-design/1" }, [],
+            selection: new { kind = "repository", repository = "estate", selectors = AllPaths }, repositories: [Repository(PolicyBasisTests.File("docs/new.md", text))]);
+        Assert.Equal(verdict, Assert.Single(result.Findings).Verdict);
     }
 
     [Fact]

@@ -41,9 +41,11 @@ internal sealed class PolicyBasis
         foreach (Finding finding in Findings) findings.Add(finding);
         Model = new EstateModel(string.Empty, Records, Records.GroupBy(r => r.Id, StringComparer.Ordinal).ToImmutableDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal),
             validated.SupersededBy.ToImmutableDictionary(StringComparer.Ordinal), findings);
-        Repositories = (repositories ?? []).Select(r => r with { Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal).ToImmutableArray() })
-            .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ToImmutableArray();
-        Objects = (objects ?? []).OrderBy(o => o.Hash, StringComparer.Ordinal).ToImmutableArray();
+        Repositories = (repositories ?? []).Select(r => r with { Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
+                .ThenBy(f => f.Available).ThenBy(f => f.IsLink).ThenBy(f => ContentHash.Sha256(f.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray() })
+            .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ThenBy(r => r.Contract, StringComparer.Ordinal).ThenBy(r => r.Complete)
+            .ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ToImmutableArray();
+        Objects = (objects ?? []).OrderBy(o => o.Hash, StringComparer.Ordinal).ThenBy(o => o.Available).ThenBy(o => ContentHash.Sha256(o.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray();
         Implementations = (implementations ?? []).OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Version).ThenBy(i => i.Digest, StringComparer.Ordinal).ToImmutableArray();
         AsOf = asOf;
         Origin = origin;
@@ -52,7 +54,7 @@ internal sealed class PolicyBasis
         RecordDigest = Hash(Records.Select(r => new { r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body, r.DeclaredHash, r.ComputedHash, r.Signatures, r.Format }));
         Digest = Hash(new
         {
-            contract = Contract, RecordDigest, Findings, complete, asOf, origin, submission,
+            contract = Contract, scanner = WritingScanner.Contract, RecordDigest, Findings, complete, asOf, origin, submission,
             successors = Model.SupersededBy.OrderBy(p => p.Key, StringComparer.Ordinal),
             repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),

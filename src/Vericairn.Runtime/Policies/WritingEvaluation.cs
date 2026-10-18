@@ -24,7 +24,9 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
     {
         List<(WritingLocation Location, SpacingOccurrence Occurrence)> candidates = [];
         List<Finding> diagnostics = [.. basis.Findings];
-        bool complete = basis.Complete && !basis.Findings.Any(f => f.Severity == Severity.Error);
+        string? unavailable = basis.UnavailableReason();
+        bool complete = unavailable is null;
+        if (unavailable is not null) diagnostics.Add(new(Severity.Warning, "writing.basis-unavailable", "writing", unavailable));
         foreach (PolicyRepository inventory in basis.Repositories)
         {
             try
@@ -44,7 +46,19 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
         foreach (string field in PolicyRecords.ProseFields)
             if (EstateModel.BodyString(record, field) is { } text)
                 candidates.AddRange(WritingScanner.Scan(text, RecordPath(record) + "#body." + field).Select(o => (new WritingLocation("record", record.Id, field), o)));
-        return Match(basis, candidates, diagnostics, complete);
+        // A caller may have already run the shared scanner. Replace only diagnostics for exact
+        // occurrences reconstructed here, using their structured values and multiplicity. Unread
+        // sources, errors and all other rules keep their original diagnostics.
+        Dictionary<Finding, int> reconstructed = candidates.GroupBy(c => c.Occurrence.Diagnostic).ToDictionary(g => g.Key, g => g.Count());
+        return Match(basis, candidates, diagnostics.Where(d =>
+        {
+            if (d is { Code: "writing.spacing", Severity: Severity.Warning } && reconstructed.TryGetValue(d, out int count) && count > 0)
+            {
+                reconstructed[d] = count - 1;
+                return false;
+            }
+            return true;
+        }), complete);
 
         void Missing(string location, string message)
         {
@@ -59,7 +73,7 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
         IEnumerable<Finding> diagnostics, bool complete)
     {
         RecordEnvelope[] entries = basis.Model.Current("writing-exception").Where(e => EstateModel.BodyString(e, "state") == "active" && EstateModel.BodyString(e, "code") == "writing.spacing" &&
-            !basis.Findings.Any(f => f.Severity == Severity.Error) && SignatureChecks.IsAuthentic(basis.Model, e))
+            basis.UnavailableReason() is null && SignatureChecks.IsAuthentic(basis.Model, e))
             .OrderBy(e => EstateModel.BodyString(e, "token"), StringComparer.Ordinal).ThenBy(e => PolicyWork.Identity(basis.Model, e), StringComparer.Ordinal).ToArray();
         var counts = entries.ToDictionary(e => e.Id, _ => 0, StringComparer.Ordinal);
         List<WritingOccurrence> warnings = [], excepted = [];

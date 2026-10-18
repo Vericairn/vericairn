@@ -51,18 +51,18 @@ internal sealed partial class DutyProofEvaluation
                 evidence.Add(ended.Reference);
                 actual = "Debt explicitly ended without completion: " + endedReason;
             }
-            else if (occurrence.Due <= Now)
+            if (occurrence.Due <= Now)
             {
-                evidence.AddRange(DateSource(occurrence.Parameters, Now));
+                if (ended is null) evidence.AddRange(DateSource(occurrence.Parameters, Now));
                 foreach ((RecordEnvelope result, JsonElement link) in links[occurrence.Key])
                 {
                     Step();
-                    if (result.AtTime < occurrence.Due || !Matches(link, occurrence, exactSubject: true)) continue;
-                    List<DutyCompletionPeriod> resultPeriods = Replay(occurrence, result, link, evidence, out string reason);
+                    if (result.AtTime < occurrence.Due || result.AtTime > (ended?.AtTime ?? Now) || !Matches(link, occurrence, exactSubject: true)) continue;
+                    List<DutyCompletionPeriod> resultPeriods = Replay(occurrence, result, link, ended?.AtTime ?? Now, evidence, out string reason);
                     periods.AddRange(resultPeriods);
-                    if (reason != "") actual = reason;
+                    if (reason != "" && ended is null) actual = reason;
                     DutyCompletionPeriod? current = resultPeriods.LastOrDefault(p => p.Until is null);
-                    if (current is null) continue;
+                    if (current is null || ended is not null) continue;
                     DateTimeOffset start = DutyRecords.Time(current.From)!.Value;
                     if (completed is null || start < completed)
                     {
@@ -97,7 +97,7 @@ internal sealed partial class DutyProofEvaluation
         return finding;
     }
 
-    private List<DutyCompletionPeriod> Replay(DutyOccurrence occurrence, RecordEnvelope result, JsonElement link, List<RecordReference> examined, out string reason)
+    private List<DutyCompletionPeriod> Replay(DutyOccurrence occurrence, RecordEnvelope result, JsonElement link, DateTimeOffset until, List<RecordReference> examined, out string reason)
     {
         List<DutyCompletionPeriod> periods = [];
         examined.Add(result.Reference);
@@ -113,7 +113,7 @@ internal sealed partial class DutyProofEvaluation
         examined.AddRange(sources);
         DateTimeOffset? start = null;
         ImmutableArray<RecordReference> periodEvidence = [];
-        foreach (DateTimeOffset instant in instants.Where(t => t >= result.AtTime))
+        foreach (DateTimeOffset instant in instants.Where(t => t >= result.AtTime && t <= until))
         {
             Step();
             bool qualifies = PolicyWork.CurrentAt(Model, result, instant);

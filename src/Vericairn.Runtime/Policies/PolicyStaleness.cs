@@ -76,6 +76,7 @@ internal static partial class FoundationPolicyKinds
             if (!waiting) anchor = null;
             else anchor ??= instant.FirstOrDefault(r => r.Id == current.Id)
                 ?? instant.FirstOrDefault(r => r.Type == "work-status" && r.Subject is { } s && model.Chain(current).Contains(s.Id, StringComparer.Ordinal))
+                ?? instant.FirstOrDefault(r => PolicyWork.OrderOfEvent(model, r)?.Id == current.Id)
                 ?? PolicyWork.ReleasePlacement(model, current, at).Evidence ?? current;
         }
         return anchor ?? order;

@@ -22,6 +22,23 @@ internal static partial class WritingScanner
     internal static IReadOnlyList<SpacingOccurrence> Scan(string text, string location)
     {
         List<SpacingOccurrence> occurrences = [];
+        foreach ((string rawLine, int lineNumber, int byteOffset) in LinesOutsideFences(text))
+        {
+            string line = CodeSpan().Replace(rawLine, m => new string(' ', m.Length));
+            foreach (Match match in WordRunIntoNumber().Matches(line))
+            {
+                if (Allowlist.Contains(match.Groups["word"].Value)) continue;
+                occurrences.Add(new(match.Value, lineNumber, byteOffset + Encoding.UTF8.GetByteCount(rawLine.AsSpan(0, match.Index)),
+                    Encoding.UTF8.GetByteCount(rawLine.AsSpan(match.Index, match.Length)),
+                    new(Severity.Warning, "writing.spacing", location + ":" + lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                        "'" + match.Value + "': put a space between the word and the number, or write an identifier as code.")));
+            }
+        }
+        return occurrences;
+    }
+
+    internal static IEnumerable<(string Text, int Line, int ByteOffset)> LinesOutsideFences(string text)
+    {
         int lineNumber = 0, byteOffset = 0, fenceLength = 0;
         char fence = '\0';
         foreach (string rawLine in text.Split('\n'))
@@ -43,21 +60,9 @@ internal static partial class WritingScanner
             {
                 fence = marker; fenceLength = run; skip = true;
             }
-            if (!skip)
-            {
-                string line = CodeSpan().Replace(rawLine, m => new string(' ', m.Length));
-                foreach (Match match in WordRunIntoNumber().Matches(line))
-                {
-                    if (Allowlist.Contains(match.Groups["word"].Value)) continue;
-                    occurrences.Add(new(match.Value, lineNumber, byteOffset + Encoding.UTF8.GetByteCount(rawLine.AsSpan(0, match.Index)),
-                        Encoding.UTF8.GetByteCount(rawLine.AsSpan(match.Index, match.Length)),
-                        new(Severity.Warning, "writing.spacing", location + ":" + lineNumber.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                            "'" + match.Value + "': put a space between the word and the number, or write an identifier as code.")));
-                }
-            }
+            if (!skip) yield return (rawLine, lineNumber, byteOffset);
             byteOffset += Encoding.UTF8.GetByteCount(rawLine) + 1;
         }
-        return occurrences;
     }
 
     [GeneratedRegex("`[^`]*`")]

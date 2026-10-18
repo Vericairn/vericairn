@@ -118,7 +118,8 @@ internal static partial class FoundationPolicyKinds
         foreach (PolicyFile file in repository.Files.Where(f => f.Path.EndsWith(".md", StringComparison.Ordinal) && selectors.Any(s => Matches(s, f.Path)) && coverage.Any(s => Matches(s, f.Path))))
         {
             string text = Read(file);
-            string? line = text.Split('\n').SkipWhile(l => !l.StartsWith("# ", StringComparison.Ordinal)).Skip(1).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+            string? line = WritingScanner.LinesOutsideFences(text).Select(l => l.Text).Where(l => !l.StartsWith("    ", StringComparison.Ordinal) && !l.StartsWith('\t'))
+                .SkipWhile(l => !l.TrimStart(' ').StartsWith("# ", StringComparison.Ordinal)).Skip(1).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
             Match match = RevisionPattern().Match(line ?? "");
             bool valid = match.Success && DateOnly.TryParseExact(match.Groups["date"].Value, "MMMM d, yyyy", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly date) &&
                 date <= DateOnly.FromDateTime(context.Basis.Time!.Value.UtcDateTime) && match.Groups["explanation"].Value.Any(char.IsLetterOrDigit);
@@ -141,7 +142,7 @@ internal static partial class FoundationPolicyKinds
             foreach (string item in cases)
             {
                 RecordEnvelope? fact = item == "accepted-still-open"
-                    ? context.Model.Current("acceptance").FirstOrDefault(a => a.Subject == order.Reference || a.Subject is { Type: "result" } s && context.Model.ById.TryGetValue(s.Id, out RecordEnvelope? result) && context.Model.IsCurrent(result) && s == result.Reference && WorkView.OrderOfResult(context.Model, result)?.Id == order.Id)
+                    ? PolicyWork.Acceptance(context.Model, order, context.Basis.Time!.Value)
                     : context.Model.OfType("release").FirstOrDefault(r => r.Subject?.Id == Text(Get(order.Body, "releasePlan"), "product") && EstateModel.BodyString(r, "version") == Text(Get(order.Body, "releasePlan"), "version") && EstateModel.BodyString(r, "status") == "published");
                 bool inconsistent = status is not null && EstateModel.BodyString(status, "status") is "planned" or "active" or "paused" or "submitted" && fact is not null;
                 yield return context.Finding(PolicyWork.Target(context.Model, order), item, inconsistent ? "unmet" : "satisfied",

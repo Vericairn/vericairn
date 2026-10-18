@@ -67,7 +67,7 @@ internal sealed class PolicyRuleContext(PolicyBasis basis, RecordEnvelope policy
     internal PolicyFinding Finding(PolicyTarget target, string item, string verdict, string actual, string required, string nextAction,
         RecordEnvelope? anchor = null, IEnumerable<RecordReference>? evidence = null, string disposition = "none", int subjects = 1) =>
         new(Identity, Policy.Reference, EstateModel.BodyString(Policy, "key") ?? "?", Key, PolicyRecords.Text(Rule, "kind") ?? "?",
-            PolicyRecords.Property(Rule, "version").TryGetInt32(out int version) ? version : 0, target, item, verdict, disposition,
+            PolicyRecords.Property(Rule, "version") is { ValueKind: JsonValueKind.Number } number && number.TryGetInt32(out int version) ? version : 0, target, item, verdict, disposition,
             EstateModel.BodyString(Policy, "level") ?? "refuse", EstateModel.BodyString(Policy, "owner") ?? "?", Basis.Digest, Basis.AsOf,
             actual, required, nextAction, anchor?.Reference, anchor?.At,
             (evidence ?? []).Distinct().OrderBy(r => r.Type, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ThenBy(r => r.Hash, StringComparer.Ordinal).ToImmutableArray(), [] , subjects, Enforced: Enforced);
