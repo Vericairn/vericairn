@@ -36,7 +36,7 @@ public sealed partial class EstateService : IClientOperationLifetime
     {
         if (resourcesClosed) return;
         resourcesClosed = true;
-        AbandonRuns();
+        runDispatch.Dispose();
         session.Dispose();
     }
 
