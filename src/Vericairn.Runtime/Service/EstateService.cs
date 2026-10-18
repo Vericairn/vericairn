@@ -41,6 +41,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     private readonly EstateSession session;
     private readonly EstateRecordAccess recordAccess;
     private readonly RunAdmissionService runAdmission;
+    private readonly RunDispatchService runDispatch;
     private readonly string startedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
 
     private EstateService(EstateSession session)
@@ -53,6 +54,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, maxBytes, recipient, assignment) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
+        runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
     }
 
     /// <summary>
@@ -2866,7 +2868,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     public void Dispose()
     {
-        AbandonRuns();
+        runDispatch.Dispose();
         session.Dispose();
     }
 

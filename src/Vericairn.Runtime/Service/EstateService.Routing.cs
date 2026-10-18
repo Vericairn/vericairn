@@ -141,7 +141,7 @@ public sealed partial class EstateService
 
         // The run starts through the worker, whose preflight comes before anything is recorded and which judges the custody precondition
         // and the budget again when it records the intent, routing's assignment with it.
-        RunResponse started = Start(run, routed, out RecordWritten? assignment);
+        RunResponse started = runDispatch.Start(run, routed, out RecordWritten? assignment);
         string assigned = assignment is null || started.Operation is null ? string.Empty : $"Routing assigned {key} to its agent (assignment {assignment.Id}), recorded with the run's intent. ";
         return new GoalStepResponse(goalId, started.Ok ? "run" : "none", $"{assigned}{key} is routed to the agent {agentName} [principal {route.Principal}] through {route.Launcher}: {route.Reason}. {started.Message}", started.Ok, key, route.State, route.Principal, assignment, null, started, started.Ok ? null : started.Problem);
     }
