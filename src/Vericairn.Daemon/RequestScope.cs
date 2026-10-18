@@ -172,6 +172,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/documents"] = null,
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
         ["GET /v1/asks"] = null,
+        ["GET /v1/operator/actions"] = null,
         ["GET /v1/goals"] = null,
         ["POST /v1/goals"] = typeof(GoalProposeRequest),
         ["GET /v1/goals/{id}"] = null,

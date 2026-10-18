@@ -137,6 +137,9 @@ public interface IEstateApi
     /// </summary>
     AsksResponse Asks(string? principal = null);
 
+    /// <summary>Every recorded action waiting on operators, with reasons, exact commands and required input. Presentation never filters the queue; reads sign and record nothing.</summary>
+    OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null);
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 

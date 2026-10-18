@@ -826,6 +826,15 @@ the state of workers.
 
 ## The SDK
 
+The next release adds `GET /v1/operator/actions` and
+`VericairnClient.OperatorActions(recipient, assignment, view)`, returning `OperatorActionsResponse`
+(`text`, `json`, `hasErrors`). This read shows every recorded operator ask, pending operator
+acceptance and waiting reserved action, with reasons, dependencies and exact commands. The existing
+communication query parameters select presentation, defaulting to the root operator; they never
+filter the canonical queue. Record errors suppress authoring commands. The complete contract and
+required-input bodies are described in [Operator actions](operator-actions.md). There is no MCP tool
+for this surface.
+
 In a .NET 10 project, install the Community SDK with:
 
 ```sh

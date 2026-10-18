@@ -106,6 +106,8 @@ public class DocsTests
             }
             Assert.Contains("GET /v1/providers", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("work-order", manifest.RootElement.GetProperty("recordTypes").EnumerateArray().Select(t => t.GetString()));
+            Assert.Contains("operator list", commands);
+            Assert.Contains("GET /v1/operator/actions", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Equal(13, manifest.RootElement.GetProperty("documents").GetArrayLength());
 
             // The record formats of the build, which the release observer reads from the set as the release's own.
@@ -117,6 +119,7 @@ public class DocsTests
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn operator list`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn updates configure`", cli, StringComparison.Ordinal);
             Assert.Contains("`--enabled <enabled>`", cli, StringComparison.Ordinal);
             Assert.Contains("Disclosure and upgrade notices go to stderr", cli, StringComparison.Ordinal);

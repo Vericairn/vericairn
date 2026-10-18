@@ -53,6 +53,7 @@ public static class OpenApiDocument
         ("GET", "/v1/documents"),
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
+        ("GET", "/v1/operator/actions"),
         ("GET", "/v1/goals"),
         ("POST", "/v1/goals"),
         ("GET", "/v1/goals/{id}"),
@@ -116,7 +117,7 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
-            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief" or "/v1/context/work/{key}/brief")
+            if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief" or "/v1/context/work/{key}/brief" or "/v1/operator/actions")
             {
                 operation["parameters"] = new JsonArray(CommunicationParameterNames
                     .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
@@ -220,6 +221,10 @@ public static class OpenApiDocument
         if (path is "/v1/resume")
         {
             responses["200"] = new JsonObject { ["description"] = "ResumeResponse: every difference, or an invalid-handoff problem. This POST is a read; it authors no record." };
+        }
+        else if (path == "/v1/operator/actions")
+        {
+            responses["200"] = new JsonObject { ["description"] = "OperatorActionsResponse: text in the selected communication settings, complete canonical JSON (vericairn.operator-actions/1), and hasErrors. Items retain their sources, reasons, waitsOn, inspection command and record-authoring commands with argument arrays and required JSON bodies; null body fields require operator input. No signing or provider access occurs." };
         }
         else if (path is "/v1/pairings" or "/v1/pairing/hello" or "/v1/pairing/confirm" or "/v1/runtime/identity" or "/v1/runtime/certificate")
         {
@@ -465,6 +470,7 @@ public static class OpenApiDocument
         ("POST", "/v1/documents/{id}/reviews") => "Review a living document by its declaration: the runtime reads the content, records the covered paths' identity and the triggers the review answers, runs the declared checks, and refuses a clearance a failed check or the declaration's clearedBy forbids.",
         ("GET", "/v1/asks") => "What waits on a principal (to), or on every principal: the asks still open or notified, oldest first, at most three delivered to each with the recommendation first and the consequence of leaving it unanswered, the rest waiting in order (vericairn.asks/1). Reading it answers nothing: an ask is answered by a decision of the principal it is put to that names it, never by waiting.",
         ("GET", "/v1/goals") => "The estate's current goals: each one's current revision, title, status and sponsor.",
+        ("GET", "/v1/operator/actions") => "Every open operator ask, pending operator acceptance and recorded waiting reserved action, with reasons, dependencies, exact record-authoring commands and required JSON input (vericairn.operator-actions/1). Text follows communication settings, defaulting to the estate's root operator; JSON always contains the complete queue. Record errors suppress authoring commands. This read neither signs nor records, inspects keys or calls providers. Not exposed through MCP.",
         ("POST", "/v1/goals") => "Propose a goal, or a revision of one (supersedes), from the goal record's body; a proposal authorizes and funds nothing, and a revision starts again from its sponsor's activation. Anyone may propose a new goal; a revision is recorded only by the sponsor of the revision it supersedes when the sponsor is a person, and by an operator when an agent sponsors it. The body's limits.deadline and limits.consecutiveFailures are validated and recorded but not yet enforced.",
         ("GET", "/v1/goals/{id}") => "A goal by the id of any of its revisions: its objective, sponsor, status and granted budget, each condition's verdict (met, not-met or unknown) with the records it read beside its current evaluation's verdict, its steps, and what stands between it and its acceptance.",
         ("GET", "/v1/goals/{id}/next") => "A goal's steps routed from the runtime's machine (vericairn.next/1): each step's state, what holds each planned one, and for each eligible one the principal its role's roster reaches (an agent where a launcher for its harness, its admitted key and the goal's budget allow, a person where needed, a reserved action only to one who holds it) or why none is available, with whether the budget allows it and the custody guard for an agent; the goal's ledger and asks. Read-only; it never falls back to a principal the roster does not name.",
