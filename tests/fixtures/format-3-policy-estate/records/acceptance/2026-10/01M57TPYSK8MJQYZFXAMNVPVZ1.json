@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T14:00:28Z",
+  "body": {
+    "basis": [],
+    "self": true,
+    "statement": "Fixture publication accepted."
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:5a318684e891bd90f0934bf3a8bbd89430624e746da5dae5a9fd3bddda013052",
+  "id": "01M57TPYSK8MJQYZFXAMNVPVZ1",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "uElNs4UoY5F5NEFUFE94p770GkH2FFf1c1fzuolX-rwLA3uaY0vR7D_AXtizdH9DQgRClnFu5qwwFdQKbyJylQ"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:aa99f1cfcbdcc22de6d19fd70b8df14d902772ffa4c3d1d38df06a613278f8a2",
+    "id": "01M57TPYSJDHMRRPD4ZTV628ZX",
+    "type": "release"
+  },
+  "type": "acceptance"
+}

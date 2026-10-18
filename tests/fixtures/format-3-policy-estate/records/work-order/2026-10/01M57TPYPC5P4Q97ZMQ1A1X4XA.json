@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-13T12:00:12Z",
+  "body": {
+    "deliverables": [
+      "fixture"
+    ],
+    "exitQuestion": "Does placement round trip?",
+    "inputs": [],
+    "intent": "Exercise typed placement.",
+    "key": "BACKLOG-1",
+    "kind": "ordinary",
+    "placement": {
+      "key": "future-work",
+      "kind": "backlog"
+    },
+    "scope": [
+      "test fixtures"
+    ],
+    "title": "Fixture release"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:68514d7caf2cff83ee7705b4394c71fce7e1625d88a54f1093f9a8f543c5c8ba",
+  "id": "01M57TPYPC5P4Q97ZMQ1A1X4XA",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "-lJCuBW-StVsUPjwmBq3Q9jDbb86v-sFmeJ9ijaY1x_ZHrh9s1RD_EXoOJDyeH67lwg8WxKRvt9ubHAMn6sKEA"
+    }
+  ],
+  "type": "work-order"
+}

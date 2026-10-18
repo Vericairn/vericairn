@@ -1,0 +1,71 @@
+{
+  "at": "2026-11-14T00:00:04Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:102b60a2dfdc157ff8229dd8c2c1d439d56320becc1b502aa3d498d4d90f5360",
+          "id": "01M7BNN7XRHDVHDJV55KT5SJXR",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "renewed-maintenance",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "predecessor": {
+      "hash": "sha256:8be6b9340daa2649a6b1fe798cfebc06be9c5991569e81edf8de8616927195cf",
+      "id": "01M7BNN6YGH33BD7K5K6VT37PG",
+      "type": "estate-policy"
+    },
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "every": 1,
+            "firstDueAt": "2026-12-01T00:00:00Z",
+            "kind": "interval",
+            "unit": "months"
+          },
+          "subject": {
+            "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+            "type": "estate"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-12-01T00:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:286fa6d6c5381ad9812512ba48fd96380d092c25b4159b4c1c9c514cac09ebc3",
+  "id": "01M7BNN8X07RYNY2AXRBQ3WEFD",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "UFgl5urmiZN-HkrRn5zMl8sAtXBFleehQcXgVWIF9D-tWsYv7ICOs0Mb_bjZolp2s5meZ_07HtwQcdIN2A8p8A"
+    }
+  ],
+  "type": "estate-policy"
+}

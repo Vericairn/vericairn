@@ -1,0 +1,31 @@
+{
+  "at": "2026-10-13T12:00:08Z",
+  "body": {
+    "affects": [],
+    "decidedAt": "2026-10-13T12:00:07Z",
+    "decidedBy": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "effects": [
+      "Apply the exact approved definition."
+    ],
+    "notAuthorized": [
+      "publication"
+    ],
+    "stake": "medium",
+    "statement": "Approve the stated definition only.",
+    "summary": "Approve a bounded test change.",
+    "synthesis": "Test evidence, without external effects.",
+    "title": "Test decision"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:b9981fd036009e8345a766bec65b63745125a53a8d7216394c90f224e1477c8a",
+  "id": "01M57TPYPA4E37QXJ9YZGM2FTS",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "j5z5HAAMSCU8M_GPsprs-3SKv3XD4WOf_59Wg_Owme8sgTWi1wsNo2EFCCGWfp4G8iIQc9X65EYvjXxrphOaSw"
+    }
+  ],
+  "type": "decision"
+}

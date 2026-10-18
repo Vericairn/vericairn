@@ -1,0 +1,92 @@
+{
+  "at": "2026-11-14T00:00:02Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:117e9fab5dafe55c3c98d454d266803d3328bfdc833234bf1a7e95b061466443",
+          "id": "01M7BNN5Z81K1NPA9Y125D2F31",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "dutyDispositions": [
+      {
+        "disposition": "ended-unmet",
+        "occurrence": {
+          "kind": "interval",
+          "number": 1
+        },
+        "policy": {
+          "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+          "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+          "type": "estate-policy"
+        },
+        "reason": "The operator deliberately ends this debt without claiming performance.",
+        "rule": "monthly",
+        "subject": {
+          "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "type": "estate"
+        }
+      }
+    ],
+    "key": "maintenance",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "retirement": {
+      "findings": "One occurrence completed; the next ended unmet.",
+      "reason": "End the example duty.",
+      "successor": "01M57TPYPQ5YVFK1TMWA8A9Q59"
+    },
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "every": 1,
+            "firstDueAt": "2026-10-13T13:00:00Z",
+            "kind": "interval",
+            "unit": "months"
+          },
+          "subject": {
+            "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+            "type": "estate"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "retired",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:8be6b9340daa2649a6b1fe798cfebc06be9c5991569e81edf8de8616927195cf",
+  "id": "01M7BNN6YGH33BD7K5K6VT37PG",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "A3Y0QqtEkMPjJQb8ZlIJfTG6KdpuAHGrE0Kf6C2SDoXh6H1F_Y_XlT9DrT_r-y33l3rengzlW3XrOXavfCUhAw"
+    }
+  ],
+  "supersedes": "01M57TPYPJKBXGK2AHXZEYBYDT",
+  "type": "estate-policy"
+}

@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T14:00:25Z",
+  "body": {
+    "note": "Check the inventory.",
+    "startedAt": "2026-10-13T14:00:24Z",
+    "workspace": "example repository"
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:0fc82ca6fdfdb78923ba9c0778aff11fdb3b69c265ce514e9e2c3e15efbd0ede",
+  "id": "01M57TPYSHFM7HZ77R836NSWVW",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "sZrryrwWcEeCveApiQgXfD6FaHQOQUl1f-ruoGzanPf6Smv3Hs1Dxnk1NswwxvvKQfKABCa4u8u8SbvlGi-DjQ"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:f9011b9833ea1ca88e7f029eb912738a6115c0d966f4c096bd14201f28f56e97",
+    "id": "01M57TPYSHFM7HZ77R836NSWVT",
+    "type": "assignment"
+  },
+  "type": "attempt"
+}

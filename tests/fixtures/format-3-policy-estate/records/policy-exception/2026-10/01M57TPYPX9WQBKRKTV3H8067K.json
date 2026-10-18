@@ -1,0 +1,59 @@
+{
+  "at": "2026-10-13T14:00:03Z",
+  "body": {
+    "basis": {
+      "authority": {
+        "hash": "sha256:b0ef94cfbafc43fe515658c9991c3ceec2f6fa28e590fe242f98bd94ec87fd22",
+        "id": "01M57TPYPW586Z4QC5P7Z7Y1XB",
+        "type": "authority"
+      },
+      "decision": {
+        "hash": "sha256:b9981fd036009e8345a766bec65b63745125a53a8d7216394c90f224e1477c8a",
+        "id": "01M57TPYPA4E37QXJ9YZGM2FTS",
+        "type": "decision"
+      }
+    },
+    "expiresAt": "2026-10-14T14:00:01Z",
+    "reason": "End the fixture exception, leaving the debt.",
+    "rule": "monthly",
+    "state": "revoked",
+    "targets": [
+      {
+        "kind": "occurrence",
+        "occurrence": {
+          "kind": "interval",
+          "number": 0
+        },
+        "policy": {
+          "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+          "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+          "type": "estate-policy"
+        },
+        "rule": "monthly",
+        "subject": {
+          "hash": "sha256:8fbcfff689fd9cebc0e7b52381f8bfd9388ba3aac2f4b0607585320e34c1f6d6",
+          "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "type": "estate"
+        }
+      }
+    ]
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:6031b143f3f8c803b01297e135963f1dcc62e60751ff41bff088c38fc5c39955",
+  "id": "01M57TPYPX9WQBKRKTV3H8067K",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "a-LdmVPuFKcSe-tBK1nuDkxdqqgx5EhH6VRHteen3DK2o9Kvd93umRJEDzPjeU0g_Ga0P7ikf12v4L1SAj3HZw"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:e3c9daa229cbc238568db8cc35a7aaad4c323ba40b34320abe643629491bb9d9",
+    "id": "01M57TPYPJKBXGK2AHXZEYBYDT",
+    "type": "estate-policy"
+  },
+  "supersedes": "01M57TPYPW586Z4QC5P7Z7Y1XD",
+  "type": "policy-exception"
+}

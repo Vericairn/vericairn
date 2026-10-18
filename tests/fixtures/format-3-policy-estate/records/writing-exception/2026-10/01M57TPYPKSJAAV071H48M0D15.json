@@ -1,0 +1,45 @@
+{
+  "at": "2026-10-13T12:00:17Z",
+  "body": {
+    "basis": {
+      "grant": {
+        "hash": "sha256:02e3b7a46516e73e06b62feb107edf795ec9af7e7e5410aa41a19dd05ef6e6de",
+        "id": "01M57TPYPJKBXGK2AHXZEYBYDW",
+        "type": "authority"
+      },
+      "kind": "authority"
+    },
+    "code": "writing.spacing",
+    "reason": "An intentional service name.",
+    "scope": {
+      "paths": [
+        {
+          "repository": "01M57TPYP3J1PPGV71CJKDNBFA",
+          "selectors": [
+            "docs/*.md"
+          ]
+        }
+      ],
+      "records": [
+        {
+          "field": "summary",
+          "record": "01M57TPYPA4E37QXJ9YZGM2FTS"
+        }
+      ]
+    },
+    "state": "active",
+    "token": "Open311"
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:ec7dfb49c3223e7697e7e6561b335b9ccfbbfa610fea0c5d24373bed0db71924",
+  "id": "01M57TPYPKSJAAV071H48M0D15",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "V9FLrqi9Oojl0E1Bs9HZPQl1t5p0dvASVicmVL5hNlhZ_h4vI1nYhOmx_V8Citl4nhY-XuPZIwnN8jKg9Ickrg"
+    }
+  ],
+  "type": "writing-exception"
+}

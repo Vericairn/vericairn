@@ -16,7 +16,7 @@ public static class RecordFormats
     public const long First = 1;
 
     /// <summary>The newest format this release writes; an estate at an older format gets records of its own format.</summary>
-    public const long Current = 2;
+    public const long Current = 3;
 
     /// <summary>The prefix of a record's format identifier.</summary>
     public const string IdentifierPrefix = "vericairn.record/";
@@ -53,6 +53,14 @@ public static class RecordFormats
     {
         long previous = Latest;
         Latest = Math.Max(latest, Current);
+        return new Restore(() => Latest = previous);
+    }
+
+    /// <summary>Exercises the manifest refusal of a reader that knows only an earlier format.</summary>
+    internal static IDisposable ReadThrough(long latest)
+    {
+        long previous = Latest;
+        Latest = latest;
         return new Restore(() => Latest = previous);
     }
 

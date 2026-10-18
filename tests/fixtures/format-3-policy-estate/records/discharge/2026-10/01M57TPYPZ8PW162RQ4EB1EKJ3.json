@@ -1,0 +1,29 @@
+{
+  "at": "2026-10-13T14:00:08Z",
+  "body": {
+    "evidence": [
+      {
+        "summary": "Fixture inventory checked."
+      }
+    ],
+    "obligation": "inventory",
+    "summary": "Fixture obligation answered."
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:d8e9efd9a7ccf9a9fc989e2204e8070b9f8e483e11d1c5f19621123e0459e5ff",
+  "id": "01M57TPYPZ8PW162RQ4EB1EKJ3",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "OlcDbzg7JIiSFjscPtqGmPCh-graB2n3yIpeqqH0TKCbitGUPPVHd2bWCyOndeKQeO1sNVWxJOtIZ-_7RlCO2w"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:a9f946b338ea15574110efb4c77715e5804d03e3469c2dc155e3b947a6954be5",
+    "id": "01M57TPYPS5XBJ7M3N4B04E4RV",
+    "type": "decision"
+  },
+  "type": "discharge"
+}

@@ -1,0 +1,99 @@
+{
+  "at": "2026-10-13T12:00:34Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:8db16e1c3ca00dbb466db4a840bfb3a767c45821ec427219fe1b6b25c225c98d",
+          "id": "01M57TPYPS5XBJ7M3N4B04E4RX",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "proof-duty",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [
+              {
+                "key": "restore",
+                "kind": "verification",
+                "method": "restore",
+                "subject": "result"
+              },
+              {
+                "commitSource": "result-scope",
+                "key": "source",
+                "kind": "verification",
+                "method": "inspect",
+                "repository": "01M57TPYPBZKR5291T0ZPZV759",
+                "subject": "duty-subject"
+              },
+              {
+                "action": "inspect",
+                "author": "operator",
+                "key": "operation",
+                "kind": "observed-operation",
+                "provider": "example"
+              },
+              {
+                "key": "retirement",
+                "kind": "retirement",
+                "retirement": "01M57TPYPRHGXRPZF8H21Y11B8"
+              },
+              {
+                "decision": "01M57TPYPS5XBJ7M3N4B04E4RV",
+                "key": "obligation",
+                "kind": "obligation",
+                "obligation": "inventory"
+              }
+            ],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "every": 1,
+            "firstDueAt": "2026-10-13T13:00:00Z",
+            "kind": "interval",
+            "unit": "months"
+          },
+          "subject": {
+            "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+            "type": "estate"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:d85368e57e1c711af9858644a18cb8ecc0d4050460870848ae0f2ec4a17c5d47",
+  "id": "01M57TPYPT8X19X6KJQAR1FP02",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "lNdjnBfJlaems1L43NiCOXKgUif7BMOSylnZ5rN50_YvXd2NXyDRmHfphhNh1exxy4b5ZhXlyybdkiMWiYwLUQ"
+    }
+  ],
+  "type": "estate-policy"
+}

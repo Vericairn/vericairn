@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-13T12:00:21Z",
+  "body": {
+    "basis": "01M57TPYPA4E37QXJ9YZGM2FTS",
+    "bounds": [
+      {
+        "actions": [
+          "add",
+          "remove",
+          "reconcile"
+        ],
+        "allTokens": true,
+        "scope": "manage-writing-exceptions"
+      }
+    ],
+    "conditions": [],
+    "expires": "2027-01-01T00:00:00Z",
+    "grantee": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "reserved": [],
+    "scope": [
+      "manage-writing-exceptions"
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:7767ff93bdd1c48c862bb0b7bcc98bad6ece318c6c20ac4df8a5153bac3b6812",
+  "id": "01M57TPYPMCEBXQX7B1SC5002W",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "nWefUo6CB1TacfrsxSmTRi0boqpilOK9bu2tKg50OEV8ARXp8DBwhjOkJTwd3C-HG9pzwQ05MeR3AKbAql7ClA"
+    }
+  ],
+  "type": "authority"
+}

@@ -1,0 +1,25 @@
+{
+  "at": "2026-10-13T12:00:28Z",
+  "body": {
+    "holder": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "kind": "other",
+    "name": "fixture-reference",
+    "purpose": "Typed date evidence only.",
+    "rotateBy": "2026-11-01T00:00:00Z",
+    "scopes": [],
+    "status": "active",
+    "store": "fixture reference"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:c8f0589f860ed2be9d16d42f715618214c01c90189ada03ba0c6b53dea509df9",
+  "id": "01M57TPYPQ5YVFK1TMWA8A9Q5B",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "atDpESxytTs9fzgLLqmeTxBwPYQCgG-WUz52B-ENGoCf-_2DscPKSU2ji30ERAbTemCGXAyXRx3ArKPnFWjjhA"
+    }
+  ],
+  "type": "credential-reference"
+}

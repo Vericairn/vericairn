@@ -1,0 +1,65 @@
+{
+  "at": "2026-10-13T12:00:27Z",
+  "body": {
+    "appliesTo": {
+      "kind": "product",
+      "product": "01M57TPYPBZKR5291T0ZPZV757"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:02aca763fd4a6ca5dfe9ff9f308d1fa3e505c488b078e87ee41f548f2f1aab7a",
+          "id": "01M57TPYPP91AKEZNSQ3J0B2BA",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "release-duty",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "kind": "release",
+            "product": "01M57TPYPBZKR5291T0ZPZV757"
+          },
+          "subject": {
+            "id": "01M57TPYPBZKR5291T0ZPZV757",
+            "type": "product"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:3e72748eaac8536a07e1ad82f0bd6731218a90ee261afa62c68b5586eec9b4dd",
+  "id": "01M57TPYPQ5YVFK1TMWA8A9Q59",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "KYnazNCSZXuHw0dcD6qu0Tj3ybDDuhndnKsoYysv-4giOOqpEG2iiOfMyOdjTzIeW88W8YDs5dmiErerfBRswg"
+    }
+  ],
+  "type": "estate-policy"
+}

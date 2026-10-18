@@ -1,0 +1,40 @@
+{
+  "at": "2026-10-13T12:00:37Z",
+  "body": {
+    "affects": [],
+    "decidedAt": "2026-10-13T12:00:36Z",
+    "decidedBy": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "effects": [
+      "Apply the exact approved definition."
+    ],
+    "notAuthorized": [
+      "publication"
+    ],
+    "policies": [
+      {
+        "action": "declare",
+        "change": "Approve this exact body.",
+        "definitionHash": "sha256:666c9c7e5cf85be1e633c4ca5f029948afb95c555c01e72948d126563d725d0e",
+        "key": "definition",
+        "policy": "credential-duty"
+      }
+    ],
+    "stake": "medium",
+    "statement": "Approve the stated definition only.",
+    "summary": "Approve a bounded test change.",
+    "synthesis": "Test evidence, without external effects.",
+    "title": "Test decision"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:b4288633e57541367778f9f97b343ac2ed02745c3f84637546def5cd9e7c9477",
+  "id": "01M57TPYPV6DY0G4A3HHA1NMCF",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "FpsH-_gc8l-R8pI6Tb0LfZokpgxYyKYDg0RS58PBq4FHBkHtxSng-8SL6X47YybcrLUa_WvCV4vITZN3m8KX-g"
+    }
+  ],
+  "type": "decision"
+}

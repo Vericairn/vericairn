@@ -27,6 +27,7 @@ public sealed class ReconciliationType : IRecordType
         new("kept", "ulid", true, "The successor of the subject that remains current, or the chosen first communication profile at that scope."),
         new("withdrawn", "ulid[]", true, "The other successors of the subject (or first communication profiles at the same scope), withdrawn in favor of the kept one."),
         new("note", "string", true, "Why this one is kept and what, if anything, from the others must be carried into a later revision."),
+        new("policyAuthority", "reference", false, "Exact bounded grant used to reconcile policy or exception history; no generic engineering grant substitutes.", 3),
     ];
 
     /// <inheritdoc />
@@ -37,12 +38,31 @@ public sealed class ReconciliationType : IRecordType
         string? kept = body.Ulid("kept", true);
         IReadOnlyList<string>? withdrawn = body.StringArray("withdrawn", true, allowEmpty: false, maxItemLength: Identity.Ulid.Length);
         body.Text("note", true, 4000);
-        body.NoOtherKeys();
         RecordEnvelope? subject = context.Find(context.Record.Subject?.Id);
+        bool policy = subject?.Type is "estate-policy" or "policy-exception" or "writing-exception";
+        bool policyGrant = subject?.Type == "authority" && PolicyAuthority.IsPolicyGrant(context.Model, subject);
+        bool policyFormat = body.Since(3, "policyAuthority");
+        if (policy)
+        {
+            if (!policyFormat) context.Error("policy.format", "Reconciling a policy or exception requires record format 3 and its bounded authority rules.");
+            PolicyAuthority.Reconcile(context, subject!, context.Find(kept));
+        }
+        else if (policyFormat && body.Has("policyAuthority")) body.Error("policy.authority", "policyAuthority", "Only policy and exception reconciliation uses this grant.");
+        if (policyGrant && !policyFormat) context.Error("policy.format", "Reconciling bounded policy authority requires record format 3.");
+        body.Allow("policyAuthority");
+        body.NoOtherKeys();
         bool communication = subject?.Type is "communication-setting" or "communication-delegation";
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("reconciliation.author", $"Reconciling principal {context.Record.By} has no principal record.");
+        }
+        else if (policy)
+        {
+            // The bounded policy check above replaces the general engineering permission.
+        }
+        else if (policyGrant)
+        {
+            if (!PolicyAuthority.OperatorAt(context.Model, context.Record.By, context.Record.At)) context.Error("policy.authority", "Only the operator reconciles bounded policy grants and their revocations.");
         }
         else if (communication)
         {
