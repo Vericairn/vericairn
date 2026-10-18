@@ -1,0 +1,73 @@
+{
+  "at": "2026-10-13T12:00:30Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:845b1fa9644da54e919c5c5cf7c2cc4d1ac41404c3d1b32ff63449a46104b0a4",
+          "id": "01M57TPYPQ5YVFK1TMWA8A9Q5D",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "date-duty",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "next-date-required",
+          "schedule": {
+            "at": "2026-11-01T00:00:00Z",
+            "dateSource": {
+              "kind": "credential-rotate-by",
+              "record": {
+                "hash": "sha256:c8f0589f860ed2be9d16d42f715618214c01c90189ada03ba0c6b53dea509df9",
+                "id": "01M57TPYPQ5YVFK1TMWA8A9Q5B",
+                "type": "credential-reference"
+              }
+            },
+            "kind": "date",
+            "leadDays": 30
+          },
+          "subject": {
+            "id": "01M57TPYPQ5YVFK1TMWA8A9Q5B",
+            "type": "credential-reference"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:0802edeceb44a21e98610bde4f4e1b474309dbf761d489862d74973e9133ec7e",
+  "id": "01M57TPYPRHGXRPZF8H21Y11B6",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "UIj3wE13xi0SW1pGt4hgkZnS9U2FW7lQfE_mdsQUxpIu0UVqhwutoRB92plEsljovbvVFN-n7EUk4qDi5QVLGw"
+    }
+  ],
+  "type": "estate-policy"
+}

@@ -154,10 +154,24 @@ public sealed partial class EstateService
         }
 
         // Prepare: the workspace on its work branch, never the shared clone, with the brief exported into it.
-        PreparedWorkspace workspace;
-        WorkspaceSnapshot baseline;
+        PreparedWorkspace? workspace = null;
+        WorkspaceSnapshot? baseline = null;
         string brief;
         string? configuredRoot;
+        RunResponse Refused(RunResponse response)
+        {
+            if (workspace is null) return response;
+            string? retained;
+            try { retained = workspaces.DiscardUnused(workspace, baseline, plan.Brief); }
+            catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
+            {
+                retained = "Cleanup could not verify that this preparation is unused.";
+            }
+            if (retained is null) return response;
+            string message = response.Message + $" Workspace kept at '{workspace.Path}'. {retained} Preserve its commits and files before removing it or choosing a root that contains it.";
+            return response with { Message = message, Problem = response.Problem is null ? null : response.Problem with { Message = message } };
+        }
+
         try
         {
             configuredRoot = new WorkerConfigurationStore().ReadWorkspaceRoot();
@@ -169,11 +183,11 @@ public sealed partial class EstateService
         }
         catch (ProviderRefusedException exception)
         {
-            return RunProblem(pending, "not-started", "refused", $"The workspace could not be prepared: {exception.Message} Nothing was recorded.");
+            return Refused(RunProblem(pending, "not-started", "refused", $"The workspace could not be prepared: {exception.Message} Nothing was recorded."));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            return RunProblem(pending, "not-started", "refused", $"The workspace could not be prepared: {exception.Message} Nothing was recorded.");
+            return Refused(RunProblem(pending, "not-started", "refused", $"The workspace could not be prepared: {exception.Message} Nothing was recorded."));
         }
 
         string where = $"{plan.Repository}, branch {workspace.Branch}";
@@ -227,7 +241,7 @@ public sealed partial class EstateService
         }
         catch (Exception exception) when (exception is ProviderRefusedException or IOException or UnauthorizedAccessException)
         {
-            return RunProblem(pending, "not-started", "refused", $"Execution preflight refused: {exception.Message} Nothing was recorded or dispatched.");
+            return Refused(RunProblem(pending, "not-started", "refused", $"Execution preflight refused: {exception.Message} Nothing was recorded or dispatched."));
         }
 
         // Record the intent before anything starts, judged again against the records as they are now, after the preparation: the
@@ -238,12 +252,12 @@ public sealed partial class EstateService
         lock (gate)
         {
             if (WorkspaceRootProblem(configuredRoot) is string rootProblem)
-                return RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded.");
+                return Refused(RunProblem(pending, "not-started", "refused", rootProblem + " Nothing was recorded."));
             EstateModel model = LoadWith(carried);
             RecordEnvelope? goal = AgentRuns.GoalAt(model, plan.Goal);
             if (AssignmentRefusal(model, plan.Assignment, plan.Key) is string assignmentRefusal)
             {
-                return RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded.");
+                return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
             }
 
             DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -253,7 +267,7 @@ public sealed partial class EstateService
                 RecordEnvelope? exception = exposed.Count == 0 ? null : CustodyExceptions.InForce(model, goal, now);
                 if (exposed.Count > 0 && exception is null)
                 {
-                    return RunProblem(pending, "not-started", "refused", CustodyRefusal(goal.Id, exposed) + " Nothing was recorded.");
+                    return Refused(RunProblem(pending, "not-started", "refused", CustodyRefusal(goal.Id, exposed) + " Nothing was recorded."));
                 }
 
                 excepted = exception is null ? null : new Excepted(exception.Id, CustodyExceptions.Describe(model, exception), EstateModel.BodyString(exception, "expires") ?? "?", exposed);
@@ -262,23 +276,23 @@ public sealed partial class EstateService
             IReadOnlyList<(string Code, string Message)> refusals = goal is null ? [("operation.goal", $"Goal {plan.Goal} is gone.")] : AgentRuns.StartRefusals(model, goal, plan.Assignment.Id, Element(plan.Cap));
             if (refusals.Count > 0)
             {
-                return RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded.");
+                return Refused(RunProblem(pending, "not-started", "refused", string.Join(" ", refusals.Select(r => r.Message)) + " Nothing was recorded."));
             }
 
             if (!SelectionStillCurrent(model, goal!, plan, configuration, launcher, request))
             {
-                return RunProblem(pending, "not-started", "refused", "Execution defaults or restrictions changed during preparation; start a newly admitted run. Nothing was recorded.");
+                return Refused(RunProblem(pending, "not-started", "refused", "Execution defaults or restrictions changed during preparation; start a newly admitted run. Nothing was recorded."));
             }
 
             if (!HarnessAdmission.StillCurrent(model, launcher.Launcher, preflight, plan.Selection["harnessAdmission"]))
             {
-                return RunProblem(pending, "not-started", "refused", "Harness qualification changed during preparation; nothing was recorded or dispatched.");
+                return Refused(RunProblem(pending, "not-started", "refused", "Harness qualification changed during preparation; nothing was recorded or dispatched."));
             }
 
             RunWatchSettings watch = RunWatchSettings.Resolve(model, goal!, launcher);
             if (watch.Refusal is string watchRefusal)
             {
-                return RunProblem(pending, "not-started", "refused", watchRefusal + " Nothing was recorded.");
+                return Refused(RunProblem(pending, "not-started", "refused", watchRefusal + " Nothing was recorded."));
             }
 
             plan = plan with { StallSeconds = StallSeconds(model, goal!, settings, launcher), Watch = watch,
@@ -333,7 +347,7 @@ public sealed partial class EstateService
                 WriteOutcome written = WriteLocked(draft, model);
                 if (!written.Ok)
                 {
-                    return new RunResponse(pending, "not-started", "Not recorded: " + written.Problem!.Message, false, Problem: written.Problem);
+                    return Refused(new RunResponse(pending, "not-started", "Not recorded: " + written.Problem!.Message, false, Problem: written.Problem));
                 }
 
                 intent = written.Written!;
@@ -344,7 +358,7 @@ public sealed partial class EstateService
                 (AuthoredRecord? authored, string? unsigned) = AuthorLocked(draft, model);
                 if (authored is null)
                 {
-                    return RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded.");
+                    return Refused(RunProblem(pending, "not-started", "refused", $"Not recorded: {unsigned} Nothing was recorded."));
                 }
 
                 (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([routed, authored], $"routing's assignment of work order {plan.Key} to {plan.AgentName} and the intent of its run {run}", routed.Envelope.Subject?.Id);
@@ -354,7 +368,7 @@ public sealed partial class EstateService
                     string what = assigned is null
                         ? "Nothing was recorded."
                         : $"Routing's assignment {assigned.Id} was stored and the run's intent was not, so nothing was launched: the assignment holds nothing of its step without that intent, routing takes the step again, and this machine reports the batch as a reconcile task (batch.incomplete).";
-                    return new RunResponse(pending, "not-started", $"{problem.Message} {what}", false, Problem: problem);
+                    return Refused(new RunResponse(pending, "not-started", $"{problem.Message} {what}", false, Problem: problem));
                 }
 
                 assigned = stored[0];
@@ -430,7 +444,7 @@ public sealed partial class EstateService
                 previous["usage"] = ZeroUsage(plan.Cap);
                 previous["executionObserved"] = new RunExecutionObservation(Element(plan.Selection)).Snapshot();
             });
-            return new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, []));
+            return Refused(new RunResponse(run, failed.Ok ? "known-failure" : "not-started", $"The {launcher.Launcher} harness could not be started: {exception.Message} The run is recorded as a known failure; nothing ran and nothing is charged.", false, failed.Written ?? intent, Element(plan.Cap), where, new Problem("provider", exception.Message, [])));
         }
 
         if (supervisor is null)
@@ -445,7 +459,7 @@ public sealed partial class EstateService
                 previous["observed"] = new JsonObject { ["summary"] = $"Cancelled before dispatch: when the harness was about to start, {devices} on the machine that ran the worker, with no custody exception in force for the goal{named}. Nothing was launched and nothing is charged.", ["at"] = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
             });
             string refusal = CustodyRefusal(plan.Goal, lapsed);
-            return new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, []));
+            return Refused(new RunResponse(run, canceled.Ok ? "canceled" : "not-started", $"Run {run} was cancelled before dispatch: {refusal} Its intent is recorded as canceled; nothing was launched and nothing is charged.", false, canceled.Written ?? intent, Element(plan.Cap), where, new Problem("refused", refusal, [])));
         }
 
         WriteOutcome dispatched;

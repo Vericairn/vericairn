@@ -267,6 +267,9 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     public AsksResponse Asks(string? principal = null) => AsksAsync(principal).GetAwaiter().GetResult();
 
     /// <inheritdoc />
+    public OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null) => OperatorActionsAsync(recipient, assignment, view).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => GoalsAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc />

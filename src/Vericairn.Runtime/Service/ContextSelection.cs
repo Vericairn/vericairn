@@ -7,13 +7,14 @@ using System.Text.RegularExpressions;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Runtime.Service;
 
 /// <summary>The working instructions and effects of one step, their pinned inputs, and only the optional documents they name.</summary>
 internal static partial class ContextSelection
 {
-    internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order)
+    internal static List<ContextAssembly.Source> Work(EstateModel model, IReadOnlyList<RecordFile> files, RecordEnvelope order, ISourceAdapter? history = null)
     {
         var working = new HashSet<string>(model.Chain(order), StringComparer.Ordinal);
         var required = new HashSet<string>(StringComparer.Ordinal);
@@ -105,15 +106,21 @@ internal static partial class ContextSelection
         {
             string path = EstateModel.BodyString(revision, "path")!;
             string hash = EstateModel.BodyString(revision, "hash")!;
-            byte[]? bytes = LocalOriginal(model.Root, path, hash);
             bool mandatory = requiredDocuments.Contains(revision.Id);
-            sources.Add(new ContextAssembly.Source(new JsonObject
+            byte[]? bytes = LocalOriginal(model.Root, path, hash, mandatory ? history : null);
+            var identity = new JsonObject
             {
                 ["kind"] = "document", ["path"] = path, ["revision"] = revision.Id,
                 ["revisionHash"] = revision.ComputedHash, ["byteHash"] = hash,
                 // A declaration alone does not verify a retained size.
                 ["bytes"] = bytes?.LongLength,
-            }, bytes, mandatory, mandatory ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; named by the work, its inputs or governing decisions"));
+            };
+            // The self-contained pin preserves retrieval behavior: optional originals stay working-tree-only.
+            if (mandatory)
+            {
+                identity["history"] = "local";
+            }
+            sources.Add(new ContextAssembly.Source(identity, bytes, mandatory, mandatory ? "Read before continuing " + EstateModel.BodyString(order, "key") : "optional for this step; named by the work, its inputs or governing decisions"));
         }
 
         return sources;
@@ -217,7 +224,7 @@ internal static partial class ContextSelection
         }
     }
 
-    internal static byte[]? LocalOriginal(string root, string relative, string hash)
+    internal static byte[]? LocalOriginal(string root, string relative, string hash, ISourceAdapter? history = null)
     {
         // Only normalized repository files are eligible; never follow a link into machine-local custody.
         string[] parts = relative.Split('/');
@@ -236,18 +243,32 @@ internal static partial class ContextSelection
             }
         }
 
-        byte[] bytes;
+        byte[]? bytes;
         try
         {
             bytes = File.ReadAllBytes(path);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return null;
+            bytes = null;
         }
 
         // File.Exists also returns false on denied directory traversal. Only genuine absence is
         // missing; access failures propagate to the context's generic, metadata-free refusal.
-        return ContentHash.Sha256(bytes) == hash ? bytes : null;
+        if (bytes is not null && ContentHash.Sha256(bytes) == hash)
+        {
+            return bytes;
+        }
+
+        try
+        {
+            bytes = history?.ReadFileAtHash(root, relative, hash);
+        }
+        catch (ProviderRefusedException)
+        {
+            return null;
+        }
+        // The adapter is not a substitute for verifying the pinned identity at the context boundary.
+        return bytes is not null && ContentHash.Sha256(bytes) == hash ? bytes : null;
     }
 }

@@ -25,6 +25,9 @@ public sealed class RecordEnvelope
     /// <summary>Format identifier for record format 2.</summary>
     public const string Format2 = "vericairn.record/2";
 
+    /// <summary>Format identifier for record format 3.</summary>
+    public const string Format3 = "vericairn.record/3";
+
     /// <summary>Creates an envelope.</summary>
     public RecordEnvelope(string type, string id, string at, string by, RecordReference? subject, string? supersedes, JsonElement body, string declaredHash, string computedHash, IReadOnlyList<RecordSignature> signatures, long format = RecordFormats.First)
     {

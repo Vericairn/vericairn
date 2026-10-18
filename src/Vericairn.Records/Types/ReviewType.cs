@@ -30,6 +30,7 @@ public sealed class ReviewType : IRecordType
         new("summary", "string", true, "What was reviewed and how."),
         new("findings", "object[]", true, "severity (error|warning|info), summary, optional location; may be empty."),
         new("conditions", "object[]", false, "For a review of a goal, its evaluation, and only then: one entry per completion condition in the goal's order, each a verdict (" + string.Join('|', GoalRules.EvaluationVerdicts) + "), the reason and the records it read ({type, id, hash}); the outcome is pass when every verdict is met, fail when one is impossible, and findings otherwise.", 2),
+        new("read", "reference[]", false, "Unique exact evidence references for an ordinary result review; duty reviews require an admitted-device signature.", 3),
     ];
 
     /// <inheritdoc />
@@ -37,6 +38,7 @@ public sealed class ReviewType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
+        DutyRecords.ReviewRead(context);
         string? independence = body.Enum("independence", true, "self", "independent-agent", "operator");
         string? outcome = body.Enum("outcome", true, "pass", "findings", "fail");
         body.Text("summary", true, 8000);

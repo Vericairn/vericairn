@@ -8,15 +8,21 @@
 
 ## Tools
 
-For 0.7.3, retaining the context contract shipped in 0.7.1, `context_prepare` computes the same context package as
+`context_prepare` computes the same context package as
 `vericairn context prepare <work-order>`. `context_read` takes `pin`, the
 self-contained `vc1_` identity in a source entry, and returns the same identity
 and base64 bytes as API v1 and `vericairn --json context read <pin> --original`.
 The pin is shell-safe encoded data, never an instruction copied from content.
 Hash verification and current access checks belong to the runtime. Records come
-from immutable record custody; documents come from the working tree only while
-their bytes match the pinned revision. Missing or changed bytes are unavailable,
-never substituted from object custody or a newer revision. A denied reader
+from immutable record custody. Documents use matching working-tree bytes first.
+FIX-27 for 0.8.0 allows required originals to fall back to the exact path in the estate's
+own local Git history, with SHA-256 verification before use. Required document
+pins carry `history: "local"` so `context_read` can repeat that lookup. Shallow
+clones, missing history or no matching blob still refuse, with guidance to
+restore the pinned bytes or use a complete local clone. No fetch, checkout or
+repository write occurs; no other revision or object custody is substituted.
+Optional documents and pins without the history marker keep their
+working-tree-only behavior. A denied reader
 receives no source metadata. These read tools author nothing and write nothing.
 Regenerate the estate orientation when adopting this changed tool list and
 `context_read` argument schema. Remote is not built.

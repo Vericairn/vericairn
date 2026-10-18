@@ -1,0 +1,78 @@
+{
+  "at": "2026-10-13T14:00:22Z",
+  "body": {
+    "appliesTo": {
+      "kind": "estate"
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:ff6291d01a453ca054edd35608ee6b51225be52f5ead6461c0339c1a2eb62fea",
+          "id": "01M57TPYS2C1VHB3K361XX5B7N",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "report-date",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "monthly",
+        "kind": "vericairn.estate/recurring-duty",
+        "parameters": {
+          "discharge": {
+            "checks": [
+              "inventory"
+            ],
+            "records": [],
+            "review": "independent"
+          },
+          "graceDays": 3,
+          "renewal": "none",
+          "schedule": {
+            "at": "2026-11-02T00:00:00Z",
+            "dateSource": {
+              "kind": "reviewed-report",
+              "result": {
+                "hash": "sha256:dd6d8f977430acd062ad45f41707d4f0f8a89b04fdd3a6a09f6780211e997721",
+                "id": "01M57TPYS1FP5YX5CS5CB8Q038",
+                "type": "result"
+              },
+              "review": {
+                "hash": "sha256:82eae939b77655406942c96636df5a0ea39d8ceec14a207f62c152805004186d",
+                "id": "01M57TPYS2C1VHB3K361XX5B7K",
+                "type": "review"
+              }
+            },
+            "kind": "date",
+            "leadDays": 7
+          },
+          "subject": {
+            "id": "01M57TPYP3J1PPGV71CJKDNBFA",
+            "type": "estate"
+          }
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-14T00:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:60b1a8d289ddb98c6f9ff7fb35907cf3ca638e5b6d4b93bf20876165c56f676e",
+  "id": "01M57TPYS3D0BV4NWW96DTJCG1",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "q5Fa-w5jfdLET7jrelYQRK0ACLa0WQ6dFqdLccn34vu7JlTmP6l77VIozBIKug_Bc_RNTUHaQmifkAUsv5UKRw"
+    }
+  ],
+  "type": "estate-policy"
+}

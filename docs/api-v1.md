@@ -71,8 +71,9 @@ exactly-once execution across independently running services.
 exact original bytes (base64 in JSON). The shell-safe `vc1_` pin is unpadded
 base64url of canonical JSON containing the estate and source identity. A record
 pin contains its id, canonical record hash, path and byte hash; a document pin
-contains its path, revision record id and hash, and byte hash. It is an identity,
-not authority, and requires no retained manifest.
+contains its path, revision record id and hash, and byte hash. Required document
+pins also carry `history: "local"`, allowing retrieval from the estate's own Git
+history. It is an identity, not authority, and requires no retained manifest.
 
 Both operations recheck the requesting device under the runtime gate. A reader
 who loses access receives only `Completeness cannot be confirmed.` from the
@@ -83,9 +84,21 @@ authority. The existing boundary is estate-wide; no per-source ACL is claimed.
 Records are read from immutable record custody (the repository's `records/`,
 or the live store for the local-only profile). Documents are read from normalized
 `docs/` or `design/` working-tree paths, without following symbolic links, only
-while their bytes match the pinned revision. No object-store fallback, retained
-manifest, latest revision or other source is substituted. Unavailable or changed
-bytes return `original-unavailable`. The earlier unreleased manifest/source
+while their bytes match the pinned revision. With FIX-27 for 0.8.0, if a required original
+is missing or differs, the registered Git adapter searches that exact path in
+the history reachable from the estate repository's local refs. Only a regular file whose exact bytes
+match the pinned SHA-256 hash is used; the runtime verifies the bytes again.
+No fetch, checkout or repository write occurs. Shallow clones, missing or
+unreadable history, an unavailable adapter, and history with no matching blob
+refuse with guidance to restore the pinned bytes or use a complete local clone.
+The lookup has a thirty-second deadline and a 64 MiB output limit per Git command;
+exceeding either makes the historical original unavailable.
+Required working-tree bytes that already match do not need history.
+Optional documents retain their working-tree-only selection and retrieval,
+including pins without the history marker. No object-store fallback, retained
+manifest, newer revision or older revision with different bytes is substituted.
+Unavailable required originals prevent a package with `context.original-unavailable`;
+retrieval returns `original-unavailable`. The earlier unreleased manifest/source
 route remains callable but returns unavailable after access checking; prepare
 again for a self-contained pin. The SDK exposes both API v1 routes. No new record
 type is introduced. Remote is not built.
@@ -795,6 +808,15 @@ an earlier check was current, shown with when, and `unavailable` otherwise. A co
 the state of workers.
 
 ## The SDK
+
+The next release adds `GET /v1/operator/actions` and
+`VericairnClient.OperatorActions(recipient, assignment, view)`, returning `OperatorActionsResponse`
+(`text`, `json`, `hasErrors`). This read shows every recorded operator ask, pending operator
+acceptance and waiting reserved action, with reasons, dependencies and exact commands. The existing
+communication query parameters select presentation, defaulting to the root operator; they never
+filter the canonical queue. Record errors suppress authoring commands. The complete contract and
+required-input bodies are described in [Operator actions](operator-actions.md). There is no MCP tool
+for this surface.
 
 In a .NET 10 project, install the Community SDK with:
 

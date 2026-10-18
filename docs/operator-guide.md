@@ -60,6 +60,10 @@ authority rules and migration record still apply. A cached network answer grants
 
 ## Required attention
 
+The next release adds [the operator action queue](operator-actions.md), available with
+`vericairn operator list`: every recorded waiting operator action, its reason, holds, exact command
+and required input. This addition is separate from the frozen release guides.
+
 In 0.7.3, `status`, `progress` and Workbench show compact references to obligations
 that remain open, with their current state and an inspection command. Later
 verification, result, review, acceptance and operation records resolve the

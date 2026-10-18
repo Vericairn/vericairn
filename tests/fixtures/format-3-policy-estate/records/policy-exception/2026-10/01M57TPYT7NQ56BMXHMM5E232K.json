@@ -1,0 +1,66 @@
+{
+  "at": "2026-10-13T14:00:34Z",
+  "body": {
+    "basis": {
+      "decision": {
+        "hash": "sha256:b9981fd036009e8345a766bec65b63745125a53a8d7216394c90f224e1477c8a",
+        "id": "01M57TPYPA4E37QXJ9YZGM2FTS",
+        "type": "decision"
+      }
+    },
+    "expiresAt": "2026-10-14T14:00:33Z",
+    "reason": "A bounded delay, with the debt retained.",
+    "rule": "age",
+    "state": "granted",
+    "targets": [
+      {
+        "hash": "sha256:453202f86cea292a3c0494e1ea89c76907d123cb808bfa988107fd1932bcfbcb",
+        "kind": "file",
+        "path": "docs/fixture-inventory.txt",
+        "repository": "01M57TPYPBZKR5291T0ZPZV759",
+        "submission": {
+          "product": "01M57TPYPBZKR5291T0ZPZV757",
+          "release": {
+            "hash": "sha256:aa99f1cfcbdcc22de6d19fd70b8df14d902772ffa4c3d1d38df06a613278f8a2",
+            "id": "01M57TPYSJDHMRRPD4ZTV628ZX",
+            "type": "release"
+          },
+          "version": "0.8.0"
+        }
+      },
+      {
+        "kind": "record",
+        "record": {
+          "hash": "sha256:dd6d8f977430acd062ad45f41707d4f0f8a89b04fdd3a6a09f6780211e997721",
+          "id": "01M57TPYS1FP5YX5CS5CB8Q038",
+          "type": "result"
+        }
+      },
+      {
+        "kind": "publication",
+        "publication": {
+          "hash": "sha256:a040b23332b66a0964e522b047dff4d4ef52a70208662647de92f6c44b1dbfb0",
+          "id": "01M57TPYSK8MJQYZFXAMNVPVZ3",
+          "type": "release"
+        }
+      }
+    ]
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:103fee28dc71154b563772538762108a25c94c73156141091d4266bffc7716f9",
+  "id": "01M57TPYT7NQ56BMXHMM5E232K",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "1WvjmgdiUE3XVO_QKcMGtLp7TPIQr8Cbh5PDvACnYRG92O39M92GwyJG9m3DHgBZT59CHFjS3B3hm_6RP3H8WA"
+    }
+  ],
+  "subject": {
+    "hash": "sha256:ba7075484f6e7e0304f24540f94c523434be475e7d2a7204cdd2c9864e85953f",
+    "id": "01M57TPYPN83EPXY34JXBZTDZ7",
+    "type": "estate-policy"
+  },
+  "type": "policy-exception"
+}

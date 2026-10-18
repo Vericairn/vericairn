@@ -4,11 +4,13 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Adapters.Git;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Hashing;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Cli.Tests;
 
@@ -161,8 +163,10 @@ public class CommunicationQualificationTests
         return outcome.Written!.Id;
     }
 
-    [Fact]
-    public void D08C_AMeasuredOmissionCanBeRetrievedUntilItsExactOriginalChanges()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void D08C_OptionalOmissionsStillRequireMatchingWorkingBytesEvenWithHistory(bool retainedHistory)
     {
         using var estate = new HandoffEstate();
         byte[] original = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat("café 漢字\n", 20_000)));
@@ -171,7 +175,15 @@ public class CommunicationQualificationTests
         File.WriteAllBytes(path, original);
         var revision = estate.Add("document-revision", estate.OperatorId, $$"""{"path":"docs/large.md","title":"Optional source","hash":"{{ContentHash.Sha256(original)}}","bytes":{{original.Length}},"mediaType":"text/markdown","revision":1,"summary":"A large optional original."}""");
         var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Measured omission","intent":"Read docs/large.md if useful.","scope":["tests"],"exitQuestion":"Measured?","inputs":[],"deliverables":["results"]}""");
+        if (retainedHistory)
+        {
+            ContextJourneyTests.Git(estate.Root, "init", "-q");
+            ContextJourneyTests.Git(estate.Root, "add", ".");
+            ContextJourneyTests.Git(estate.Root, "commit", "-qm", "Keep the optional original");
+        }
         using EstateService api = EstateService.Open(estate.Root);
+        api.Providers = new ProviderRegistry();
+        api.Providers.Register(new GitCommandAdapter());
         var mcp = new ToolRegistry(api, null);
         const long cap = 100_000;
         ContextResponse response = api.Context("COMMS-J", cap);
@@ -214,7 +226,7 @@ public class CommunicationQualificationTests
             Assert.Equal(original, JsonSerializer.Deserialize<ContextReadResponse>(read.Text, ProtocolJson.Options)!.Content);
             Assert.Equal(original, api.ContextRead(pin).Content);
 
-            // A changed working file cannot satisfy an old pin or silently reuse its measured size.
+            // Optional documents keep their working-tree-only retrieval even when local history holds the bytes.
             File.WriteAllText(path, "Edited original: café.\n");
             Assert.Equal("original-unavailable", api.ContextRead(pin).Problem!.Code);
             Assert.True(mcp.Call("context_read", new JsonObject { ["pin"] = pin }).IsError);

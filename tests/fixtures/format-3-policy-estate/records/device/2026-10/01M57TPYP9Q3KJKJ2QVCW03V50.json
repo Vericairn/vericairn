@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-13T12:00:06Z",
+  "body": {
+    "algorithm": "ecdsa-p256-sha256",
+    "custody": "file-owner-only",
+    "name": "Test signing device",
+    "platform": "linux",
+    "presence": "none",
+    "principal": "01M57TPYP3J1PPGV71CJKDNBFC",
+    "profiles": [
+      "embedded"
+    ],
+    "publicKey": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1kYSdGiqcxuh9j3ZIK6b1eZZ3iir64NgdbDXT0ZwWwslARXmvORs5Ymz6fg9uiqjdIjLpPFT0pe8kk-KS6qXMg",
+    "purpose": "signing"
+  },
+  "by": "01M57TPYP3J1PPGV71CJKDNBFC",
+  "format": "vericairn.record/3",
+  "hash": "sha256:49a444f22de0f8275919976b4a17f7894586db45ff615dba856a48208bb52bcd",
+  "id": "01M57TPYP9Q3KJKJ2QVCW03V50",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
+      "signature": "sNsfbDXpofAVS6vYr4QVxrbs-v4_1PX6Y3njCMYt3l7DWd91jUEYySer9uwCCVsWApgk8mMocFnX7feN0FUjUA"
+    }
+  ],
+  "type": "device"
+}

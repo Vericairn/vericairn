@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-13T12:00:10Z",
+  "body": {
+    "kind": "repository",
+    "location": {
+      "github": "Example/example"
+    },
+    "name": "Fixture sources",
+    "role": "Test sources.",
+    "visibility": "public"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:3e4c720394c197f30acd1fd5c21601742d350dc8ce26198004a8502b792bb626",
+  "id": "01M57TPYPBZKR5291T0ZPZV759",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "pQx3aZps0qrVe9u5yMhbsS4zLKjzudd4QII4vd6Eg-JjRHZpFBmEpMtGWipA9o95Wvl4n0qo5GHv3-7sXU39ow"
+    }
+  ],
+  "subject": {
+    "id": "01M57TPYPBZKR5291T0ZPZV757",
+    "type": "product"
+  },
+  "type": "resource"
+}

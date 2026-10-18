@@ -21,6 +21,7 @@ internal static class CliApp
         root.Subcommands.Add(new RecordsCommand(context));
         root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(new WorkCommand(context));
+        root.Subcommands.Add(new OperatorCommand(context));
         root.Subcommands.Add(new GoalCommand(context));
         root.Subcommands.Add(new WorkerCommand(context));
         root.Subcommands.Add(new DevicesCommand(context));

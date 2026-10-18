@@ -213,6 +213,10 @@ public sealed partial class VericairnClient
     public Task<AsksResponse> AsksAsync(string? principal = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<AsksResponse>(nameof(Asks), async token => (await GetAsync<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Asks)), cancellationToken);
 
+    /// <summary>The cancellable OperatorActions operation, with a deadline covering the complete response.</summary>
+    public Task<OperatorActionsResponse> OperatorActionsAsync(string? recipient = null, string? assignment = null, CommunicationValues? view = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<OperatorActionsResponse>(nameof(OperatorActions), async token => (await GetAsync<OperatorActionsResponse>("/v1/operator/actions" + CommunicationQuery(recipient, assignment, view), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(OperatorActions)), cancellationToken);
+
     /// <summary>The cancellable Goals operation, with a deadline covering the complete response.</summary>
     public Task<IReadOnlyList<GoalRow>> GoalsAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<IReadOnlyList<GoalRow>>(nameof(Goals), async token => (await GetAsync<List<GoalRow>>("/v1/goals", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Goals)), cancellationToken);

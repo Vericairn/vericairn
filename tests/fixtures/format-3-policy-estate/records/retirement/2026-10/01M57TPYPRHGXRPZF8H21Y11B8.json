@@ -1,0 +1,21 @@
+{
+  "at": "2026-10-13T12:00:31Z",
+  "body": {
+    "condition": "Remove after checking.",
+    "path": "docs/removed-fixture.txt",
+    "reason": "Temporary fixture.",
+    "retiredAt": "2026-10-13T12:00:30Z"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:89a2e0492b6535dabfe8a8878839e7e6bfcea945de068127e501bba0e59c43d1",
+  "id": "01M57TPYPRHGXRPZF8H21Y11B8",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "0Ft_FYL6fAj-ppBZNiou0kWelKMWYDUpIYgEfay6nnDDEv-U1Az3oX7X2YmhIPaYCA4Y9P-KWmEpbfYCIQ1Hbw"
+    }
+  ],
+  "type": "retirement"
+}

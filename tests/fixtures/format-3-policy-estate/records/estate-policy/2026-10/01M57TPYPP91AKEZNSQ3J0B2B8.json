@@ -1,0 +1,52 @@
+{
+  "at": "2026-10-13T12:00:25Z",
+  "body": {
+    "appliesTo": {
+      "kind": "work-orders",
+      "workOrders": [
+        "01M57TPYPC5P4Q97ZMQ1A1X4X8",
+        "01M57TPYPC5P4Q97ZMQ1A1X4XA"
+      ]
+    },
+    "basis": [
+      {
+        "decision": {
+          "hash": "sha256:cfcad722a4fcdff5441d715b35ce1273e6b6268e77e0243fbfe618eaabb44e5c",
+          "id": "01M57TPYPP91AKEZNSQ3J0B2B6",
+          "type": "decision"
+        },
+        "requirement": "definition"
+      }
+    ],
+    "key": "work-policy",
+    "level": "refuse",
+    "maxExceptionDays": 30,
+    "owner": "01M57TPYNPYJYZKTGCETXTHRT8",
+    "reason": "Keep an attributable maintenance history.",
+    "rules": [
+      {
+        "key": "age",
+        "kind": "example.policy/age",
+        "parameters": {
+          "plannedDays": 30
+        },
+        "version": 1
+      }
+    ],
+    "startsAt": "2026-10-13T13:00:00Z",
+    "state": "active",
+    "title": "Test maintenance"
+  },
+  "by": "01M57TPYNPYJYZKTGCETXTHRT8",
+  "format": "vericairn.record/3",
+  "hash": "sha256:25167457b87197d916e89db8749a1865c2569447d5126e264d1f47aa1be2cc19",
+  "id": "01M57TPYPP91AKEZNSQ3J0B2B8",
+  "signatures": [
+    {
+      "algorithm": "ecdsa-p256-sha256",
+      "device": "01M57TPYP4PJ10HN6CYX7650CM",
+      "signature": "5zCwvtkys1YzN37ScXGkbO8Qwun_Y6DU6fSd6piBrh0wS5qIj8ItXBVJn3I2ZfkA4gB7T0NBNAUlb_7ClrTliw"
+    }
+  ],
+  "type": "estate-policy"
+}
