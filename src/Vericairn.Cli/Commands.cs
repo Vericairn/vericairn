@@ -135,41 +135,11 @@ internal static partial class Commands
         return Clean;
     });
 
-    public static int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
-    {
-        BriefResponse? brief = json ? api.Brief(key) : api.BriefFor(key, presentation?.Recipient, presentation?.Assignment, presentation?.Values("handoff"));
-        if (brief is null)
-        {
-            return Fail($"No current work order has key or id {key}.");
-        }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(brief.Json) : brief.Markdown);
-        return brief.Problem is null ? Clean : Failed;
-    });
 
-    public static int WorkObserve(string root, string key, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
-    {
-        ObserveResponse? observe = api.Observe(key);
-        if (observe is null)
-        {
-            return Fail($"No current work order has key or id {key}.");
-        }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(observe.Json) : CommandPresentation.Protected(api, "result", key, observe.Text, presentation));
-        return Clean;
-    });
 
-    public static int WorkAssign(string root, string key, string contributor, string by, string briefPath, string? note, bool json) =>
-        WithBody(briefPath, brief => WithApi(root, api => ReportOutcome(api.Assign(new AssignRequest(key, contributor, by, brief, note)), json)));
 
-    public static int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json) =>
-        WithApi(root, api => ReportOutcome(api.Attempt(new AttemptRequest(assignmentId, by, workspace, note, at)), json));
-
-    public static int WorkResult(string root, string attemptId, string by, string bodyPath, bool json) =>
-        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.Result(new ResultRequest(attemptId, by, body)), json)));
-
-    public static int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
-        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.Amend(new AmendRequest(assignmentId, by, body)), json)));
 
     /// <summary>The current goal condition by condition: the one named, or the one goal neither achieved nor ended; with none or several, the list.</summary>
     public static int Goal(string root, string? id, bool json) => WithApi(root, api =>
@@ -639,25 +609,6 @@ internal static partial class Commands
         });
     }
 
-    /// <summary>Hands a step an agent holds over to a person, and prints the stops asked of the agent's runs in flight.</summary>
-    public static int WorkTakeover(string root, string assignment, string by, string? contributor, string? note, bool json) => WithApi(root, api =>
-    {
-        TakeoverResponse taken = api.WorkTakeover(new TakeoverRequest(assignment, by, contributor, note));
-        if (!taken.Ok)
-        {
-            return taken.Problem is { Code: "rejected", Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(taken.Message);
-        }
-
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(taken, ProtocolJson.Options));
-            return Clean;
-        }
-
-        Console.Out.WriteLine($"{taken.Assignment!.Path}  {taken.Assignment.Id}  {taken.Assignment.Hash}");
-        Console.Out.WriteLine("  " + taken.Message);
-        return Clean;
-    });
 
     /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
     public static int WorkerStop(string root, string run, string by, string? reason, int? grace, bool json) => WithApi(root, api =>

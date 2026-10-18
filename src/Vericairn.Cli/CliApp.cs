@@ -28,7 +28,7 @@ internal static partial class CliApp
         root.Subcommands.Add(new CommunicationCommand(context));
         root.Subcommands.Add(new RecordsCommand(context));
         root.Subcommands.Add(new EstateCommand(context));
-        root.Subcommands.Add(WorkFamily(estateOption, jsonOption, presentation));
+        root.Subcommands.Add(new WorkCommand(context));
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
         root.Subcommands.Add(new DevicesCommand(context));
@@ -370,96 +370,4 @@ internal static partial class CliApp
         return worker;
     }
 
-    private static Command WorkFamily(Option<string> estateOption, Option<bool> jsonOption, PresentationOptions presentation)
-    {
-        var work = new Command("work", "Briefs, assignments, attempts, results and amendments of work orders.");
-        var keyArgument = new Argument<string>("work-order") { Description = "Work-order key (for example M1-WORK) or record id." };
-        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
-
-        var brief = new Command("brief", "Export the brief of a work order: everything a contributor needs, from the records alone.");
-        brief.Arguments.Add(keyArgument);
-        brief.SetAction(parseResult => Commands.WorkBrief(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
-        work.Subcommands.Add(brief);
-
-        var contributorOption = new Option<string>("--contributor") { Description = "Principal id of the contributor the work is delegated to.", Required = true };
-        var briefOption = new Option<string>("--brief") { Description = "Path to a JSON file holding the brief (outcome, sources, permittedChanges, prohibitedEffects, workspace, limits, expectedOutputs, reviewCriteria, recovery), or '-' for standard input.", Required = true };
-        var noteOption = new Option<string?>("--note") { Description = "Free text." };
-        var assign = new Command("assign", "Delegate a work order to a contributor under a brief, pinned to the exact work-order revision.");
-        assign.Arguments.Add(keyArgument);
-        assign.Options.Add(contributorOption);
-        assign.Options.Add(byOption);
-        assign.Options.Add(briefOption);
-        assign.Options.Add(noteOption);
-        assign.SetAction(parseResult => Commands.WorkAssign(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(keyArgument)!,
-            parseResult.GetValue(contributorOption)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(briefOption)!,
-            parseResult.GetValue(noteOption),
-            parseResult.GetValue(jsonOption)));
-        work.Subcommands.Add(assign);
-
-        var assignmentArgument = new Argument<string>("assignment") { Description = "Assignment record id." };
-        var workspaceOption = new Option<string>("--workspace") { Description = "Where the work happens, named without machine paths (a repository and branch, a clone, a tool).", Required = true };
-        var attemptNoteOption = new Option<string>("--note") { Description = "What the contributor intends to do.", Required = true };
-        var atOption = new Option<string?>("--at") { Description = "Start time, for example 2026-10-13T14:00:00Z (default: now)." };
-        var attempt = new Command("attempt", "Record the start of an attempt by the assignment's contributor.");
-        attempt.Arguments.Add(assignmentArgument);
-        attempt.Options.Add(byOption);
-        attempt.Options.Add(workspaceOption);
-        attempt.Options.Add(attemptNoteOption);
-        attempt.Options.Add(atOption);
-        attempt.SetAction(parseResult => Commands.WorkAttempt(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(assignmentArgument)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(workspaceOption)!,
-            parseResult.GetValue(attemptNoteOption)!,
-            parseResult.GetValue(atOption),
-            parseResult.GetValue(jsonOption)));
-        work.Subcommands.Add(attempt);
-
-        var attemptArgument = new Argument<string>("attempt") { Description = "Attempt record id." };
-        var bodyOption = new Option<string>("--body") { Description = "Path to a JSON file holding the body, or '-' for standard input.", Required = true };
-        var result = new Command("result", "Submit the result of an attempt: outcome, summary, outputs by hash, evidence, checks, limitations, unresolved effects, next step.");
-        result.Arguments.Add(attemptArgument);
-        result.Options.Add(byOption);
-        result.Options.Add(bodyOption);
-        result.SetAction(parseResult => Commands.WorkResult(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(attemptArgument)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(bodyOption)!,
-            parseResult.GetValue(jsonOption)));
-        work.Subcommands.Add(result);
-
-        var amend = new Command("amend", "Request a change to an assignment's outcome, scope, target, budget or permitted effects; it authorizes nothing.");
-        amend.Arguments.Add(assignmentArgument);
-        amend.Options.Add(byOption);
-        amend.Options.Add(bodyOption);
-        amend.SetAction(parseResult => Commands.WorkAmend(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(assignmentArgument)!,
-            parseResult.GetValue(byOption)!,
-            parseResult.GetValue(bodyOption)!,
-            parseResult.GetValue(jsonOption)));
-        work.Subcommands.Add(amend);
-
-        var takenOption = new Option<string?>("--contributor") { Description = "The person who takes the step over; the recording principal when omitted." };
-        var takeoverNoteOption = new Option<string?>("--note") { Description = "Why; a sentence naming the hand-over when omitted." };
-        var takeover = new Command("takeover", "Take over a step an agent holds: the hand-over is a new assignment of the step to a person, carrying the agent's brief and naming the agent's assignment, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop. A person records it, the one taking the step over, the sponsor of its goal or an operator, never an agent.");
-        takeover.Arguments.Add(assignmentArgument);
-        takeover.Options.Add(byOption);
-        takeover.Options.Add(takenOption);
-        takeover.Options.Add(takeoverNoteOption);
-        takeover.SetAction(parseResult => Commands.WorkTakeover(parseResult.GetValue(estateOption)!, parseResult.GetValue(assignmentArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(takenOption), parseResult.GetValue(takeoverNoteOption), parseResult.GetValue(jsonOption)));
-        work.Subcommands.Add(takeover);
-
-        var observe = new Command("observe", "Show a work order's assignments, attempts, results, amendments, reviews and acceptances.");
-        observe.Arguments.Add(keyArgument);
-        observe.SetAction(parseResult => Commands.WorkObserve(parseResult.GetValue(estateOption)!, parseResult.GetValue(keyArgument)!, parseResult.GetValue(jsonOption), presentation.Read(parseResult)));
-        work.Subcommands.Add(observe);
-        return work;
-    }
 }
