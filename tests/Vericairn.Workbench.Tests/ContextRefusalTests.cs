@@ -18,7 +18,7 @@ public class ContextRefusalTests(HeadlessFixture fixture)
         string root = Seed.Temp("wb-context-refusal");
         string person = Seed.Init(root);
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Seed.Temp("wb-context-refusal-prefs"))) { ActingOverride = person };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         IEstateApi api = shell.Api!;
         byte[] original = Encoding.UTF8.GetBytes("Required evidence, unavailable in this copy.\n");
         WriteOutcome revision = api.NewRecord(new("document-revision", person, Seed.Json($$"""{"path":"docs/required.md","title":"Required evidence","hash":"{{ContentHash.Sha256(original)}}","bytes":{{original.Length}},"mediaType":"text/markdown","revision":1,"summary":"Required original."}""")));
@@ -27,17 +27,18 @@ public class ContextRefusalTests(HeadlessFixture fixture)
         Assert.True(order.Ok, order.Problem?.Message);
         WriteOutcome assignment = api.Assign(new("COMMS-REFUSED", person, person, Seed.Json("""{"outcome":"Read the evidence.","sources":[],"permittedChanges":["tests"],"prohibitedEffects":["no publication"],"workspace":["local clone"],"limits":[],"expectedOutputs":["result"],"reviewCriteria":["original read"],"recovery":"Restore the evidence."}""")));
         Assert.True(assignment.Ok, assignment.Problem?.Message);
-        await fixture.Ui(shell.Refresh);
+        await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
         BriefResponse brief = api.BriefFor("COMMS-REFUSED", person)!;
         Assert.Equal("incomplete-context", brief.Problem!.Code);
         Assert.NotEmpty(brief.Problem.Findings);
         foreach (string depth in CommunicationResolution.Depths)
         {
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 shell.StatusViewDepth = depth;
-                if (openAssignment) { shell.OpenAssignment(assignment.Written!.Id); }
-                else { shell.OpenWorkOrder("COMMS-REFUSED"); }
+                await shell.PendingOperation;
+                if (openAssignment) { await shell.OpenAssignmentAsync(assignment.Written!.Id, cancellationToken: TestContext.Current.CancellationToken); }
+                else { await shell.OpenWorkOrderAsync("COMMS-REFUSED", cancellationToken: TestContext.Current.CancellationToken); }
             });
             TextDocument page = Assert.IsType<TextDocument>(shell.SelectedDocument);
             Assert.Contains(brief.Markdown, page.Text, StringComparison.Ordinal);

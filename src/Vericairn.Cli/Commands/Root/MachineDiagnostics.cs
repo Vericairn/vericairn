@@ -36,7 +36,7 @@ internal sealed class MachineDiagnostics(CommandContext context)
         if (IsEstate(root))
         {
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            context.Output.WriteLine(endpoint is not null && VericairnClient.IsAlive(endpoint)
+            context.Output.WriteLine(endpoint is not null && context.IsAlive(endpoint)
                 ? $"daemon    process {endpoint.ProcessId} serves this estate since {endpoint.StartedAt} ({endpoint.Kind}{(endpoint.Loopback is null ? string.Empty : ", loopback " + endpoint.Loopback.Port)})"
                 : "daemon    none; commands run the embedded runtime");
         }

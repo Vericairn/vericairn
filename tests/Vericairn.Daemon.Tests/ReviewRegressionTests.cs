@@ -500,8 +500,10 @@ public class ReviewRegressionTests
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a client certificate named: {string.Join(", ", addresses.Requests)}");
     }
 
-    [Fact]
-    public async Task F5_ARuntimeCertificatesAddressesAreNeverFetched()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task F5_ARuntimeCertificatesAddressesAreNeverFetched(bool asynchronous)
     {
         // Something answering at a runtime's address with a certificate that names an address: the device pairing with it refuses
         // the handshake before its TLS reads the certificate, and fetches nothing. On Windows the impostor's own TLS holds a
@@ -534,8 +536,22 @@ public class ReviewRegressionTests
                     }
                 },
                 TestContext.Current.CancellationToken);
-            PairingException refused = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }));
-            Say($"{refused.Code}: {refused.Message}");
+            Exception refused;
+            if (asynchronous)
+            {
+                ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => RuntimePairing.PairAsync($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }, TestContext.Current.CancellationToken));
+                Assert.False(failure.OutcomeUnknown);
+                Assert.Equal("refused", ClientFailure.FromException(failure)!.Code);
+                refused = failure;
+            }
+            else
+            {
+                PairingException failure = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }));
+                Assert.Equal("unavailable", failure.Code); // The synchronous contract stays exactly as released.
+                Assert.StartsWith($"No runtime answered at 127.0.0.1:{port}:", failure.Message, StringComparison.Ordinal);
+                refused = failure;
+            }
+            Say(refused.Message);
             Assert.Contains("names an address to fetch", refused.Message, StringComparison.Ordinal);
             await serve.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
             Assert.True(!windows || swap?.Swapped == true, "The impostor never sent its certificate.");

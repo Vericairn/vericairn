@@ -20,9 +20,10 @@ namespace Vericairn.Sdk;
 /// the local network a paired device presents a certificate its key issued, has the runtime identity it pinned prove each
 /// connection, and signs every request. It presents, requests and observes; it never evaluates authority.
 /// </summary>
-public sealed class VericairnClient : IEstateApi, IDisposable
+public sealed partial class VericairnClient : IEstateApi, IDisposable
 {
     private readonly HttpClient http;
+    private readonly HttpClient asyncHttp;
     private readonly LocalNetworkCredential? credential;
 
     /// <summary>Connects over the local socket of a published endpoint.</summary>
@@ -39,8 +40,16 @@ public sealed class VericairnClient : IEstateApi, IDisposable
                 if (endpoint.Kind == "pipe")
                 {
                     var pipe = new NamedPipeClientStream(".", endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous);
-                    await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
-                    return pipe;
+                    try
+                    {
+                        await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
+                        return pipe;
+                    }
+                    catch
+                    {
+                        pipe.Dispose();
+                        throw;
+                    }
                 }
 
                 var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
@@ -57,6 +66,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
             },
         };
         http = new HttpClient(handler, disposeHandler: true) { BaseAddress = new Uri("http://vericairn/"), Timeout = TimeSpan.FromMinutes(5) };
+        asyncHttp = AsyncTransport(handler, http.BaseAddress);
     }
 
     private VericairnClient(DaemonEndpoint endpoint, LoopbackEndpoint loopback, IRequestSigner? signer)
@@ -75,12 +85,14 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         };
         HttpMessageHandler chain = signer is null ? handler : new SigningHandler(signer, handler);
         http = new HttpClient(chain, disposeHandler: true) { BaseAddress = new Uri($"https://{loopback.Host}:{loopback.Port}/"), Timeout = TimeSpan.FromMinutes(5) };
+        asyncHttp = AsyncTransport(chain, http.BaseAddress);
     }
 
     private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout)
     {
         Endpoint = new DaemonEndpoint("local-network", connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
         Transport = "local-network";
+        OperationTimeout = _ => timeout;
         credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
         LocalNetworkCredential own = credential;
         var handler = new SocketsHttpHandler
@@ -93,6 +105,14 @@ public sealed class VericairnClient : IEstateApi, IDisposable
         // TLS and the identity proof happen in the connect callback, so the requests themselves go over that stream as plain HTTP,
         // each signed for this estate and the runtime identity the device paired with.
         http = new HttpClient(new SigningHandler(signer, handler, connection), disposeHandler: true) { BaseAddress = new Uri($"http://{connection.Address}/"), Timeout = timeout ?? TimeSpan.FromMinutes(5) };
+        var asyncHandler = new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            ConnectTimeout = timeout ?? TimeSpan.FromSeconds(30),
+            ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken, classifyRefusal: true),
+        };
+        asyncHttp = new HttpClient(new SigningHandler(signer, asyncHandler, connection), disposeHandler: true)
+            { BaseAddress = http.BaseAddress, Timeout = Timeout.InfiniteTimeSpan };
     }
 
     /// <summary>The endpoint this client talks to.</summary>
@@ -430,6 +450,7 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
+        asyncHttp.Dispose();
         http.Dispose();
         credential?.Dispose();
     }

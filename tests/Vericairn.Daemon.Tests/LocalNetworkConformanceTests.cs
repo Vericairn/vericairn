@@ -171,6 +171,9 @@ public class LocalNetworkConformanceTests
         {
             HttpRequestException refused = Assert.Throws<HttpRequestException>(() => client.Health());
             Assert.Equal(ConnectionStates.Denied, Refusal(refused).State);
+            ClientRefusedException asynchronous = await Assert.ThrowsAsync<ClientRefusedException>(() => client.NewRecordAsync(null!, TestContext.Current.CancellationToken));
+            Assert.False(asynchronous.OutcomeUnknown);
+            Assert.Equal("refused", ClientFailure.FromException(asynchronous)!.Code);
         }
 
         // A paired device's certificate makes no other key's requests acceptable, nor does its key make another certificate acceptable.
@@ -345,10 +348,16 @@ public class LocalNetworkConformanceTests
             RuntimeConnectionException refused = Refusal(Assert.Throws<HttpRequestException>(() => misled.Health()));
             Assert.Equal(ConnectionStates.Unavailable, refused.State);
             Assert.Contains("did not prove the runtime identity", refused.Message, StringComparison.Ordinal);
+            ClientRefusedException asynchronous = await Assert.ThrowsAsync<ClientRefusedException>(() => misled.NewRecordAsync(null!, TestContext.Current.CancellationToken));
+            Assert.Equal("refused", ClientFailure.FromException(asynchronous)!.Code);
+            Assert.False(asynchronous.OutcomeUnknown);
+            Assert.Equal(refused.Message, asynchronous.Message);
         }
 
         ConnectionStatus check = harness.Connections.Probe(redirected, TimeSpan.FromSeconds(5));
         Assert.Equal(ConnectionStates.Unavailable, check.State);
+        ConnectionStatus asynchronousCheck = await harness.Connections.ProbeAsync(redirected, TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ConnectionStates.Denied, asynchronousCheck.State);
         await impostor.DisposeAsync();
         Assert.All(impostor.Requests, r => Assert.StartsWith("GET /v1/runtime/identity?nonce=", r, StringComparison.Ordinal));
         Assert.NotEmpty(impostor.Requests);

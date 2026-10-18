@@ -81,14 +81,6 @@ public class ShellTests(HeadlessFixture fixture)
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
 
-    static ShellTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task OpensAnEstateShowsTheTargetContextAndDerivesAttention()
     {
@@ -104,7 +96,7 @@ public class ShellTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.True(shell.HasEstate);
             Assert.Equal("Example Estate", shell.EstateName);
             Assert.Equal("daemon", shell.RuntimeMode);
@@ -115,11 +107,12 @@ public class ShellTests(HeadlessFixture fixture)
             Assert.Equal("Example Estate", await fixture.Ui(() => window.EstateNameText.Text));
 
             // Enter on the attention item opens the work order as a document and explains it in the inspector.
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.Focus();
                 window.KeyPress(Key.D2, RawInputModifiers.Control, PhysicalKey.Digit2, null);
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             Assert.True(shell.Documents.Any(d => d.Kind == "work-order"), $"documents: {string.Join(", ", shell.Documents.Select(d => d.Title + "/" + d.Kind))} | focused: {await fixture.Ui(() => window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing")} | activity: {string.Join(" / ", shell.Activity)}");
             Assert.Contains("decision needed", shell.Inspector, StringComparison.Ordinal);
@@ -138,17 +131,37 @@ public class ShellTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.D1, RawInputModifiers.Control, PhysicalKey.Digit1, null); });
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.D1, RawInputModifiers.Control, PhysicalKey.Digit1, null);
+                await shell.PendingOperation;
+            });
             Assert.True(await fixture.Ui(() => window.Navigation.IsKeyboardFocusWithin), await fixture.Ui(() => "focused: " + (window.FocusManager?.GetFocusedElement()?.GetType().Name ?? "nothing")));
-            await fixture.Ui(() => window.KeyPress(Key.L, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.L, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.L, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.L, null);
+                await shell.PendingOperation;
+            });
             Assert.False(shell.LeftVisible);
             Assert.False(await fixture.Ui(() => window.LeftPanel.IsVisible));
-            await fixture.Ui(() => window.KeyPress(Key.B, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.B, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.B, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.B, null);
+                await shell.PendingOperation;
+            });
             Assert.False(shell.BottomVisible);
-            await fixture.Ui(() => window.KeyPress(Key.D0, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Digit0, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.D0, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Digit0, null);
+                await shell.PendingOperation;
+            });
             Assert.True(shell.LeftVisible && shell.BottomVisible && shell.RightVisible);
             Assert.True(await fixture.Ui(() => window.LeftPanel.IsVisible));
-            await fixture.Ui(() => window.KeyPress(Key.O, RawInputModifiers.Control, PhysicalKey.O, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.O, RawInputModifiers.Control, PhysicalKey.O, null);
+                await shell.PendingOperation;
+            });
             Assert.True(await fixture.Ui(() => window.EstatePathBox.IsKeyboardFocusWithin || window.EstatePathBox.IsFocused));
         }
         finally
@@ -165,7 +178,7 @@ public class ShellTests(HeadlessFixture fixture)
         var runtime = new FakeRuntimeManager();
         var unavailable = new UnavailableThenAvailable(root);
         var shell = new ShellViewModel(_ => unavailable, runtime, new Preferences(Temp("wb-prefs-runtime")));
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         Assert.Equal(["start"], runtime.Calls);
         Assert.Equal("daemon", shell.RuntimeMode);
         await fixture.UiAsync(shell.ShowInstallPlanAsync);
@@ -180,7 +193,7 @@ public class ShellTests(HeadlessFixture fixture)
     {
         string root = Temp("wb-not-estate");
         var shell = new ShellViewModel(r => new ServiceConnection(r), new FakeRuntimeManager(), new Preferences(Temp("wb-prefs-none")));
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
         Assert.False(shell.HasEstate);
         Assert.Contains("not an estate root", shell.Status, StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFileSystemEntries(root));
@@ -209,6 +222,7 @@ public class ShellTests(HeadlessFixture fixture)
     private sealed class UnavailableThenAvailable(string root) : IEstateConnection
     {
         private ServiceConnection? inner;
+        private int refreshes;
 
         public string Root { get; } = root;
 
@@ -218,7 +232,7 @@ public class ShellTests(HeadlessFixture fixture)
 
         public string Where => inner?.Where ?? "no daemon answers";
 
-        public void Refresh() => inner ??= new ServiceConnection(Root);
+        public void Refresh() { if (++refreshes > 1) inner ??= new ServiceConnection(Root); }
 
         public void Dispose() => inner?.Dispose();
     }

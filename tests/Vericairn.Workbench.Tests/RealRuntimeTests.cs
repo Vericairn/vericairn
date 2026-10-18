@@ -12,14 +12,6 @@ namespace Vericairn.Workbench.Tests;
 [Collection("workbench")]
 public class RealRuntimeTests(HeadlessFixture fixture)
 {
-    static RealRuntimeTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task OnAFirstLaunchWorkbenchStartsTheDaemonThroughTheCommandLineAndOpensTheEstate()
     {
@@ -34,7 +26,7 @@ public class RealRuntimeTests(HeadlessFixture fixture)
         try
         {
             Assert.Equal(0, Seed.Run("--estate", root, "runtime", "status"));
-            Task open = fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            Task open = fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             opened = await Task.WhenAny(open, Task.Delay(TimeSpan.FromSeconds(120), TestContext.Current.CancellationToken)) == open;
             Assert.True(opened, $"Workbench did not finish opening the estate within 120 seconds; status: {shell.Status}; activity: {string.Join(" / ", shell.Activity)}");
             await open;
@@ -43,7 +35,7 @@ public class RealRuntimeTests(HeadlessFixture fixture)
             Assert.Contains("process", shell.RuntimeWhere, StringComparison.Ordinal);
             Assert.Equal("Example Estate", shell.EstateName);
 
-            ReleaseWorkspace page = await fixture.Ui(shell.OpenRelease);
+            ReleaseWorkspace page = Assert.IsType<ReleaseWorkspace>(await fixture.UiAsync(() => shell.OpenReleaseAsync(cancellationToken: TestContext.Current.CancellationToken)));
             Assert.Same(page, shell.SelectedDocument);
 
             // Stopping goes through the same runtime manager and the real command line.

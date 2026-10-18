@@ -22,14 +22,6 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
     // The product declares its provider and one setting; the repository is left for the form, as a person would type it.
     private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free.","license":"Apache-2.0"}],"surfaces":[{"name":"CLI","slug":"cli","summary":"The command line."}],"release":{"destination":{"provider":"github-releases","settings":{"workflow":"release.yml"}}}}""";
 
-    static ReleaseJourneyTests()
-    {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-home"));
-        }
-    }
-
     [Fact]
     public async Task TheReleaseFlowKeyboardOnlyFromIntentToObservedPublication()
     {
@@ -49,11 +41,15 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
             Assert.Same(provider, connection!.Service!.Providers.Release("github-releases"));
 
             // Ctrl+Shift+E opens the release workspace with the keyboard in its first field; the form is typed, Ctrl+Enter submits.
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null); });
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null);
+                await shell.PendingOperation;
+            });
             ReleaseWorkspace workspace = Assert.IsType<ReleaseWorkspace>(shell.SelectedDocument);
             Assert.Equal("Widget", workspace.Product?.Name);
             Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
@@ -68,7 +64,11 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             await fixture.Ui(() => Keys.Focus(window, "repository"));
             await fixture.Ui(() => Keys.Type(window, "Example/widget", "repository"));
             Assert.Equal("Example/widget", workspace.Settings.Single(s => s.Name == "repository").Value);
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.True(workspace.Status.Contains("intent was recorded before the dispatch", StringComparison.Ordinal), workspace.Status);
             Assert.Equal("dispatched", workspace.LastResponse!.Status);
             string run = workspace.LastResponse.Run!;
@@ -80,20 +80,32 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             Assert.Single(provider.Dispatches);
 
             // A second submission under the same identity is refused the same way the command line refuses it; nothing is dispatched.
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.Contains("observe and reconcile", workspace.Status, StringComparison.Ordinal);
             Assert.Single(provider.Dispatches);
             Assert.Equal(2, Seed.Run("--estate", root, "release", "submit", "--product", workspace.Product!.Id, "--version", "0.9.0", "--repository", "Example/widget", "--by", builder));
             Assert.Single(provider.Dispatches);
 
             // Observing while the run is in progress records nothing; after the run succeeds the draft becomes a candidate with its hash.
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.Contains("pending", workspace.Status, StringComparison.Ordinal);
             Assert.Empty(shell.Api!.Records("release"));
             provider.CompleteRun("Example/widget", run, true, "0.9.0");
             workspace.Qualified = "linux-x64";
             workspace.Limitations = "Nothing signed.";
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.Equal("observed-success", workspace.LastResponse!.Status);
             Assert.NotNull(workspace.LastResponse.Candidate);
             Assert.Contains("--draft=false", workspace.Publish, StringComparison.Ordinal);
@@ -104,38 +116,52 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
 
             // The operator acts now: Enter on the destination opens the candidate in the review workspace; the acceptance is typed and sent with Ctrl+Shift+Enter.
             shell.ActingOverride = op;
-            await fixture.Ui(shell.Refresh);
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
             Assert.Equal("Operator (named with --as; no device of this principal is held here, so its records will be unsigned)", shell.ActingPrincipal);
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.UpdateLayout();
                 ListBox list = window.GetVisualDescendants().OfType<ListBox>().First(l => l.DataContext is ReleaseWorkspace && l.ItemsSource is System.Collections.ObjectModel.ObservableCollection<DestinationRow>);
                 list.SelectedIndex = 0;
                 (list.ContainerFromIndex(0) as Control)?.Focus();
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             ReviewWorkspace review = Assert.IsType<ReviewWorkspace>(shell.SelectedDocument);
             Assert.Equal(destination.ReleaseId, review.SubjectId);
             Assert.Equal("operator", review.Independence);
             Assert.False(review.SelfAcceptance);
-            await fixture.Ui(() =>
+            await fixture.UiAsync(async () =>
             {
                 window.UpdateLayout();
                 Keys.Focus(window, "Acceptance statement");
                 Keys.Type(window, "Accepted 0.9.0 from the recorded evidence.", "Acceptance statement");
                 window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
             });
             Assert.StartsWith("Written: acceptance", review.Status, StringComparison.Ordinal);
 
             // The operator publishes by hand; the builder observes again and the publication is recorded. Workbench published nothing itself.
             shell.ActingOverride = builder;
-            await fixture.Ui(shell.Refresh);
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null); });
+            await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null);
+                await shell.PendingOperation;
+            });
             Assert.Same(workspace, shell.SelectedDocument);
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.Contains("a draft", workspace.Status, StringComparison.Ordinal);
             provider.Publish("Example/widget", "v0.9.0");
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.Equal("published", workspace.LastResponse!.Status);
             Assert.NotNull(workspace.LastResponse.Release);
             destination = Assert.Single(workspace.Destinations);
@@ -176,8 +202,12 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null); });
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.E, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.E, null);
+                await shell.PendingOperation;
+            });
             ReleaseWorkspace workspace = Assert.IsType<ReleaseWorkspace>(shell.SelectedDocument);
             Assert.Equal("Widget", workspace.Product?.Name);
             Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
@@ -186,34 +216,58 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             ComboBox providers = await fixture.Ui(() => Combo(window, "Provider"));
 
             // A product that declares no provider: nothing is selected and no setting field is left from the earlier product.
-            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Gadget"));
+            await fixture.UiAsync(async () =>
+            {
+                products.SelectedItem = workspace.Products.Single(p => p.Name == "Gadget");
+                await shell.PendingOperation;
+            });
             Assert.Equal("Gadget", workspace.Product?.Name);
             Assert.Null(workspace.SelectedProvider);
             Assert.Null(await fixture.Ui(() => providers.SelectedItem));
             Assert.Empty(workspace.Settings);
             Assert.False(await fixture.Ui(() => SettingFieldShown(window, "repository")));
-            await fixture.Ui(() => { workspace.Version = "1.0.0"; window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null); });
+            await fixture.UiAsync(async () =>
+            {
+                workspace.Version = "1.0.0"; window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.StartsWith("Choose the provider the release goes through; the product declares none", workspace.Status, StringComparison.Ordinal);
             Assert.Empty(provider.Dispatches);
 
             // The person's own choice for that product holds until the product changes again.
-            await fixture.Ui(() => providers.SelectedItem = workspace.Providers.Single(p => p.Provider == "github-releases"));
+            await fixture.UiAsync(async () =>
+            {
+                providers.SelectedItem = workspace.Providers.Single(p => p.Provider == "github-releases");
+                await shell.PendingOperation;
+            });
             Assert.Equal(["repository", "workflow", "ref", "checksums"], workspace.Settings.Select(s => s.Name));
             Assert.Equal(string.Empty, workspace.Settings.Single(s => s.Name == "workflow").Value);
             Assert.True(await fixture.Ui(() => SettingFieldShown(window, "repository")));
 
             // A product whose declared provider the runtime cannot reach selects nothing either, and the refusal names that provider.
-            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Gizmo"));
+            await fixture.UiAsync(async () =>
+            {
+                products.SelectedItem = workspace.Products.Single(p => p.Name == "Gizmo");
+                await shell.PendingOperation;
+            });
             Assert.Null(workspace.SelectedProvider);
             Assert.Null(await fixture.Ui(() => providers.SelectedItem));
             Assert.Empty(workspace.Settings);
             Assert.False(await fixture.Ui(() => SettingFieldShown(window, "repository")));
-            await fixture.Ui(() => window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null));
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
             Assert.StartsWith("Choose the provider the release goes through; the product declares elsewhere-releases, which the runtime cannot reach", workspace.Status, StringComparison.Ordinal);
             Assert.Empty(provider.Dispatches);
 
             // Back on the product that declares one, its provider and declared values are selected again.
-            await fixture.Ui(() => products.SelectedItem = workspace.Products.Single(p => p.Name == "Widget"));
+            await fixture.UiAsync(async () =>
+            {
+                products.SelectedItem = workspace.Products.Single(p => p.Name == "Widget");
+                await shell.PendingOperation;
+            });
             Assert.Equal("github-releases", workspace.SelectedProvider?.Provider);
             Assert.Same(workspace.SelectedProvider, await fixture.Ui(() => providers.SelectedItem));
             Assert.Equal("release.yml", workspace.Settings.Single(s => s.Name == "workflow").Value);
@@ -243,8 +297,12 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });
         try
         {
-            await fixture.UiAsync(() => shell.OpenEstateAsync(root));
-            await fixture.Ui(() => { window.Focus(); window.KeyPress(Key.U, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.U, null); });
+            await fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
+            await fixture.UiAsync(async () =>
+            {
+                window.Focus(); window.KeyPress(Key.U, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.U, null);
+                await shell.PendingOperation;
+            });
             RuntimeDocument page = Assert.IsType<RuntimeDocument>(shell.SelectedDocument);
             Assert.Contains("API 1", page.Health, StringComparison.Ordinal);
             Assert.False(page.PlanShown);

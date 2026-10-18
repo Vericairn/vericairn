@@ -6,6 +6,7 @@ using System.CommandLine;
 using System.CommandLine.Help;
 using Vericairn.Cli;
 using Vericairn.DocsTool;
+using Vericairn.Protocol;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Cli.Tests;
@@ -17,6 +18,34 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public class DocsTests
 {
+    [Fact]
+    public void TheDocumentationToolGeneratesTheInterruptedRequestSectionAndItsExcerpt()
+    {
+        string output = CliHarness.TempDirectory("docs-interrupted");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            string excerpt = File.ReadAllText(Path.Combine(output, "cli-client-outcomes.md"));
+            string section = excerpt[excerpt.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd();
+            Assert.Contains(section + "\n\n## Root options", reference, StringComparison.Ordinal);
+            foreach (Exception exception in new Exception[] { new ClientTimeoutException(false), new ClientCancelledException(false, default), new ClientUnavailableException(false, new IOException()) })
+            {
+                ClientFailure failure = ClientFailure.FromException(exception)!;
+                Assert.Contains($"| `{failure.Code}` | `{failure.ExitCode}` | `error: {failure.Message}` |", section, StringComparison.Ordinal);
+            }
+            Assert.Contains("reconcile the original operation before retrying", section, StringComparison.Ordinal);
+            Assert.Contains("A definite refusal keeps its diagnostic", section, StringComparison.Ordinal);
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            Assert.Equal(reference, File.ReadAllText(Path.Combine(output, "cli-reference.md")));
+            string? root = AppContext.BaseDirectory;
+            while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
+            Assert.NotNull(root);
+            Assert.Equal(File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md")), excerpt);
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
+
     private static readonly string[] Declared = ["README.md", "install.md", "operator-guide.md", "cli-reference.md", "api-reference.md", "record-reference.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
 
     private static readonly string[] Authored = ["README.md", "install.md", "operator-guide.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
@@ -29,7 +58,7 @@ public class DocsTests
         {
             Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
             string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
-            Check(CliApp.Build(), string.Empty);
+            Check(CliApp.Build(cancellationToken: TestContext.Current.CancellationToken), string.Empty);
 
             void Check(Command command, string path)
             {

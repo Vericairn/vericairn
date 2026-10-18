@@ -57,7 +57,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             }
 
             DaemonEndpoint? running = DaemonHost.Discover(root);
-            bool alive = running is not null && VericairnClient.IsAlive(running);
+            bool alive = running is not null && context.IsAlive(running);
             string? served = running?.LocalNetwork is LocalNetworkEndpoint lan ? new System.Net.IPEndPoint(System.Net.IPAddress.Parse(lan.Host), lan.Port).ToString() : null;
             if (json)
             {
@@ -99,10 +99,10 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
             }
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
+            if (endpoint is not null && context.IsAlive(endpoint))
             {
                 using var client = new VericairnClient(endpoint);
-                (CertificateRotated? rotated, Problem? problem) = client.RotateCertificate(new CertificateRotateRequest(compromised, reason, identity));
+                (CertificateRotated? rotated, Problem? problem) = client.RotateCertificateAsync(new CertificateRotateRequest(compromised, reason, identity), context.CancellationToken).GetAwaiter().GetResult();
                 if (rotated is null)
                 {
                     return context.Fail(problem?.Message ?? "The certificate was not rotated.");
@@ -155,7 +155,7 @@ internal sealed class RuntimeNetworkConfiguration(CommandContext context)
 
             return Clean;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException or System.Security.Cryptography.CryptographicException)
+        catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException or System.Security.Cryptography.CryptographicException) && exception is not IClientOperationFailure)
         {
             return context.Fail(exception.Message);
         }

@@ -13,6 +13,43 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class ReleaseDispatchTests
 {
+    [Fact]
+    public async Task CancelledEmbeddedReleaseRetainsItsRuntimeUntilTheEffectFinishes()
+    {
+        using var fixture = new ReleaseFixture(null);
+        using var finish = new ManualResetEventSlim();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        fixture.Provider.OnDispatch = _ =>
+        {
+            entered.TrySetResult();
+            Assert.True(finish.Wait(TimeSpan.FromSeconds(10)));
+        };
+        using var stop = new CancellationTokenSource();
+        IEstateApi api = fixture.Service;
+        Task<ReleaseResponse> request = api.ReleaseSubmitAsync(fixture.Request, stop.Token);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            stop.Cancel();
+            ClientCancelledException interrupted = await Assert.ThrowsAsync<ClientCancelledException>(() => request);
+            Assert.True(interrupted.OutcomeUnknown);
+            fixture.Service.Dispose(); // The client stopped waiting; the service's store must not disappear under the effect.
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => api.HealthAsync(TestContext.Current.CancellationToken));
+            finish.Set();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+            deadline.CancelAfter(TimeSpan.FromSeconds(5));
+            while (!fixture.Estate.Load().Current("operation").Any(operation => operation.Body.GetProperty("status").GetString() == "dispatched"))
+                await Task.Delay(10, deadline.Token);
+            fixture.Reopen();
+            ReleaseResponse retry = fixture.Service.ReleaseSubmit(fixture.Request);
+            Assert.False(retry.Ok);
+            Assert.Contains("observe and reconcile", retry.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(1, fixture.Provider.Calls);
+            Assert.True(interrupted.OutcomeUnknown);
+        }
+        finally { finish.Set(); }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("known-failure")]
