@@ -31,7 +31,7 @@ internal static partial class CliApp
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption, presentation));
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
-        root.Subcommands.Add(DevicesFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new DevicesCommand(context));
         root.Subcommands.Add(new ConnectionsCommand(context));
         root.Subcommands.Add(new ReleaseCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
@@ -281,103 +281,6 @@ internal static partial class CliApp
 
 
 
-    private static Command DevicesFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var devices = new Command("devices", "Device keys: create a device for a principal on this machine, pair one on another machine, list, admit, revoke, rename and rotate, and the operator's recovery device.");
-        var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
-
-        var principalOption = new Option<string>("--principal") { Description = "The principal this device acts for.", Required = true };
-        var nameOption = new Option<string>("--name") { Description = "Descriptive device name, never a machine path.", Required = true };
-        var custodyOption = new Option<string?>("--custody") { Description = "Key custody: default, the strongest this machine offers (CNG on Windows; the Secure Enclave on a Mac that has one; the secret service on Linux where one runs; else an owner-only file), or file, cng, secure-enclave or secret-service." };
-        var presenceOption = new Option<bool?>("--presence") { Description = "Every signature needs its owner's presence (Touch ID or the login password; Secure Enclave custody only, never for an agent). Default: a person's device needs it wherever its custody enforces it; '--presence false' declines." };
-        var profilesOption = new Option<string[]>("--profile") { Description = "Permitted connectivity profile; repeatable (default: embedded).", AllowMultipleArgumentsPerToken = true };
-        var create = new Command("create", "Generate a key on this machine and record the device, signed by its own key.");
-        create.Options.Add(principalOption);
-        create.Options.Add(nameOption);
-        create.Options.Add(custodyOption);
-        create.Options.Add(presenceOption);
-        create.Options.Add(profilesOption);
-        create.SetAction(parseResult => Commands.DevicesCreate(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(principalOption)!,
-            parseResult.GetValue(nameOption)!,
-            parseResult.GetValue(custodyOption),
-            parseResult.GetValue(presenceOption),
-            parseResult.GetValue(profilesOption) ?? [],
-            parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(create);
-
-        var list = new Command("list", "List device records with their admission state and whether their key is held here.");
-        list.SetAction(parseResult => Commands.DevicesList(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(list);
-
-        var deviceArgument = new Argument<string>("device") { Description = "Device record id." };
-        var noteOption = new Option<string>("--note") { Description = "Why the device is admitted.", Required = true };
-        var recoveryOption = new Option<string?>("--recovery") { Description = "Sign with the operator's recovery key in this file, when no admitted device of the operator is left; asks for its passphrase. Every use stays in 'status' until the operator reviews it." };
-        var passphraseStdinOption = new Option<bool>("--passphrase-stdin") { Description = "Read the recovery key's passphrase from the first line of standard input instead of the terminal." };
-        var admit = new Command("admit", "Admit a device to author records in this estate (operator or 'administer' scope).");
-        admit.Arguments.Add(deviceArgument);
-        admit.Options.Add(byOption);
-        admit.Options.Add(noteOption);
-        admit.Options.Add(recoveryOption);
-        admit.Options.Add(passphraseStdinOption);
-        admit.SetAction(parseResult => Commands.DevicesAdmit(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(noteOption)!, parseResult.GetValue(recoveryOption), parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(admit);
-
-        var reasonOption = new Option<string>("--reason") { Description = "Why the admission ends.", Required = true };
-        var revoke = new Command("revoke", "Revoke a device's admission from now on; its earlier records stay attributable.");
-        revoke.Arguments.Add(deviceArgument);
-        revoke.Options.Add(byOption);
-        revoke.Options.Add(reasonOption);
-        revoke.Options.Add(recoveryOption);
-        revoke.Options.Add(passphraseStdinOption);
-        revoke.SetAction(parseResult => Commands.DevicesRevoke(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(byOption)!, parseResult.GetValue(reasonOption)!, parseResult.GetValue(recoveryOption), parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(revoke);
-
-        var recoveryPrincipalOption = new Option<string>("--principal") { Description = "The operator the recovery device acts for.", Required = true };
-        var recoveryNameOption = new Option<string>("--name") { Description = "Descriptive name, for example where the key is kept; never a machine path.", Required = true };
-        var outputOption = new Option<string>("--output") { Description = "New file to write the encrypted key to, outside the estate's repository; move it off this machine at once.", Required = true };
-        var recovery = new Command("recovery", "Make the operator's recovery device for emergency access: its key is written once to a file, encrypted with a passphrase you type, and never held by this machine; an admitted device of the operator held here admits it (record format 2).");
-        recovery.Options.Add(recoveryPrincipalOption);
-        recovery.Options.Add(recoveryNameOption);
-        recovery.Options.Add(outputOption);
-        recovery.Options.Add(passphraseStdinOption);
-        recovery.SetAction(parseResult => Commands.DevicesRecovery(parseResult.GetValue(estateOption)!, parseResult.GetValue(recoveryPrincipalOption)!, parseResult.GetValue(recoveryNameOption)!, parseResult.GetValue(outputOption)!, parseResult.GetValue(passphraseStdinOption), parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(recovery);
-
-        var pairPrincipalOption = new Option<string>("--principal") { Description = "The principal the new device will act for.", Required = true };
-        var pairByOption = new Option<string>("--by") { Description = "The administrator: the operator, or a principal holding the 'administer' scope, whose admitted device on this machine signs the admission.", Required = true };
-        var pairProfilesOption = new Option<string[]>("--profile") { Description = "A connectivity profile the device will be permitted; repeatable (default: local-network).", AllowMultipleArgumentsPerToken = true };
-        var pair = new Command("pair", "Issue a pairing code for a new device on another machine: 16 characters, valid ten minutes, for one device and five attempts. Entered there with 'vericairn connections add', it records the device with the key it presents and admits it under your authority (needs the runtime serving the local-network profile).");
-        pair.Options.Add(pairPrincipalOption);
-        pair.Options.Add(pairByOption);
-        pair.Options.Add(pairProfilesOption);
-        pair.SetAction(parseResult => Commands.DevicesPair(parseResult.GetValue(estateOption)!, parseResult.GetValue(pairPrincipalOption)!, parseResult.GetValue(pairByOption)!, parseResult.GetValue(pairProfilesOption) ?? [], parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(pair);
-
-        var writesDeviceArgument = new Argument<string?>("device") { Description = "A paired device's id, to list its writes only.", Arity = ArgumentArity.ZeroOrOne };
-        var writes = new Command("writes", "List what paired devices wrote over the local network through this machine's runtime: when, which device, for which principal, the operation and the record it produced. A record a paired device asks for is signed by a device of the same principal held here, so this is where the paired device behind it is kept.");
-        writes.Arguments.Add(writesDeviceArgument);
-        writes.SetAction(parseResult => Commands.DevicesWrites(parseResult.GetValue(estateOption)!, parseResult.GetValue(writesDeviceArgument), parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(writes);
-
-        var newNameOption = new Option<string>("--name") { Description = "The device's new descriptive name, never a machine path.", Required = true };
-        var rename = new Command("rename", "Rename a device whose key is held here; it keeps its identity, key and admission (record format 2).");
-        rename.Arguments.Add(deviceArgument);
-        rename.Options.Add(newNameOption);
-        rename.SetAction(parseResult => Commands.DevicesRename(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(newNameOption)!, parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(rename);
-
-        var rotateCustodyOption = new Option<string?>("--custody") { Description = "Custody of the new key: file, cng, secure-enclave, secret-service, or default for the strongest this machine offers (when omitted: the custody the device has)." };
-        var rotatePresenceOption = new Option<bool?>("--presence") { Description = "Every signature with the new key needs its owner's presence (Secure Enclave custody only, never for an agent); '--presence false' removes it. Default: the device's presence, where the new custody enforces it." };
-        var rotate = new Command("rotate", "Replace a device's key with a new one, signed by both keys; the device keeps its identity and admission, and its earlier records stay valid (record format 2).");
-        rotate.Arguments.Add(deviceArgument);
-        rotate.Options.Add(rotateCustodyOption);
-        rotate.Options.Add(rotatePresenceOption);
-        rotate.SetAction(parseResult => Commands.DevicesRotate(parseResult.GetValue(estateOption)!, parseResult.GetValue(deviceArgument)!, parseResult.GetValue(rotateCustodyOption), parseResult.GetValue(rotatePresenceOption), parseResult.GetValue(jsonOption)));
-        devices.Subcommands.Add(rotate);
-        return devices;
-    }
 
     private static Command GoalFamily(Option<string> estateOption, Option<bool> jsonOption)
     {

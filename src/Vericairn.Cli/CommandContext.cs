@@ -68,6 +68,31 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         }
     }
 
+    /// <summary>Runs an operation that only a running daemon serves, such as pairing; refused, with the way on, when none answers.</summary>
+    public int WithDaemon(string root, string purpose, Func<VericairnClient, int> operation)
+    {
+        try
+        {
+            if (!IsEstate(root))
+            {
+                return Fail(NotAnEstate(root));
+            }
+
+            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
+            if (endpoint is null || !VericairnClient.IsAlive(endpoint))
+            {
+                return Fail($"No daemon is serving this estate, and {purpose} needs one: configure the local-network profile with 'vericairn runtime configure --local-network <address:port>' and start the runtime with 'vericairn runtime start'.");
+            }
+
+            using var client = new VericairnClient(endpoint);
+            return operation(client);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
+        {
+            return Fail(exception.Message);
+        }
+    }
+
     /// <summary>A bare records directory without a manifest is still validated from its files; no live state is involved.</summary>
     public int WithFiles(string root, Func<EstateModel, int> operation)
     {
