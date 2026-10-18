@@ -106,6 +106,9 @@ public sealed class DocumentReviewType : IRecordType
             return;
         }
 
+        if (GeneratedDocumentContract.IsStrict(context.Model, declaration))
+            context.Error("document.generated-clearance", "A whole generated document is verified by regeneration and takes no authored clearance record.");
+
         bool clears = outcome != "needs-change";
         if (clears && failed.Count > 0)
         {

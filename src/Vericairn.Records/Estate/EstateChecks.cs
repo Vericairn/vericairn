@@ -332,6 +332,13 @@ public static partial class EstateChecks
         foreach (LivingDocuments.State state in LivingDocuments.Derive(model))
         {
             string location = state.Repository is null ? state.Path : state.Declaration.ExpectedPath;
+            if (GeneratedDocumentContract.IsStrict(model, state.Declaration))
+            {
+                GeneratedDocumentPlan plan = state.Generation!;
+                foreach (string problem in plan.Problems)
+                    findings.Error(plan.Status == DocumentGenerationStatus.Unavailable ? "document.generated-unavailable" : "document.generated-edited", location, problem);
+                continue;
+            }
             if (state.Level is "warn" or "refuse")
             {
                 findings.Warning("document.due", location, $"Due at {state.Level}: {string.Join("; ", state.Reasons.Where(r => r.Level != "remind").Select(r => r.Summary))}. Revise it or record a document review.");
@@ -392,11 +399,13 @@ public static partial class EstateChecks
     private static void CheckDocuments(EstateModel model, FindingList findings)
     {
         var retired = new HashSet<string>(model.Current("retirement").Where(r => EstateModel.BodyString(r, "retiredAt") is not null).Select(r => EstateModel.BodyString(r, "path") ?? string.Empty), StringComparer.Ordinal);
+        HashSet<string> generated = model.Current("living-document").Where(d => EstateModel.BodyString(d, "repository") is null && GeneratedDocumentContract.IsStrict(model, d))
+            .SelectMany(d => GeneratedDocumentVerification.Plan(model, d).Expected).Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
         foreach (RecordEnvelope revision in model.Current("document-revision"))
         {
             string? path = EstateModel.BodyString(revision, "path");
             string? hash = EstateModel.BodyString(revision, "hash");
-            if (path is null || hash is null)
+            if (path is null || hash is null || generated.Contains(path))
             {
                 continue;
             }

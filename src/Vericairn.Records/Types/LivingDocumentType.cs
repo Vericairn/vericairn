@@ -75,7 +75,7 @@ public sealed class LivingDocumentType : IRecordType
         string? kind = body.Enum("kind", true, Kinds);
         BodyReader? generator = body.Nested("generator", false);
         string? source = body.Text("source", true, 200);
-        IReadOnlyList<BodyReader>? triggers = body.NestedArray("triggers", true, allowEmpty: context.Record.Format >= 3 && kind == "generated");
+        IReadOnlyList<BodyReader>? triggers = body.NestedArray("triggers", true, allowEmpty: context.Record.Format >= 3 && kind == "generated" && GeneratedDocumentContract.IsStrict(context.Model, context.Record));
         IReadOnlyList<BodyReader>? regions = body.NestedArray("regions", false, allowEmpty: false);
         body.Enum("clearedBy", false, Clearers);
         IReadOnlyList<string>? checks = body.StringArray("checks", false, allowEmpty: false, maxItemLength: 200);
@@ -85,11 +85,6 @@ public sealed class LivingDocumentType : IRecordType
         if (pattern is not null && (path is not null || kind != "generated" || regions is not null || !DocumentPatterns.IsValid(pattern)))
         {
             body.Error("document.pattern", "pathPattern", "A generated pattern is exclusive with path and regions, and uses a literal directory followed by {month}/{date}-{slug}-{id}.md.");
-        }
-
-        if (context.Record.Format >= 3 && kind == "generated" && body.Has("clearedBy"))
-        {
-            body.Error("document.clearance", "clearedBy", "Format-3 whole generated documents are verified from their sources and take no authored clearance.");
         }
 
         context.RequireReference("repository", repository, "resource");
@@ -158,13 +153,16 @@ public sealed class LivingDocumentType : IRecordType
 
         // One declaration per document: a revision supersedes it and keeps its path and repository.
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
-        if (previous is not null && previous.Type == Name && (DocumentPatterns.Destination(previous) != destination || EstateModel.BodyString(previous, "repository") != repository))
+        GeneratedDocumentContract.Validate(context, previous);
+        if (previous is not null && previous.Type == Name && (DocumentPatterns.Destination(previous) != destination || EstateModel.BodyString(previous, "repository") != repository)
+            && !GeneratedDocumentContract.HasReviewedMigration(context.Model, context.Record))
         {
             context.Error("document.path-changed", "A declaration's revision keeps its path and its repository; another document is another declaration.");
         }
 
         RecordEnvelope? other = !context.Model.IsCurrent(context.Record) ? null : context.Model.Current(Name).FirstOrDefault(d => d.Id != context.Record.Id
-            && DocumentPatterns.Overlaps(d, context.Record) && EstateModel.BodyString(d, "repository") == repository);
+            && (d.Format < 3 && context.Record.Format < 3 ? EstateModel.BodyString(d, "path") == path : DocumentPatterns.Overlaps(d, context.Record))
+            && EstateModel.BodyString(d, "repository") == repository);
         if (other is not null)
         {
             context.Error("document.declared-twice", $"{destination} overlaps ownership declared by {other.Id}; revise that declaration instead.");

@@ -166,3 +166,16 @@ inventory retains every fixture byte. Generator interface and output-contract ve
 record format. Legacy region inputs retain their existing grammar; versioned generators use validated named
 inputs, including an explicit `format`, `audience` and `selection`. Missing contracts and incomplete source
 selections are unavailable, never a successful empty collection.
+
+New format-3 whole generated declarations require admitted-device signatures and mandatory fresh member
+and byte comparison. They require no output pin or authored clearance. Authored documents, including those
+with generated regions, keep their exact-file pins. Upgrading the manifest or making an editorial successor
+does not convert a legacy generated lineage. An explicit conversion submits canonical declaration-basis and
+complete before/after preview outputs in an ordinary `result`, followed by an authentic independent operator
+`review` of that exact result. These use existing output/evidence fields, not a new record or mode field.
+The preview identifies the prior declaration, owned paths, existing pins, exact source digests and proposed
+bytes. A successor adopts the reviewed definition; generator or ownership changes need a new reviewed
+migration. Historical pins remain unchanged. Strict whole generated outputs refuse later pins and
+`document-review` records, and neither missing implementations nor a matching historical pin can establish
+currentness. External repository comparisons require an exact commit and a complete versioned source
+inventory; they cannot substitute a clone's head for the release commit.

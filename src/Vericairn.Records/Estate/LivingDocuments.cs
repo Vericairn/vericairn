@@ -64,7 +64,7 @@ public static class LivingDocuments
     public sealed record State(RecordEnvelope Declaration, string? Level, IReadOnlyList<Reason> Reasons, RecordEnvelope? Clearance, IReadOnlyList<string> Unavailable, IReadOnlyList<string> Notes)
     {
         /// <summary>The document's repository-relative path.</summary>
-        public string Path => EstateModel.BodyString(Declaration, "path") ?? "?";
+        public string Path => DocumentPatterns.Destination(Declaration) ?? "?";
 
         /// <summary>The resource record of the repository that holds it; null for the estate's own repository.</summary>
         public string? Repository => EstateModel.BodyString(Declaration, "repository");
@@ -72,11 +72,14 @@ public static class LivingDocuments
         /// <summary>The repository commit selected for this release comparison; null when no commit is available or needed.</summary>
         public string? ComparisonCommit { get; init; }
 
+        /// <summary>The fresh strict generation comparison, when the declaration has adopted that contract.</summary>
+        public GeneratedDocumentPlan? Generation { get; init; }
+
         /// <summary>True when a trigger is newer than the latest clearance.</summary>
         public bool Due => Level is not null;
 
         /// <summary>True when a trigger at level refuse is declared, so an unavailable contribution closes the gates too.</summary>
-        public bool DeclaresRefuse => Triggers(Declaration).Any(t => t.Level == "refuse");
+        public bool DeclaresRefuse => Generation is not null || Triggers(Declaration).Any(t => t.Level == "refuse");
 
         /// <summary>Whether it closes the gates: due at level refuse, or unavailable while it declares refuse.</summary>
         public bool Closes => Level == "refuse" || (Unavailable.Count > 0 && DeclaresRefuse);
@@ -122,7 +125,9 @@ public static class LivingDocuments
             ArgumentException.ThrowIfNullOrWhiteSpace(commit);
         }
 
-        return model.Current("living-document").Where(d => NamesProduct(model, d, product))
+        return model.Current("living-document").Where(d => NamesProduct(model, d, product)
+                || (GeneratedDocumentContract.IsStrict(model, d) && (EstateModel.BodyString(d, "repository") is not { } repository
+                    || releaseRepositories is null || releaseRepositories.Contains(repository))))
             .OrderBy(d => EstateModel.BodyString(d, "path"), StringComparer.Ordinal).ThenBy(d => d.Id, StringComparer.Ordinal)
             .Select(d =>
             {
@@ -130,7 +135,7 @@ public static class LivingDocuments
                 IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(d, "source"));
                 bool releaseRepository = releaseRepositories is null || (repository is not null && releaseRepositories.Contains(repository));
                 string? at = repository is null ? null
-                    : releaseRepository ? commit : source?.Head(model, d);
+                    : releaseRepository ? commit : GeneratedDocumentContract.IsStrict(model, d) ? null : source?.Head(model, d);
                 State state = Evaluate(model, d, at);
                 if (!releaseRepository && at is not null && state.Clearance is { Type: "document-review" } review &&
                     review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&
@@ -238,6 +243,14 @@ public static class LivingDocuments
 
     private static State Evaluate(EstateModel model, RecordEnvelope declaration, string? releaseCommit = null)
     {
+        if (GeneratedDocumentContract.IsStrict(model, declaration))
+        {
+            GeneratedDocumentPlan plan = GeneratedDocumentVerification.Plan(model, declaration, releaseCommit);
+            return new State(declaration, plan.Current ? null : "refuse",
+                plan.Problems.Select(p => new Reason("generation", "refuse", p, null)).ToArray(), null,
+                plan.Status == DocumentGenerationStatus.Unavailable ? plan.Problems : [], []) { Generation = plan };
+        }
+
         IReadOnlyList<string> chain = model.Chain(declaration);
         string path = EstateModel.BodyString(declaration, "path") ?? string.Empty;
         bool elsewhere = EstateModel.BodyString(declaration, "repository") is not null;

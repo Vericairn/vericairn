@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Records.Estate;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>Pins a document in the repository (design or docs) at an exact hash and revision.</summary>
@@ -47,6 +49,11 @@ public sealed class DocumentRevisionType : IRecordType
         {
             return;
         }
+
+        if (context.Model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is null
+            && GeneratedDocumentContract.IsStrict(context.Model, d) && GeneratedDocumentContract.Owns(d, path)
+            && !GeneratedDocumentContract.IsHistoricalPin(context.Model, d, context.Record)))
+            context.Error("document.generated-pin", "A whole generated document is verified from its sources and takes no output pin.");
 
         if (path.Contains("/../", StringComparison.Ordinal) || path.Contains("//", StringComparison.Ordinal))
         {

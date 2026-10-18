@@ -23,6 +23,10 @@ public interface IDocumentSource
     DocumentSourceSelection ReadSelection(EstateModel model, RecordEnvelope declaration, string commit, DocumentGeneratorDescriptor generator) =>
         new(DocumentGenerationStatus.Unavailable, [], commit, "This source does not provide the versioned snapshot contract.");
 
+    /// <summary>Reads the complete owned output inventory at that same exact commit, including unexpected files.</summary>
+    DocumentFileInventory ReadInventory(EstateModel model, RecordEnvelope declaration, string commit) =>
+        new(DocumentGenerationStatus.Unavailable, [], commit, "This source does not provide complete member inventories.");
+
     /// <summary>The commit at the head of the repository's clone here, or null when no clone is registered or it cannot be read.</summary>
     string? Head(EstateModel model, RecordEnvelope declaration);
 

@@ -1277,6 +1277,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         var compared = new List<string>();
         foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && d.DeclaresRefuse))
         {
+            if (document.Generation is { } generation)
+            {
+                if (generation.Current) compared.Add($"{document.Path} at {generation.Commit}: every generated member equals its verified sources");
+                else changed.AddRange(generation.Problems.Select(p => $"{document.Path}: {p}"));
+                continue;
+            }
+
             RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
             JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
             string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
@@ -1345,7 +1352,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private static bool NeedsReleaseCommit(EstateModel model, string product, IReadOnlySet<string> repositories) =>
         model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is string repository && repositories.Contains(repository) &&
-            LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"));
+            (GeneratedDocumentContract.IsStrict(model, d) || (LivingDocuments.NamesProduct(model, d, product) && LivingDocuments.Triggers(d).Any(t => t.Level == "refuse"))));
 
     // Match the effective build destination, including request overrides, through the provider's resource location keys.
     // Every revision of a matching resource denotes the same repository, including an older declaration or clone registration.

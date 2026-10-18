@@ -24,8 +24,9 @@ public class DocumentGenerationTests
     [Fact]
     public void PatternsBelongToFormatThreeAndRequireUnambiguousGeneratedOwnership()
     {
-        using var estate = new TestEstate(3);
-        RecordEnvelope valid = estate.Add("living-document", estate.OperatorId, Declaration().ToJsonString());
+        using var fixture = new PolicyFixture();
+        TestEstate estate = fixture.Estate;
+        RecordEnvelope valid = fixture.Add("living-document", Declaration());
         Assert.False(estate.Load().Findings.HasErrors, string.Join('\n', estate.Load().Findings));
         using var old = new TestEstate(2);
         old.Add("living-document", old.OperatorId, Declaration().ToJsonString());

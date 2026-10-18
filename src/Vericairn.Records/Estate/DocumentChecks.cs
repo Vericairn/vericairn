@@ -55,16 +55,20 @@ public static partial class DocumentChecks
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(declaration);
         ArgumentNullException.ThrowIfNull(text);
+        if (GeneratedDocumentContract.IsStrict(model, declaration))
+            return GeneratedDocumentVerification.Plan(model, declaration).Problems;
+        bool strictRegions = declaration.Format >= 3 && EstateModel.BodyString(declaration, "kind") == "authored";
         var problems = new List<string>();
         foreach ((string id, string generator, IReadOnlyList<string> inputs) in Regions(declaration))
         {
             string? fresh = DocumentGenerators.Find(generator)?.Generate(model, id, inputs);
             if (fresh is null)
             {
+                if (strictRegions) problems.Add($"region {id}: generator {generator} is unavailable");
                 continue;
             }
 
-            string? content = GeneratedRegions.Content(text.Replace("\r\n", "\n", StringComparison.Ordinal), id);
+            string? content = GeneratedRegions.Content(strictRegions ? text : text.Replace("\r\n", "\n", StringComparison.Ordinal), id);
             if (content is null)
             {
                 problems.Add($"region {id} has lost its markers");
@@ -123,7 +127,8 @@ public static partial class DocumentChecks
     {
         IReadOnlyList<string> problems = Generated(model, declaration, text);
         bool installed = Regions(declaration).Any(r => DocumentGenerators.Find(r.Generator) is not null) || (Generator(declaration) is (string id, _) && DocumentGenerators.Find(id) is not null);
-        return !installed ? new Outcome("matches-generator", "not-performed", "Its generator is not installed here; the product's own tests compare it.")
+        bool strict = GeneratedDocumentContract.IsStrict(model, declaration) || (declaration.Format >= 3 && EstateModel.BodyString(declaration, "kind") == "authored");
+        return !installed && !strict ? new Outcome("matches-generator", "not-performed", "Its generator is not installed here; the product's own tests compare it.")
             : problems.Count == 0 ? new Outcome("matches-generator", "passed", "Equals a fresh generation.")
             : new Outcome("matches-generator", "failed", string.Join("; ", problems) + ".");
     }
