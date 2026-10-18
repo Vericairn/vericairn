@@ -1,6 +1,6 @@
 # Generated CLI reference: client outcomes
 
-Generated from `ClientFailure` by `docs/cli-reference-generator`.
+Generated from `ClientFailure` by `vericairn-docs generate`.
 
 ## Interrupted client requests
 
@@ -13,5 +13,7 @@ An interrupted client request writes its diagnostic to standard error. It does n
 | `unavailable` | `2` | `error: The runtime is unavailable.` |
 
 When an effect may have happened, the diagnostic also says: `The outcome is unknown; reconcile the original operation before retrying.`
+
+A definite refusal keeps its diagnostic and exit code `2`; it is never called unavailable or of unknown outcome. Existing structured refusal responses keep their representation.
 
 Caller cancellation (including Ctrl+C for ordinary requests) and a per-operation deadline are separate outcomes. Cancellation does not undo an effect, and these clients do not retry it. Foreground worker following still interprets Ctrl+C as a request to stop the original run; runtime serving still interprets it as a request to stop the service. Their requests remain subject to deadlines.
