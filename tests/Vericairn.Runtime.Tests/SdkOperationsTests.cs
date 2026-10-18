@@ -331,6 +331,24 @@ public sealed class SdkOperationsTests
         Assert.Equal("unavailable", ClientFailure.FromException(failure)?.Code);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ATransportTimeoutKeepsItsCauseWhenWrappedByHttpOrCancellation(bool http)
+    {
+        var timeout = new TimeoutException("transport deadline elapsed");
+        Exception original = http ? new HttpRequestException("request ended", timeout) : new TaskCanceledException("request ended", timeout);
+        using var client = Client((_, _) => throw original);
+        Exception? legacy = Record.Exception(() => client.Attempt(new("assignment", "contributor", "workspace", "note")));
+        Assert.Same(original, legacy);
+        ClientTimeoutException failure = await Assert.ThrowsAsync<ClientTimeoutException>(() =>
+            client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken));
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal("timed-out", ClientFailure.FromException(original)!.Code);
+        Assert.Equal("timed-out", ClientFailure.FromException(failure)!.Code);
+        Assert.Equal("cancelled", ClientFailure.FromException(new ClientCancelledException(true, default, timeout))!.Code);
+    }
+
     [Fact]
     public async Task ExistingResponseShapesAndSynchronousCallsStillWork()
     {

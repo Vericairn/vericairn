@@ -63,6 +63,7 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
     {
         if (Refusal(exception) is Exception refusal) return new("refused", refusal.Message, false, 2);
         bool unknown = exception is IClientOperationFailure { OutcomeUnknown: true };
+        if (exception is not IClientOperationFailure && TimedOut(exception)) return new("timed-out", TimeoutMessage(unknown), unknown, 124);
         return exception switch
         {
             TimeoutException => new("timed-out", TimeoutMessage(unknown), unknown, 124),
@@ -83,6 +84,13 @@ public sealed record ClientFailure(string Code, string Message, bool OutcomeUnkn
         }
 
         return exception is HttpRequestException { StatusCode: not null } ? exception : null;
+    }
+
+    internal static bool TimedOut(Exception exception)
+    {
+        for (Exception? cause = exception; cause is not null; cause = cause.InnerException)
+            if (cause is TimeoutException) return true;
+        return false;
     }
 
     internal static string CancelledMessage(bool unknown) => "The request was cancelled." + (unknown ? Uncertain : string.Empty);
@@ -149,7 +157,8 @@ public static class ClientOperation
                 throw new ClientCancelledException(mayHaveEffect(), cancellationToken, exception);
             }
 
-            if (deadline.IsCancellationRequested) throw new ClientTimeoutException(mayHaveEffect(), exception);
+            if (deadline.IsCancellationRequested || (exception is not IClientOperationFailure && ClientFailure.TimedOut(exception)))
+                throw new ClientTimeoutException(mayHaveEffect(), exception);
             if (exception is ClientCancelledException) throw;
             // An unrelated transport cancellation is neither proof of a deadline nor a person's cancellation.
             throw new ClientUnavailableException(mayHaveEffect(), exception);
@@ -166,6 +175,7 @@ public static class ClientOperation
         catch (HttpRequestException exception) when (exception.StatusCode is null && exception is not IClientOperationFailure)
         {
             bool dispatched = exception.HttpRequestError is not (HttpRequestError.NameResolutionError or HttpRequestError.ConnectionError);
+            if (ClientFailure.TimedOut(exception)) throw new ClientTimeoutException(mayHaveEffect() && dispatched, exception);
             throw new ClientUnavailableException(mayHaveEffect() && dispatched, exception);
         }
         catch (HttpRequestException exception) when (exception is not IClientOperationFailure && mayHaveEffect() && exception.StatusCode >= HttpStatusCode.InternalServerError)
