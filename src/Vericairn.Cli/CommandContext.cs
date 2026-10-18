@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.Reflection;
 using System.Text.Json;
 using Vericairn.Daemon;
 using Vericairn.Protocol;
@@ -152,6 +153,9 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         using EstateSession session = EstateSession.Open(root);
         return session.Load();
     }
+
+    public static string VersionText() =>
+        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
 
     public static bool IsEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath));
 

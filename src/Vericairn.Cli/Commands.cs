@@ -1995,57 +1995,7 @@ internal static partial class Commands
         }
     }
 
-    /// <summary>The git adapter behind sources and check; tests substitute a recorded one.</summary>
-    /// <summary>Serves the estate over the Model Context Protocol on standard input and output; diagnostics go to standard error.</summary>
-    public static int McpServe(string root, string? actingAs) => WithApi(root, api =>
-    {
-        var utf8 = new System.Text.UTF8Encoding(false);
-        Console.InputEncoding = utf8;
-        Console.OutputEncoding = utf8;
-        var server = new McpServer(new ToolRegistry(api, actingAs), VersionText());
-        Console.Error.WriteLine($"vericairn mcp: serving {Path.GetFullPath(root)} ({(string.IsNullOrWhiteSpace(actingAs) ? "read-only" : "acting as " + actingAs)})");
-        server.Run(Console.In, Console.Out, Console.Error);
-        return Clean;
-    });
 
-    /// <summary>
-    /// Writes the agent orientation files from the estate's identity, its qualifications of agent harnesses and the tool registry;
-    /// with <paramref name="check"/>, compares the copies in the directory with a fresh generation instead and names every file
-    /// that is missing or differs.
-    /// </summary>
-    public static int McpOrientation(string root, string output, string? actingAs, bool check, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<(string Name, string Content)> files = Orientation.Generate(api, new ToolRegistry(api, actingAs));
-        if (check)
-        {
-            var findings = new List<FindingDto>();
-            foreach ((string name, string content) in files)
-            {
-                string path = Path.Combine(output, name);
-                if (!File.Exists(path))
-                {
-                    findings.Add(new FindingDto("error", "orientation.missing", name, "Missing; write it with `vericairn mcp orientation --out <directory>`."));
-                }
-                else if (File.ReadAllText(path) != content)
-                {
-                    findings.Add(new FindingDto("error", "orientation.stale", name, "Differs from a fresh generation; regenerate it with `vericairn mcp orientation --out <directory>` instead of editing it."));
-                }
-            }
-
-            return ReportFindings(new FindingsResponse(findings.Count == 0 ? $"{output}: current" : $"{output}: out of date", findings.Count, 0, findings), json);
-        }
-
-        Directory.CreateDirectory(output);
-        var written = new List<string>();
-        foreach ((string name, string content) in files)
-        {
-            File.WriteAllText(Path.Combine(output, name), content);
-            written.Add(name);
-        }
-
-        Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { output, files = written }) : $"{output}: {string.Join(", ", written)}");
-        return Clean;
-    });
 
     /// <summary>The git adapter registered in this process; tests register a recorded one.</summary>
     internal static ISourceAdapter? SourceAdapter
@@ -2557,8 +2507,7 @@ internal static partial class Commands
         return all;
     }
 
-    private static string VersionText() =>
-        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "unknown";
+    private static string VersionText() => CommandContext.VersionText();
 
     private static string? Probe(string tool, string argument)
     {

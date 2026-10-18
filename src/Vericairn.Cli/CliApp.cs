@@ -40,7 +40,7 @@ internal static partial class CliApp
         root.Subcommands.Add(new RecoverCommand(context));
         root.Subcommands.Add(new ObjectsCommand(context));
         root.Subcommands.Add(DocsFamily(estateOption, jsonOption));
-        root.Subcommands.Add(McpFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new McpCommand(context));
         root.Subcommands.Add(new ContextCommand(context));
         root.Subcommands.Add(UpdatesFamily(jsonOption));
 
@@ -92,27 +92,6 @@ internal static partial class CliApp
         return root;
     }
 
-    private static Command McpFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var mcp = new Command("mcp", "The Model Context Protocol server: serve the estate to a coding agent over standard input and output, or generate the agent orientation files.");
-
-        var serve = new Command("serve", "Serve the estate's tools over standard input and output until the input ends; a client of the daemon or the embedded runtime, never a second owner.");
-        var asOption = new Option<string>("--as") { Description = "Principal id the agent acts for; its admitted device on this machine signs the writes. Without it only the read-only tools are listed." };
-        serve.Options.Add(asOption);
-        serve.SetAction(parseResult => Commands.McpServe(parseResult.GetValue(estateOption)!, parseResult.GetValue(asOption)));
-        mcp.Subcommands.Add(serve);
-
-        var orientation = new Command("orientation", "Write AGENTS.md and the pointer files for the common agent harnesses from the estate's identity, its qualifications of agent harnesses and the tool registry, or check existing copies against a fresh generation.");
-        var outOption = new Option<string>("--out") { Description = "Directory to write the files into, for example a repository root.", Required = true };
-        var orientationAsOption = new Option<string>("--as") { Description = "Principal id the files describe as the acting principal, if any." };
-        var checkOption = new Option<bool>("--check") { Description = "Write nothing; compare the files in --out with a fresh generation and name every one that is missing or differs." };
-        orientation.Options.Add(outOption);
-        orientation.Options.Add(orientationAsOption);
-        orientation.Options.Add(checkOption);
-        orientation.SetAction(parseResult => Commands.McpOrientation(parseResult.GetValue(estateOption)!, parseResult.GetValue(outOption)!, parseResult.GetValue(orientationAsOption), parseResult.GetValue(checkOption), parseResult.GetValue(jsonOption)));
-        mcp.Subcommands.Add(orientation);
-        return mcp;
-    }
 
     private static Command DocsFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
