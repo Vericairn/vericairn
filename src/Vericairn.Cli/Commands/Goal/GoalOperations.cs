@@ -192,7 +192,7 @@ internal sealed class GoalOperations(CommandContext context)
 
         return context.WithApi(root, api =>
         {
-            if (options.Detach && api is not VericairnClient)
+            if (options.Detach && !context.UsingDaemon)
             {
                 return context.Fail("--detach leaves an agent's run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or take the step in the foreground.");
             }
@@ -210,7 +210,7 @@ internal sealed class GoalOperations(CommandContext context)
                 return step.Run?.Problem is { Findings.Count: > 0 } rejected ? context.ReportOutcome(WriteOutcome.Fail(rejected), json) : context.Fail(step.Message);
             }
 
-            RunRow? row = step.Outcome == "run" && !options.Detach ? RunConsole.Follow(api, step.Run!.Run, options.By) : null;
+            RunRow? row = step.Outcome == "run" && !options.Detach ? RunConsole.Follow(context, api, step.Run!.Run, options.By) : null;
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new { step, settled = row }, ProtocolJson.Options));

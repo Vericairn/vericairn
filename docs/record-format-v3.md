@@ -149,3 +149,92 @@ The checked-in format-3 policy estate pins every fixture byte in `inventory.sha2
 record types and registry fields, round trips, signatures, bounded authority, occurrence identities, debt
 dispositions and the migration refusal boundary. Runtime tests use fixture estates and isolated homes.
 The platform matrix must run on the eventual pushed commit before integration.
+
+## Generated living documents
+
+READ-01 extends `living-document` in format 3 with `pathPattern`. It is exclusive with `path`, requires
+`kind: generated`, and cannot carry authored `regions`. The supported form is a literal portable directory
+followed by `/{month}/{date}-{slug}-{id}.md`. The source revision supplies its UTC month and date, a bounded
+ASCII title slug (or `item` when none remains), and its full revision id. The directory is owned by one
+declaration; overlapping declarations, authored files and case collisions are refused. A pattern is never
+evidence of membership by itself: the generator enumerates the complete selected source inventory.
+
+A whole generated format-3 declaration permits `triggers: []` and has no `clearedBy`. Format-2 records still
+require a concrete `path` and nonempty triggers, and refuse `pathPattern` with a format error. No new record
+type or companion-status field is introduced. The signed golden fixture includes the new field, and its
+inventory retains every fixture byte. Generator interface and output-contract versions are independent of
+record format. Legacy region inputs retain their existing grammar; versioned generators use validated named
+inputs, including an explicit `format`, `audience` and `selection`. Missing contracts and incomplete source
+selections are unavailable, never a successful empty collection.
+
+New format-3 whole generated declarations require admitted-device signatures and mandatory fresh member
+and byte comparison. They require no output pin or authored clearance. Authored documents, including those
+with generated regions, keep their exact-file pins. Upgrading the manifest or making an editorial successor
+does not convert a legacy generated lineage. An explicit conversion submits canonical declaration-basis and
+complete before/after preview outputs in an ordinary `result`, followed by an authentic independent operator
+`review` of that exact result. These use existing output/evidence fields, not a new record or mode field.
+The preview identifies the prior declaration, owned paths, existing pins, exact source digests and proposed
+bytes. A successor adopts the reviewed definition; generator or ownership changes need a new reviewed
+migration. Historical pins remain unchanged. Strict whole generated outputs refuse later pins and
+`document-review` records, and neither missing implementations nor a matching historical pin can establish
+currentness. External repository comparisons require an exact commit and a complete versioned source
+inventory; they cannot substitute a clone's head for the release commit.
+
+### Canonical rendering and contribution coverage
+
+The immutable renderer interface, output contract, rendition response and coverage
+descriptor have separate version numbers. `DocumentRendering` takes only selected,
+verified snapshots and named inputs. Stored and on-demand views use that same
+renderer. Input digests identify the relevant source revisions, generator and
+implementation; the comparison commit is response metadata and never becomes an
+input to its own output. Each pattern member receives only its own revision.
+Generated source dependencies must be current at the same basis and acyclic.
+
+Canonical Markdown is UTF-8 without a BOM, with LF endings, no trailing horizontal
+whitespace and exactly one final newline. Source wording is escaped as literal
+data, numbers and UTC dates use invariant formatting, and selections have explicit
+ordinal order. The original source hashes still describe original bytes. Renderers
+return explicit success, unavailable or error; failed renditions contain no bytes
+or digest. Ordinary repository content checks and the declared size bound apply.
+
+`DocumentCoverage` compares the authoritative kind inventory and shipped descriptors
+in both directions. It includes admitted record types and declared collection
+fields; owning contributions supply deeper nested and non-record collections.
+Each exact kind names its reader task, item/list contracts, input schema, Internal
+audience and destination, or a bounded no-reader reason. Missing and duplicate
+coverage, missing implementations and unsupported versions fail conformance.
+Descriptors do not certify prose quality. The READ-02 and READ-03 builds supply the
+first-party readers and their coverage; this foundation does not claim that an
+absent reader is covered by a raw JSON fallback.
+
+Named-input schemas accept fixed literals and bounded typed alternatives for exact
+identities, UTC instants, hashes, commits, repository paths and text. A date or
+interval is an explicit input; no renderer reads the current clock. Unknown grammar
+tokens, duplicate names and unsupported output versions are refused.
+
+### Repair, retirement and interrupted writes
+
+The existing `docs regenerate` operation selects a declaration, register directory
+or proved member. It prepares the complete rendition before publishing any bytes,
+refuses unavailable generators and malformed markers, and preserves authored bytes
+outside regions. It neither prunes unexpected files nor writes pins. Authored files
+still need their ordinary updated pin after a region changes.
+
+Repository record writes prepare the affected generated members before storing a
+record. A rendering failure writes neither records nor outputs. The existing local
+batch journal carries prepared output changes until publication completes. Each
+destination replacement is atomic and guarded by its observed hash. An I/O failure
+after records were stored reports those records together with a recovery problem;
+it never calls them rolled back. Reopening the estate or using the existing repair
+route resumes verified pending outputs. Changed destinations or unavailable fresh
+inputs hold recovery and further writes. The transient journal is removed after
+completion and is not companion authority or a second status ledger.
+
+The existing signed `retirement` record names the exact generated file or register
+directory. Retiring generated ownership requires operator or local-engineering
+authority and a complete current inventory; unexpected or unavailable members are
+never pruned. Generator, destination and region-contract changes require a fresh
+reviewed migration preview. Restoring authored ownership requires an exact pin in
+the proposed batch. Source records and historical pins are retained unchanged.
+Local-only records remain in their canonical live store; committed estate companion
+adoption requires repository custody, while on-demand rendering needs no file.

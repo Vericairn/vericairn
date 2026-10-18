@@ -38,7 +38,7 @@
     {
       "algorithm": "ecdsa-p256-sha256",
       "device": "01M57TPYP9Q3KJKJ2QVCW03V50",
-      "signature": "V9FLrqi9Oojl0E1Bs9HZPQl1t5p0dvASVicmVL5hNlhZ_h4vI1nYhOmx_V8Citl4nhY-XuPZIwnN8jKg9Ickrg"
+      "signature": "IjfZKSYVwj9DSw61_yZLVdfO48_ag_bGZZijuCNw0KCmxjScuWElUqBSsOAPY9s_b-MDY0zAFBNG7lsgRT7qaA"
     }
   ],
   "type": "writing-exception"

@@ -2,6 +2,8 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.RegularExpressions;
+using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Types;
 
@@ -47,6 +49,16 @@ public sealed partial class RetirementType : IRecordType
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("retirement.author", $"Authoring principal {context.Record.By} has no principal record.");
+        }
+        if (context.Model.Current("living-document").Any(d => GeneratedDocumentContract.IsStrict(context.Model, d)
+            && EstateModel.BodyString(d, "repository") is null && GeneratedDocumentContract.RetirementPath(d) == path))
+        {
+            if (context.Format < 3 || !SignatureChecks.IsAuthentic(context.Model, context.Record)
+                || (!context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.LocalEngineering)))
+                context.Error("retirement.generated-author", "Retiring generated ownership requires a signed format-3 record by the operator or under local-engineering authority.");
+            if (context.Record.Supersedes is { } previous && context.Find(previous) is { } prior
+                && EstateModel.BodyString(prior, "retiredAt") is not null && EstateModel.BodyString(context.Record, "retiredAt") is null)
+                context.Error("retirement.generated-reopen", "Retired generated ownership cannot be silently reactivated.");
         }
     }
 

@@ -28,46 +28,44 @@ public partial class App : Application
             string? probe = Value("--probe");
             window.Shell.ActingOverride = Value("--as");
             string? open = Value("--open");
-            if (estate is not null)
+            window.Opened += async (_, _) =>
             {
-                window.Opened += async (_, _) =>
+                if (estate is not null)
                 {
                     await window.Shell.OpenEstateAsync(estate).ConfigureAwait(true);
                     // --open names a workspace to show after the estate opens, so a measurement can cover it.
                     switch (open)
                     {
                         case "products":
-                            window.Shell.OpenProducts();
+                            await window.Shell.OpenProductsAsync().ConfigureAwait(true);
                             break;
                         case "inbox":
                             window.Shell.OpenInbox();
                             break;
                         case "release":
-                            window.Shell.OpenRelease();
+                            await window.Shell.OpenReleaseAsync().ConfigureAwait(true);
                             break;
                         case "runtime":
-                            window.Shell.OpenRuntime();
+                            await window.Shell.OpenRuntimeAsync().ConfigureAwait(true);
                             break;
                         case "goals":
-                            window.Shell.OpenGoals();
+                            await window.Shell.OpenGoalsAsync().ConfigureAwait(true);
                             break;
                         case null:
                             break;
                         default:
-                            window.Shell.OpenWorkOrder(open);
+                            await window.Shell.OpenWorkOrderAsync(open).ConfigureAwait(true);
                             break;
                     }
-                };
-            }
-
-            if (probe is not null)
-            {
-                window.Opened += (_, _) => Dispatcher.UIThread.Post(() =>
+                }
+                if (probe is not null)
                 {
-                    File.WriteAllText(probe, Probe.Report(window, Value("--cell") ?? "unnamed cell", Arguments.Contains("--virtual")));
+                    string report = await Dispatcher.UIThread.InvokeAsync(() =>
+                        Probe.Report(window, Value("--cell") ?? "unnamed cell", Arguments.Contains("--virtual")), DispatcherPriority.Background);
+                    await File.WriteAllTextAsync(probe, report).ConfigureAwait(true);
                     desktop.Shutdown();
-                }, DispatcherPriority.Background);
-            }
+                }
+            };
         }
 
         base.OnFrameworkInitializationCompleted();

@@ -49,13 +49,14 @@ public sealed class LivingDocumentType : IRecordType
     /// <inheritdoc />
     public IReadOnlyList<FieldDescription> Fields { get; } =
     [
-        new("path", "path", true, "The document's repository-relative path.", 2),
+        new("path", "path", false, "The document's repository-relative path; required unless format 3 supplies pathPattern.", 2),
+        new("pathPattern", "string", false, "For generated documents only: a literal directory followed by {month}/{date}-{slug}-{id}.md. Exclusive with path; members come from exact source revisions.", 3),
         new("repository", "ulid", false, "The resource record of the repository that holds it; absent for the estate's own repository.", 2),
         new("title", "string", true, "The document's title.", 2),
         new("kind", string.Join('|', Kinds), true, "authored by a person or an agent, or generated from its inputs.", 2),
         new("generator", "object", false, "For a generated document, required: id (such as vericairn.mcp/orientation) and inputs (string[]).", 2),
         new("source", "string", true, "How its content is read at a revision: estate-file, or a pack's source such as vericairn.software/git-file.", 2),
-        new("triggers", "object[]", true, "At least one {on, level (remind|warn|refuse), ...}: covers with paths, release with product, upgrade, decision, accepted with keys, or a pack's trigger named namespace/name.", 2),
+        new("triggers", "object[]", true, "Nonempty for authored and legacy declarations; strict format-3 whole generated declarations allow an empty list. Each trigger has on, level (remind|warn|refuse), and its declared inputs.", 2),
         new("regions", "object[]", false, "Generated regions: id, generator and optionally its inputs (string[]); marked <!-- vericairn:generated <id> --> and <!-- vericairn:end <id> --> in the document.", 2),
         new("clearedBy", string.Join('|', Clearers), false, "Who may clear it: any admitted principal (the default), independent (not the one that revised or wrote its content), or operator.", 2),
         new("checks", "string[]", false, "Checks run at each clearance: names-version, matches-generator, links-resolve, or a pack's named namespace/name.", 2),
@@ -67,18 +68,24 @@ public sealed class LivingDocumentType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
-        string? path = body.Text("path", true, 500, Patterns.RelativePath, "a normalized repository-relative path");
+        string? pattern = body.Since(3, "pathPattern") ? body.Text("pathPattern", false, 500) : null;
+        string? path = body.Text("path", pattern is null, 500, Patterns.RelativePath, "a normalized repository-relative path");
         string? repository = body.Ulid("repository", false);
         body.Text("title", true, 300);
         string? kind = body.Enum("kind", true, Kinds);
         BodyReader? generator = body.Nested("generator", false);
         string? source = body.Text("source", true, 200);
-        IReadOnlyList<BodyReader>? triggers = body.NestedArray("triggers", true, allowEmpty: false);
+        IReadOnlyList<BodyReader>? triggers = body.NestedArray("triggers", true, allowEmpty: context.Record.Format >= 3 && kind == "generated" && GeneratedDocumentContract.IsStrict(context.Model, context.Record));
         IReadOnlyList<BodyReader>? regions = body.NestedArray("regions", false, allowEmpty: false);
         body.Enum("clearedBy", false, Clearers);
         IReadOnlyList<string>? checks = body.StringArray("checks", false, allowEmpty: false, maxItemLength: 200);
         body.Text("summary", true, 4000);
         body.NoOtherKeys();
+
+        if (pattern is not null && (path is not null || kind != "generated" || regions is not null || !DocumentPatterns.IsValid(pattern)))
+        {
+            body.Error("document.pattern", "pathPattern", "A generated pattern is exclusive with path and regions, and uses a literal directory followed by {month}/{date}-{slug}-{id}.md.");
+        }
 
         context.RequireReference("repository", repository, "resource");
         if (source is not null && source != EstateFile && !Patterns.Contribution.IsMatch(source))
@@ -138,23 +145,28 @@ public sealed class LivingDocumentType : IRecordType
             context.Error("document.author", $"Authoring principal {context.Record.By} has no principal record.");
         }
 
-        if (path is null)
+        string? destination = path ?? pattern;
+        if (destination is null)
         {
             return;
         }
 
         // One declaration per document: a revision supersedes it and keeps its path and repository.
         RecordEnvelope? previous = context.Record.Supersedes is null ? null : context.Find(context.Record.Supersedes);
-        if (previous is not null && previous.Type == Name && (EstateModel.BodyString(previous, "path") != path || EstateModel.BodyString(previous, "repository") != repository))
+        GeneratedDocumentContract.Validate(context, previous);
+        if (previous is not null && previous.Type == Name && (DocumentPatterns.Destination(previous) != destination || EstateModel.BodyString(previous, "repository") != repository)
+            && !GeneratedDocumentContract.HasReviewedMigration(context.Model, context.Record))
         {
             context.Error("document.path-changed", "A declaration's revision keeps its path and its repository; another document is another declaration.");
         }
 
         RecordEnvelope? other = !context.Model.IsCurrent(context.Record) ? null : context.Model.Current(Name).FirstOrDefault(d => d.Id != context.Record.Id
-            && EstateModel.BodyString(d, "path") == path && EstateModel.BodyString(d, "repository") == repository);
+            && !GeneratedDocumentContract.IsRetired(context.Model, d) && !GeneratedDocumentContract.IsRetired(context.Model, context.Record)
+            && (d.Format < 3 && context.Record.Format < 3 ? EstateModel.BodyString(d, "path") == path : DocumentPatterns.Overlaps(d, context.Record))
+            && EstateModel.BodyString(d, "repository") == repository);
         if (other is not null)
         {
-            context.Error("document.declared-twice", $"{path} is already declared by {other.Id}; revise that declaration instead.");
+            context.Error("document.declared-twice", $"{destination} overlaps ownership declared by {other.Id}; revise that declaration instead.");
         }
     }
 

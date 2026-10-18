@@ -12,8 +12,8 @@ public class OperatorActionsJourneyTests
     [Fact]
     public void QueueIsACommandClassAndRefusesAnAbsentEstate()
     {
-        Assert.IsType<OperatorCommand>(CliApp.Build().Subcommands.Single(c => c.Name == "operator"));
-        Assert.IsType<OperatorListCommand>(CliApp.Build().Subcommands.Single(c => c.Name == "operator").Subcommands.Single(c => c.Name == "list"));
+        Assert.IsType<OperatorCommand>(CliApp.Build(cancellationToken: TestContext.Current.CancellationToken).Subcommands.Single(c => c.Name == "operator"));
+        Assert.IsType<OperatorListCommand>(CliApp.Build(cancellationToken: TestContext.Current.CancellationToken).Subcommands.Single(c => c.Name == "operator").Subcommands.Single(c => c.Name == "list"));
         string root = CliHarness.TempDirectory("operator-absent");
         try
         {

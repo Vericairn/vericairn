@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.CommandLine;
+using System.CommandLine.Invocation;
 using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
@@ -10,11 +11,11 @@ namespace Vericairn.Cli;
 internal static class CliApp
 {
     /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version, updates.</summary>
-    public static RootCommand Build(ReleaseUpdates? updates = null)
+    public static RootCommand Build(ReleaseUpdates? updates = null, CancellationToken cancellationToken = default)
     {
         updates ??= new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default);
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
-        var context = new CommandContext();
+        var context = new CommandContext(cancellationToken: cancellationToken);
         var root = new VericairnCommand(context);
         root.Subcommands.Add(new CommunicationCommand(context));
         root.Subcommands.Add(new RecordsCommand(context));
@@ -45,6 +46,16 @@ internal static class CliApp
         root.Subcommands.Add(new DecisionsCommand(context));
         root.Subcommands.Add(new DoctorCommand(context, updates));
         root.Subcommands.Add(new VersionCommand(context, updates));
+        Bind(root);
         return root;
+
+        void Bind(Command command)
+        {
+            if (command.Action is SynchronousCommandLineAction action)
+            {
+                command.SetAction(parseResult => context.Invoke(() => action.Invoke(parseResult)));
+            }
+            foreach (Command child in command.Subcommands) Bind(child);
+        }
     }
 }

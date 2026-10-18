@@ -43,7 +43,7 @@ public partial class MainWindow : Window
         shell.PropertyChanged += OnShellChanged;
         ApplyLayout();
         Closing += OnClosing;
-        progressTimer.Tick += (_, _) => shell.RefreshProgress();
+        progressTimer.Tick += (_, _) => _ = shell.RefreshProgressAsync();
         updatesTimer.Tick += async (_, _) => await shell.RefreshUpdatesAsync().ConfigureAwait(true);
         Opened += async (_, _) =>
         {
@@ -51,7 +51,7 @@ public partial class MainWindow : Window
             updatesTimer.Start();
             await shell.RefreshUpdatesAsync().ConfigureAwait(true);
         };
-        Closed += (_, _) => { progressTimer.Stop(); updatesTimer.Stop(); };
+        Closed += (_, _) => { progressTimer.Stop(); updatesTimer.Stop(); shell.CancelCurrentRequest(); };
     }
 
     /// <summary>The view model.</summary>
@@ -66,7 +66,7 @@ public partial class MainWindow : Window
         bool handled = true;
         if (e.Key == Key.F5)
         {
-            shell.Refresh();
+            _ = shell.RefreshAsync();
         }
         else if (command && shift && e.Key == Key.L)
         {
@@ -115,33 +115,27 @@ public partial class MainWindow : Window
         }
         else if (command && shift && e.Key == Key.E)
         {
-            shell.OpenRelease();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenReleaseAsync());
         }
         else if (command && shift && e.Key == Key.D)
         {
-            shell.OpenLivingDocuments();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenLivingDocumentsAsync());
         }
         else if (command && shift && e.Key == Key.P)
         {
-            shell.OpenProgress();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenProgressAsync());
         }
         else if (command && shift && e.Key == Key.H)
         {
-            shell.OpenHandoff();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenHandoffAsync());
         }
         else if (command && shift && e.Key == Key.G)
         {
-            shell.OpenGoals();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenGoalsAsync());
         }
         else if (command && shift && e.Key == Key.U)
         {
-            shell.OpenRuntime();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenRuntimeAsync());
         }
         else if (command && shift && e.Key == Key.A)
         {
@@ -150,7 +144,8 @@ public partial class MainWindow : Window
         }
         else if (e.Key == Key.Escape)
         {
-            FocusRegion(Navigation);
+            if (shell.IsBusy) shell.CancelCurrentRequest();
+            else FocusRegion(Navigation);
         }
         else if (e.Key == Key.Enter && ReferenceEquals(e.Source, this))
         {
@@ -225,19 +220,19 @@ public partial class MainWindow : Window
         ListBox? list = focused as ListBox ?? focused.FindAncestorOfType<ListBox>();
         if (list?.DataContext is ResultInboxDocument && list.SelectedItem is InboxRow row)
         {
-            shell.OpenReview(row.ResultId);
+            _ = shell.OpenReviewAsync(row.ResultId);
             return true;
         }
 
         if (list?.DataContext is WorkOrderDocument && list.SelectedItem is AssignmentView assignment)
         {
-            shell.OpenAssignment(assignment.Id);
+            _ = shell.OpenAssignmentAsync(assignment.Id);
             return true;
         }
 
         if (list?.DataContext is AssignmentDocument && list.SelectedItem is AttemptView attempt && attempt.ResultId is not null)
         {
-            shell.OpenReview(attempt.ResultId);
+            _ = shell.OpenReviewAsync(attempt.ResultId);
             return true;
         }
 
@@ -245,7 +240,7 @@ public partial class MainWindow : Window
         {
             if (destination.ReleaseId is not null)
             {
-                shell.OpenReview(destination.ReleaseId);
+                _ = shell.OpenReviewAsync(destination.ReleaseId);
             }
             else
             {
@@ -257,7 +252,7 @@ public partial class MainWindow : Window
 
         if (list?.DataContext is ReleaseWorkspace && list.SelectedItem is ReleaseRowView release)
         {
-            shell.OpenReview(release.Id);
+            _ = shell.OpenReviewAsync(release.Id);
             return true;
         }
 
@@ -273,13 +268,13 @@ public partial class MainWindow : Window
 
         if (AttentionList.IsKeyboardFocusWithin && AttentionList.SelectedItem is AttentionItem item)
         {
-            shell.OpenAttention(item);
+            _ = shell.OpenAttentionAsync(item);
             return true;
         }
 
         if (ProgressList.IsKeyboardFocusWithin && ProgressList.SelectedItem is ProgressRow)
         {
-            shell.OpenProgress();
+            _ = shell.OpenProgressAsync();
             return true;
         }
 
@@ -297,7 +292,7 @@ public partial class MainWindow : Window
 
         if (RecordIdBox.IsKeyboardFocusWithin && !string.IsNullOrWhiteSpace(RecordIdBox.Text))
         {
-            shell.OpenRecord(RecordIdBox.Text.Trim());
+            _ = shell.OpenRecordAsync(RecordIdBox.Text.Trim());
             return true;
         }
 
@@ -392,7 +387,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter && !string.IsNullOrWhiteSpace(RecordIdBox.Text))
         {
             e.Handled = true;
-            shell.OpenRecord(RecordIdBox.Text.Trim());
+            _ = shell.OpenRecordAsync(RecordIdBox.Text.Trim());
             FocusRegion(DocumentTabs);
         }
     }
@@ -402,7 +397,7 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter && AttentionList.SelectedItem is AttentionItem item)
         {
             e.Handled = true;
-            shell.OpenAttention(item);
+            _ = shell.OpenAttentionAsync(item);
         }
     }
 
@@ -410,7 +405,7 @@ public partial class MainWindow : Window
     {
         if (AttentionList.SelectedItem is AttentionItem item)
         {
-            shell.OpenAttention(item);
+            _ = shell.OpenAttentionAsync(item);
         }
     }
 
@@ -427,38 +422,34 @@ public partial class MainWindow : Window
         if (e.Key == Key.Enter && ProgressList.SelectedItem is ProgressRow)
         {
             e.Handled = true;
-            shell.OpenProgress();
-            FocusDocument();
+            _ = OpenAndFocusAsync(shell.OpenProgressAsync());
         }
     }
 
     private void OnOpenCommunication(object? sender, RoutedEventArgs e)
     {
-        shell.OpenCommunication();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenCommunicationAsync());
     }
 
-    private void OnRefreshCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Refresh();
-    private void OnSaveCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Save();
-    private void OnResetCommunication(object? sender, RoutedEventArgs e) => DocumentOf<CommunicationDocument>(sender)?.Reset();
+    private async void OnRefreshCommunication(object? sender, RoutedEventArgs e) => await shell.RefreshCommunicationDocumentAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
+    private async void OnSaveCommunication(object? sender, RoutedEventArgs e) => await shell.SaveCommunicationAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
+    private async void OnResetCommunication(object? sender, RoutedEventArgs e) => await shell.ResetCommunicationAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
 
     private void OnOpenProgress(object? sender, RoutedEventArgs e)
     {
-        shell.OpenProgress();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenProgressAsync());
     }
 
     private void OnOpenHandoff(object? sender, RoutedEventArgs e)
     {
-        shell.OpenHandoff();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenHandoffAsync());
     }
 
-    private void OnPrepareHandoff(object? sender, RoutedEventArgs e) => DocumentOf<HandoffDocument>(sender)?.Prepare();
+    private async void OnPrepareHandoff(object? sender, RoutedEventArgs e) => await shell.PrepareHandoffAsync(DocumentOf<HandoffDocument>(sender)).ConfigureAwait(true);
 
-    private void OnResumeHandoff(object? sender, RoutedEventArgs e) => DocumentOf<HandoffDocument>(sender)?.Compare();
+    private async void OnResumeHandoff(object? sender, RoutedEventArgs e) => await shell.CompareHandoffAsync(DocumentOf<HandoffDocument>(sender)).ConfigureAwait(true);
 
-    private void OnObserveEstate(object? sender, RoutedEventArgs e) => shell.ObserveEstate();
+    private void OnObserveEstate(object? sender, RoutedEventArgs e) => _ = shell.ObserveEstateAsync();
 
     private async void OnSaveHandoff(object? sender, RoutedEventArgs e)
     {
@@ -476,13 +467,14 @@ public partial class MainWindow : Window
         }).ConfigureAwait(true);
         if (file?.TryGetLocalPath() is { } path)
         {
-            page.Save(path);
+            await shell.SaveHandoffAsync(page, path).ConfigureAwait(true);
         }
     }
 
     private async void OnLoadHandoff(object? sender, RoutedEventArgs e)
     {
-        HandoffDocument page = DocumentOf<HandoffDocument>(sender) ?? shell.OpenHandoff();
+        HandoffDocument? page = DocumentOf<HandoffDocument>(sender) ?? await shell.OpenHandoffAsync().ConfigureAwait(true);
+        if (page is null) return;
         IReadOnlyList<IStorageFile> files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
             Title = "Open retained hand-over package",
@@ -493,7 +485,7 @@ public partial class MainWindow : Window
         {
             try
             {
-                page.Load(await File.ReadAllTextAsync(path).ConfigureAwait(true));
+                await shell.LoadHandoffAsync(page, path).ConfigureAwait(true);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -504,8 +496,7 @@ public partial class MainWindow : Window
 
     private void OnOpenGoals(object? sender, RoutedEventArgs e)
     {
-        shell.OpenGoals();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenGoalsAsync());
     }
 
     private void OnOpenInbox(object? sender, RoutedEventArgs e)
@@ -514,29 +505,21 @@ public partial class MainWindow : Window
         FocusRegion(DocumentTabs);
     }
 
-    private void OnOpenProducts(object? sender, RoutedEventArgs e) => shell.OpenProducts();
+    private void OnOpenProducts(object? sender, RoutedEventArgs e) => _ = shell.OpenProductsAsync();
 
     private void OnOpenLivingDocuments(object? sender, RoutedEventArgs e)
     {
-        shell.OpenLivingDocuments();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenLivingDocumentsAsync());
     }
 
-    private void OnSubmitDocumentReview(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<LivingDocumentsWorkspace>(sender) is LivingDocumentsWorkspace page && shell.Api is not null)
-        {
-            page.Submit(shell.Api, shell.ActingPrincipalId);
-            shell.Status = page.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnSubmitDocumentReview(object? sender, RoutedEventArgs e) =>
+        await shell.SubmitDocumentReviewAsync(DocumentOf<LivingDocumentsWorkspace>(sender)).ConfigureAwait(true);
 
     private void OnOpenComposer(object? sender, RoutedEventArgs e)
     {
         if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
         {
-            shell.OpenComposer(order.Key);
+            _ = shell.OpenComposerAsync(order.Key);
         }
         else
         {
@@ -548,15 +531,15 @@ public partial class MainWindow : Window
     {
         if (DocumentOf<WorkOrderDocument>(sender) is WorkOrderDocument order)
         {
-            shell.OpenComparison(order.Id);
+            _ = shell.OpenComparisonAsync(order.Id);
         }
         else if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace)
         {
-            shell.OpenComparison(workspace.SubjectId);
+            _ = shell.OpenComparisonAsync(workspace.SubjectId);
         }
         else if (!string.IsNullOrWhiteSpace(RecordIdBox.Text))
         {
-            shell.OpenComparison(RecordIdBox.Text.Trim());
+            _ = shell.OpenComparisonAsync(RecordIdBox.Text.Trim());
         }
         else
         {
@@ -570,7 +553,7 @@ public partial class MainWindow : Window
         {
             if (order.SelectedAssignment is AssignmentView assignment)
             {
-                shell.OpenAssignment(assignment.Id);
+                _ = shell.OpenAssignmentAsync(assignment.Id);
             }
             else
             {
@@ -585,11 +568,11 @@ public partial class MainWindow : Window
         {
             if (page.SelectedAttempt?.ResultId is string selected)
             {
-                shell.OpenReview(selected);
+                _ = shell.OpenReviewAsync(selected);
             }
             else if (page.LatestResultId is string latest)
             {
-                shell.OpenReview(latest);
+                _ = shell.OpenReviewAsync(latest);
             }
             else
             {
@@ -604,7 +587,7 @@ public partial class MainWindow : Window
         {
             if (order.SelectedAssignment?.LatestResultId is string result)
             {
-                shell.OpenReview(result);
+                _ = shell.OpenReviewAsync(result);
             }
             else
             {
@@ -613,88 +596,45 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnSubmitAssignment(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<AssignmentComposer>(sender) is AssignmentComposer composer && shell.Api is not null)
-        {
-            composer.Submit(shell.Api, shell.ActingPrincipalId);
-            shell.Status = composer.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnSubmitAssignment(object? sender, RoutedEventArgs e) =>
+        await shell.SubmitAssignmentAsync(DocumentOf<AssignmentComposer>(sender)).ConfigureAwait(true);
 
     private void OnInboxOpen(object? sender, RoutedEventArgs e)
     {
         if (DocumentOf<ResultInboxDocument>(sender) is ResultInboxDocument inbox && inbox.Selected is InboxRow row)
         {
-            shell.OpenReview(row.ResultId);
+            _ = shell.OpenReviewAsync(row.ResultId);
         }
     }
 
-    private void OnSubmitReview(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
-        {
-            workspace.SubmitReview(shell.Api);
-            shell.Status = workspace.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnSubmitReview(object? sender, RoutedEventArgs e) =>
+        await shell.SubmitReviewAsync(DocumentOf<ReviewWorkspace>(sender)).ConfigureAwait(true);
 
-    private void OnSubmitAcceptance(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
-        {
-            workspace.SubmitAcceptance(shell.Api);
-            shell.Status = workspace.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnSubmitAcceptance(object? sender, RoutedEventArgs e) =>
+        await shell.SubmitAcceptanceAsync(DocumentOf<ReviewWorkspace>(sender)).ConfigureAwait(true);
 
-    private void OnCheckPrepared(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace && shell.Api is not null)
-        {
-            workspace.CheckPrepared(shell.Api);
-            shell.Status = workspace.PreparedState;
-        }
-    }
+    private async void OnCheckPrepared(object? sender, RoutedEventArgs e) =>
+        await shell.CheckPreparedAsync(DocumentOf<ReviewWorkspace>(sender)).ConfigureAwait(true);
 
     private void OnOpenRelease(object? sender, RoutedEventArgs e)
     {
-        shell.OpenRelease();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenReleaseAsync());
     }
 
     private void OnOpenRuntime(object? sender, RoutedEventArgs e)
     {
-        shell.OpenRuntime();
-        FocusDocument();
+        _ = OpenAndFocusAsync(shell.OpenRuntimeAsync());
     }
 
     private async void OnInstallRuntime(object? sender, RoutedEventArgs e) => await shell.InstallRuntimeAsync().ConfigureAwait(true);
 
     private async void OnUninstallRuntime(object? sender, RoutedEventArgs e) => await shell.UninstallRuntimeAsync().ConfigureAwait(true);
 
-    private void OnSubmitRelease(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<ReleaseWorkspace>(sender) is ReleaseWorkspace workspace && shell.Api is not null)
-        {
-            workspace.Submit(shell.Api, shell.ActingPrincipalId);
-            shell.Status = workspace.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnSubmitRelease(object? sender, RoutedEventArgs e) =>
+        await shell.SubmitReleaseAsync(DocumentOf<ReleaseWorkspace>(sender)).ConfigureAwait(true);
 
-    private void OnObserveRelease(object? sender, RoutedEventArgs e)
-    {
-        if (DocumentOf<ReleaseWorkspace>(sender) is ReleaseWorkspace workspace && shell.Api is not null)
-        {
-            workspace.Observe(shell.Api, shell.ActingPrincipalId);
-            shell.Status = workspace.Status.Split('\n')[0];
-            shell.Refresh();
-        }
-    }
+    private async void OnObserveRelease(object? sender, RoutedEventArgs e) =>
+        await shell.ObserveReleaseAsync(DocumentOf<ReleaseWorkspace>(sender)).ConfigureAwait(true);
 
     private void OnAcceptCandidate(object? sender, RoutedEventArgs e)
     {
@@ -702,7 +642,7 @@ public partial class MainWindow : Window
         {
             if (workspace.Selected?.ReleaseId is string release)
             {
-                shell.OpenReview(release);
+                _ = shell.OpenReviewAsync(release);
             }
             else
             {
@@ -752,11 +692,17 @@ public partial class MainWindow : Window
     }
 
     /// <summary>The document a handler acts on: the sender's data context when it is inside that document, else the selected document.</summary>
+    private async Task OpenAndFocusAsync(Task operation)
+    {
+        await operation.ConfigureAwait(true);
+        FocusDocument();
+    }
+
     private T? DocumentOf<T>(object? sender) where T : Document => (sender as Control)?.DataContext as T ?? shell.SelectedDocument as T;
 
     private void OnFocusOpen(object? sender, RoutedEventArgs e) => FocusRegion(EstatePathBox);
 
-    private void OnRefresh(object? sender, RoutedEventArgs e) => shell.Refresh();
+    private void OnRefresh(object? sender, RoutedEventArgs e) => _ = shell.RefreshAsync();
 
     private async void OnStartRuntime(object? sender, RoutedEventArgs e) => await shell.StartRuntimeAsync().ConfigureAwait(true);
 

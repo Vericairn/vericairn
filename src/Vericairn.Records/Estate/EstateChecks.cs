@@ -237,27 +237,10 @@ public static partial class EstateChecks
         }
     }
 
-    private static readonly HashSet<string> SpacingAllowlist = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "base", "http", "https", "html", "python", "sqlite", "float", "uint", "utf", "unicode", "windows", "macos", "ipv", "mp", "ecdsa", "sha",
-    };
-
     /// <summary>Flags a word run into a number ("October13", "checkpoint2693") outside code spans, identifiers and paths.</summary>
     private static void ScanProse(string text, string location, FindingList findings)
     {
-        int lineNumber = 0;
-        foreach (string rawLine in text.Split('\n'))
-        {
-            lineNumber++;
-            string line = CodeSpan().Replace(rawLine, " ");
-            foreach (Match match in WordRunIntoNumber().Matches(line))
-            {
-                if (!SpacingAllowlist.Contains(match.Groups["word"].Value))
-                {
-                    findings.Warning("writing.spacing", $"{location}:{lineNumber}", $"'{match.Value}': put a space between the word and the number.");
-                }
-            }
-        }
+        foreach (SpacingOccurrence occurrence in WritingScanner.Scan(text, location)) findings.Add(occurrence.Diagnostic);
     }
 
     private static void ScanRecordProse(byte[] bytes, string relative, FindingList findings)
@@ -332,6 +315,32 @@ public static partial class EstateChecks
         foreach (LivingDocuments.State state in LivingDocuments.Derive(model))
         {
             string location = state.Repository is null ? state.Path : state.Declaration.ExpectedPath;
+            if (state.Repository is null && state.Declaration.Format >= 3)
+            {
+                foreach (RecordEnvelope previous in model.Chain(state.Declaration).Select(id => model.ById[id]).Where(d => d.Id != state.Declaration.Id
+                    && DocumentPatterns.Destination(d) != DocumentPatterns.Destination(state.Declaration)))
+                {
+                    try
+                    {
+                        DocumentFileInventory former = GeneratedDocumentVerification.ReadInventory(model.Root, previous);
+                        if (former.Status != DocumentGenerationStatus.Success) findings.Error("document.former-unavailable", location, "Former generated ownership could not be inspected.");
+                        foreach (DocumentFile formerFile in former.Files.Where(f => !GeneratedDocumentContract.Owns(state.Declaration, f.Path)
+                            && !model.Current("living-document").Any(d => d.Id != state.Declaration.Id && EstateModel.BodyString(d, "repository") is null
+                                && GeneratedDocumentContract.Owns(d, f.Path) && (GeneratedDocumentContract.IsStrict(model, d)
+                                    || model.Current("document-revision").Any(p => EstateModel.BodyString(p, "path") == f.Path && EstateModel.BodyString(p, "hash") == f.Hash)))))
+                            findings.Error("document.former-output", formerFile.Path, "A former owned output remains without a checked successor or retirement.");
+                    }
+                    catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+                    { findings.Error("document.former-unavailable", location, "Former generated ownership could not be inspected safely."); }
+                }
+            }
+            if (GeneratedDocumentContract.IsStrict(model, state.Declaration))
+            {
+                GeneratedDocumentPlan plan = state.Generation!;
+                foreach (string problem in plan.Problems)
+                    findings.Error(plan.Status == DocumentGenerationStatus.Unavailable ? "document.generated-unavailable" : "document.generated-edited", location, problem);
+                continue;
+            }
             if (state.Level is "warn" or "refuse")
             {
                 findings.Warning("document.due", location, $"Due at {state.Level}: {string.Join("; ", state.Reasons.Where(r => r.Level != "remind").Select(r => r.Summary))}. Revise it or record a document review.");
@@ -351,7 +360,9 @@ public static partial class EstateChecks
             string file = Path.Combine(model.Root, state.Path.Replace('/', Path.DirectorySeparatorChar));
             if (!File.Exists(file))
             {
-                findings.Warning("document.absent", state.Path, $"Declared living by {state.Declaration.Id}, and no such file is in the estate.");
+                if (GeneratedDocumentContract.UsesStrictRegions(model, state.Declaration))
+                    findings.Error("document.generated-unavailable", state.Path, "The declared generated regions are absent.");
+                else findings.Warning("document.absent", state.Path, $"Declared living by {state.Declaration.Id}, and no such file is in the estate.");
                 continue;
             }
 
@@ -392,11 +403,13 @@ public static partial class EstateChecks
     private static void CheckDocuments(EstateModel model, FindingList findings)
     {
         var retired = new HashSet<string>(model.Current("retirement").Where(r => EstateModel.BodyString(r, "retiredAt") is not null).Select(r => EstateModel.BodyString(r, "path") ?? string.Empty), StringComparer.Ordinal);
+        HashSet<string> generated = model.Current("living-document").Where(d => EstateModel.BodyString(d, "repository") is null && GeneratedDocumentContract.IsStrict(model, d))
+            .SelectMany(d => GeneratedDocumentVerification.Plan(model, d).Expected).Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
         foreach (RecordEnvelope revision in model.Current("document-revision"))
         {
             string? path = EstateModel.BodyString(revision, "path");
             string? hash = EstateModel.BodyString(revision, "hash");
-            if (path is null || hash is null)
+            if (path is null || hash is null || generated.Contains(path))
             {
                 continue;
             }
@@ -404,7 +417,9 @@ public static partial class EstateChecks
             string full = Path.Combine(model.Root, path);
             if (!File.Exists(full))
             {
-                if (retired.Contains(path))
+                bool historicalGenerated = model.Current("living-document").Any(d => EstateModel.BodyString(d, "repository") is null
+                    && GeneratedDocumentContract.IsStrict(model, d) && GeneratedDocumentContract.IsHistoricalPin(model, d, revision));
+                if (retired.Contains(path) || historicalGenerated)
                 {
                     findings.Info("document.retired", path, $"Pinned by {revision.Id} and deliberately retired; its last revision remains in history.");
                     continue;
@@ -421,12 +436,6 @@ public static partial class EstateChecks
             }
         }
     }
-
-    [GeneratedRegex("`[^`]*`")]
-    private static partial Regex CodeSpan();
-
-    [GeneratedRegex(@"(?<![A-Za-z0-9_./:\\-])(?<word>[A-Za-z][a-z]{3,})(?<number>[0-9]+)(?![A-Za-z0-9_/:-]|\.[0-9A-Za-z])")]
-    private static partial Regex WordRunIntoNumber();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_./-])(?:/Users/|/home/[A-Za-z0-9_-]+/|/Volumes/|/private/var/|/mnt/[a-z]/|[A-Za-z]:\\)")]
     private static partial Regex AbsolutePath();
