@@ -304,22 +304,99 @@ public sealed class SdkOperationsTests
         Assert.Equal("refused", ClientFailure.FromException(failure)!.Code);
     }
 
-    [Fact]
-    public async Task ALongOperationCanFinishBeyondTheInteractiveDeadline()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ALongOperationCanFinishBeyondTheInteractiveDeadline(bool deliverDeadlineFirst)
     {
-        using var http = new HttpClient(new Handler(async (_, token) =>
+        var clock = new ClientClock();
+        var checkEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var healthEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var respond = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new Handler(async (request, token) =>
         {
-            await Task.Delay(150, token);
+            (request.RequestUri!.AbsolutePath == "/v1/check" ? checkEntered : healthEntered).SetResult();
+            await respond.Task.WaitAsync(token);
             return Json(new FindingsResponse("clean", 0, 0, []));
         })) { BaseAddress = new Uri("http://localhost/") };
         using var client = new VericairnClient(http)
         {
+            OperationClock = clock,
             OperationTimeout = operation => operation == nameof(IEstateApi.Check) ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(30),
         };
         Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
         Task<FindingsResponse> check = client.CheckAsync(TestContext.Current.CancellationToken);
-        await Assert.ThrowsAsync<ClientTimeoutException>(() => client.HealthAsync(TestContext.Current.CancellationToken));
-        Assert.Equal("clean", (await check).Summary);
+        Task<HealthResponse> health = client.HealthAsync(TestContext.Current.CancellationToken);
+        try
+        {
+            await Task.WhenAll(checkEntered.Task, healthEntered.Task).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            // Both requests have started. Force either callback order at the old handler's response time.
+            clock.Advance(TimeSpan.FromMilliseconds(150));
+            if (deliverDeadlineFirst) clock.FireDueTimers();
+            respond.SetResult();
+            await Assert.ThrowsAsync<ClientTimeoutException>(() => health);
+            Assert.Equal("clean", (await check).Summary);
+        }
+        finally { respond.TrySetResult(); }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ACompletedOperationCannotWinAgainstItsDeadline(bool deliverDeadlineFirst, bool mayHaveEffect)
+    {
+        var clock = new ClientClock();
+        TimeSpan timeout = TimeSpan.FromMilliseconds(30);
+        int calls = 0;
+        Task<int> request = ClientOperation.RunAsync("Attempt", _ =>
+        {
+            calls++;
+            clock.Advance(timeout);
+            if (deliverDeadlineFirst) clock.FireDueTimers();
+            // WaitAsync accepts an already completed task even when its token is cancelled.
+            return Task.FromResult(1);
+        }, () => mayHaveEffect, timeout, clock, TestContext.Current.CancellationToken);
+
+        ClientTimeoutException failure = await Assert.ThrowsAsync<ClientTimeoutException>(() => request);
+        Assert.Equal(mayHaveEffect, failure.OutcomeUnknown);
+        Assert.Equal("timed-out", ClientFailure.FromException(failure)?.Code);
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AResponseBeforeItsDeadlineOrWithoutADeadlineStillSucceeds(bool infinite)
+    {
+        var clock = new ClientClock();
+        int result = await ClientOperation.RunAsync("Health", _ =>
+        {
+            clock.Advance(infinite ? TimeSpan.FromDays(1) : TimeSpan.FromMilliseconds(29));
+            clock.FireDueTimers();
+            return Task.FromResult(1);
+        }, () => false, infinite ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(30), clock, TestContext.Current.CancellationToken);
+        Assert.Equal(1, result);
+    }
+
+    [Fact]
+    public async Task CallerCancellationKeepsItsIdentityWhenACompletedResponseAndDeadlineAlsoArrive()
+    {
+        var clock = new ClientClock();
+        using var stop = new CancellationTokenSource();
+        Task<int> request = ClientOperation.RunAsync("Attempt", _ =>
+        {
+            clock.Advance(TimeSpan.FromMilliseconds(30));
+            clock.FireDueTimers();
+            stop.Cancel();
+            return Task.FromResult(1);
+        }, () => true, TimeSpan.FromMilliseconds(30), clock, stop.Token);
+
+        ClientCancelledException failure = await Assert.ThrowsAsync<ClientCancelledException>(() => request);
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal(stop.Token, failure.CancellationToken);
+        Assert.Equal("cancelled", ClientFailure.FromException(failure)?.Code);
     }
 
     [Fact]
