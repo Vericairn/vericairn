@@ -23,6 +23,7 @@ internal sealed class LocalCompanionGenerator : IDocumentGenerator
 
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {
+        if (context.Selection != context.Parameters["selection"]) return DocumentRenderResult.Error("The selected inspector mode does not match its named input.");
         if (context.Region is not null || context.Sources.Length != 1 || !int.TryParse(context.Parameters["page"], NumberStyles.None, CultureInfo.InvariantCulture, out int page) || page < 1)
             return DocumentRenderResult.Error("The local inspector request is invalid.");
         DocumentSourceSnapshot source = context.Sources[0];

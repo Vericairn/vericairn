@@ -16,6 +16,56 @@ public sealed class CompanionCultureScope;
 public class CompanionCanonicalTests
 {
     [Fact]
+    public void OnDemandCollectionsAndManifestRetainCanonicalBytesAcrossCulturesZonesAndOrders()
+    {
+        using var fixture = new PolicyFixture();
+        var original = fixture.Estate.Load();
+        var reversed = new EstateModel(original.Root, original.Records.Reverse().ToArray(), original.ById, original.SupersededBy, original.Findings) { Manifest = original.Manifest };
+        byte[] manifest = File.ReadAllBytes(Path.Combine(fixture.Estate.Root, EstateLayout.ManifestPath));
+        CultureInfo oldCulture = CultureInfo.CurrentCulture, oldUi = CultureInfo.CurrentUICulture;
+        string? oldZone = Environment.GetEnvironmentVariable("TZ");
+        var hashes = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (string locale in new[] { "", "en-US", "tr-TR", "ar-SA", "ja-JP" })
+            {
+                CultureInfo culture;
+                try { culture = new CultureInfo(locale); }
+                catch (CultureNotFoundException) { culture = CultureInfo.InvariantCulture; }
+                CultureInfo.CurrentCulture = culture;
+                CultureInfo.CurrentUICulture = culture;
+                foreach (string zone in new[] { "UTC", "Pacific/Kiritimati", "America/Los_Angeles" })
+                {
+                    Environment.SetEnvironmentVariable("TZ", zone);
+                    TimeZoneInfo.ClearCachedData();
+                    foreach (EstateModel model in new[] { original, reversed })
+                    {
+                        foreach (var register in RevisionCompanionGenerator.Registers)
+                            foreach (string selection in new[] { "current", "all-revisions" })
+                                Check(register.Id + selection, DocumentOnDemand.Records(model, register.Id, DocumentOnDemand.RecordSnapshot(model), selection));
+                        Check("manifest", DocumentOnDemand.Manifest(model, manifest, DocumentOnDemand.ManifestSnapshot(model, manifest)));
+                    }
+                }
+            }
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = oldCulture;
+            CultureInfo.CurrentUICulture = oldUi;
+            Environment.SetEnvironmentVariable("TZ", oldZone);
+            TimeZoneInfo.ClearCachedData();
+        }
+
+        void Check(string key, DocumentRendition rendition)
+        {
+            Assert.Equal(DocumentGenerationStatus.Success, rendition.Status);
+            Assert.NotNull(rendition.ContentHash);
+            hashes.TryAdd(key, rendition.ContentHash);
+            Assert.Equal(hashes[key], rendition.ContentHash);
+        }
+    }
+
+    [Fact]
     public void AllRegistersAreByteIdenticalAcrossCulturesZonesAndEnumerationOrders()
     {
         CultureInfo oldCulture = CultureInfo.CurrentCulture;

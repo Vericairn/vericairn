@@ -40,7 +40,7 @@ internal sealed class RevisionCompanionGenerator : IDocumentGenerator
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {
         if (context.Selection == "list") return Collection(context);
-        if (context.Region is not null || context.Selection != "item") return DocumentRenderResult.Error("A revision file renders exactly one member; collections require an on-demand selection.");
+        if (context.Region is not null || context.Selection != "item" || context.Parameters["selection"] != "all-revisions") return DocumentRenderResult.Error("A revision file renders exactly one historical member; current selections require an on-demand collection.");
         DocumentSourceSnapshot[] primary = context.Sources.Where(s => !context.Sources.Any(other => other.Supersedes == s.Identity)).ToArray();
         if (primary.Length != 1) return DocumentRenderResult.Error("A revision item requires one exact source and only its predecessor.");
         DocumentSourceSnapshot source = primary[0];

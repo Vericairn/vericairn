@@ -76,7 +76,7 @@ internal static class RecordCompanionText
                 && value.TryGetProperty("type", out JsonElement type) && type.ValueKind == JsonValueKind.String)
             {
                 yield return "- " + DocumentMarkdown.Text(Label(path)) + ": Exact record reference " + DocumentMarkdown.Text(type.GetString() + " " + id.GetString())
-                    + " at " + (value.TryGetProperty("hash", out JsonElement hash) ? DocumentMarkdown.Text(hash.GetString()!) : "hash not recorded; no current revision substituted") + ".\n\n";
+                    + " at " + (value.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String ? DocumentMarkdown.Text(hash.GetString()!) : "hash not recorded; no current revision substituted") + ".\n\n";
                 // Keep any additional fields: a reference-shaped object is not permission to drop data.
                 foreach (JsonProperty extra in value.EnumerateObject().Where(p => p.Name is not ("type" or "id" or "hash")).OrderBy(p => p.Name, StringComparer.Ordinal))
                     foreach (string block in Value(extra.Value, path + "." + extra.Name)) yield return block;

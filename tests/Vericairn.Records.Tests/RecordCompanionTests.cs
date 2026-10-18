@@ -99,6 +99,16 @@ public class RecordCompanionTests
     }
 
     [Fact]
+    public void ConflictingReaderSelectionsFailWithoutBytesOrDigests()
+    {
+        IDocumentGenerator generator = DocumentGenerators.Find("vericairn.records/items")!;
+        var inputs = new Dictionary<string, string> { ["format"] = "1", ["audience"] = "Internal", ["selection"] = "item", ["field"] = "body", ["index"] = "all", ["page"] = "1" }.ToImmutableDictionary(StringComparer.Ordinal);
+        DocumentRendition result = DocumentRendering.Render(generator, new(1, generator.Descriptor!, inputs, "list", null, [Source("decision", new JsonObject())]));
+        Assert.Equal(DocumentGenerationStatus.Error, result.Status);
+        Assert.Empty(result.Bytes); Assert.Null(result.InputDigest); Assert.Null(result.ContentHash);
+    }
+
+    [Fact]
     public void UnknownCapsAreNotZeroAndNoTypedPlacementIsInferredFromProse()
     {
         DocumentSourceSnapshot operation = Source("operation", new JsonObject

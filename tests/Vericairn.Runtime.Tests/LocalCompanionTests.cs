@@ -114,6 +114,10 @@ public class LocalCompanionTests
             Failed(DocumentRendering.Render(generator, new(1, generator.Descriptor!, inputs, "list", null, [source])), DocumentGenerationStatus.Error);
         }
         Assert.False(generator.Descriptor!.AllowsRepositoryOutput);
+        var valid = new JsonObject { ["kind"] = "devices", ["asOf"] = At, ["items"] = new JsonArray(Example(LocalCompanionSchemas.All["devices"])) };
+        var context = new DocumentGenerationContext(1, generator.Descriptor, inputs, "list", null, [DocumentSourceSnapshot.LocalMetadata("devices", CanonicalJson.SerializeUtf8(Element(valid)))]);
+        Assert.Equal(DocumentGenerationStatus.Success, DocumentRendering.Render(generator, context).Status);
+        Failed(DocumentRendering.Render(generator, context with { Parameters = inputs.SetItem("selection", "item") }), DocumentGenerationStatus.Error);
     }
 
     [Fact]
@@ -177,6 +181,8 @@ public class LocalCompanionTests
         Assert.Contains(Hash, text, StringComparison.Ordinal);
         Assert.Contains("Byte counts are bytes", text, StringComparison.Ordinal);
         Assert.DoesNotContain(hidden, text, StringComparison.Ordinal);
+        payload["originals"]![0]!["hash"] = null;
+        Assert.Contains("hash not recorded; no current revision substituted", Text(LocalCompanions.Inspect("retained-context", Element(payload), At)), StringComparison.Ordinal);
     }
 
     [Fact]

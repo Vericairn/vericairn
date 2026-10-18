@@ -23,6 +23,7 @@ internal sealed class RecordCompanionGenerator : IDocumentGenerator
 
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {
+        if (context.Selection != context.Parameters["selection"]) return DocumentRenderResult.Error("The selected reader mode does not match its named input.");
         string field = context.Parameters["field"];
         if (!int.TryParse(context.Parameters["page"], NumberStyles.None, CultureInfo.InvariantCulture, out int page) || page < 1)
             return DocumentRenderResult.Error("A page is a positive integer.");

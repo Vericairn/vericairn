@@ -178,6 +178,10 @@ public class RevisionCompanionTests
         body = Declaration("vericairn.records/decisions"); body["generator"]!["id"] = "example.missing/reader";
         Assert.Equal(DocumentGenerationStatus.Unavailable, DocumentGeneration.Members(Carrier(body), selected).Status);
         Assert.Empty(DocumentGeneration.Members(Carrier("vericairn.records/decisions"), selected with { Status = DocumentGenerationStatus.Unavailable }).Members);
+        DocumentMember member = Assert.Single(DocumentGeneration.Members(Carrier("vericairn.records/decisions"), selected).Members);
+        DocumentRendition mislabeled = DocumentRendering.Render(DocumentGenerators.Find("vericairn.records/decisions")!, member.Context with { Parameters = member.Context.Parameters.SetItem("selection", "current") });
+        Assert.Equal(DocumentGenerationStatus.Error, mislabeled.Status);
+        Assert.Empty(mislabeled.Bytes); Assert.Null(mislabeled.InputDigest); Assert.Null(mislabeled.ContentHash);
         JsonObject successor = f.DecisionBody();
         RecordEnvelope revision = f.Add("decision", successor, supersedes: f.Decision.Id);
         Assert.Equal(DocumentGenerationStatus.Unavailable, DocumentGeneration.Members(Carrier("vericairn.records/decisions"), selected with { Sources = [DocumentSourceSnapshot.Record(revision)] }).Status);
