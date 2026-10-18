@@ -45,7 +45,7 @@ public sealed partial class ShellViewModel : Observable
 
     /// <summary>A shell over a way to connect and a runtime manager.</summary>
     public ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences)
-        : this(connect, runtime, preferences, new ReleaseUpdates()) { }
+        : this(connect, runtime, preferences, new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default)) { }
 
     internal ShellViewModel(Func<string, IEstateConnection> connect, IRuntimeManager runtime, Preferences preferences, ReleaseUpdates updates)
     {

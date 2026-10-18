@@ -30,6 +30,7 @@
     <ProjectReference Include="../Vericairn.Presentation/Vericairn.Presentation.csproj" />
     <ProjectReference Include="../Vericairn.Protocol/Vericairn.Protocol.csproj" />
     <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
+    <ProjectReference Include="../Vericairn.Providers.GitHub.Releases/Vericairn.Providers.GitHub.Releases.csproj" />
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
   </ItemGroup>
 

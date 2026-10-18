@@ -29,7 +29,7 @@ public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files
 }
 
 /// <summary>
-/// The workspace contract, version 1 (vericairn.workspace/1): an isolated working tree of a repository on a work branch, made from this
+/// The workspace operations exposed by a source adapter, version 1 (vericairn.workspace/1): an isolated working tree on a work branch, made from this
 /// machine's registered clone of it and never the clone's own working tree. The workspace stays after the run, for review.
 /// </summary>
 public interface IWorkspaceProvider
