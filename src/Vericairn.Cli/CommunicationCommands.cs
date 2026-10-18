@@ -15,14 +15,6 @@ internal sealed record CommunicationSelection(string? Recipient = null, string? 
 
 internal static partial class Commands
 {
-    public static int RecordShow(string root, string id) => WithApi(root, api =>
-    {
-        RecordResponse? record = api.Record(id);
-        if (record is null) { return Fail("No record has id " + id + "."); }
-        Console.Out.Write(CanonicalJson.SerializePretty(record.Envelope));
-        return Clean;
-    });
-
     public static int CommunicationShow(string root, CommunicationSelection selection, bool preview, bool json) => WithApi(root, api =>
     {
         CommunicationProfile profile = api.Communication(selection.Recipient, selection.Assignment, json ? null : selection.Values("status"));

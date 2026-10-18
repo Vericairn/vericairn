@@ -1,0 +1,135 @@
+{
+  "work": "CODE-02",
+  "status": "partial; full CLI suite gate unmet",
+  "baselineCommit": "f5717b924a787e2e38937fda8a386ce650a180bd",
+  "baselineQualification": "The starting workspace revision. The workspace has no main ref; no network comparison with a later main revision was possible.",
+  "estatePrerequisite": "The MCP runtime reported Vericairn 0.7.3 before the attempt began.",
+  "implemented": [
+    "Shared CommandContext owns global estate and JSON options, output and error writers, exit codes, API selection and disposal, body parsing, and outcome and finding rendering.",
+    "The records family and its six verbs are concrete command classes with explicit registration and thin handlers. File formatting, hashing and type descriptions are owned by helpers in the records family.",
+    "Unmigrated handlers delegate shared boundaries to CommandContext through compatibility methods."
+  ],
+  "build": {
+    "configuration": "Release",
+    "project": "tests/Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj",
+    "outcome": "passed",
+    "warnings": 0,
+    "errors": 0,
+    "dependencies": "Restored in locked mode from the local package cache with an empty local package source and audit disabled. Single-process builds with build servers disabled."
+  },
+  "cliReference": {
+    "commands": 113,
+    "outcome": "passed",
+    "comparison": "Generated independently from the unchanged baseline and the records-family build. Removed only the provenance paragraph at line 3 before a byte comparison; all other bytes are identical.",
+    "normalizedSha256": "82600b435f5c85a96bcea61232712d684f3abf9a6aa383cece58377bcf912208",
+    "declaration": "docs/releases/documents.json",
+    "generatedInto": "Ignored artifacts only; no frozen documentation changed."
+  },
+  "fullCliSuite": {
+    "outcome": "failed",
+    "standardRunner": "dotnet test could not bind its named pipe in the sandbox: SocketException (13), Permission denied.",
+    "directRunner": "The baseline full run did not finish and was cancelled. The records-family full run showed daemon-dependent failures and exceeded its 90-second runner timeout and 100-second outer limit.",
+    "failureCause": "The daemon certificate path fails with AppleCommonCryptoCryptographicException: The add-in load operation has failed. This also occurs on the unchanged baseline.",
+    "testSources": "Unchanged. Test processes had the inherited runtime-home setting removed before launch; fixtures created their own homes.",
+    "qualification": "No passing full-suite or all-journeys claim."
+  },
+  "diagnosticClassComparison": {
+    "scope": "All CLI test classes run independently against both builds. This does not replace the required full-suite gate.",
+    "classes": 33,
+    "matchingOutcomes": 33,
+    "countsAcrossCompletedClasses": {
+      "total": 156,
+      "succeeded": 147,
+      "failed": 8,
+      "skipped": 1
+    },
+    "perClassOuterTimeoutSeconds": 30,
+    "classesWithFailures": [
+      {
+        "class": "Vericairn.Cli.Tests.DaemonJourneyTests",
+        "counts": {
+          "total": 1,
+          "failed": 1,
+          "succeeded": 0,
+          "skipped": 0
+        },
+        "methods": [
+          "Vericairn.Cli.Tests.DaemonJourneyTests.J03_ThroughTheDaemon"
+        ]
+      },
+      {
+        "class": "Vericairn.Cli.Tests.PairingJourneyTests",
+        "counts": {
+          "total": 2,
+          "failed": 1,
+          "succeeded": 1,
+          "skipped": 0
+        },
+        "methods": [
+          "Vericairn.Cli.Tests.PairingJourneyTests.ASecondDevicePairsActsWithinItsScopeAndIsRefusedOnceRevoked"
+        ]
+      },
+      {
+        "class": "Vericairn.Cli.Tests.RuntimeStartTests",
+        "counts": {
+          "total": 2,
+          "failed": 1,
+          "succeeded": 1,
+          "skipped": 0
+        },
+        "methods": [
+          "Vericairn.Cli.Tests.RuntimeStartTests.StartingTheDaemonReleasesTheCallersOutputWhileTheDaemonServes"
+        ]
+      },
+      {
+        "class": "Vericairn.Cli.Tests.WorkerConfigurationJourneyTests",
+        "counts": {
+          "total": 4,
+          "failed": 2,
+          "succeeded": 2,
+          "skipped": 0
+        },
+        "methods": [
+          "Vericairn.Cli.Tests.WorkerConfigurationJourneyTests.StockWorkerLoadsLocalConfigurationBeforeDispatch"
+        ]
+      },
+      {
+        "class": "Vericairn.Cli.Tests.WorkspaceRootJourneyTests",
+        "counts": {
+          "total": 6,
+          "failed": 3,
+          "succeeded": 3,
+          "skipped": 0
+        },
+        "methods": [
+          "Vericairn.Cli.Tests.WorkspaceRootJourneyTests.AStockNativeRunCanMoveOutsideAUsersConfiguredHome",
+          "Vericairn.Cli.Tests.WorkspaceRootJourneyTests.AWorkspaceRootChangedBetweenIntentAndDispatchRefusesWithoutCharging"
+        ]
+      }
+    ],
+    "timedOutClasses": [
+      "Vericairn.Cli.Tests.HarnessQualificationTests"
+    ],
+    "focusedJourneyAndDocs": {
+      "total": 16,
+      "succeeded": 16,
+      "failed": 0
+    },
+    "frozenDocumentationTests": {
+      "total": 2,
+      "succeeded": 2,
+      "failed": 0
+    }
+  },
+  "threePlatformRun": {
+    "outcome": "not-performed",
+    "reason": "Push, merge and publication are prohibited. The builder must run CI on the reviewed pushed head."
+  },
+  "remaining": [
+    "Pass the full CLI suite and all journeys in an environment that supports the required local IPC and certificate operations before advancing another family.",
+    "Migrate the remaining command families and root commands one family at a time, preserving the reference and rerunning both test gates each time.",
+    "Establish that FIX-25 is merged into main before extracting owned run-admission, run-dispatch and release-coordination services.",
+    "Move worker workspace git operations behind the git adapter and move the GitHub release source outside the SDK foundation.",
+    "Builder review and three-platform CI on the pushed head."
+  ]
+}

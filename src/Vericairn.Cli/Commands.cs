@@ -33,12 +33,11 @@ namespace Vericairn.Cli;
 /// </summary>
 internal static partial class Commands
 {
-    internal const int Clean = 0;
-    internal const int HasErrors = 1;
-    internal const int Failed = 2;
+    internal const int Clean = CommandContext.Clean;
+    internal const int HasErrors = CommandContext.HasErrors;
+    internal const int Failed = CommandContext.Failed;
 
-    public static int Validate(string root, bool json) =>
-        IsEstate(root) ? WithApi(root, api => ReportFindings(api.Validate(), json)) : WithFiles(root, model => ReportFindings(ToFindings(model.Findings, $"{model.Records.Count} records"), json));
+    private static readonly CommandContext Context = new();
 
     public static int Check(string root, bool json) =>
         IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
@@ -198,9 +197,6 @@ internal static partial class Commands
         Console.Out.Write(json ? CanonicalJson.SerializePretty(asks.Json) : asks.Text);
         return Clean;
     });
-
-    public static int New(string root, string type, string by, string bodyPath, string? subject, string? supersedes, string? at, string? id, bool json) =>
-        WithBody(bodyPath, body => WithApi(root, api => ReportOutcome(api.NewRecord(new NewRecordRequest(type, by, body, subject, supersedes, at, id)), json)));
 
     public static int WorkBrief(string root, string key, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
@@ -903,90 +899,6 @@ internal static partial class Commands
             return Clean;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int Describe(string? type)
-    {
-        if (type is null)
-        {
-            Console.Out.WriteLine($"Record types this build reads (record formats {string.Join(", ", RecordFormats.Reads)}; new records use the estate's format, at most {RecordFormats.Current}):");
-            foreach (IRecordType recordType in RecordTypeRegistry.All)
-            {
-                Console.Out.WriteLine($"  {recordType.Name,-18} {(recordType.SinceFormat > RecordFormats.First ? $"[format {recordType.SinceFormat}] " : string.Empty)}{recordType.Summary}");
-            }
-
-            Console.Out.WriteLine();
-            Console.Out.WriteLine("Reserved for later releases: " + string.Join(", ", RecordTypeRegistry.Reserved));
-            Console.Out.WriteLine("Every record also has the envelope: format, type, id, at, by, body, hash, and optionally subject, supersedes, signatures.");
-            return Clean;
-        }
-
-        IRecordType? found = RecordTypeRegistry.Find(type);
-        if (found is null)
-        {
-            return Fail($"Unknown record type '{type}'.");
-        }
-
-        Console.Out.WriteLine($"{found.Name}: {found.Summary}");
-        Console.Out.WriteLine(found.SubjectType is null ? (found.SubjectHashRequired ? "Subject: required, pinned to an exact hash." : "Subject: none.") : $"Subject: {found.SubjectType}{(found.SubjectHashRequired ? ", pinned to an exact hash" : string.Empty)}.");
-        if (found.SinceFormat > RecordFormats.First)
-        {
-            Console.Out.WriteLine($"Record format: {found.SinceFormat} and later.");
-        }
-
-        Console.Out.WriteLine("Body fields:");
-        foreach (FieldDescription field in found.Fields)
-        {
-            string since = field.SinceFormat > RecordFormats.First ? $"[format {field.SinceFormat}] " : string.Empty;
-            Console.Out.WriteLine($"  {field.Name,-18} {field.Kind,-28} {(field.Required ? "required" : "optional"),-9} {since}{field.Description}");
-        }
-
-        return Clean;
-    }
-
-    public static int Format(string[] files)
-    {
-        int result = Clean;
-        foreach (string file in files)
-        {
-            try
-            {
-                byte[] original = File.ReadAllBytes(file);
-                byte[] formatted = RecordAuthor.Format(original);
-                if (!formatted.AsSpan().SequenceEqual(original))
-                {
-                    File.WriteAllBytes(file, formatted);
-                    Console.Out.WriteLine($"formatted {file}");
-                }
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException)
-            {
-                Console.Error.WriteLine($"{file}: {exception.Message}");
-                result = Failed;
-            }
-        }
-
-        return result;
-    }
-
-    public static int Hash(string file)
-    {
-        try
-        {
-            var findings = new FindingList();
-            RecordEnvelope? record = RecordParser.Parse(File.ReadAllBytes(file), file, findings, checkFormatting: false);
-            if (record is null)
-            {
-                return ReportFindings(ToFindings(findings, file), false);
-            }
-
-            Console.Out.WriteLine(record.ComputedHash);
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return Fail(exception.Message);
         }
@@ -2699,59 +2611,18 @@ internal static partial class Commands
     }
 
     /// <summary>Runs an operation against the estate's API: the daemon's when one answers for this estate, the embedded runtime otherwise.</summary>
-    private static int WithApi(string root, Func<IEstateApi, int> operation)
-    {
-        try
-        {
-            if (!IsEstate(root))
-            {
-                return Fail(NotAnEstate(root));
-            }
-
-            DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is not null && VericairnClient.IsAlive(endpoint))
-            {
-                using var client = new VericairnClient(endpoint);
-                return operation(client);
-            }
-
-            using EstateService service = EstateService.Open(root);
-            return operation(service);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    private static int WithApi(string root, Func<IEstateApi, int> operation) =>
+        Context.WithApi(root, operation);
 
     private static string LocalNetworkAddress(LocalNetworkEndpoint network) =>
         "https://" + new System.Net.IPEndPoint(System.Net.IPAddress.Parse(network.Host), network.Port);
 
     /// <summary>A bare records directory without a manifest is still validated from its files; no live state is involved.</summary>
-    private static int WithFiles(string root, Func<EstateModel, int> operation)
-    {
-        try
-        {
-            return operation(EstateLoader.Load(root));
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    private static int WithFiles(string root, Func<EstateModel, int> operation) =>
+        Context.WithFiles(root, operation);
 
-    private static int WithBody(string bodyPath, Func<JsonElement, int> operation)
-    {
-        try
-        {
-            using JsonDocument body = CanonicalJson.Parse(bodyPath == "-" ? ReadStandardInput() : File.ReadAllBytes(bodyPath));
-            return operation(body.RootElement.Clone());
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CanonicalJsonException)
-        {
-            return Fail(exception.Message);
-        }
-    }
+    private static int WithBody(string bodyPath, Func<JsonElement, int> operation) =>
+        Context.WithBody(bodyPath, operation);
 
     internal static EstateModel LoadCopy(string root)
     {
@@ -2764,9 +2635,9 @@ internal static partial class Commands
         return session.Load();
     }
 
-    private static bool IsEstate(string root) => File.Exists(Path.Combine(root, EstateLayout.ManifestPath));
+    private static bool IsEstate(string root) => CommandContext.IsEstate(root);
 
-    private static string NotAnEstate(string root) => $"{Path.GetFullPath(root)} is not an estate root (no {EstateLayout.ManifestPath}).";
+    private static string NotAnEstate(string root) => CommandContext.NotAnEstate(root);
 
     private static PosixSignalRegistration? IgnoreHangup()
     {
@@ -2838,63 +2709,15 @@ internal static partial class Commands
         }
     }
 
-    private static byte[] ReadStandardInput()
-    {
-        using Stream input = Console.OpenStandardInput();
-        using var buffer = new MemoryStream();
-        input.CopyTo(buffer);
-        return buffer.ToArray();
-    }
-
     private static FindingsResponse ToFindings(FindingList findings, string summary) =>
-        new(summary, findings.Errors, findings.Warnings, findings.Sorted().Select(f => new FindingDto(f.Severity.ToString().ToLowerInvariant(), f.Code, f.Location, f.Message)).ToList());
+        CommandContext.ToFindings(findings, summary);
 
-    private static int ReportOutcome(WriteOutcome outcome, bool json)
-    {
-        if (outcome.Written is RecordWritten written)
-        {
-            Console.Out.WriteLine(json ? JsonSerializer.Serialize(new { path = written.Path, id = written.Id, hash = written.Hash }) : $"{written.Path}  {written.Id}  {written.Hash}");
-            return Clean;
-        }
+    private static int ReportOutcome(WriteOutcome outcome, bool json) =>
+        Context.ReportOutcome(outcome, json);
 
-        Problem problem = outcome.Problem ?? new Problem("refused", "refused", []);
-        if (problem.Code == "rejected")
-        {
-            Console.Error.WriteLine(problem.Message);
-            return ReportFindings(new FindingsResponse("rejected", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
-        }
+    internal static int ReportFindings(FindingsResponse findings, bool json) =>
+        Context.ReportFindings(findings, json);
 
-        return Fail(problem.Message);
-    }
-
-    internal static int ReportFindings(FindingsResponse findings, bool json)
-    {
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(new
-            {
-                summary = findings.Summary,
-                errors = findings.Errors,
-                warnings = findings.Warnings,
-                findings = findings.Findings.Select(f => new { severity = f.Severity, f.Code, f.Location, f.Message }),
-            }));
-        }
-        else
-        {
-            foreach (FindingDto finding in findings.Findings)
-            {
-                Console.Out.WriteLine($"{finding.Severity.ToUpperInvariant()} {finding.Code} {finding.Location}: {finding.Message}");
-            }
-
-            Console.Out.WriteLine($"{findings.Summary}: {findings.Errors} errors, {findings.Warnings} warnings");
-        }
-
-        return findings.Errors > 0 ? HasErrors : Clean;
-    }
-
-    internal static int Fail(string message)
-    {
-        Console.Error.WriteLine("error: " + message);
-        return Failed;
-    }
+    internal static int Fail(string message) =>
+        Context.Fail(message);
 }
