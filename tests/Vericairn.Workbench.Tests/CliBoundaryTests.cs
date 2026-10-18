@@ -62,6 +62,25 @@ public sealed class CliBoundaryTests
         Assert.Equal("error: The request was cancelled." + error.NewLine, error.ToString());
     }
 
+    [Fact]
+    public void LostWriteResponseAtTheCliKeepsItsUncertaintyAndExistingErrorExitCode()
+    {
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("truncated response"),
+        }))) { BaseAddress = new Uri("http://localhost") };
+        using var client = new VericairnClient(http);
+        var error = new StringWriter();
+        var context = new CommandContext(error: error, cancellationToken: TestContext.Current.CancellationToken);
+        int code = context.Invoke(() =>
+        {
+            new CancellationBoundApi(client, context.CancellationToken).Attempt(new("assignment", "contributor", "workspace", "note"));
+            return 0;
+        });
+        Assert.Equal(2, code);
+        Assert.Contains("The outcome is unknown; reconcile the original operation before retrying.", error.ToString(), StringComparison.Ordinal);
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => send(request, cancellationToken);

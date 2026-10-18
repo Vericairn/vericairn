@@ -222,12 +222,33 @@ public sealed partial class ShellViewModel
     public Task<CommunicationDocument?> OpenCommunicationAsync(CancellationToken cancellationToken) => RunCommandAsync("Open Communication", token => OpenCommunicationCoreAsync(token), cancellationToken);
 
     private Task DocumentCommandAsync(Document? page, string label, Func<CancellationToken, Task> action, bool refresh = true,
-        CancellationToken cancellationToken = default)
+        bool submission = false, CancellationToken cancellationToken = default)
     {
         if (page is null) return Task.CompletedTask;
         return RunCommandAsync(label, async token =>
         {
-            await action(token).ConfigureAwait(true);
+            if (submission && page.UncertainEffect is ClientFailure unresolved)
+            {
+                LastFailure = unresolved;
+                RequestState = unresolved.Code;
+                Status = unresolved.Message;
+                return;
+            }
+            try { await action(token).ConfigureAwait(true); }
+            catch (Exception exception) when (ClientFailure.FromException(exception) is ClientFailure)
+            {
+                ClientFailure failure = ClientFailure.FromException(exception)!;
+                if (failure.OutcomeUnknown) page.UncertainEffect = failure;
+                switch (page)
+                {
+                    case AssignmentComposer composer: composer.Status = failure.Message; break;
+                    case ReviewWorkspace review: review.Status = failure.Message; break;
+                    case ReleaseWorkspace release: release.Status = failure.Message; break;
+                    case LivingDocumentsWorkspace document: document.Status = failure.Message; break;
+                    case CommunicationDocument communicationPage: communicationPage.Note = failure.Message; break;
+                }
+                throw;
+            }
             string outcome = page switch
             {
                 AssignmentComposer composer => composer.Status,
@@ -248,15 +269,15 @@ public sealed partial class ShellViewModel
 
     /// <summary>Sends an assignment and refreshes the views, preserving the composer's result.</summary>
     public Task SubmitAssignmentAsync(AssignmentComposer? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Send assignment", token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Send assignment for " + page?.WorkOrderKey, token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Sends a review after rechecking its pinned subject.</summary>
     public Task SubmitReviewAsync(ReviewWorkspace? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Send review", token => page!.SubmitReviewAsync(AvailableApi, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Send review", token => page!.SubmitReviewAsync(AvailableApi, token), cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Sends an acceptance after rechecking its pinned subject.</summary>
     public Task SubmitAcceptanceAsync(ReviewWorkspace? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Send acceptance", token => page!.SubmitAcceptanceAsync(AvailableApi, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Send acceptance", token => page!.SubmitAcceptanceAsync(AvailableApi, token), cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Rechecks a prepared subject without sending its draft.</summary>
     public Task CheckPreparedAsync(ReviewWorkspace? page, CancellationToken cancellationToken = default) =>
@@ -269,7 +290,7 @@ public sealed partial class ShellViewModel
 
     /// <summary>Submits a release intent; an interrupted response stays uncertain.</summary>
     public Task SubmitReleaseAsync(ReleaseWorkspace? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Submit release " + page?.Version, token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Submit release " + page?.Version, token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Observes the original release identity; it does not resubmit a release.</summary>
     public Task ObserveReleaseAsync(ReleaseWorkspace? page, CancellationToken cancellationToken = default) =>
@@ -277,34 +298,34 @@ public sealed partial class ShellViewModel
 
     /// <summary>Submits a living document's review through the runtime.</summary>
     public Task SubmitDocumentReviewAsync(LivingDocumentsWorkspace? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Review document", token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken);
+        DocumentCommandAsync(page, "Review document", token => page!.SubmitAsync(AvailableApi, ActingPrincipalId, token), cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Reads communication settings without changing a profile.</summary>
     public Task RefreshCommunicationDocumentAsync(CommunicationDocument? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Read communication settings", token => page!.RefreshAsync(token), false, cancellationToken);
+        DocumentCommandAsync(page, "Read communication settings", token => page!.RefreshAsync(token), false, cancellationToken: cancellationToken);
 
     /// <summary>Saves the profile draft with its expected prior revision.</summary>
     public Task SaveCommunicationAsync(CommunicationDocument? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Save communication settings", token => page!.SaveAsync(token), false, cancellationToken);
+        DocumentCommandAsync(page, "Save communication settings", token => page!.SaveAsync(token), false, cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Resets the profile to inheritance.</summary>
     public Task ResetCommunicationAsync(CommunicationDocument? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Reset communication settings", token => page!.ResetAsync(token), false, cancellationToken);
+        DocumentCommandAsync(page, "Reset communication settings", token => page!.ResetAsync(token), false, cancellationToken: cancellationToken, submission: true);
 
     /// <summary>Prepares a hand-over while retaining the previous package until a complete response arrives.</summary>
     public Task PrepareHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Prepare hand-over", token => page!.PrepareAsync(token), false, cancellationToken);
+        DocumentCommandAsync(page, "Prepare hand-over", token => page!.PrepareAsync(token), false, cancellationToken: cancellationToken);
 
     /// <summary>Compares the retained package without replacing its original basis.</summary>
     public Task CompareHandoffAsync(HandoffDocument? page, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Compare hand-over", token => page!.CompareAsync(token), false, cancellationToken);
+        DocumentCommandAsync(page, "Compare hand-over", token => page!.CompareAsync(token), false, cancellationToken: cancellationToken);
 
     /// <summary>Reads and validates a saved hand-over through the runtime.</summary>
     public Task LoadHandoffAsync(HandoffDocument? page, string path, CancellationToken cancellationToken = default) =>
         DocumentCommandAsync(page, "Load hand-over", async token =>
-            await page!.LoadAsync(await File.ReadAllTextAsync(path, token).ConfigureAwait(true), token).ConfigureAwait(true), false, cancellationToken);
+            await page!.LoadAsync(await File.ReadAllTextAsync(path, token).ConfigureAwait(true), token).ConfigureAwait(true), false, cancellationToken: cancellationToken);
     /// <summary>Saves the retained package without blocking the UI while writing its bytes.</summary>
     public Task SaveHandoffAsync(HandoffDocument? page, string path, CancellationToken cancellationToken = default) =>
-        DocumentCommandAsync(page, "Save hand-over", async token => await page!.SaveAsync(path, token).ConfigureAwait(true), false, cancellationToken);
+        DocumentCommandAsync(page, "Save hand-over", async token => await page!.SaveAsync(path, token).ConfigureAwait(true), false, cancellationToken: cancellationToken);
 
 }

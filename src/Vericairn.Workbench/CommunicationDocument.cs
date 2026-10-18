@@ -43,7 +43,7 @@ public sealed class CommunicationDocument(Func<IEstateApi?> api, Func<string?> a
     /// <summary>Recorded effective values and their sources, including conflicts and freshness.</summary>
     public string Effective { get => effective; private set => Set(ref effective, value); }
     /// <summary>The complete outcome or refusal of the last action.</summary>
-    public string Note { get => note; private set => Set(ref note, value); }
+    public string Note { get => note; internal set => Set(ref note, value); }
     /// <summary>A preview from the same examples and renderer as the CLI; a draft authors nothing.</summary>
     public string Preview => CommunicationPresentation.Preview(CommunicationResolution.Resolve(Scope == "estate" ? null : Recipient,
         Scope == "assignment" ? Assignment : null,

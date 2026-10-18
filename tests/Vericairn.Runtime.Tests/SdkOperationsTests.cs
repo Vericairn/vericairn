@@ -41,6 +41,14 @@ public sealed class SdkOperationsTests
             Assert.NotNull(typeof(VericairnClient).GetMethod(counterpart.Name, parameters));
             Assert.Equal(method.GetParameters().Select(p => p.DefaultValue), counterpart.GetParameters().SkipLast(1).Select(p => p.DefaultValue));
         }
+
+        foreach (MethodInfo method in typeof(VericairnClient).GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly)
+            .Where(method => !method.IsSpecialName && !method.Name.EndsWith("Async", StringComparison.Ordinal) && method.Name is not ("Dispose" or "Loopback" or "LocalNetwork")))
+        {
+            MethodInfo? counterpart = typeof(VericairnClient).GetMethod(method.Name + "Async", [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)]);
+            Assert.NotNull(counterpart);
+            Assert.Equal(method.ReturnType == typeof(void) ? typeof(Task) : typeof(Task<>).MakeGenericType(method.ReturnType), counterpart.ReturnType);
+        }
     }
 
     [Fact]
@@ -135,6 +143,57 @@ public sealed class SdkOperationsTests
         Assert.True(write.OutcomeUnknown);
         ClientUnavailableException read = await Assert.ThrowsAsync<ClientUnavailableException>(() => client.ResumeHandoffAsync(null!, TestContext.Current.CancellationToken));
         Assert.False(read.OutcomeUnknown);
+    }
+
+    [Theory]
+    [InlineData("invalid-json")]
+    [InlineData("null")]
+    [InlineData("body-lost")]
+    [InlineData("server-error")]
+    public async Task AnUnusableWriteResponseNeverBecomesAKnownFailure(string response)
+    {
+        int effects = 0;
+        using var client = Client((_, _) =>
+        {
+            effects++;
+            if (response == "body-lost") throw new IOException("response ended after the effect");
+            return Task.FromResult(new HttpResponseMessage(response == "server-error" ? HttpStatusCode.InternalServerError : HttpStatusCode.OK)
+            {
+                Content = new StringContent(response == "null" ? "null" : "incomplete response"),
+            });
+        });
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
+            client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken));
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal(1, effects);
+        Assert.Contains("reconcile", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ALongOperationCanFinishBeyondTheInteractiveDeadline()
+    {
+        using var http = new HttpClient(new Handler(async (_, token) =>
+        {
+            await Task.Delay(150, token);
+            return Json(new FindingsResponse("clean", 0, 0, []));
+        })) { BaseAddress = new Uri("http://localhost/") };
+        using var client = new VericairnClient(http)
+        {
+            OperationTimeout = operation => operation == nameof(IEstateApi.Check) ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(30),
+        };
+        Assert.Equal(Timeout.InfiniteTimeSpan, http.Timeout);
+        Task<FindingsResponse> check = client.CheckAsync(TestContext.Current.CancellationToken);
+        await Assert.ThrowsAsync<ClientTimeoutException>(() => client.HealthAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("clean", (await check).Summary);
+    }
+
+    [Fact]
+    public async Task ATransportCancellationWithoutACallerOrDeadlineIsUnavailable()
+    {
+        using var client = Client((_, _) => throw new TaskCanceledException("transport stopped independently"));
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() => client.HealthAsync(TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
+        Assert.Equal("unavailable", ClientFailure.FromException(failure)?.Code);
     }
 
     [Fact]

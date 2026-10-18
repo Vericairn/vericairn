@@ -312,7 +312,7 @@
                     <TextBox Text="{Binding Recovery}" MinHeight="28" AutomationProperties.Name="Recovery" />
                     <TextBlock Text="Note" />
                     <TextBox Text="{Binding Note}" MinHeight="28" AutomationProperties.Name="Note" />
-                    <Button Content="Send the assignment" MinHeight="32" Click="OnSubmitAssignment" />
+                    <Button Content="Send the assignment" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitAssignment" />
                     <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" />
                   </StackPanel>
                 </ScrollViewer>
@@ -341,7 +341,7 @@
                     <TextBox Text="{Binding Commit}" MinHeight="28" AutomationProperties.Name="Commit" />
                     <TextBlock Text="Findings, one per line as severity: text" />
                     <TextBox Text="{Binding Findings}" AcceptsReturn="True" MinHeight="56" AutomationProperties.Name="Findings" />
-                    <Button Content="Record the review" MinHeight="32" Click="OnSubmitDocumentReview" />
+                    <Button Content="Record the review" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitDocumentReview" />
                     <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" />
                   </StackPanel>
                 </ScrollViewer>
@@ -386,12 +386,12 @@
                     <TextBox Text="{Binding ReviewSummary}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Review summary" />
                     <TextBox Text="{Binding ReviewFindings}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Findings, one per line, prefixed error:, warning: or info:" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <Button Content="Send the review" MinHeight="32" Click="OnSubmitReview" />
+                      <Button Content="Send the review" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitReview" />
                       <Button Content="Check the subject" MinHeight="32" Click="OnCheckPrepared" />
                     </StackPanel>
                     <TextBlock Text="Acceptance" FontWeight="SemiBold" />
                     <TextBox Text="{Binding AcceptanceStatement}" AcceptsReturn="True" MinHeight="48" AutomationProperties.Name="Acceptance statement" />
-                    <Button Content="Send the acceptance" MinHeight="32" Click="OnSubmitAcceptance" />
+                    <Button Content="Send the acceptance" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitAcceptance" />
                     <SelectableTextBlock MinHeight="24" Text="{Binding Status}" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" />
                     <TextBlock Text="{Binding PreparedState}" TextWrapping="Wrap" Opacity="0.8" />
                   </StackPanel>
@@ -454,7 +454,7 @@
                     </ItemsControl>
                     <TextBlock Text="Reconciliation (required for a retry after a failed, canceled or uncertain attempt)" />
                     <TextBox Text="{Binding Reconciliation}" MinHeight="28" AutomationProperties.Name="Reconciliation" />
-                    <Button Content="Submit the release (intent, then dispatch)" MinHeight="32" Click="OnSubmitRelease" />
+                    <Button Content="Submit the release (intent, then dispatch)" MinHeight="32" IsEnabled="{Binding CanSubmit}" Click="OnSubmitRelease" />
                     <TextBlock Text="Destinations (Enter opens the candidate for acceptance)" FontWeight="SemiBold" />
                     <ListBox ItemsSource="{Binding Destinations}" SelectedItem="{Binding Selected}" Focusable="True" MaxHeight="240" AutomationProperties.Name="Release destinations">
                       <ListBox.ItemTemplate>
@@ -617,8 +617,8 @@
                     <TextBlock Text="Handoff depth" />
                     <ComboBox ItemsSource="{Binding Depths}" SelectedItem="{Binding HandoffDepth}" MinWidth="180" AutomationProperties.Name="Handoff depth" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                      <Button Content="Save this scope" Click="OnSaveCommunication" />
-                      <Button Content="Reset this scope to inheritance" Click="OnResetCommunication" />
+                      <Button Content="Save this scope" IsEnabled="{Binding CanSubmit}" Click="OnSaveCommunication" />
+                      <Button Content="Reset this scope to inheritance" IsEnabled="{Binding CanSubmit}" Click="OnResetCommunication" />
                     </StackPanel>
                     <SelectableTextBlock MinHeight="24" Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Communication write outcome" />
                     <TextBlock Text="Recorded values and sources" FontWeight="SemiBold" />

@@ -34,36 +34,36 @@ public class ClientCommandTests(HeadlessFixture fixture)
             connection.Control.Timeout = timeout ? TimeSpan.FromSeconds(1) : TimeSpan.FromMinutes(1);
             await fixture.UiAsync(async () =>
             {
-            Task request = shell.RefreshAsync(TestContext.Current.CancellationToken);
-            Assert.False(request.IsCompleted, shell.Status + "/" + shell.RequestState);
-            await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            Assert.False(request.IsCompleted);
-            await Dispatcher.UIThread.InvokeAsync(() =>
-            {
-                Assert.True(shell.IsBusy);
-                Assert.Equal("busy", shell.RequestState);
-                Assert.False(shell.RefreshCommand.CanExecute(null));
-                Assert.True(shell.CancelCommand.CanExecute(null));
-                window.Focus();
-                window.KeyPress(Key.L, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.L, null);
-                Assert.False(shell.LeftVisible);
-                if (!timeout) shell.CancelCurrentRequest();
-            });
-            await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            Assert.Equal(timeout ? "timed-out" : "cancelled", shell.RequestState);
-            Assert.Equal(timeout ? "The request timed out." : "The request was cancelled.", shell.Status);
-            Assert.False(shell.IsBusy);
-            Assert.False(shell.HasUncertainOutcomes);
-            Assert.Equal("cached", shell.Freshness);
-            string interrupted = shell.Status;
-            connection.Control.Release.TrySetResult();
-            await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            Assert.Equal(interrupted, shell.Status);
-            connection.Control.StallStatus = false;
-            await shell.RefreshAsync(TestContext.Current.CancellationToken);
-            Assert.Equal("idle", shell.RequestState);
-            Assert.Null(shell.LastFailure);
-            Assert.All(uiChanges, onUi => Assert.True(onUi));
+                Task request = shell.RefreshAsync(TestContext.Current.CancellationToken);
+                Assert.False(request.IsCompleted, shell.Status + "/" + shell.RequestState);
+                await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.False(request.IsCompleted);
+                await Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    Assert.True(shell.IsBusy);
+                    Assert.Equal("busy", shell.RequestState);
+                    Assert.False(shell.RefreshCommand.CanExecute(null));
+                    Assert.True(shell.CancelCommand.CanExecute(null));
+                    window.Focus();
+                    window.KeyPress(Key.L, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.L, null);
+                    Assert.False(shell.LeftVisible);
+                    if (!timeout) shell.CancelCurrentRequest();
+                });
+                await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.Equal(timeout ? "timed-out" : "cancelled", shell.RequestState);
+                Assert.Equal(timeout ? "The request timed out." : "The request was cancelled.", shell.Status);
+                Assert.False(shell.IsBusy);
+                Assert.False(shell.HasUncertainOutcomes);
+                Assert.Equal("cached", shell.Freshness);
+                string interrupted = shell.Status;
+                connection.Control.Release.TrySetResult();
+                await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.Equal(interrupted, shell.Status);
+                connection.Control.StallStatus = false;
+                await shell.RefreshAsync(TestContext.Current.CancellationToken);
+                Assert.Equal("idle", shell.RequestState);
+                Assert.Null(shell.LastFailure);
+                Assert.All(uiChanges, onUi => Assert.True(onUi));
             });
         }
         finally
@@ -97,12 +97,68 @@ public class ClientCommandTests(HeadlessFixture fixture)
     {
         string root = Seed.Temp("command-effect");
         string person = Seed.Init(root);
-        Seed.Admit(root, person, Seed.Temp("command-effect-inputs"), "Contributor", "agent", "contributor");
         using var connection = new ControlledConnection(root);
+        IEstateApi api = connection.Api;
+        (ShellViewModel shell, AssignmentComposer page) = await CreateComposerAsync(connection, person);
+        connection.Control.StallAssign = true;
+        connection.Control.Timeout = timeout ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMinutes(1);
+        await fixture.UiAsync(async () =>
+        {
+            Task request = shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
+            Assert.False(request.IsCompleted, page.Status + "/" + shell.Status);
+            try
+            {
+                await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                if (!timeout) shell.CancelCurrentRequest();
+                await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                Assert.True(shell.LastFailure?.OutcomeUnknown);
+                Assert.True(shell.HasUncertainOutcomes);
+                Assert.Null(page.WrittenId);
+                Assert.False(page.CanSubmit);
+                Assert.Contains("outcome is unknown", page.Status, StringComparison.Ordinal);
+                Assert.Contains("outcome is unknown", shell.UncertaintyNotice, StringComparison.Ordinal);
+                connection.Control.Release.TrySetResult();
+                await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await shell.RefreshAsync(TestContext.Current.CancellationToken);
+                Assert.True(shell.HasUncertainOutcomes);
+                await shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
+                Assert.Single(api.Records("assignment"));
+                Assert.Equal(1, connection.Control.AssignCalls);
+            }
+            finally { connection.Control.Release.TrySetResult(); }
+        });
+    }
+
+    [Fact]
+    public async Task AConfirmedWriteKeepsItsReceiptWhenTheFollowingRefreshTimesOut()
+    {
+        string root = Seed.Temp("command-confirmed-effect");
+        string person = Seed.Init(root);
+        using var connection = new ControlledConnection(root);
+        (ShellViewModel shell, AssignmentComposer page) = await CreateComposerAsync(connection, person);
+        connection.Control.StallStatus = true;
+        connection.Control.Timeout = TimeSpan.FromMilliseconds(100);
+        try
+        {
+            await fixture.UiAsync(() => shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken));
+            Assert.Equal("timed-out", shell.RequestState);
+            Assert.False(shell.LastFailure?.OutcomeUnknown);
+            Assert.False(shell.HasUncertainOutcomes);
+            Assert.NotNull(page.WrittenId);
+            Assert.Null(page.UncertainEffect);
+            Assert.StartsWith("Written: assignment " + page.WrittenId, page.Status, StringComparison.Ordinal);
+            Assert.Equal(page.WrittenId, Assert.Single(connection.Api.Records("assignment")).Id);
+        }
+        finally { connection.Control.Release.TrySetResult(); }
+    }
+
+    private async Task<(ShellViewModel Shell, AssignmentComposer Page)> CreateComposerAsync(ControlledConnection connection, string person)
+    {
+        Seed.Admit(connection.Root, person, Seed.Temp("command-effect-inputs"), "Contributor", "agent", "contributor");
         IEstateApi api = connection.Api;
         Assert.True(api.NewRecord(new("work-order", person, Seed.Json("""{"key":"ASYNC","kind":"ordinary","title":"Observe an effect","intent":"Test.","scope":["test"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}"""))).Ok);
         var shell = new ShellViewModel(_ => connection, new FakeRuntimeManager(), new Preferences(Seed.Temp("command-preferences"))) { ActingOverride = person };
-        await fixture.UiAsync(() => shell.OpenEstateAsync(root, TestContext.Current.CancellationToken));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(connection.Root, TestContext.Current.CancellationToken));
         AssignmentComposer page = Assert.IsType<AssignmentComposer>(await fixture.UiAsync(() => shell.OpenComposerAsync("ASYNC", TestContext.Current.CancellationToken)));
         await fixture.Ui(() =>
         {
@@ -114,30 +170,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
             page.ReviewCriteria = "observed";
             page.Recovery = "Reconcile the original assignment.";
         });
-        connection.Control.StallAssign = true;
-        connection.Control.Timeout = timeout ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMinutes(1);
-        await fixture.UiAsync(async () =>
-        {
-        Task request = shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
-        Assert.False(request.IsCompleted, page.Status + "/" + shell.Status);
-        try
-        {
-            await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            if (!timeout) shell.CancelCurrentRequest();
-            await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            Assert.True(shell.LastFailure?.OutcomeUnknown);
-            Assert.True(shell.HasUncertainOutcomes);
-            Assert.Null(page.WrittenId);
-            Assert.Contains("outcome is unknown", shell.UncertaintyNotice, StringComparison.Ordinal);
-            connection.Control.Release.TrySetResult();
-            await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            await shell.RefreshAsync(TestContext.Current.CancellationToken);
-            Assert.True(shell.HasUncertainOutcomes);
-            Assert.Single(api.Records("assignment"));
-            Assert.Equal(1, connection.Control.AssignCalls);
-        }
-        finally { connection.Control.Release.TrySetResult(); }
-        });
+        return (shell, page);
     }
 
     private sealed class ControlledConnection : IEstateConnection

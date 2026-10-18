@@ -2850,8 +2850,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// </summary>
     public void Dispose()
     {
-        AbandonRuns();
-        session.Dispose();
+        lock (lifetimeGate)
+        {
+            closeRequested = true;
+            if (clientOperations == 0) CloseResources();
+        }
     }
 
     /// <summary>A signature a device made elsewhere over the content hash of exactly this record; any other digest is refused.</summary>

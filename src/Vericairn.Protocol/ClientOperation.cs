@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Net;
+using System.Text.Json;
+
 namespace Vericairn.Protocol;
+
+/// <summary>A runtime whose resources must stay alive until non-cooperative embedded operations actually finish.</summary>
+public interface IClientOperationLifetime
+{
+    /// <summary>Retains the runtime for one operation, including work that outlives client cancellation.</summary>
+    IDisposable RetainClientOperation();
+}
 
 /// <summary>A client stopped observing an operation; this does not establish whether its effect happened.</summary>
 public interface IClientOperationFailure
@@ -76,6 +86,15 @@ public static class ClientOperation
     public static Task<T> RunSynchronousAsync<T>(string operation, Func<T> action, bool mayHaveEffect, CancellationToken cancellationToken = default) =>
         RunAsync(operation, token => Task.Run(action, token), mayHaveEffect, cancellationToken: cancellationToken);
 
+    /// <summary>Adapts an owned runtime while retaining its resources until the synchronous operation finishes.</summary>
+    public static Task<T> RunSynchronousAsync<T>(string operation, Func<T> action, bool mayHaveEffect, IClientOperationLifetime? lifetime, CancellationToken cancellationToken = default) =>
+        RunAsync(operation, async token =>
+        {
+            using IDisposable? retained = lifetime?.RetainClientOperation();
+            // Cleanup follows actual task completion, including cancellation before the queued work starts.
+            return await Task.Run(action, token).ConfigureAwait(false);
+        }, mayHaveEffect, cancellationToken: cancellationToken);
+
     /// <summary>Runs one operation with an explicit deadline and preserves uncertainty if observation is interrupted.</summary>
     public static async Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, bool mayHaveEffect,
         TimeSpan? timeout = null, CancellationToken cancellationToken = default)
@@ -101,7 +120,10 @@ public static class ClientOperation
                 throw new ClientCancelledException(mayHaveEffect, cancellationToken, exception);
             }
 
-            throw new ClientTimeoutException(mayHaveEffect, exception);
+            if (deadline.IsCancellationRequested) throw new ClientTimeoutException(mayHaveEffect, exception);
+            if (exception is ClientCancelledException) throw;
+            // An unrelated transport cancellation is neither proof of a deadline nor a person's cancellation.
+            throw new ClientUnavailableException(mayHaveEffect, exception);
         }
         catch (TimeoutException exception) when (exception is not ClientTimeoutException)
         {
@@ -110,6 +132,14 @@ public static class ClientOperation
         catch (HttpRequestException exception) when (exception.StatusCode is null && exception is not ClientUnavailableException)
         {
             throw new ClientUnavailableException(mayHaveEffect, exception);
+        }
+        catch (HttpRequestException exception) when (mayHaveEffect && exception.StatusCode >= HttpStatusCode.InternalServerError)
+        {
+            throw new ClientUnavailableException(true, exception);
+        }
+        catch (Exception exception) when (mayHaveEffect && exception is (IOException or JsonException))
+        {
+            throw new ClientUnavailableException(true, exception);
         }
         finally
         {

@@ -96,6 +96,16 @@ public sealed class McpServer
         var gate = new object();
         using var writing = new SemaphoreSlim(1, 1);
         var pending = new List<Task>();
+        Task<string?>? reading = null;
+        bool inputCompleted = false;
+
+        async Task<string?> ReadAsync()
+        {
+            // Console.In and some TextReader implementations perform their "async" read synchronously. Keep that read off
+            // the server loop, and stop waiting on cancellation even if the reader cannot interrupt its underlying handle.
+            reading = Task.Run(async () => await input.ReadLineAsync(cancellationToken).ConfigureAwait(false), cancellationToken);
+            return await reading.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         async Task SendAsync(JsonObject message)
         {
@@ -123,7 +133,7 @@ public sealed class McpServer
 
         try
         {
-            while (await input.ReadLineAsync(cancellationToken).ConfigureAwait(false) is string line)
+            while (await ReadAsync().ConfigureAwait(false) is string line)
             {
                 if (string.IsNullOrWhiteSpace(line)) continue;
                 JsonNode? message;
@@ -150,7 +160,7 @@ public sealed class McpServer
 
                 if (id is null)
                 {
-                    if (method == "notifications/cancelled" && request["params"]?["requestId"] is JsonNode cancelled)
+                    if (method == "notifications/cancelled" && request["params"] is JsonObject cancellation && cancellation["requestId"] is JsonNode cancelled)
                     {
                         lock (gate)
                         {
@@ -175,6 +185,7 @@ public sealed class McpServer
                 pending.RemoveAll(task => task.IsCompletedSuccessfully);
                 pending.Add(RespondAsync(id.DeepClone(), method, request["params"] as JsonObject, key, source));
             }
+            inputCompleted = true;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -184,11 +195,15 @@ public sealed class McpServer
         {
             lock (gate)
             {
-                if (cancellationToken.IsCancellationRequested)
-                    foreach (CancellationTokenSource source in active.Values) source.Cancel();
+                if (!inputCompleted || cancellationToken.IsCancellationRequested)
+                    foreach (CancellationTokenSource source in active.Values.ToArray()) source.Cancel();
             }
+            if (reading is not null && !reading.IsCompletedSuccessfully)
+                _ = reading.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             await Task.WhenAll(pending).ConfigureAwait(false);
         }
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task<JsonObject> HandleAsync(JsonNode id, string method, JsonObject? parameters, CancellationToken cancellationToken)
@@ -197,7 +212,7 @@ public sealed class McpServer
         {
             return await HandleCoreAsync(id, method, parameters, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is OperationCanceledException or TimeoutException or HttpRequestException or IOException)
+        catch (Exception exception) when (exception is OperationCanceledException or TimeoutException or HttpRequestException or IOException or InvalidOperationException or JsonException or UnauthorizedAccessException or ArgumentException)
         {
             return Error(id, -32603, ClientFailure.FromException(exception)?.Message ?? exception.Message);
         }

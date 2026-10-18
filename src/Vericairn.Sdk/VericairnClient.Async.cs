@@ -22,7 +22,7 @@ public sealed partial class VericairnClient
     /// <summary>Optional deadline override by operation name; null uses that operation's standard deadline.</summary>
     public Func<string, TimeSpan?>? OperationTimeout { get; init; }
 
-    /// <summary>Checks the local endpoint without blocking the caller. A caller's cancellation is propagated.</summary>
+    /// <summary>Checks the local endpoint without blocking the caller. Caller cancellation and operation deadlines are propagated.</summary>
     public static async Task<bool> IsAliveAsync(DaemonEndpoint endpoint, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
@@ -31,7 +31,7 @@ public sealed partial class VericairnClient
             using var client = new VericairnClient(endpoint);
             return (await client.HealthAsync(cancellationToken).ConfigureAwait(false)).Api == ApiVersion.Current;
         }
-        catch (Exception exception) when (exception is HttpRequestException or System.Net.Sockets.SocketException or IOException or TimeoutException or JsonException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is HttpRequestException or System.Net.Sockets.SocketException or IOException or JsonException or UnauthorizedAccessException)
         {
             return false;
         }
@@ -384,7 +384,8 @@ public sealed partial class VericairnClient
         }
 
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<T>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<T>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
+            ?? throw new JsonException("The runtime returned no result.");
     }
 
     private async Task<TResponse?> PostAsync<TRequest, TResponse>(string path, TRequest request, CancellationToken cancellationToken)
@@ -396,7 +397,8 @@ public sealed partial class VericairnClient
             response.EnsureSuccessStatusCode();
         }
 
-        return await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
+            ?? throw new JsonException("The runtime returned no result.");
     }
 
     private async Task<(TResponse? Response, Problem? Problem)> PostOrProblemAsync<TRequest, TResponse>(string path, TRequest request, CancellationToken cancellationToken)
@@ -405,7 +407,8 @@ public sealed partial class VericairnClient
         using HttpResponseMessage response = await http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options, cancellationToken).ConfigureAwait(false);
         if (response.IsSuccessStatusCode)
         {
-            return (await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false), null);
+            return (await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
+                ?? throw new JsonException("The runtime returned no result."), null);
         }
 
         if (response.StatusCode is HttpStatusCode.Conflict or HttpStatusCode.UnprocessableEntity or HttpStatusCode.Unauthorized)

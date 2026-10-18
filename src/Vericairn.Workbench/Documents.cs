@@ -14,6 +14,14 @@ namespace Vericairn.Workbench;
 /// <summary>A document open in the center workspace; the kind picks the view.</summary>
 public abstract class Document(string title, string kind) : Observable
 {
+    private ClientFailure? uncertainEffect;
+
+    /// <summary>An interrupted effect on this editor, retained until its original operation is reconciled outside the editor.</summary>
+    public ClientFailure? UncertainEffect { get => uncertainEffect; internal set { if (Set(ref uncertainEffect, value)) Raise(nameof(CanSubmit)); } }
+
+    /// <summary>Whether the editor may submit; an uncertain previous effect must be reconciled before another submission.</summary>
+    public bool CanSubmit => UncertainEffect is null;
+
     /// <summary>Tab title.</summary>
     public string Title { get; } = title;
 
@@ -451,7 +459,7 @@ public sealed class AssignmentComposer(string workOrderKey, IReadOnlyList<Contri
     public string Note { get => note; set => Set(ref note, value); }
 
     /// <summary>What the runtime answered.</summary>
-    public string Status { get => status; private set => Set(ref status, value); }
+    public string Status { get => status; internal set => Set(ref status, value); }
 
     /// <summary>The assignment id once written.</summary>
     public string? WrittenId { get; private set; }
@@ -650,7 +658,7 @@ public sealed class ReviewWorkspace : Document
     public string AcceptanceStatement { get => acceptanceStatement; set => Set(ref acceptanceStatement, value); }
 
     /// <summary>What the runtime answered last.</summary>
-    public string Status { get => status; private set => Set(ref status, value); }
+    public string Status { get => status; internal set => Set(ref status, value); }
 
     /// <summary>The prepared action's state on the last check.</summary>
     public string PreparedState { get => preparedState; private set => Set(ref preparedState, value); }
@@ -938,7 +946,7 @@ public sealed class ReleaseWorkspace : Document
     public string CancelReason { get => cancelReason; set => Set(ref cancelReason, value); }
 
     /// <summary>What the runtime answered last.</summary>
-    public string Status { get => status; private set => Set(ref status, value); }
+    public string Status { get => status; internal set => Set(ref status, value); }
 
     /// <summary>The operator's manual publication command, as the runtime named it; never run here.</summary>
     public string Publish { get => publish; private set => Set(ref publish, value); }

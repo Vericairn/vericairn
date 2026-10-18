@@ -85,6 +85,7 @@ public sealed class McpCancellationTests
         Assert.Equal(2, ping["id"]!.GetValue<int>());
         Assert.Empty(ping["result"]!.AsObject());
         input.Add("""{"method":"notifications/cancelled","params":{"requestId":"unrelated"}}""");
+        input.Add("""{"method":"notifications/cancelled","params":17}""");
         input.Add("""{"method":"notifications/cancelled","params":{"requestId":"slow"}}""");
         JsonObject cancelled = await output.Next();
         Assert.Equal("slow", cancelled["id"]!.GetValue<string>());
@@ -92,6 +93,53 @@ public sealed class McpCancellationTests
         Assert.Equal("The request was cancelled.", cancelled["result"]!["content"]![0]!["text"]!.GetValue<string>());
         input.Complete();
         await serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
+    [Fact]
+    public async Task ServerCancellationStopsWaitingForASynchronousReader()
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+        using var input = new BlockingInput();
+        using var output = new StringWriter();
+        using var stop = new CancellationTokenSource();
+        Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: stop.Token);
+        try
+        {
+            await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            stop.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            Assert.Empty(output.ToString());
+        }
+        finally
+        {
+            input.Release.Set();
+            await input.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+    }
+
+    [Fact]
+    public async Task ServerCancellationSettlesEveryPendingRequest()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int calls = 0;
+        using var client = Client(async (_, token) =>
+        {
+            if (Interlocked.Increment(ref calls) == 2) entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            return new(HttpStatusCode.OK);
+        });
+        using var input = new Input();
+        using var output = new Output();
+        using var stop = new CancellationTokenSource();
+        Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: stop.Token);
+        input.Add("""{"id":1,"method":"tools/call","params":{"name":"estate_health"}}""");
+        input.Add("""{"id":2,"method":"tools/call","params":{"name":"estate_health"}}""");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        JsonObject[] responses = [await output.Next(), await output.Next()];
+        Assert.Equal([1, 2], responses.Select(response => response["id"]!.GetValue<int>()).Order());
+        Assert.All(responses, response => Assert.Equal("The request was cancelled.", response["result"]!["content"]![0]!["text"]!.GetValue<string>()));
     }
 
     [Fact]
@@ -108,6 +156,18 @@ public sealed class McpCancellationTests
         JsonObject result = JsonNode.Parse(output.ToString())!.AsObject();
         Assert.Equal(-32603, result["error"]!["code"]!.GetValue<int>());
         Assert.Equal("The request timed out.", result["error"]!["message"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AnUnreadableAdmissionResponseIsAProtocolErrorAndLeavesPingUsable()
+    {
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("truncated response") }));
+        using var input = new StringReader("{\"id\":1,\"method\":\"tools/list\"}\n{\"id\":2,\"method\":\"ping\"}\n");
+        using var output = new StringWriter();
+        await new McpServer(new ToolRegistry(client, "contributor"), "test").RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
+        JsonObject[] responses = output.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => JsonNode.Parse(line)!.AsObject()).ToArray();
+        Assert.Equal(-32603, responses.Single(response => response["id"]!.GetValue<int>() == 1)["error"]!["code"]!.GetValue<int>());
+        Assert.Empty(responses.Single(response => response["id"]!.GetValue<int>() == 2)["result"]!.AsObject());
     }
 
     [Fact]
@@ -155,5 +215,24 @@ public sealed class McpCancellationTests
         public override Encoding Encoding => Encoding.UTF8;
         public override Task WriteLineAsync(string? value) { Assert.True(lines.Writer.TryWrite(value!)); return Task.CompletedTask; }
         public async Task<JsonObject> Next() => JsonNode.Parse(await lines.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken))!.AsObject();
+    }
+
+    private sealed class BlockingInput : TextReader
+    {
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public ManualResetEventSlim Release { get; } = new();
+        public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
+        {
+            Entered.TrySetResult();
+            Release.Wait(TimeSpan.FromSeconds(10), CancellationToken.None);
+            Finished.TrySetResult();
+            return ValueTask.FromResult<string?>(null);
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Release.Dispose();
+            base.Dispose(disposing);
+        }
     }
 }

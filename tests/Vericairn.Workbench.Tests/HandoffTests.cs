@@ -97,6 +97,14 @@ public class HandoffTests(HeadlessFixture fixture)
         Assert.Equal(basis, File.ReadAllText(path));
         await fixture.UiAsync(async () => Assert.False((await page.SaveAsync(path, cancellationToken: TestContext.Current.CancellationToken))));
         Assert.Equal(basis, File.ReadAllText(path));
+        using (var stop = new CancellationTokenSource())
+        {
+            stop.Cancel();
+            string interruptedPath = Path.Combine(scratch, "interrupted.json");
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => page.SaveAsync(interruptedPath, stop.Token));
+            Assert.False(File.Exists(interruptedPath));
+            Assert.Empty(Directory.EnumerateFiles(scratch, "*.pending-*"));
+        }
 
         var next = new HandoffDocument(() => available);
         await fixture.UiAsync(async () => Assert.True((await next.LoadAsync(File.ReadAllText(path), cancellationToken: TestContext.Current.CancellationToken))));

@@ -112,10 +112,13 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
             return false;
         }
 
+        string temporary = path + ".pending-" + Guid.NewGuid().ToString("N");
         try
         {
-            await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous);
-            await file.WriteAsync(Encoding.UTF8.GetBytes(PackageJson), cancellationToken).ConfigureAwait(true);
+            await using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous))
+                await file.WriteAsync(Encoding.UTF8.GetBytes(PackageJson), cancellationToken).ConfigureAwait(true);
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Move(temporary, path, overwrite: false);
             Note = "Package saved. Use Open package here or vericairn resume to continue from it.";
             return true;
         }
@@ -123,6 +126,10 @@ public sealed class HandoffDocument(Func<IEstateApi?> api, Func<CommunicationPro
         {
             Note = "Package was not saved: " + exception.Message;
             return false;
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
         }
     }
 

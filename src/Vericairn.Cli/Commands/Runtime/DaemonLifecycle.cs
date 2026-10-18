@@ -80,6 +80,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
 
     public int RuntimeStart(string root, bool json)
     {
+        bool launched = false;
         try
         {
             if (!IsEstate(root))
@@ -123,6 +124,7 @@ internal sealed class DaemonLifecycle(CommandContext context)
             {
                 return context.Fail("The daemon process did not start.");
             }
+            launched = true;
 
             process.StandardInput.Close();
             process.StandardOutput.Close();
@@ -145,7 +147,19 @@ internal sealed class DaemonLifecycle(CommandContext context)
                 Task.Delay(200, context.CancellationToken).GetAwaiter().GetResult();
             }
 
-            return context.Fail($"The daemon did not start serving within 30 seconds{LogSince(log, logStart)}. Its log is {log}.");
+            throw new ClientTimeoutException(true);
+        }
+        catch (OperationCanceledException exception) when (launched)
+        {
+            throw new ClientCancelledException(true, context.CancellationToken, exception);
+        }
+        catch (TimeoutException exception) when (launched)
+        {
+            throw new ClientTimeoutException(true, exception);
+        }
+        catch (Exception exception) when (launched && exception is (IOException or InvalidOperationException or System.ComponentModel.Win32Exception))
+        {
+            throw new ClientUnavailableException(true, exception);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or System.ComponentModel.Win32Exception)
         {
@@ -167,11 +181,13 @@ internal sealed class DaemonLifecycle(CommandContext context)
             return Clean;
         }
 
+        bool asked = false;
         try
         {
             using (var client = new VericairnClient(endpoint))
             {
                 client.ShutdownAsync(context.CancellationToken).GetAwaiter().GetResult();
+                asked = true;
             }
 
             var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
@@ -183,6 +199,14 @@ internal sealed class DaemonLifecycle(CommandContext context)
             bool stopped = !context.IsAlive(endpoint);
             context.Output.WriteLine(json ? JsonSerializer.Serialize(new { stopped = stopped ? endpoint.ProcessId : (int?)null, process = endpoint.ProcessId }) : $"asked daemon {endpoint.ProcessId} to stop; {(stopped ? "stopped" : "still answering")}");
             return stopped ? Clean : HasErrors;
+        }
+        catch (OperationCanceledException exception) when (asked)
+        {
+            throw new ClientCancelledException(true, context.CancellationToken, exception);
+        }
+        catch (TimeoutException exception) when (asked)
+        {
+            throw new ClientTimeoutException(true, exception);
         }
         catch (Exception exception) when ((exception is HttpRequestException or IOException or InvalidOperationException) && exception is not IClientOperationFailure)
         {

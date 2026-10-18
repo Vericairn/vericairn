@@ -37,8 +37,16 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
                 if (endpoint.Kind == "pipe")
                 {
                     var pipe = new NamedPipeClientStream(".", endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous);
-                    await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
-                    return pipe;
+                    try
+                    {
+                        await pipe.ConnectAsync(5000, cancellationToken).ConfigureAwait(false);
+                        return pipe;
+                    }
+                    catch
+                    {
+                        pipe.Dispose();
+                        throw;
+                    }
                 }
 
                 var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
