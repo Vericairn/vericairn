@@ -281,6 +281,10 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public AsksResponse Asks(string? principal = null) => Get<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal))!;
 
     /// <inheritdoc />
+    public OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        Get<OperatorActionsResponse>("/v1/operator/actions" + CommunicationQuery(recipient, assignment, view))!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />

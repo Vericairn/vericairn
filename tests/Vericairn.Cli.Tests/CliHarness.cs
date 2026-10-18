@@ -19,10 +19,7 @@ internal static class CliHarness
     static CliHarness()
     {
         // Live stores and keys of test estates never touch the developer's real per-user state.
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, TempDirectory("cli-tests-home"));
-        }
+        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, TempDirectory("cli-tests-home"));
         new ReleaseUpdateStore().Configure(false);
     }
 
