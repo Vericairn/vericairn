@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
@@ -12,10 +13,10 @@ namespace Vericairn.Records.Types;
 public sealed class ResultType : IRecordType
 {
     /// <summary>Allowed outcomes.</summary>
-    public static readonly string[] Outcomes = ["completed", "partial", "blocked", "abandoned"];
+    public static readonly ImmutableArray<string> Outcomes = ["completed", "partial", "blocked", "abandoned"];
 
     /// <summary>Allowed check outcomes.</summary>
-    public static readonly string[] CheckOutcomes = ["passed", "failed", "skipped", "not-performed"];
+    public static readonly ImmutableArray<string> CheckOutcomes = ["passed", "failed", "skipped", "not-performed"];
 
     /// <inheritdoc />
     public string Name => "result";

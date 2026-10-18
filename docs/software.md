@@ -3,6 +3,14 @@
 How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
 
+## Checked repository changes (unreleased)
+
+The additive `changes push`, `changes open`, `changes merge` and `changes observe`
+commands record their intent and observed outcome. Pushes require a successful
+scan of their exact commits; merges require declared checks at their pinned head.
+The [checked repository changes guide](changes.md) describes declarations,
+authority, target-run observations and recovery from uncertain effects.
+
 ## Personal communication (0.7.0, COMMS-01)
 
 Communication has five independent fields: optional progress frequency, status
@@ -293,8 +301,11 @@ implementation serves a provider id that is recorded on every operation, declare
 defaults, the setting that names the destination, and the resource locations it serves. The GitHub provider
 serves `github-releases` and declares `repository` (required, the destination), `workflow` (default
 `release.yml`), `ref` (default `main`) and `checksums` (default `SHA256SUMS`); it uses the GitHub CLI logged
-in by the user on the runtime's machine, and Vericairn never sees or stores the token. `FakeReleaseProvider`
-declares the same settings and simulates GitHub in memory for the conformance suite and the journeys. A
+in by the user on the runtime's machine, and Vericairn never sees or stores the token. The internal
+`FakeReleaseProvider` in `tests/TestSupport/FakeReleaseProvider.cs` declares the same settings and simulates
+GitHub in memory for the conformance suite and the journeys. The Runtime, CLI and Workbench test projects
+compile that shared test support; the fake is absent from the runtime assembly and packages. The replaying
+`RecordedSourceAdapter` remains beside its runtime contract as the offline conformance implementation. A
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an

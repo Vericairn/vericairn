@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Runtime.Providers;
 
 /// <summary>A setting a provider declares: what a request or a product's declared destination supplies, and the provider's own default when it has one.</summary>
@@ -22,7 +24,7 @@ public sealed record ProviderSetting(string Name, string Summary, bool Required,
 public sealed record ProviderDescriptor(string Id, string Contract, string Status, IReadOnlyList<string> Operations, IReadOnlyList<string> Limitations, IReadOnlyList<ProviderSetting>? Settings = null, string? Destination = null, IReadOnlyList<string>? Locations = null)
 {
     /// <summary>The statuses an implementation may record.</summary>
-    public static readonly string[] Statuses = ["candidate", "implemented", "qualified", "available"];
+    public static readonly ImmutableArray<string> Statuses = ["candidate", "implemented", "qualified", "available"];
 
     /// <summary>The declared settings, never null.</summary>
     public IReadOnlyList<ProviderSetting> DeclaredSettings => Settings ?? [];

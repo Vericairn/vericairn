@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Collections;
 using Vericairn.Records.Signing;
 
@@ -18,7 +19,7 @@ namespace Vericairn.Runtime.Workers;
 public static class WorkerEnvironment
 {
     /// <summary>The variables that pass when the worker's environment holds them.</summary>
-    public static readonly string[] Allowed =
+    public static readonly ImmutableArray<string> Allowed =
     [
         "PATH", "HOME", "USER", "USERNAME", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TZ", "TERM", "TMPDIR", "TEMP", "TMP",
         "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
@@ -30,7 +31,7 @@ public static class WorkerEnvironment
     ];
 
     /// <summary>The variables Vericairn's MCP server needs, which the worker also passes it through the MCP configuration.</summary>
-    public static readonly string[] McpServer = [VericairnHome.EnvironmentVariable, SecureEnclaveCustody.HelperVariable, "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64", "DOTNET_ROOT_X86"];
+    public static readonly ImmutableArray<string> McpServer = [VericairnHome.EnvironmentVariable, SecureEnclaveCustody.HelperVariable, "DOTNET_ROOT", "DOTNET_ROOT_X64", "DOTNET_ROOT_ARM64", "DOTNET_ROOT_X86"];
 
     private static readonly string[] CredentialMarks = ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "API_KEY", "APIKEY", "PRIVATE_KEY", "ACCESS_KEY", "AUTH"];
 

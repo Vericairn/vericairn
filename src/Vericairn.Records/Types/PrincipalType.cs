@@ -49,7 +49,7 @@ public sealed class PrincipalType : IRecordType
         body.NoOtherKeys();
         if (roles is not null)
         {
-            foreach (string role in roles.Where(r => Array.IndexOf(Roles.All, r) < 0))
+            foreach (string role in roles.Where(r => Roles.All.IndexOf(r) < 0))
             {
                 body.Error("body.enum", "roles", $"Unknown role '{role}'. Known roles: {string.Join(", ", Roles.All)}.");
             }

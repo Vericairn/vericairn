@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
+
 namespace Vericairn.Records.Types;
 
 /// <summary>Role names a principal can hold.</summary>
@@ -22,7 +24,7 @@ public static class Roles
     public const string Service = "service";
 
     /// <summary>All role names.</summary>
-    public static readonly string[] All = [Operator, Builder, Reviewer, Contributor, Service];
+    public static readonly ImmutableArray<string> All = [Operator, Builder, Reviewer, Contributor, Service];
 }
 
 /// <summary>Authority scope names with a defined meaning.</summary>
@@ -59,5 +61,5 @@ public static class Scopes
     public const string ManageWritingExceptions = "manage-writing-exceptions";
 
     /// <summary>All scope names with defined meaning.</summary>
-    public static readonly string[] Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions];
+    public static readonly ImmutableArray<string> Known = [LocalEngineering, RepositoryWrite, SelfAcceptOrdinaryWork, AcceptWork, Administer, Spending, Qualify, ManageEstatePolicies, GrantPolicyExceptions, ManageWritingExceptions];
 }

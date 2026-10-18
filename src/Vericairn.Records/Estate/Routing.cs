@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.ObjectModel;
 using System.Text.Json;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
@@ -27,11 +28,11 @@ public static class Routing
     /// and a grant in force of the 'publication' scope gives; the decider's is a decision, such as the acceptance of a release or a
     /// milestone or another reserved action, which only an operator makes.
     /// </summary>
-    public static IReadOnlyDictionary<string, string> ReservedRoles { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    public static IReadOnlyDictionary<string, string> ReservedRoles { get; } = new ReadOnlyDictionary<string, string>(new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["publisher"] = "publication",
         ["decider"] = "decision",
-    };
+    });
 
     /// <summary>What this machine offers routing.</summary>
     /// <param name="Launchers">Each coding-agent launcher available here, by id, and the harness it starts, as an agent principal's product names it (Claude Code, Codex); null for a launcher that names no harness, such as the generic one, which serves no agent by itself.</param>

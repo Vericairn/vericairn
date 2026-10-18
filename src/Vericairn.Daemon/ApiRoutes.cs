@@ -58,6 +58,8 @@ public static class ApiRoutes
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
         app.MapPost($"{v}/documents/{{id}}/reviews", (string id, DocumentReviewRequest request) => Outcome(service.DocumentReview(id, request)));
         app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
+        app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
+            Results.Json(service.OperatorActions(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
         app.MapGet($"{v}/goals", () => Results.Json(service.Goals(), ProtocolJson.Options));
         app.MapPost($"{v}/goals", (GoalProposeRequest request) => Outcome(service.GoalPropose(request)));
         app.MapGet($"{v}/goals/{{id}}", (string id) => service.Goal(id) is GoalResponse goal ? Results.Json(goal, ProtocolJson.Options) : Results.NotFound());
@@ -77,6 +79,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/runs/{{id}}/stop", (string id, RunStopRequest request) => Results.Json(service.RunStop(id, request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/submit", (ReleaseSubmitRequest request) => Results.Json(service.ReleaseSubmit(request), ProtocolJson.Options));
         app.MapPost($"{v}/releases/observe", (ReleaseObserveRequest request) => Results.Json(service.ReleaseObserve(request), ProtocolJson.Options));
+        app.MapPost($"{v}/changes/push", (ChangesPushRequest request) => Results.Json(service.ChangesPush(request), ProtocolJson.Options));
+        app.MapPost($"{v}/changes/open", (ChangesOpenRequest request) => Results.Json(service.ChangesOpen(request), ProtocolJson.Options));
+        app.MapPost($"{v}/changes/merge", (ChangesMergeRequest request) => Results.Json(service.ChangesMerge(request), ProtocolJson.Options));
+        app.MapPost($"{v}/changes/observe", (ChangesObserveRequest request) => Results.Json(service.ChangesObserve(request), ProtocolJson.Options));
+
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {
             (UpgradeResponse? plan, Problem? problem) = service.Upgrade(request);

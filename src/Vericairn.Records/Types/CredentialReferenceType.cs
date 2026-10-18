@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 
@@ -10,10 +11,10 @@ namespace Vericairn.Records.Types;
 public sealed class CredentialReferenceType : IRecordType
 {
     /// <summary>Kinds of credential.</summary>
-    public static readonly string[] Kinds = ["api-token", "oauth-client", "signing-certificate", "ssh-key", "password", "device-key", "other"];
+    public static readonly ImmutableArray<string> Kinds = ["api-token", "oauth-client", "signing-certificate", "ssh-key", "password", "device-key", "other"];
 
     /// <summary>Whether a credential is in use.</summary>
-    public static readonly string[] Statuses = ["active", "rotated", "revoked", "retired"];
+    public static readonly ImmutableArray<string> Statuses = ["active", "rotated", "revoked", "retired"];
 
     /// <inheritdoc />
     public string Name => "credential-reference";

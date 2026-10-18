@@ -281,6 +281,10 @@ public sealed class VericairnClient : IEstateApi, IDisposable
     public AsksResponse Asks(string? principal = null) => Get<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal))!;
 
     /// <inheritdoc />
+    public OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null) =>
+        Get<OperatorActionsResponse>("/v1/operator/actions" + CommunicationQuery(recipient, assignment, view))!;
+
+    /// <inheritdoc />
     public IReadOnlyList<GoalRow> Goals() => Get<List<GoalRow>>("/v1/goals")!;
 
     /// <inheritdoc />
@@ -339,6 +343,19 @@ public sealed class VericairnClient : IEstateApi, IDisposable
 
     /// <inheritdoc />
     public ReleaseResponse ReleaseObserve(ReleaseObserveRequest request) => Post<ReleaseObserveRequest, ReleaseResponse>("/v1/releases/observe", request)!;
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesPush(ChangesPushRequest request) => Post<ChangesPushRequest, ChangeResponse>("/v1/changes/push", request)!;
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesOpen(ChangesOpenRequest request) => Post<ChangesOpenRequest, ChangeResponse>("/v1/changes/open", request)!;
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesMerge(ChangesMergeRequest request) => Post<ChangesMergeRequest, ChangeResponse>("/v1/changes/merge", request)!;
+
+    /// <inheritdoc />
+    public ChangeResponse ChangesObserve(ChangesObserveRequest request) => Post<ChangesObserveRequest, ChangeResponse>("/v1/changes/observe", request)!;
+
 
     /// <inheritdoc />
     public (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request) => PostOrProblem<UpgradeRequest, UpgradeResponse>("/v1/estate/upgrade", request);

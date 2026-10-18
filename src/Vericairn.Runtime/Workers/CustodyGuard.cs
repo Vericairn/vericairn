@@ -57,7 +57,7 @@ public static class CustodyGuard
                     continue;
                 }
 
-                bool presence = EstateModel.BodyString(device, "presence") == "required" && Array.IndexOf(DeviceKeyStores.PresenceKinds, store.Kind) >= 0;
+                bool presence = EstateModel.BodyString(device, "presence") == "required" && DeviceKeyStores.PresenceKinds.IndexOf(store.Kind) >= 0;
                 if (presence)
                 {
                     continue;

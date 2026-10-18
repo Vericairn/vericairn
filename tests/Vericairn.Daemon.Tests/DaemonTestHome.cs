@@ -11,12 +11,9 @@ internal static class DaemonTestHome
 {
     static DaemonTestHome()
     {
-        if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable(VericairnHome.EnvironmentVariable)))
-        {
-            string home = Path.Combine(Path.GetTempPath(), "vericairn-daemon-tests-home-" + Ulid.NewUlid().Value);
-            Directory.CreateDirectory(home);
-            Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
-        }
+        string home = Path.Combine(Path.GetTempPath(), "vericairn-daemon-tests-home-" + Ulid.NewUlid().Value);
+        Directory.CreateDirectory(home);
+        Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
     }
 
     /// <summary>Forces the static constructor.</summary>

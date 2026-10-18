@@ -137,6 +137,9 @@ public interface IEstateApi
     /// </summary>
     AsksResponse Asks(string? principal = null);
 
+    /// <summary>Every recorded action waiting on operators, with reasons, exact commands and required input. Presentation never filters the queue; reads sign and record nothing.</summary>
+    OperatorActionsResponse OperatorActions(string? recipient = null, string? assignment = null, CommunicationValues? view = null);
+
     /// <summary>The estate's current goals with their status.</summary>
     IReadOnlyList<GoalRow> Goals();
 
@@ -206,6 +209,19 @@ public interface IEstateApi
 
     /// <summary>Observe a release's run, draft and publication, recording what settled; or cancel an intent that had no effect.</summary>
     ReleaseResponse ReleaseObserve(ReleaseObserveRequest request);
+
+    /// <summary>Push an exact head after its recorded secret scan passes.</summary>
+    ChangeResponse ChangesPush(ChangesPushRequest request);
+
+    /// <summary>Open a pull request from a recorded scanned push.</summary>
+    ChangeResponse ChangesOpen(ChangesOpenRequest request);
+
+    /// <summary>Merge only with every declared check successful at the pinned head.</summary>
+    ChangeResponse ChangesMerge(ChangesMergeRequest request);
+
+    /// <summary>Record an observation of an original change, including the target run.</summary>
+    ChangeResponse ChangesObserve(ChangesObserveRequest request);
+
 
     /// <summary>Plan or apply an upgrade; a problem when the plan cannot be made.</summary>
     (UpgradeResponse? Plan, Problem? Problem) Upgrade(UpgradeRequest request);

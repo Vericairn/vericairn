@@ -550,7 +550,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             try
             {
                 string custody = request.Custody ?? current!.Kind;
-                presence = request.Presence ?? (EstateModel.BodyString(device!, "presence") == "required" && Array.IndexOf(DeviceKeyStores.PresenceKinds, DeviceKeyStores.Named(custody).Kind) >= 0);
+                presence = request.Presence ?? (EstateModel.BodyString(device!, "presence") == "required" && DeviceKeyStores.PresenceKinds.IndexOf(DeviceKeyStores.Named(custody).Kind) >= 0);
                 next = DeviceKeyStores.Named(custody, presence);
             }
             catch (Exception exception) when (exception is ArgumentException or PlatformNotSupportedException)
@@ -845,12 +845,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("The reviewing principal must be a ULID.");
         }
 
-        if (Array.IndexOf(DocumentReviewType.Outcomes, request.Outcome) < 0)
+        if (DocumentReviewType.Outcomes.IndexOf(request.Outcome) < 0)
         {
             return Refuse($"A document review's outcome is {string.Join(", ", DocumentReviewType.Outcomes)}.");
         }
 
-        if (request.Independence is not null && Array.IndexOf(DocumentReviewType.Independences, request.Independence) < 0)
+        if (request.Independence is not null && DocumentReviewType.Independences.IndexOf(request.Independence) < 0)
         {
             return Refuse($"A document review's independence is {string.Join(", ", DocumentReviewType.Independences)}.");
         }
@@ -1073,7 +1073,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 {
                     problems.Add($"The goal has conditions 1 to {completion.Count}, not {verdict.Condition}.");
                 }
-                else if (Array.IndexOf(GoalRules.EvaluationVerdicts, verdict.Verdict) < 0)
+                else if (GoalRules.EvaluationVerdicts.IndexOf(verdict.Verdict) < 0)
                 {
                     problems.Add($"Condition {verdict.Condition}'s verdict is one of {string.Join(", ", GoalRules.EvaluationVerdicts)}, not '{verdict.Verdict}'.");
                 }
@@ -1238,7 +1238,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             }
 
             string status = GoalRules.Status(model, current);
-            bool ended = status == "achieved" || Array.IndexOf(GoalRules.Ended, status) >= 0;
+            bool ended = status == "achieved" || GoalRules.Ended.IndexOf(status) >= 0;
             string? refusal = action switch
             {
                 _ when ended => status == "achieved" ? $"Goal {current.Id} was achieved; a new objective is a new goal." : $"Goal {current.Id} ended as {status}; a new objective is a new goal.",
@@ -1626,7 +1626,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return "A paired device is permitted at least one connectivity profile.";
         }
 
-        if (profiles.FirstOrDefault(p => Array.IndexOf(DeviceType.Profiles, p) < 0) is string unknown)
+        if (profiles.FirstOrDefault(p => DeviceType.Profiles.IndexOf(p) < 0) is string unknown)
         {
             return $"Unknown profile '{unknown}'. Known: {string.Join(", ", DeviceType.Profiles)}.";
         }

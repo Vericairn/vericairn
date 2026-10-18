@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,7 +18,7 @@ namespace Vericairn.Records.Estate;
 public static class LivingDocuments
 {
     /// <summary>The foundation's own contributions that are named namespace/name: its generators.</summary>
-    public static readonly string[] FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes", "vericairn.records/releases", "vericairn.records/progress"];
+    public static readonly ImmutableArray<string> FoundationGenerators = ["vericairn.mcp/orientation", "vericairn.docs/notes", "vericairn.records/releases", "vericairn.records/progress"];
 
     private static readonly HashSet<string> Contributions = new(FoundationGenerators, StringComparer.Ordinal);
 
@@ -307,7 +308,7 @@ public static class LivingDocuments
             }
         }
 
-        string? due = reasons.Count == 0 ? null : reasons.Select(r => r.Level).OrderBy(l => Array.IndexOf(LivingDocumentType.Levels, l)).Last();
+        string? due = reasons.Count == 0 ? null : reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).Last();
         return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes);
     }
 

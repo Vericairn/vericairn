@@ -24,6 +24,23 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## Checked repository changes (unreleased addition)
+
+| Route | Request | SDK method |
+|---|---|---|
+| `POST /v1/changes/push` | `ChangesPushRequest` | `ChangesPush` |
+| `POST /v1/changes/open` | `ChangesOpenRequest` | `ChangesOpen` |
+| `POST /v1/changes/merge` | `ChangesMergeRequest` | `ChangesMerge` |
+| `POST /v1/changes/observe` | `ChangesObserveRequest` | `ChangesObserve` |
+
+All four return `ChangeResponse` with the operation identity, state, record
+references and any problem. `status` describes the external effect; `checkStatus`
+separately describes the target branch's checks. A confirmed merge with pending
+or failed target checks has `ok: false`. The runtime checks repository-write
+authority, records intent before provider calls, and preserves uncertain outcomes.
+No corresponding MCP tools are exposed. The [changes guide](changes.md) describes
+the declared requirements, exact-head gate, scan and reconciliation rules.
+
 ## Required attention (0.7.3 addition)
 
 Status and progress JSON add a compact `attention` array, independent of response
@@ -808,6 +825,15 @@ an earlier check was current, shown with when, and `unavailable` otherwise. A co
 the state of workers.
 
 ## The SDK
+
+The next release adds `GET /v1/operator/actions` and
+`VericairnClient.OperatorActions(recipient, assignment, view)`, returning `OperatorActionsResponse`
+(`text`, `json`, `hasErrors`). This read shows every recorded operator ask, pending operator
+acceptance and waiting reserved action, with reasons, dependencies and exact commands. The existing
+communication query parameters select presentation, defaulting to the root operator; they never
+filter the canonical queue. Record errors suppress authoring commands. The complete contract and
+required-input bodies are described in [Operator actions](operator-actions.md). There is no MCP tool
+for this surface.
 
 In a .NET 10 project, install the Community SDK with:
 

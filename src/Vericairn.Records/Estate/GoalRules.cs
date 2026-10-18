@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
@@ -16,10 +17,10 @@ namespace Vericairn.Records.Estate;
 public static class GoalRules
 {
     /// <summary>An evaluation's verdicts on a condition (design/goals.md § 5).</summary>
-    public static readonly string[] EvaluationVerdicts = ["met", "not-yet", "impossible"];
+    public static readonly ImmutableArray<string> EvaluationVerdicts = ["met", "not-yet", "impossible"];
 
     /// <summary>The statuses after which a goal never moves again.</summary>
-    public static readonly string[] Ended = ["impossible", "abandoned"];
+    public static readonly ImmutableArray<string> Ended = ["impossible", "abandoned"];
 
     /// <summary>
     /// Who accepts a goal, the one place the rule lives (decision 01M507XV4VBFYWMRN8WCXMXHX4): its sponsor when the sponsor is a
@@ -267,7 +268,7 @@ public static class GoalRules
         ArgumentNullException.ThrowIfNull(goal);
         int conditions = goal.Body.TryGetProperty("completion", out JsonElement completion) && completion.ValueKind == JsonValueKind.Array ? completion.GetArrayLength() : 0;
         return Ordered(model.About(goal.Id, "review").Where(r => r.Subject?.Hash == goal.ComputedHash && (before is null || Before(r, before))
-            && Verdicts(r) is { } verdicts && verdicts.Count == conditions && verdicts.All(v => Array.IndexOf(EvaluationVerdicts, v) >= 0)
+            && Verdicts(r) is { } verdicts && verdicts.Count == conditions && verdicts.All(v => EvaluationVerdicts.IndexOf(v) >= 0)
             && !StepAuthors(model, goal, r).Contains(r.By)));
     }
 
@@ -310,7 +311,7 @@ public static class GoalRules
         {
             refusals.Add(("acceptance.activation", "The goal's exact revision was never activated; a goal is accepted after its sponsor activated it."));
         }
-        else if (last is not null && Array.IndexOf(Ended, last) >= 0)
+        else if (last is not null && Ended.IndexOf(last) >= 0)
         {
             refusals.Add(("acceptance.activation", $"The goal ended as {last}; an ended goal is not accepted."));
         }

@@ -20,11 +20,13 @@ internal static class CliApp
         root.Subcommands.Add(new RecordsCommand(context));
         root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(new WorkCommand(context));
+        root.Subcommands.Add(new OperatorCommand(context));
         root.Subcommands.Add(new GoalCommand(context));
         root.Subcommands.Add(new WorkerCommand(context));
         root.Subcommands.Add(new DevicesCommand(context));
         root.Subcommands.Add(new ConnectionsCommand(context));
         root.Subcommands.Add(new ReleaseCommand(context));
+        root.Subcommands.Add(new ChangesCommand(context));
         root.Subcommands.Add(new SourcesCommand(context));
         root.Subcommands.Add(new CheckCommand(context));
         root.Subcommands.Add(new RuntimeCommand(context));

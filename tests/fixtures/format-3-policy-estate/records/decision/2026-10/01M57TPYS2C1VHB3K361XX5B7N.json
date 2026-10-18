@@ -33,7 +33,7 @@
     {
       "algorithm": "ecdsa-p256-sha256",
       "device": "01M57TPYP4PJ10HN6CYX7650CM",
-      "signature": "YD9gOo9o3I39j82FcQvYBxzI1eZT6O3Uvp7hyTR7R9ajfRglVetPfeRXbx7G-sioLhNYa5_KA5zJxk3QB2XzQg"
+      "signature": "phwrmr5gZE5K_mRgBXZiB7scKSZkdNUD65EnNGC_Z0K6BFSZ2KibsUCN66M_0_Fwt_MgU3kiTzq6KRneoAekVg"
     }
   ],
   "type": "decision"
