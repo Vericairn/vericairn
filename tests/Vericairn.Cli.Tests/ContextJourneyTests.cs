@@ -5,17 +5,70 @@ using System.Text;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Adapters.Git;
 using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Estate;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Cli.Tests;
 
 [Collection("cli")]
 public class ContextJourneyTests
 {
+    private static readonly string[] GitSettings = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"];
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void RequiredOriginalUsesOnlyMatchingLocalHistoryThroughCliAndMcp(bool retainedHistory)
+    {
+        using var estate = new HandoffEstate();
+        byte[] bytes = [0, 255, 254, 13, 10, 128, 65];
+        ContextAssembly.Source document = Document(estate, "docs/required.dat", bytes);
+        string revision = document.Identity["revision"]!.GetValue<string>();
+        estate.Add("work-order", estate.OperatorId, $$"""{"key":"C-1","kind":"ordinary","title":"Pinned context","intent":"Read the pinned original.","scope":["work"],"exitQuestion":"Exact bytes?","inputs":[{"type":"document-revision","id":"{{revision}}"}],"deliverables":["result"]}""");
+        if (retainedHistory)
+        {
+            Git(estate.Root, "init", "-q");
+            Git(estate.Root, "add", ".");
+            Git(estate.Root, "commit", "-qm", "Keep the pinned original");
+        }
+        using EstateService api = EstateService.Open(estate.Root);
+        api.Providers = new ProviderRegistry();
+        api.Providers.Register(new GitCommandAdapter());
+        JsonElement original = api.Context("C-1").Package!.Payload.GetProperty("originals").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+        string pin = original.GetProperty("pin").GetString()!;
+        File.WriteAllText(Path.Combine(estate.Root, "docs/required.dat"), "Different bytes.");
+        var registry = new ToolRegistry(api, null);
+        ToolCallResult prepared = registry.Call("context_prepare", new JsonObject { ["workOrder"] = "C-1" });
+        CliHarness.Outcome cli = CliHarness.Run("--estate", estate.Root, "context", "prepare", "C-1");
+        Assert.Equal(retainedHistory ? 0 : 2, cli.Code);
+        Assert.Equal(!retainedHistory, prepared.IsError);
+        Assert.Equal(cli.Out, prepared.Text);
+        ToolCallResult read = registry.Call("context_read", new JsonObject { ["pin"] = pin });
+        CliHarness.Outcome fetched = CliHarness.Run("--estate", estate.Root, "--json", "context", "read", pin, "--original");
+        Assert.Equal(retainedHistory ? 0 : 2, fetched.Code);
+        Assert.Equal(fetched.Out, read.Text);
+        ContextReadResponse response = JsonSerializer.Deserialize<ContextReadResponse>(read.Text, ProtocolJson.Options)!;
+        if (retainedHistory)
+        {
+            Assert.Equal(bytes, response.Content);
+            using JsonDocument payload = JsonDocument.Parse(cli.Out);
+            JsonElement retained = payload.RootElement.GetProperty("originals").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "document");
+            Assert.Equal(bytes, Convert.FromBase64String(retained.GetProperty("content").GetString()!));
+            Assert.Equal(revision, retained.GetProperty("revision").GetString());
+        }
+        else
+        {
+            Assert.Null(response.Content);
+            Assert.Equal("original-unavailable", response.Problem!.Code);
+            Assert.Contains("local history", prepared.Text, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void DefaultAgentBriefWithholdsNamedOptionalTextAndListsTheUnselectedCatalogue()
     {
@@ -161,4 +214,18 @@ public class ContextJourneyTests
         }, bytes, false, "optional for this step", Inline: false, ExcerptBytes: excerpt);
     }
 
+    internal static void Git(string root, params string[] arguments)
+    {
+        var info = new ProcessStartInfo("git") { WorkingDirectory = root, UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in GitSettings.Concat(arguments))
+        {
+            info.ArgumentList.Add(argument);
+        }
+        using Process process = Process.Start(info)!;
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        Assert.True(process.WaitForExit(30_000));
+        Assert.True(process.ExitCode == 0, error.GetAwaiter().GetResult());
+        _ = output.GetAwaiter().GetResult();
+    }
 }

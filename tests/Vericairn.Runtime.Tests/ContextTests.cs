@@ -365,7 +365,7 @@ public class ContextTests
     }
 
     [Fact]
-    public void PinnedRecordsSurviveRevisionsButDocumentsRequireMatchingWorkingTreeBytes()
+    public void PinnedRecordsSurviveRevisionsButOptionalDocumentsRequireMatchingWorkingTreeBytes()
     {
         using var estate = new TestEstate(recordFormat: 2);
         RecordEnvelope order = estate.Add("work-order", estate.OperatorId, HandoffTests.Order.Replace("Continue from records.", "Read docs/context.md for context.", StringComparison.Ordinal));

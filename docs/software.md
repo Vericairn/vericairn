@@ -111,9 +111,15 @@ standard output; `--out <file>` creates a new file without overwriting and
 `--json` returns identity plus base64 bytes. Each generated, shell-safe `vc1_`
 pin encodes the estate and exact source identity, so no retained manifest is
 needed. Records are read by id, record hash and byte hash from immutable record
-custody. Documents are read by path, revision record and byte hash from the
-working tree only while those bytes still match. Changed, missing or unsupported
-sources are unavailable in this copy; neither the latest revision nor an object
+custody. Documents are read by path, revision record and byte hash, using matching
+working-tree bytes first. FIX-27 for 0.8.0 also reads required originals from the
+estate repository's own local Git history when the working file is missing or
+differs. The adapter searches the exact path, and the returned bytes must match
+the pinned SHA-256 hash. Required pins carry `history: "local"` to preserve this
+retrieval behavior. Optional documents and pins without that marker remain
+working-tree-only. A shallow clone, absent or unreadable history, or no matching
+blob still refuses with guidance to restore the exact bytes or use a complete
+local clone. Nothing is fetched or checked out; no other revision or object
 store is substituted. Missing mandatory originals refuse the dependent step.
 Remote is not built or qualified.
 
