@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Description>The git adapter (vericairn.adapter.git): read-only observation of a repository over the git command. Shipped inside Vericairn Community until packages exist.</Description>
+    <Description>The git adapter (vericairn.adapter.git): read-only repository observation and isolated worker workspaces over the git command. Shipped inside Vericairn Community until packages exist.</Description>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 

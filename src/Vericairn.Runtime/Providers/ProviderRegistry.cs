@@ -96,7 +96,8 @@ public sealed class ProviderRegistry
         {
             lock (gate)
             {
-                return workspaces.OrderBy(w => w.Key, StringComparer.Ordinal).Select(w => w.Value).ToList();
+                return sources.Keys.Union(workspaces.Keys, StringComparer.Ordinal).Order(StringComparer.Ordinal)
+                    .Select(Workspace).OfType<IWorkspaceProvider>().ToList();
             }
         }
     }
@@ -165,13 +166,13 @@ public sealed class ProviderRegistry
         }
     }
 
-    /// <summary>The workspace provider registered for a kind, or null.</summary>
+    /// <summary>The explicit workspace provider, or the registered source adapter's workspace operations for that kind.</summary>
     public IWorkspaceProvider? Workspace(string kind)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(kind);
         lock (gate)
         {
-            return workspaces.GetValueOrDefault(kind);
+            return workspaces.GetValueOrDefault(kind) ?? sources.GetValueOrDefault(kind)?.Workspaces;
         }
     }
 

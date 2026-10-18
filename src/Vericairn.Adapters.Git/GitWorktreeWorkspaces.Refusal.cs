@@ -7,7 +7,7 @@ using System.Text.Json;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 public sealed partial class GitWorktreeWorkspaces
 {

@@ -10,7 +10,7 @@ using Vericairn.Records.Signing;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>
 /// Workspaces with their own Git administration and read-only object alternates from the registered clone. The historical
@@ -52,7 +52,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         if (Git(clone, out string common, "rev-parse", "--path-format=absolute", "--git-common-dir") != 0)
             throw new ProviderRefusedException("The registered clone is not a git repository with this git.");
-        common = HarnessWorkspace.Canonical(common.TrimEnd('\r', '\n'));
+        common = WorkspacePaths.Canonical(common.TrimEnd('\r', '\n'));
         if (Git(clone, out _, "check-ref-format", "refs/heads/" + branch) != 0 || branch.StartsWith('-'))
             throw new ProviderRefusedException($"'{branch}' is not a branch name git accepts.");
 
@@ -83,7 +83,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
         WorkspaceSnapshot? unused = null;
         if (reused)
         {
-            directory = HarnessWorkspace.Canonical(directory);
+            directory = WorkspacePaths.Canonical(directory);
             if (!Within(root, directory))
                 throw new ProviderRefusedException($"Branch {branch} already has a workspace at '{directory}', outside the selected workspace root. Preserve its work, then remove that workspace directory, or configure a root containing it.");
             OwnRepository(directory, common, branch);
@@ -94,7 +94,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             string planned = CanonicalRoot(Path.GetFullPath(directory));
             if (!Within(root, planned)) throw new ProviderRefusedException("The workspace resolves outside the selected workspace root.");
             Directory.CreateDirectory(Path.GetDirectoryName(directory)!);
-            string parent = HarnessWorkspace.Canonical(Path.GetDirectoryName(directory)!);
+            string parent = WorkspacePaths.Canonical(Path.GetDirectoryName(directory)!);
             if (!Within(root, parent) && !Same(root, parent)) throw new ProviderRefusedException("The workspace parent resolves outside the selected workspace root.");
             string reference = (string.IsNullOrWhiteSpace(baseReference) ? "HEAD" : baseReference) + "^{commit}";
             string baseline = expected ?? WorkspaceGitCommand.Require(clone, "rev-parse", "--verify", "--end-of-options", reference);
@@ -123,7 +123,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             {
                 if (Directory.Exists(preparing)) WorkspaceCleanup.Delete(preparing);
             }
-            directory = HarnessWorkspace.Canonical(directory);
+            directory = WorkspacePaths.Canonical(directory);
         }
 
         PreparedWorkspace? workspace = null;
@@ -226,8 +226,8 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             if (field.StartsWith("worktree ", StringComparison.Ordinal)) existing = Path.GetFullPath(field[9..]);
             else if (field == "branch refs/heads/" + branch && existing is not null)
             {
-                string physical = Directory.Exists(existing) ? HarnessWorkspace.Canonical(existing) : existing;
-                if (Same(physical, HarnessWorkspace.Canonical(clone)))
+                string physical = Directory.Exists(existing) ? WorkspacePaths.Canonical(existing) : existing;
+                if (Same(physical, WorkspacePaths.Canonical(clone)))
                     throw new ProviderRefusedException($"Branch {branch} is checked out in the registered clone; choose a work branch so its working tree stays unchanged.");
                 string where = root is not null && !Within(root, physical) ? ", outside the selected workspace root" : string.Empty;
                 throw new ProviderRefusedException($"Branch {branch} has a legacy linked worktree at '{physical}'{where}. Preserve its committed and uncommitted work, then use git worktree remove with that path from the registered clone. Retry to prepare an independent workspace repository.");
@@ -280,7 +280,7 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
             missing.Push(parent.Name);
             parent = parent.Parent ?? throw new ProviderRefusedException("The workspace root could not be canonicalized.");
         }
-        string path = HarnessWorkspace.Canonical(parent.FullName);
+        string path = WorkspacePaths.Canonical(parent.FullName);
         foreach (string name in missing) path = Path.Combine(path, name);
         return path;
     }

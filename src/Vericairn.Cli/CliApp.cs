@@ -13,7 +13,7 @@ internal static class CliApp
     /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version, updates.</summary>
     public static RootCommand Build(ReleaseUpdates? updates = null, CancellationToken cancellationToken = default)
     {
-        updates ??= new ReleaseUpdates();
+        updates ??= new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default);
         Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
         var context = new CommandContext(cancellationToken: cancellationToken);
         var root = new VericairnCommand(context);

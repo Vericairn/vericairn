@@ -5,10 +5,11 @@ using System.Diagnostics;
 using System.Globalization;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Providers;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Adapters.Git;
 
-/// <summary>The git adapter over the git command on the PATH: every call is a read-only git command.</summary>
+/// <summary>The git adapter over the git command on the PATH, with read-only observations and isolated worker workspaces.</summary>
 public sealed class GitCommandAdapter : ISourceAdapter
 {
     private readonly Func<ProcessStartInfo, ProcessResult> run;
@@ -18,9 +19,10 @@ public sealed class GitCommandAdapter : ISourceAdapter
     {
     }
 
-    internal GitCommandAdapter(Func<ProcessStartInfo, ProcessResult> run)
+    internal GitCommandAdapter(Func<ProcessStartInfo, ProcessResult> run, IWorkspaceProvider? workspaces = null)
     {
         this.run = run;
+        Workspaces = workspaces ?? new GitWorktreeWorkspaces();
     }
 
     /// <inheritdoc />
@@ -28,8 +30,11 @@ public sealed class GitCommandAdapter : ISourceAdapter
         "git-command",
         ISourceAdapter.Contract,
         "implemented",
-        ["inspect", "read-file-at-hash"],
-        ["Requires git on the PATH.", "Observes the working tree and history only; it never fetches, commits, pushes or changes the index beyond git's own status refresh."]);
+        ["inspect", "read-file-at-hash", "workspaces"],
+        ["Requires git on the PATH.", "Observations are read-only. Worker workspaces have independent administration and retain audited branches locally after settlement; the adapter never publishes."]);
+
+    /// <inheritdoc />
+    public IWorkspaceProvider Workspaces { get; }
 
     /// <inheritdoc />
     public byte[]? ReadFileAtHash(string root, string relativePath, string hash) => GitDocumentHistory.Read(root, relativePath, hash);
