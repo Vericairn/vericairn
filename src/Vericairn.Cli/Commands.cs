@@ -153,118 +153,14 @@ internal static partial class Commands
 
 
     /// <summary>What <c>vericairn worker run</c> was given.</summary>
-    internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach, RunChoices? Choices = null);
 
 
 
-    private static readonly string[] ExecutionCapabilityLists = ["scopes", "efforts", "providers", "destinations", "dataBoundaries"];
 
 
-    /// <summary>Lists the coding-agent launchers, labeling a generic one as not complete agent support.</summary>
-    public static int WorkerLaunchers(string root, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<ProviderRow> rows = api.Launchers();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-            return Clean;
-        }
 
-        if (rows.Count == 0)
-        {
-            Console.Out.WriteLine("No coding-agent launcher is available to the runtime here.");
-            return Clean;
-        }
 
-        foreach (ProviderRow row in rows)
-        {
-            Console.Out.WriteLine($"{row.Provider}  {row.Implementation}  {row.Contract}  {row.Status}{(row.Provider == "generic" ? "  (" + Vericairn.Runtime.Workers.IAgentLauncher.GenericLabel + ")" : string.Empty)}");
-            if (row.Execution is JsonElement execution)
-            {
-                foreach (string field in ExecutionCapabilityLists)
-                {
-                    Console.Out.WriteLine($"  {field}: {string.Join(", ", execution.GetProperty(field).EnumerateArray().Select(v => v.GetString()))}");
-                }
-                Console.Out.WriteLine($"  complete environment inventory: {execution.GetProperty("closedEnvironment").GetBoolean()}");
-            }
-            foreach (ProviderSettingRow setting in row.Settings)
-            {
-                Console.Out.WriteLine($"  {setting.Name,-10} {(setting.Required ? "required" : setting.Default is null ? "optional" : "default " + setting.Default)}: {setting.Summary}");
-            }
 
-            foreach (string limitation in row.Limitations)
-            {
-                Console.Out.WriteLine($"  limitation: {limitation}");
-            }
-        }
-
-        return Clean;
-    });
-
-    /// <summary>Records a human's exact-version native harness qualification from local probes, without launching an agent.</summary>
-    public static int WorkerQualify(string root, string launcher, string by, string[] options, bool json)
-    {
-        Dictionary<string, string>? settings = ParseSettings(options, out string? problem);
-        return settings is null ? Fail(problem!) : WithApi(root, api => ReportOutcome(api.QualifyHarness(new(launcher, by, settings)), json));
-    }
-
-    /// <summary>
-    /// Runs a coding agent on an assignment: starts the run, then waits in the foreground until it settles and reports its usage, a
-    /// Ctrl+C asking it to stop; with --detach, returns once the daemon serving the estate has launched it.
-    /// </summary>
-    public static int WorkerRun(string root, WorkerRunOptions options, bool json)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
-        if (settings is null || !RunChoices.TryParse(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
-        {
-            return Fail(problem!);
-        }
-
-        return WithApi(root, api =>
-        {
-            if (options.Detach && api is not VericairnClient)
-            {
-                return Fail("--detach leaves the run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or run in the foreground.");
-            }
-
-            RunResponse started = api.RunStart(new RunStartRequest(options.Assignment, options.Launcher, options.Agent, options.By, options.Repository, options.Goal, options.Branch, options.Base, options.WallMinutes, settings,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
-            if (!started.Ok)
-            {
-                return started.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(started.Message);
-            }
-
-            if (!json)
-            {
-                Console.Out.WriteLine($"run {started.Run}  {started.Status}  {started.Workspace}");
-                Console.Out.WriteLine($"  cap {Units(started.Cap)}");
-                Console.Out.WriteLine("  " + started.Message);
-            }
-
-            if (options.Detach)
-            {
-                if (json)
-                {
-                    Console.Out.WriteLine(JsonSerializer.Serialize(started, ProtocolJson.Options));
-                }
-
-                return Clean;
-            }
-
-            RunRow? row = Follow(api, started.Run, options.By);
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(row, ProtocolJson.Options));
-            }
-            else
-            {
-                PrintSettled(row);
-            }
-
-            return row?.Status == "observed-success" ? Clean : HasErrors;
-        });
-    }
 
     private static RunRow? Follow(IEstateApi api, string run, string by) => RunConsole.Follow(api, run, by);
 
@@ -275,65 +171,7 @@ internal static partial class Commands
 
 
 
-    /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
-    public static int WorkerStop(string root, string run, string by, string? reason, int? grace, bool json) => WithApi(root, api =>
-    {
-        RunStopResponse response = api.RunStop(run, new RunStopRequest(by, reason, grace));
-        if (response.Problem is not null && response.Stop is null)
-        {
-            return Fail(response.Message);
-        }
 
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
-        }
-        else
-        {
-            Console.Out.WriteLine($"run {response.Run}  stop {response.State}");
-            if (response.Stop is not null)
-            {
-                PrintStop(response.Stop);
-            }
-
-            Console.Out.WriteLine("  " + response.Message);
-        }
-
-        return response.Ok ? Clean : HasErrors;
-    });
-
-    /// <summary>Lists the agent runs with their caps, usage, charges and stops, and the ledgers of their goals.</summary>
-    public static int WorkerRuns(string root, bool json) => WithApi(root, api =>
-    {
-        RunsResponse response = api.Runs();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(response, ProtocolJson.Options));
-            return Clean;
-        }
-
-        if (response.Runs.Count == 0)
-        {
-            Console.Out.WriteLine("No agent runs.");
-        }
-
-        foreach (RunRow row in response.Runs)
-        {
-            PrintRun(row);
-        }
-
-        foreach (LedgerRow ledger in response.Goals)
-        {
-            Console.Out.WriteLine($"goal {ledger.Goal}  {ledger.Status}  {ledger.Title}");
-            Console.Out.WriteLine($"  budget {string.Join(", ", ledger.Units.Select(u => $"{u.Unit} {u.Spent} of {u.Budget}{(u.Currency is null ? string.Empty : " " + u.Currency)} charged, {u.Remaining} remain"))}; {ledger.InFlight} of {ledger.Concurrency} runs in flight; {ledger.AttemptsPerStep} attempts per step");
-            foreach (string fence in ledger.Fenced)
-            {
-                Console.Out.WriteLine($"  fenced: {fence}");
-            }
-        }
-
-        return Clean;
-    });
 
     private static void PrintRun(RunRow row) => RunConsole.PrintRun(Context, row);
 

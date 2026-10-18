@@ -30,7 +30,7 @@ internal static partial class CliApp
         root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(new WorkCommand(context));
         root.Subcommands.Add(new GoalCommand(context));
-        root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new WorkerCommand(context));
         root.Subcommands.Add(new DevicesCommand(context));
         root.Subcommands.Add(new ConnectionsCommand(context));
         root.Subcommands.Add(new ReleaseCommand(context));
@@ -149,82 +149,5 @@ internal static partial class CliApp
 
 
 
-    private static Command WorkerFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var worker = new Command("worker", "The worker (vericairn.worker/1): a coding agent carries one assignment toward its exit question through a launcher, in a workspace on a work branch, with its cap from its goal's budget recorded before it starts and its observed usage after. It accepts nothing; the agent's result is a claim another principal reviews.");
-
-        var launchers = new Command("launchers", "List the coding-agent launchers available to the runtime, providers of vericairn.launcher.agent/1, with their settings and limitations.");
-        launchers.SetAction(parseResult => Commands.WorkerLaunchers(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        worker.Subcommands.Add(launchers);
-        worker.Subcommands.Add(WorkerConfigure(jsonOption));
-
-        var qualify = new Command("qualify", "Record an authorized human's qualification of one exact installed harness version from local probe digests: version, help-confirmed flags, closed tools, isolated configuration, login boundary and effective MCP. It launches no agent, establishes no live inference or work acceptance, and grants no version range. Admission allows the shipped baseline or a current qualification whose repeated local probes have identical digests; a superseding record revokes the qualification. The existing inventory policy still applies. Remote is not built.");
-        var qualifyLauncher = new Option<string>("--launcher") { Description = "The native launcher: codex or claude-code.", Required = true };
-        var qualifyBy = new Option<string>("--by") { Description = "A human operator or human explicitly granted the qualify scope; never an agent.", Required = true };
-        var qualifySettings = new Option<string[]>("--setting") { Description = "Local launcher setting as name=value, including command=<executable or JSON array>; repeatable. Values are never recorded.", AllowMultipleArgumentsPerToken = false };
-        qualify.Options.Add(qualifyLauncher);
-        qualify.Options.Add(qualifyBy);
-        qualify.Options.Add(qualifySettings);
-        qualify.SetAction(parseResult => Commands.WorkerQualify(parseResult.GetValue(estateOption)!, parseResult.GetValue(qualifyLauncher)!, parseResult.GetValue(qualifyBy)!, parseResult.GetValue(qualifySettings) ?? [], parseResult.GetValue(jsonOption)));
-        worker.Subcommands.Add(qualify);
-
-        var assignmentArgument = new Argument<string>("assignment") { Description = "The assignment the agent carries, whose contributor it is." };
-        var launcherOption = new Option<string>("--launcher") { Description = "The launcher: claude-code, codex or generic (generic process launch is not complete agent support).", Required = true };
-        var agentOption = new Option<string>("--agent") { Description = "The agent principal the harness acts for: the assignment's contributor, with an admitted device whose key this machine holds.", Required = true };
-        var byOption = new Option<string>("--by") { Description = "The principal recording the run: the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope.", Required = true };
-        var repositoryOption = new Option<string>("--repository") { Description = "The repository resource whose clone, registered on this machine (vericairn sources clone), the workspace is made from.", Required = true };
-        var goalOption = new Option<string?>("--goal") { Description = "The goal the run is charged to, when the work belongs to more than one active goal." };
-        var branchOption = new Option<string?>("--branch") { Description = "The work branch; work/ and the work order's key when omitted. A later run of the branch continues in its workspace." };
-        var baseOption = new Option<string?>("--base") { Description = "What a new work branch starts from; the clone's HEAD when omitted." };
-        var wallMinutesOption = new Option<long?>("--wall-minutes") { Description = "The run's cap in wall minutes; what remains of the goal's budget when omitted, and never more." };
-        var settingOption = new Option<string[]>("--setting") { Description = "A launcher setting as name=value, for example command=<executable or JSON array>; repeatable.", AllowMultipleArgumentsPerToken = false };
-        var detachOption = new Option<bool>("--detach") { Description = "Return once the harness is launched, leaving the run to the daemon that serves the estate; without it the command waits until the run settles, and Ctrl+C asks it to stop." };
-        var run = new Command("run", "Run a coding agent on an assignment: refused while the goal is not active or its budget is spent, while a device of an operator or the goal's sponsor signs here without presence and the sponsor recorded no custody exception in force for the goal, or when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, the harness launched with the brief and the MCP server, observed, and its usage recorded once it exits.");
-        run.Arguments.Add(assignmentArgument);
-        run.Options.Add(launcherOption);
-        run.Options.Add(agentOption);
-        run.Options.Add(byOption);
-        run.Options.Add(repositoryOption);
-        run.Options.Add(goalOption);
-        run.Options.Add(branchOption);
-        run.Options.Add(baseOption);
-        run.Options.Add(wallMinutesOption);
-        run.Options.Add(settingOption);
-        run.Options.Add(detachOption);
-        var executionOptions = new ExecutionOptions(run);
-        run.SetAction(parseResult => Commands.WorkerRun(
-            parseResult.GetValue(estateOption)!,
-            new Commands.WorkerRunOptions(
-                parseResult.GetValue(assignmentArgument)!,
-                parseResult.GetValue(launcherOption)!,
-                parseResult.GetValue(agentOption)!,
-                parseResult.GetValue(byOption)!,
-                parseResult.GetValue(repositoryOption)!,
-                parseResult.GetValue(goalOption),
-                parseResult.GetValue(branchOption),
-                parseResult.GetValue(baseOption),
-                parseResult.GetValue(wallMinutesOption),
-                parseResult.GetValue(settingOption) ?? [],
-                parseResult.GetValue(detachOption), executionOptions.Read(parseResult)),
-            parseResult.GetValue(jsonOption)));
-        worker.Subcommands.Add(run);
-
-        var runArgument = new Argument<string>("run") { Description = "The run: its id, the id of any of its operation's revisions, or its identity." };
-        var stopByOption = new Option<string>("--by") { Description = "The principal asking for the stop.", Required = true };
-        var reasonOption = new Option<string?>("--reason") { Description = "Why." };
-        var graceOption = new Option<int?>("--grace") { Description = "Seconds the harness has to stop once the stop is transmitted before its process tree is killed; the worker's default, ten, when omitted." };
-        var stop = new Command("stop", "Ask a run to stop and report what was observed: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the containment, each only once observed. A stop that is not observed is reported as requested.");
-        stop.Arguments.Add(runArgument);
-        stop.Options.Add(stopByOption);
-        stop.Options.Add(reasonOption);
-        stop.Options.Add(graceOption);
-        stop.SetAction(parseResult => Commands.WorkerStop(parseResult.GetValue(estateOption)!, parseResult.GetValue(runArgument)!, parseResult.GetValue(stopByOption)!, parseResult.GetValue(reasonOption), parseResult.GetValue(graceOption), parseResult.GetValue(jsonOption)));
-        worker.Subcommands.Add(stop);
-
-        var runs = new Command("runs", "List the agent runs with their caps, their observed usage, what each is charged (its cap for what was not reported, and while in flight) and their stops, and the ledgers of their goals.");
-        runs.SetAction(parseResult => Commands.WorkerRuns(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        worker.Subcommands.Add(runs);
-        return worker;
-    }
 
 }
