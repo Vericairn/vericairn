@@ -1185,6 +1185,8 @@ repository with the snapshot taken before the workspace was made available, allo
 brief export. The comparison includes the index, references, reflogs and objects as well as tracked, untracked
 and ignored files. Fixing the refusal's cause and retrying, including after moving the workspace root, then
 creates a clean workspace. The execution preflight and custody checks keep their existing refusal rules.
+On Windows the inventory opens both directories and files with extended paths, including Git references and
+reflogs under the temporary preparation name, so long branch names do not leave an unused workspace behind.
 
 A reused workspace, a workspace taken up by another preparation, a branch already holding commits beyond the
 requested base, or any changed or incompletely verified workspace is kept. The refusal names its location and

@@ -12,6 +12,48 @@ public class WorkspaceScopeTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void NativeWindowsInventoryPathsSupportLongNamesWithoutMachineConfiguration(bool network)
+    {
+        // Synthetic Windows names exercise the native namespace contract on every test platform. An unprefixed name
+        // beyond MAX_PATH requires machine policy and a long-path-aware host, neither of which the worker can assume.
+        string tail = string.Join('\\', Enumerable.Repeat(new string('n', 64), 5));
+        string path = network ? "\\\\" + string.Join('\\', "test-server", "test-share", tail) : "T:" + '\\' + tail;
+        Assert.True(path.Length > 260);
+
+        string native = WorkspaceScopeAudit.ExtendedWindowsPath(path);
+
+        string prefix = network ? @"\\?\UNC\" : @"\\?\";
+        Assert.StartsWith(prefix, native, StringComparison.Ordinal);
+        Assert.Equal(network ? path[2..] : path, native[prefix.Length..]);
+        Assert.Equal(native, WorkspaceScopeAudit.ExtendedWindowsPath(native));
+    }
+
+    [Fact]
+    public void TheCompleteInventoryReadsLongGitPathsBeforeAndAfterTheWorkspaceMoves()
+    {
+        using var run = new RunEstate();
+        string preparing = Path.Combine(run.Scratch, "preparing");
+        while (preparing.Length <= 260) preparing = Path.Combine(preparing, "nested-workspace");
+        string reference = Path.Combine(".git", "logs", "refs", "heads", "work", new string('b', 80));
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(preparing, reference))!);
+        File.WriteAllText(Path.Combine(preparing, reference), "reference history\n");
+
+        WorkspaceSnapshot before = WorkspaceScopeProbe.Capture(preparing, TimeSpan.FromSeconds(10), FakeHarness.ScopeCommand(), includeGit: true);
+
+        Assert.Null(before.Problem);
+        Assert.NotNull(before.Identity);
+        Assert.Contains(reference.Replace(Path.DirectorySeparatorChar, '/'), before.Files.Keys);
+        string published = Path.Combine(run.Scratch, "published");
+        Directory.Move(preparing, published);
+        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(published, TimeSpan.FromSeconds(10), FakeHarness.ScopeCommand(), includeGit: true);
+        Assert.Null(after.Problem);
+        Assert.Equal(before.Identity, after.Identity);
+        Assert.Equal(before.Files.OrderBy(f => f.Key, StringComparer.Ordinal), after.Files.OrderBy(f => f.Key, StringComparer.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void SettlementUsesTheSameInterpretablePatternsAsAdmission(bool explicitPattern)
     {
         const string prose = "NOTES.md at the repository root";

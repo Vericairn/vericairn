@@ -69,6 +69,62 @@ public class WorkspaceRefusalTests
         }
     }
 
+    [Fact]
+    public void ALongBranchRefusalRemovesItsWorkspaceAndCanRetryUnderAnotherRoot()
+    {
+        using var run = new RunEstate();
+        var store = new WorkerConfigurationStore();
+        string? previous = store.ReadWorkspaceRoot();
+        string branch = "work/" + new string('b', 80);
+        string root = Path.Combine(run.Scratch, "long-root");
+        while (root.Length < 120) root = Path.Combine(root, "nested-root");
+        string? workspace = null;
+        IAgentLauncher launcher = run.Service.Providers.Launcher("claude-code")!;
+        run.Service.Providers.Register(new HookedLauncher(launcher, prepared: context =>
+        {
+            workspace = context.Workspace;
+            string reference = Path.Combine(workspace, ".git", "logs", "refs", "heads", branch.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(reference.Length > 260);
+            Assert.True(File.Exists(reference));
+            throw new ProviderRefusedException("The preflight refuses this run.");
+        }));
+        int records = run.Estate.Load().ById.Count;
+        string refs = RunEstate.Git(run.Clone, "show-ref");
+        try
+        {
+            store.WriteWorkspaceRoot(root);
+            RunResponse refused = run.Start("claude-code", "claude", run.Report("refused"), branch: branch);
+
+            Assert.False(refused.Ok);
+            Assert.Contains("Execution preflight refused", refused.Message, StringComparison.Ordinal);
+            Assert.NotNull(workspace);
+            Assert.False(Directory.Exists(workspace), refused.Message);
+            Assert.DoesNotContain("Workspace kept", refused.Message, StringComparison.Ordinal);
+            Assert.Equal(records, run.Estate.Load().ById.Count);
+            Assert.Equal(refs, RunEstate.Git(run.Clone, "show-ref"));
+            Assert.False(File.Exists(run.Report("refused")));
+
+            string newRoot = Path.Combine(run.Scratch, "new-root");
+            store.WriteWorkspaceRoot(newRoot);
+            run.Service.Providers.Register(launcher);
+            run.Service.Providers.Register(new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
+            RunResponse retry = run.Start("claude-code", "claude", run.Report("retry"), branch: branch);
+
+            Assert.True(retry.Ok, retry.Message);
+            Assert.Equal("observed-success", run.Settled(retry.Run).Status);
+            Assert.False(Directory.Exists(workspace));
+            string retried = Path.Combine(HarnessWorkspace.Canonical(newRoot), run.Service.Session.Manifest.Estate, branch.Replace('/', '-'));
+            Assert.True(Directory.Exists(retried));
+            Assert.Equal(RunEstate.Git(run.Clone, "rev-parse", "HEAD"), WorkspaceGitCommand.Require(retried, "rev-parse", "HEAD"));
+            Assert.Empty(WorkspaceGitCommand.Require(retried, "status", "--porcelain"));
+        }
+        finally
+        {
+            if (previous is not null) store.WriteWorkspaceRoot(previous);
+            else File.Delete(Path.Combine(VericairnHome.Path(), "worker", "workspaces.json"));
+        }
+    }
+
     [Theory]
     [InlineData("commit")]
     [InlineData("tracked")]
