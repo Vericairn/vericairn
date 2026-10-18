@@ -39,8 +39,6 @@ internal static partial class Commands
 
     private static readonly CommandContext Context = new();
 
-    public static int Check(string root, bool json) =>
-        IsEstate(root) ? WithApi(root, api => ReportFindings(api.Check(), json)) : WithFiles(root, model => ReportFindings(ToFindings(Combined(model), $"{model.Records.Count} records"), json));
 
     public static int Status(string root, bool json, bool observe = false, string? by = null, CommunicationSelection? presentation = null)
     {
@@ -792,56 +790,6 @@ internal static partial class Commands
         return parts.Count == 0 ? "nothing" : string.Join(", ", parts);
     }
 
-    public static int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
-    {
-        try
-        {
-            var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
-            RecordEnvelope operatorRecord;
-            RecordEnvelope estateRecord;
-            if (profile == "local-only")
-            {
-                PreparedEstate prepared = EstateInitializer.Prepare(root, initialization);
-                string manifestPath = Path.Combine(root, EstateLayout.ManifestPath);
-                Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
-                File.WriteAllBytes(manifestPath, prepared.ManifestBytes);
-                using EstateSession session = EstateSession.Open(root);
-                session.Write(prepared.Operator);
-                session.Write(prepared.Estate);
-                EstateModel model = session.Load();
-                if (model.Findings.HasErrors)
-                {
-                    session.Discard(prepared.Estate);
-                    session.Discard(prepared.Operator);
-                    File.Delete(manifestPath);
-                    return ReportFindings(ToFindings(model.Findings, "rejected"), json);
-                }
-
-                (operatorRecord, estateRecord) = (prepared.Operator.Envelope, prepared.Estate.Envelope);
-            }
-            else
-            {
-                (operatorRecord, estateRecord) = EstateInitializer.Initialize(root, initialization);
-            }
-
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { @operator = operatorRecord.Id, estate = estateRecord.Id, manifest = EstateLayout.ManifestPath }));
-            }
-            else
-            {
-                Console.Out.WriteLine($"operator  {operatorRecord.Id}  {operatorRecord.ExpectedPath}");
-                Console.Out.WriteLine($"estate    {estateRecord.Id}  {estateRecord.ExpectedPath}");
-                Console.Out.WriteLine($"manifest  {EstateLayout.ManifestPath}");
-            }
-
-            return Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
-        {
-            return Fail(exception.Message);
-        }
-    }
 
     public static int Decisions(string root, string? id, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
     {
@@ -1224,133 +1172,10 @@ internal static partial class Commands
         }
     }
 
-    public static int Upgrade(string root, string version, string? by, bool check, bool json) => WithApi(root, api =>
-    {
-        (UpgradeResponse? plan, Problem? problem) = api.Upgrade(new UpgradeRequest(version, by, check));
-        if (plan is null)
-        {
-            if (problem is not null && problem.Findings.Count > 0)
-            {
-                Console.Error.WriteLine(problem.Message);
-                return ReportFindings(new FindingsResponse("not upgraded", problem.Findings.Count(f => f.Severity == "error"), problem.Findings.Count(f => f.Severity == "warning"), problem.Findings), json);
-            }
-
-            return Fail(problem?.Message ?? "refused");
-        }
-
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(plan, ProtocolJson.Options));
-        }
-        else
-        {
-            Console.Out.WriteLine($"{(plan.Applied ? "upgraded" : "would upgrade")} {plan.FromPin} -> {plan.ToPin}; record format {plan.FromFormat} -> {plan.ToFormat}; migrations: {(plan.Migrations.Count == 0 ? "none" : string.Join(", ", plan.Migrations))}; release {plan.Release}");
-            foreach ((string platform, string hash) in plan.Artifacts.OrderBy(a => a.Key, StringComparer.Ordinal))
-            {
-                Console.Out.WriteLine($"  {platform}  {hash}");
-            }
-
-            if (plan.Anchored is { Count: > 0 } anchored)
-            {
-                Console.Out.WriteLine($"{(plan.Applied ? "anchored" : "anchors")} the admissions recorded without a signature, which count after the move only because the signed migration lists them: {string.Join(", ", anchored)}");
-            }
-
-            if (plan.Migration is not null)
-            {
-                Console.Out.WriteLine($"{plan.Migration.Path}  {plan.Migration.Id}  {plan.Migration.Hash}");
-            }
-        }
-
-        return Clean;
-    });
 
 
-    public static int Export(string root, string output, string? by, bool json) => WithApi(root, api =>
-    {
-        (ExportResponse? export, Problem? problem) = api.Export(new ExportRequest(Path.GetFullPath(output), by));
-        if (export is null)
-        {
-            return Fail(problem?.Message ?? "refused");
-        }
 
-        if (export.HadErrors)
-        {
-            Console.Error.WriteLine("The estate has errors; exported anyway so that it can be inspected elsewhere.");
-        }
 
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(new { export.Id, export.Estate, export.CreatedAt, export.Profile, export.Records, export.Objects, export.Documents, export.InventoryHash, output = export.Output }));
-        }
-        else
-        {
-            Console.Out.WriteLine($"export {export.Id} of estate {export.Estate}: {export.Records} records, {export.Objects} objects, {export.Documents} documents; inventory {export.InventoryHash}");
-            Console.Out.WriteLine("Carries records and bytes only: no keys, sessions, credentials or authority travel with it.");
-        }
-
-        return Clean;
-    });
-
-    public static int Restore(string from, string to, bool json)
-    {
-        try
-        {
-            (ExportSummary? summary, FindingList findings) = EstateExport.TryRestore(from, to);
-            if (summary is null || findings.HasErrors)
-            {
-                Console.Error.WriteLine("Nothing restored: the export does not verify against its inventory.");
-                return ReportFindings(ToFindings(findings, "rejected"), json);
-            }
-
-            using EstateSession session = EstateSession.Open(to);
-            EstateModel model = session.Load();
-            FindingList checks = EstateChecks.Run(model);
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { summary.Id, summary.Estate, summary.Records, summary.Objects, summary.Documents, restoredTo = Path.GetFullPath(to), errors = model.Findings.Errors + checks.Errors }));
-            }
-            else
-            {
-                Console.Out.WriteLine($"restored export {summary.Id} of estate {summary.Estate} into {Path.GetFullPath(to)}: {summary.Records} records, {summary.Objects} objects, {summary.Documents} documents");
-                Console.Out.WriteLine("Restored records carry no authority: devices stay where their keys are, and a device held here must be admitted before this copy can author.");
-                Console.Out.Write(Recovery.Inspect(model, checks));
-            }
-
-            return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or JsonException)
-        {
-            return Fail(exception.Message);
-        }
-    }
-
-    public static int Reconcile(string root, bool json) => WithApi(root, api =>
-    {
-        IReadOnlyList<ReconcileTask> tasks = api.Reconcile();
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(tasks.Select(t => new { t.Code, t.Location, t.Message })));
-        }
-        else if (tasks.Count == 0)
-        {
-            Console.Out.WriteLine("Nothing to reconcile.");
-        }
-        else
-        {
-            foreach (ReconcileTask task in tasks)
-            {
-                Console.Out.WriteLine($"{task.Code}  {task.Location}: {task.Message}");
-            }
-
-            // A batch stopped part-way says in its own words what settles it; divergent revisions are settled by a reconciliation.
-            if (tasks.Any(t => t.Code != "batch.incomplete"))
-            {
-                Console.Out.WriteLine("Settle divergent revisions with a reconciliation record (kept, withdrawn, note); nothing is merged silently and nothing is deleted.");
-            }
-        }
-
-        return tasks.Count == 0 ? Clean : HasErrors;
-    });
 
 
 
@@ -1742,18 +1567,6 @@ internal static partial class Commands
         }
     }
 
-    private static FindingList Combined(EstateModel model)
-    {
-        var all = new FindingList();
-        foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
-        {
-            all.Add(finding);
-        }
-
-        ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
-
-        return all;
-    }
 
     private static string VersionText() => CommandContext.VersionText();
 

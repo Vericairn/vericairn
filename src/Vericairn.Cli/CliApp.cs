@@ -27,7 +27,7 @@ internal static partial class CliApp
         root.Options.Add(presentation.Depth);
         root.Subcommands.Add(CommunicationFamily(estateOption, jsonOption, presentation));
         root.Subcommands.Add(new RecordsCommand(context));
-        root.Subcommands.Add(EstateFamily(estateOption, jsonOption));
+        root.Subcommands.Add(new EstateCommand(context));
         root.Subcommands.Add(WorkFamily(estateOption, jsonOption, presentation));
         root.Subcommands.Add(GoalFamily(estateOption, jsonOption));
         root.Subcommands.Add(WorkerFamily(estateOption, jsonOption));
@@ -156,78 +156,6 @@ internal static partial class CliApp
         return docs;
     }
 
-    private static Command EstateFamily(Option<string> estateOption, Option<bool> jsonOption)
-    {
-        var estate = new Command("estate", "Create and check estates.");
-
-        var nameOption = new Option<string>("--name") { Description = "Estate display name.", Required = true };
-        var slugOption = new Option<string>("--slug") { Description = "Estate slug (lower-case kebab-case).", Required = true };
-        var purposeOption = new Option<string>("--purpose") { Description = "Why the estate exists.", Required = true };
-        var operatorNameOption = new Option<string>("--operator-name") { Description = "Display name of the root operator (a human).", Required = true };
-        var organizationOption = new Option<string>("--organization") { Description = "Organization display name.", Required = true };
-        var githubOption = new Option<string?>("--github") { Description = "GitHub organization login, if any." };
-        var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the Vericairn source to pin.", DefaultValueFactory = _ => "Vericairn/vericairn" };
-        var commitOption = new Option<string>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits).", Required = true };
-        var profileOption = new Option<string>("--profile") { Description = "Storage profile: repository-synced (records as files in a git repository) or local-only (records in this machine's live store).", DefaultValueFactory = _ => "repository-synced" };
-        var init = new Command("init", "Create a new estate: operator principal, charter and manifest, validated together.");
-        init.Options.Add(profileOption);
-        init.Options.Add(nameOption);
-        init.Options.Add(slugOption);
-        init.Options.Add(purposeOption);
-        init.Options.Add(operatorNameOption);
-        init.Options.Add(organizationOption);
-        init.Options.Add(githubOption);
-        init.Options.Add(repositoryOption);
-        init.Options.Add(commitOption);
-        init.SetAction(parseResult => Commands.Init(
-            parseResult.GetValue(estateOption)!,
-            parseResult.GetValue(nameOption)!,
-            parseResult.GetValue(slugOption)!,
-            parseResult.GetValue(purposeOption)!,
-            parseResult.GetValue(operatorNameOption)!,
-            parseResult.GetValue(organizationOption)!,
-            parseResult.GetValue(githubOption),
-            parseResult.GetValue(repositoryOption)!,
-            parseResult.GetValue(commitOption)!,
-            parseResult.GetValue(profileOption)!,
-            parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(init);
-
-        var check = new Command("check", "Validate records and run repository cleanliness and portability checks. Warn when the manifest pins a release below a newer published release known from this estate's release records or the machine-local cache; use vericairn estate upgrade to review and apply an upgrade. This command makes no release-check request, and a newer-release warning never changes its exit code to an error.");
-        check.SetAction(parseResult => Commands.Check(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(check);
-
-        var outOption = new Option<string>("--out") { Description = "Path of the export file to create (never overwritten).", Required = true };
-        var exportByOption = new Option<string?>("--by") { Description = "Principal id recorded as the exporter." };
-        var export = new Command("export", "Write a verified export: records, objects, manifest and documents with an inventory; no keys or authority.");
-        export.Options.Add(outOption);
-        export.Options.Add(exportByOption);
-        export.SetAction(parseResult => Commands.Export(parseResult.GetValue(estateOption)!, parseResult.GetValue(outOption)!, parseResult.GetValue(exportByOption), parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(export);
-
-        var fromOption = new Option<string>("--from") { Description = "Export file.", Required = true };
-        var toOption = new Option<string>("--to") { Description = "Empty destination directory.", Required = true };
-        var restore = new Command("restore", "Verify an export against its inventory and restore it into an empty directory as a repository-synced estate; authority is not restored.");
-        restore.Options.Add(fromOption);
-        restore.Options.Add(toOption);
-        restore.SetAction(parseResult => Commands.Restore(parseResult.GetValue(fromOption)!, parseResult.GetValue(toOption)!, parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(restore);
-
-        var toVersionOption = new Option<string>("--to") { Description = "Version of a published release recorded in this estate.", Required = true };
-        var upgradeByOption = new Option<string?>("--by") { Description = "Principal id applying the upgrade (required unless --check)." };
-        var checkOnlyOption = new Option<bool>("--check") { Description = "Show the plan without changing anything." };
-        var upgrade = new Command("upgrade", "Pin the estate to a published release and apply record-format migrations as one reviewable change with a migration record.");
-        upgrade.Options.Add(toVersionOption);
-        upgrade.Options.Add(upgradeByOption);
-        upgrade.Options.Add(checkOnlyOption);
-        upgrade.SetAction(parseResult => Commands.Upgrade(parseResult.GetValue(estateOption)!, parseResult.GetValue(toVersionOption)!, parseResult.GetValue(upgradeByOption), parseResult.GetValue(checkOnlyOption), parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(upgrade);
-
-        var reconcile = new Command("reconcile", "List what two diverged copies left to settle: divergent revisions, duplicate keys, duplicate results.");
-        reconcile.SetAction(parseResult => Commands.Reconcile(parseResult.GetValue(estateOption)!, parseResult.GetValue(jsonOption)));
-        estate.Subcommands.Add(reconcile);
-        return estate;
-    }
 
     private static Command RuntimeFamily(Option<string> estateOption, Option<bool> jsonOption)
     {
