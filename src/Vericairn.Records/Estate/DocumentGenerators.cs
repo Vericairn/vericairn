@@ -32,6 +32,11 @@ public static class DocumentGenerators
         [RecordCompanionGenerator.Name] = new RecordCompanionGenerator(),
     };
 
+    static DocumentGenerators()
+    {
+        foreach (var register in RevisionCompanionGenerator.Registers.Where(r => r.Id != ReleasesTable.Name)) Register(new RevisionCompanionGenerator(register.Id));
+    }
+
     /// <summary>Installs a generator; a pack registers its own.</summary>
     public static void Register(IDocumentGenerator generator)
     {
@@ -66,8 +71,13 @@ public static class DocumentGenerators
     private sealed class ReleasesTable : IDocumentGenerator
     {
         public const string Name = "vericairn.records/releases";
+        private readonly RevisionCompanionGenerator revisions = new(Name);
 
         public string Id => Name;
+
+        public DocumentGeneratorDescriptor Descriptor => revisions.Descriptor;
+
+        public DocumentRenderResult Generate(DocumentGenerationContext context) => revisions.Generate(context);
 
         public string? Generate(EstateModel model, string? region, IReadOnlyList<string> inputs)
         {

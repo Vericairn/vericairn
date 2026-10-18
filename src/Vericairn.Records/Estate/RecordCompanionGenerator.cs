@@ -19,7 +19,7 @@ internal sealed class RecordCompanionGenerator : IDocumentGenerator
         {
             ["audience"] = ["Internal"], ["selection"] = ["item", "list"], ["field"] = ["@text"], ["index"] = ["all", "@text"], ["page"] = ["@text"],
         }.ToImmutableDictionary(StringComparer.Ordinal), RecordCompanions.Types, ["record"], ["item", "list"], "text/markdown",
-        "Record type, UTC time, ordinal id; fields ordinal within schema sections; array members in recorded order", "Internal", "single");
+        "Record type, UTC time, ordinal id; fields ordinal within schema sections; array members in recorded order", "Internal", "single") { AllowsRepositoryOutput = false };
 
     public DocumentRenderResult Generate(DocumentGenerationContext context)
     {

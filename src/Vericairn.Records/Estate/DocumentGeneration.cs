@@ -20,6 +20,15 @@ public sealed record DocumentGeneratorDescriptor(
     ImmutableArray<string> SourceKinds, ImmutableArray<string> Selections, string MediaType,
     string Ordering, string Audience, string PathMapping, int MaxMemberBytes = 1048576)
 {
+    /// <summary>False for readers whose output must remain on demand.</summary>
+    public bool AllowsRepositoryOutput { get; init; } = true;
+
+    /// <summary>A first-party revision register's exact destination and predecessor-source contract.</summary>
+    public string? RequiredPattern { get; init; }
+
+    /// <summary>The exact source metadata retained when a full item would exceed the member bound.</summary>
+    public ImmutableArray<string> PartialOverviewFields { get; init; } = [];
+
     /// <summary>Refuses incomplete descriptors before registration; implementations cannot silently replace each other.</summary>
     public void Validate(string id)
     {
@@ -32,7 +41,8 @@ public sealed record DocumentGeneratorDescriptor(
             || RecordTypes.Any(t => RecordTypeRegistry.Find(t) is null)
             || SourceKinds.Distinct(StringComparer.Ordinal).Count() != SourceKinds.Length
             || Selections.Distinct(StringComparer.Ordinal).Count() != Selections.Length
-            || Inputs.Any(p => p.Key == "format" || !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(v => !DocumentInputs.Supported(v))))
+            || Inputs.Any(p => p.Key == "format" || !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(v => !DocumentInputs.Supported(v)))
+            || (RequiredPattern is not null && (PathMapping != "record-revision" || !DocumentPatterns.IsValid(RequiredPattern))))
         {
             throw new ArgumentException("The generator descriptor is incomplete, unsupported or cyclic.", nameof(id));
         }
@@ -52,7 +62,7 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
     public static DocumentSourceSnapshot Record(RecordEnvelope record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        return new("record", record.Id, record.ComputedHash, null, record.ExpectedPath, [], record.Type,
+        return new("record", record.Id, record.ComputedHash, null, "records/" + record.Type + "/" + record.At[..7] + "/" + record.Id + ".json", [], record.Type,
             record.At, EstateModel.BodyString(record, "title") ?? EstateModel.BodyString(record, "key") ?? EstateModel.BodyString(record, "token") ?? "item",
             record.Supersedes, record.Subject, record.Body.Clone()) { Author = record.By, RecordFormat = record.Format };
     }
@@ -192,6 +202,9 @@ public static class DocumentGeneration
         if (DocumentChecks.Generator(declaration) is not (string id, IReadOnlyList<string> inputs)
             || DocumentGenerators.Find(id)?.Descriptor is not { } descriptor)
             return Unavailable("The versioned generator is not installed.");
+        if (!descriptor.AllowsRepositoryOutput) return Error("This reader renders only on demand.");
+        if (descriptor.RequiredPattern is { } required && EstateModel.BodyString(declaration, "pathPattern") != required)
+            return Error("This revision generator requires its exact register pattern.");
 
         var parameters = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
         foreach (string input in inputs)
@@ -238,7 +251,14 @@ public static class DocumentGeneration
             string path = DocumentPatterns.Member(pattern, source.Identity,
                 DateTimeOffset.ParseExact(source.At, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal), source.Title);
             if (!DocumentPatterns.IsSafePath(path)) return Error("The mapped member exceeds the portable path contract.");
-            members.Add(new(path, context with { Selection = "item", Sources = [source] }));
+            ImmutableArray<DocumentSourceSnapshot> basis = [source];
+            if (descriptor.RequiredPattern is not null && source.Supersedes is { } previous)
+            {
+                DocumentSourceSnapshot? predecessor = sources.Sources.SingleOrDefault(s => s.Identity == previous && s.RecordType == source.RecordType);
+                if (predecessor is null) return Unavailable("An exact predecessor revision is unavailable.");
+                basis = [source, predecessor];
+            }
+            members.Add(new(path, context with { Selection = "item", Sources = basis }));
         }
 
         if (members.Select(m => m.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != members.Count)
