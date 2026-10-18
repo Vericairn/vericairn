@@ -3,6 +3,8 @@
 
 using System.Text.Json.Nodes;
 using Vericairn.Records.Model;
+using Vericairn.Records.Tests;
+using Vericairn.Records.Types;
 using Vericairn.Runtime.Policies;
 using static Vericairn.Runtime.Tests.FoundationPolicyTests;
 
@@ -253,6 +255,46 @@ public class ReleaseEntryTests
             }
         }
         finally { System.Globalization.CultureInfo.CurrentCulture = saved; }
+    }
+
+    [Fact]
+    public void ARealPublicationExceptionCoversOnlyItsExactNextSubmissionUntilExclusiveExpiry()
+    {
+        using var fixture = new PolicyFixture();
+        RecordEnvelope product = DutyScheduleSourceTests.Product(fixture, "example");
+        JsonObject body = fixture.PolicyBody(duty: false);
+        body["rules"] = new JsonArray(new JsonObject
+        {
+            ["key"] = "entry", ["kind"] = ReleaseEntry.Kind, ["version"] = 1,
+            ["parameters"] = new JsonObject { ["product"] = product.Id, ["entryKind"] = "devlog", ["source"] = "estate-draft/1", ["directory"] = Directory,
+                ["fromPublication"] = "after-declaration", ["review"] = "independent" },
+        });
+        RecordEnvelope policy = fixture.Policy(body);
+        fixture.Estate.SetClock(DateTimeOffset.Parse("2026-10-13T14:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        RecordEnvelope candidate = DutyScheduleSourceTests.Candidate(fixture, product, "0.8.0");
+        fixture.Add("acceptance", new JsonObject { ["statement"] = "Accept fixture publication.", ["basis"] = new JsonArray(), ["self"] = true }, subject: candidate.Reference);
+        JsonObject published = PolicyFixture.Body(candidate); published["status"] = "published";
+        published["publishedAt"] = RecordParser.FormatTimestamp(fixture.Estate.Clock); published["url"] = "https://example.invalid/releases/fixture";
+        RecordEnvelope publication = fixture.Add("release", published, subject: candidate.Subject, supersedes: candidate.Id);
+        RecordEnvelope next = DutyScheduleSourceTests.Candidate(fixture, product, "0.9.0");
+        DateTimeOffset expiry = fixture.Estate.Clock.AddDays(1);
+        fixture.Add("policy-exception", new JsonObject
+        {
+            ["rule"] = "entry", ["reason"] = "A bounded fixture delay.", ["expiresAt"] = RecordParser.FormatTimestamp(expiry), ["state"] = "granted",
+            ["basis"] = new JsonObject { ["decision"] = PolicyFixture.Ref(fixture.Decision) },
+            ["targets"] = new JsonArray(new JsonObject { ["kind"] = "publication", ["publication"] = PolicyFixture.Ref(publication),
+                ["submission"] = new JsonObject { ["release"] = PolicyFixture.Ref(next), ["product"] = product.Id, ["version"] = "0.9.0" } }),
+        }, subject: policy.Reference);
+        fixture.AssertValid();
+        var submission = new PolicySubmission(next.Reference, product.Id, "0.9.0", new string('1', 40));
+        PolicyEvaluation Check(PolicySubmission proposed, DateTimeOffset at) => PolicyEvaluator.Evaluate(new(fixture.Estate.Load(), RecordParser.FormatTimestamp(at), PolicyTimeOrigin.Submission,
+            [new(fixture.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, true, [])], implementations: Kinds.Implementations, submission: proposed), Kinds);
+        PolicyFinding excepted = Assert.Single(Check(submission, fixture.Estate.Clock).Findings);
+        Assert.Equal("unmet", excepted.Verdict);
+        Assert.Equal("excepted", excepted.Disposition);
+        Assert.False(excepted.ReleaseHold);
+        Assert.True(Assert.Single(Check(submission, expiry).Findings).ReleaseHold);
+        Assert.True(Assert.Single(Check(submission with { Version = "1.0.0" }, fixture.Estate.Clock).Findings).ReleaseHold);
     }
 
     private static RecordEnvelope Policy(object? from = null, string review = "independent") => P(ReleaseEntry.Kind,
