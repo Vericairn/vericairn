@@ -64,6 +64,8 @@ public static class PolicyGoldenFixtureWriter
             Assert.All(generated.OfType("living-document"), r => Assert.True(SignatureChecks.IsAuthentic(generated, r)));
             File.WriteAllText(Path.Combine(output, "inventory.sha256"), string.Join('\n', Directory.EnumerateFiles(output, "*", SearchOption.AllDirectories)
                 .Select(p => (Path: Path.GetRelativePath(output, p).Replace('\\', '/'), Hash: ContentHash.Sha256File(p)))
+                // Record staging is ignored local state that RecordAuthor.Write leaves beside the records, never fixture content.
+                .Where(p => !p.Path.StartsWith(".vericairn/", StringComparison.Ordinal))
                 .OrderBy(p => p.Path, StringComparer.Ordinal).Select(p => p.Hash + "  " + p.Path)) + "\n");
 
             AuthoredRecord Rebuild(RecordEnvelope record, Dictionary<string, string> replacements, IReadOnlyList<IRecordSigner> signers)
