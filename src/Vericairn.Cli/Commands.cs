@@ -141,259 +141,24 @@ internal static partial class Commands
 
 
 
-    /// <summary>The current goal condition by condition: the one named, or the one goal neither achieved nor ended; with none or several, the list.</summary>
-    public static int Goal(string root, string? id, bool json) => WithApi(root, api =>
-    {
-        id ??= OpenGoal(api, json);
-        if (id is null)
-        {
-            return Clean;
-        }
 
-        GoalResponse? goal = api.Goal(id);
-        if (goal is null)
-        {
-            return Fail($"No goal has id {id}.");
-        }
 
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(goal.Json) : goal.Text);
-        return Clean;
-    });
-
-    /// <summary>
-    /// A goal's next steps routed from the runtime's machine: the one named, or the one goal neither achieved nor ended; with none or
-    /// several, the list. It records and starts nothing.
-    /// </summary>
-    public static int GoalNext(string root, string? id, bool json) => WithApi(root, api =>
-    {
-        id ??= OpenGoal(api, json);
-        if (id is null)
-        {
-            return Clean;
-        }
-
-        NextResponse? next = api.GoalNext(id);
-        if (next is null)
-        {
-            return Fail($"No goal has id {id}.");
-        }
-
-        Console.Out.Write(json ? CanonicalJson.SerializePretty(next.Json) : next.Text);
-        return Clean;
-    });
-
-    /// <summary>The one goal neither achieved nor ended; with none or several, prints the goals and returns null.</summary>
-    private static string? OpenGoal(IEstateApi api, bool json)
-    {
-        IReadOnlyList<GoalRow> rows = api.Goals();
-        List<GoalRow> open = rows.Where(r => r.Status is not ("achieved" or "impossible" or "abandoned")).ToList();
-        if (open.Count == 1)
-        {
-            return open[0].Id;
-        }
-
-        if (json)
-        {
-            Console.Out.WriteLine(JsonSerializer.Serialize(rows, ProtocolJson.Options));
-            return null;
-        }
-
-        Console.Out.WriteLine(rows.Count == 0 ? "No goals; propose one with vericairn goal propose." : open.Count == 0 ? "No goal is open; the goals:" : $"{open.Count} goals are open; name one:");
-        foreach (GoalRow row in rows)
-        {
-            Console.Out.WriteLine($"{row.Id}  {row.Status}  {row.Title}  sponsor {row.SponsorName ?? row.Sponsor}");
-        }
-
-        return null;
-    }
 
     /// <summary>What <c>vericairn goal propose</c> was given.</summary>
-    internal sealed record GoalProposal(string By, string Title, string Objective, string[] Done, string? Sponsor, string? Delegate, string[] Constraints, string[] Budget, string? Roster, string Kind, string[] WorkOrders, string[] Inputs, string? Deadline, string? Supersedes);
 
-    /// <summary>Proposes a goal from its options: the conditions as JSON, the caps as unit=value, the inputs as type:id.</summary>
-    public static int GoalPropose(string root, GoalProposal proposal, bool json)
-    {
-        ArgumentNullException.ThrowIfNull(proposal);
-        var completion = new Json.JsonArray();
-        foreach (string condition in proposal.Done)
-        {
-            Json.JsonNode? node;
-            try
-            {
-                node = Json.JsonNode.Parse(condition);
-            }
-            catch (JsonException exception)
-            {
-                return Fail($"--done '{condition}' is not JSON: {exception.Message}");
-            }
 
-            if (node is not Json.JsonObject entry)
-            {
-                return Fail($"--done '{condition}' is not a JSON object.");
-            }
 
-            completion.Add(entry.ContainsKey("record") || entry.ContainsKey("evidence") ? entry : new Json.JsonObject { ["record"] = entry });
-        }
 
-        var caps = new Json.JsonObject();
-        foreach (string cap in proposal.Budget)
-        {
-            int equals = cap.IndexOf('=', StringComparison.Ordinal);
-            string unit = equals > 0 ? cap[..equals] : string.Empty;
-            string value = equals > 0 ? cap[(equals + 1)..] : string.Empty;
-            string[] currency = value.Split(':');
-            if (unit == "currency" && currency.Length == 2 && long.TryParse(currency[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long amount))
-            {
-                caps[unit] = new Json.JsonObject { ["amount"] = amount, ["unit"] = currency[1] };
-            }
-            else if (unit != "currency" && Caps.UnitNames.Contains(unit) && long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long number))
-            {
-                caps[unit] = number;
-            }
-            else
-            {
-                return Fail($"A cap is unit=value with the unit one of {string.Join(", ", Caps.UnitNames)}, and currency=<amount in minor units>:<unit>: '{cap}'.");
-            }
-        }
 
-        var inputs = new Json.JsonArray();
-        foreach (string input in proposal.Inputs)
-        {
-            int colon = input.IndexOf(':', StringComparison.Ordinal);
-            if (colon <= 0)
-            {
-                return Fail($"An input is type:id: '{input}'.");
-            }
 
-            inputs.Add(new Json.JsonObject { ["type"] = input[..colon], ["id"] = input[(colon + 1)..] });
-        }
-
-        var body = new Json.JsonObject
-        {
-            ["title"] = proposal.Title,
-            ["objective"] = proposal.Objective,
-            ["completion"] = completion,
-            ["constraints"] = new Json.JsonArray(proposal.Constraints.Select(c => (Json.JsonNode)c).ToArray()),
-            ["kind"] = proposal.Kind,
-            ["sponsor"] = proposal.Sponsor ?? proposal.By,
-            ["budget"] = caps,
-            ["plan"] = proposal.WorkOrders.Length == 0
-                ? new Json.JsonObject { ["policy"] = "proposed-by-planner", ["approval"] = "sponsor-approves" }
-                : new Json.JsonObject { ["policy"] = "given", ["approval"] = "sponsor-approves", ["workOrders"] = new Json.JsonArray(proposal.WorkOrders.Select(w => (Json.JsonNode)w).ToArray()) },
-            ["inputs"] = inputs,
-        };
-        if (proposal.Delegate is not null)
-        {
-            body["delegate"] = proposal.Delegate;
-        }
-
-        if (proposal.Roster is not null)
-        {
-            body["roster"] = proposal.Roster;
-        }
-
-        if (proposal.Deadline is not null)
-        {
-            body["limits"] = new Json.JsonObject { ["deadline"] = proposal.Deadline };
-        }
-
-        return WithApi(root, api => ReportOutcome(api.GoalPropose(new GoalProposeRequest(proposal.By, Element(body), proposal.Supersedes)), json));
-    }
-
-    /// <summary>Activates, pauses, resumes or stops a goal.</summary>
-    public static int GoalAction(string root, string action, string goal, string by, string? note, bool json) => WithApi(root, api =>
-    {
-        var request = new GoalActionRequest(by, note);
-        return ReportOutcome(action switch
-        {
-            "activate" => api.GoalActivate(goal, request),
-            "pause" => api.GoalPause(goal, request),
-            "resume" => api.GoalResume(goal, request),
-            _ => api.GoalStop(goal, request),
-        }, json);
-    });
-
-    /// <summary>Records a goal's evaluation from the evaluator's verdicts, n:verdict:reason, and the records read, n:id.</summary>
-    public static int GoalEvaluate(string root, string goal, string by, string summary, string[] verdicts, string[] reads, bool json)
-    {
-        var given = new SortedDictionary<int, (string Verdict, string Reason)>();
-        foreach (string verdict in verdicts)
-        {
-            string[] parts = verdict.Split(':', 3);
-            if (parts.Length != 3 || !int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int condition) || !given.TryAdd(condition, (parts[1], parts[2].Trim())))
-            {
-                return Fail($"A verdict is n:verdict:reason, once for each condition, with n from 1: '{verdict}'.");
-            }
-        }
-
-        var read = new Dictionary<int, List<string>>();
-        foreach (string entry in reads)
-        {
-            string[] parts = entry.Split(':', 2);
-            if (parts.Length != 2 || !int.TryParse(parts[0], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int condition) || !given.ContainsKey(condition))
-            {
-                return Fail($"A record read is n:record-id, for a condition given a verdict: '{entry}'.");
-            }
-
-            if (!read.TryGetValue(condition, out List<string>? ids))
-            {
-                read[condition] = ids = [];
-            }
-
-            ids.Add(parts[1]);
-        }
-
-        List<GoalVerdict> list = given.Select(g => new GoalVerdict(g.Key, g.Value.Verdict, g.Value.Reason, read.TryGetValue(g.Key, out List<string>? ids) ? ids : null)).ToList();
-        return WithApi(root, api => ReportOutcome(api.GoalEvaluate(goal, new GoalEvaluateRequest(by, summary, list)), json));
-    }
-
-    /// <summary>Records the sponsor's custody exception for a goal's current revision, with its reason and its expiry.</summary>
-    public static int GoalCustodyException(string root, string goal, string by, string reason, string expires, bool json) => WithApi(root, api =>
-    {
-        if (!RecordParser.IsTimestamp(expires))
-        {
-            return Fail($"--expires is a time such as 2026-10-20T00:00:00Z, not '{expires}'.");
-        }
-
-        GoalResponse? shown = api.Goal(goal);
-        if (shown is null)
-        {
-            return Fail($"No goal has id {goal}.");
-        }
-
-        JsonElement current = shown.Json.GetProperty("goal");
-        var body = new Json.JsonObject { ["reason"] = reason, ["expires"] = expires };
-        return ReportOutcome(api.NewRecord(new NewRecordRequest("custody-exception", by, Element(body), $"goal:{current.GetProperty("id").GetString()}:{current.GetProperty("hash").GetString()}")), json);
-    });
-
-    /// <summary>Accepts a goal at its current revision, relying on its current evaluation.</summary>
-    public static int GoalAccept(string root, string goal, string by, string statement, bool json) =>
-        WithApi(root, api => ReportOutcome(api.GoalAccept(goal, new GoalAcceptRequest(by, statement)), json));
 
     /// <summary>What <c>vericairn worker run</c> was given.</summary>
     internal sealed record WorkerRunOptions(string Assignment, string Launcher, string Agent, string By, string Repository, string? Goal, string? Branch, string? Base, long? WallMinutes, string[] Settings, bool Detach, RunChoices? Choices = null);
 
-    internal sealed record RunChoices(string? Configuration, string[] Execution, long? InputTokens, long? OutputTokens, string? ContextPackage, long? ContextBytes = null);
+
 
     private static readonly string[] ExecutionCapabilityLists = ["scopes", "efforts", "providers", "destinations", "dataBoundaries"];
 
-    private static bool ParseRunChoices(RunChoices? choices, out JsonElement? execution, out JsonElement? allocation, out string? problem)
-    {
-        execution = null;
-        allocation = null;
-        Dictionary<string, string>? values = ParseSettings(choices?.Execution ?? [], out problem);
-        if (values is null) return false;
-        if (values.Count > 0) execution = JsonSerializer.SerializeToElement(values);
-        if (choices?.InputTokens is not null || choices?.OutputTokens is not null || choices?.ContextBytes is not null)
-        {
-            var counts = new Json.JsonObject();
-            if (choices.InputTokens is long input) counts["inputTokens"] = input;
-            if (choices.OutputTokens is long output) counts["outputTokens"] = output;
-            if (choices.ContextBytes is long maxBytes) counts["maxBytes"] = maxBytes;
-            allocation = Element(counts);
-        }
-        return true;
-    }
 
     /// <summary>Lists the coding-agent launchers, labeling a generic one as not complete agent support.</summary>
     public static int WorkerLaunchers(string root, bool json) => WithApi(root, api =>
@@ -451,7 +216,7 @@ internal static partial class Commands
     {
         ArgumentNullException.ThrowIfNull(options);
         Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
-        if (settings is null || !ParseRunChoices(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
+        if (settings is null || !RunChoices.TryParse(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
         {
             return Fail(problem!);
         }
@@ -501,113 +266,13 @@ internal static partial class Commands
         });
     }
 
-    /// <summary>
-    /// Waits in the foreground until a run settles, or no worker observes it any longer, and returns its row; a Ctrl+C asks for its stop
-    /// rather than abandoning it. The run is observed by the runtime, never by this wait.
-    /// </summary>
-    private static RunRow? Follow(IEstateApi api, string run, string by)
-    {
-        int stopping = 0;
-        void Interrupt(object? sender, ConsoleCancelEventArgs e)
-        {
-            e.Cancel = true;
-            if (Interlocked.Exchange(ref stopping, 1) == 0)
-            {
-                ThreadPool.QueueUserWorkItem(_ => api.RunStop(run, new RunStopRequest(by, "interrupted at the command line")));
-            }
-        }
+    private static RunRow? Follow(IEstateApi api, string run, string by) => RunConsole.Follow(api, run, by);
 
-        Console.CancelKeyPress += Interrupt;
-        try
-        {
-            RunRow? row = null;
-            int unobserved = 0;
-            while (unobserved < 5)
-            {
-                Thread.Sleep(1000);
-                row = api.Runs().Runs.FirstOrDefault(r => r.Run == run);
-                if (row is null || row.Status is "observed-success" or "known-failure" or "canceled")
-                {
-                    break;
-                }
-
-                unobserved = row.Observed ? 0 : unobserved + 1;
-            }
-
-            return row;
-        }
-        finally
-        {
-            Console.CancelKeyPress -= Interrupt;
-        }
-    }
-
-    /// <summary>Prints a followed run as it ended, or as it was last observed.</summary>
-    private static void PrintSettled(RunRow? row)
-    {
-        if (row is null)
-        {
-            return;
-        }
-
-        PrintRun(row);
-        if (row.Status is "dispatched" or "not-started" or "uncertain")
-        {
-            Console.Out.WriteLine("  The run is no longer observed by a worker here; it stays in flight, charged at its cap, until a worker observes its end. A lost connection is not a stopped run.");
-        }
-    }
+    private static void PrintSettled(RunRow? row) => RunConsole.PrintSettled(Context, row);
 
     /// <summary>What <c>vericairn goal step</c> was given.</summary>
-    internal sealed record GoalStepOptions(string? Goal, string By, string? Repository, string[] Settings, long? WallMinutes, string? Branch, string? Base, bool Detach, RunChoices? Choices = null);
 
-    /// <summary>
-    /// Takes a goal's next step, one at a time: an agent's run starts and, without --detach, is followed until it settles; a person's step
-    /// is assigned and asked; a step no principal is available for is asked of the sponsor.
-    /// </summary>
-    public static int GoalStep(string root, GoalStepOptions options, bool json)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        Dictionary<string, string>? settings = ParseSettings(options.Settings, out string? problem);
-        if (settings is null || !ParseRunChoices(options.Choices, out JsonElement? execution, out JsonElement? allocation, out problem))
-        {
-            return Fail(problem!);
-        }
 
-        return WithApi(root, api =>
-        {
-            if (options.Detach && api is not VericairnClient)
-            {
-                return Fail("--detach leaves an agent's run to the daemon that serves the estate, and no daemon serves it here: start one with vericairn runtime start, or take the step in the foreground.");
-            }
-
-            string? goal = options.Goal ?? OpenGoal(api, json);
-            if (goal is null)
-            {
-                return Clean;
-            }
-
-            GoalStepResponse step = api.GoalStep(goal, new GoalStepRequest(options.By, options.Repository, settings.Count == 0 ? null : settings, options.WallMinutes, options.Branch, options.Base,
-                options.Choices?.Configuration, execution, allocation, options.Choices?.ContextPackage));
-            if (!step.Ok)
-            {
-                return step.Run?.Problem is { Findings.Count: > 0 } rejected ? ReportOutcome(WriteOutcome.Fail(rejected), json) : Fail(step.Message);
-            }
-
-            RunRow? row = step.Outcome == "run" && !options.Detach ? Follow(api, step.Run!.Run, options.By) : null;
-            if (json)
-            {
-                Console.Out.WriteLine(JsonSerializer.Serialize(new { step, settled = row }, ProtocolJson.Options));
-            }
-            else
-            {
-                Console.Out.WriteLine(step.Step is null ? $"goal {step.Goal}  {step.Outcome}" : $"step {step.Step}  {step.Route}  {step.Outcome}{(step.Principal is null ? string.Empty : "  " + step.Principal)}");
-                Console.Out.WriteLine("  " + step.Message);
-                PrintSettled(row);
-            }
-
-            return step.Outcome != "run" || options.Detach || row?.Status == "observed-success" ? Clean : HasErrors;
-        });
-    }
 
 
     /// <summary>Asks a run to stop and prints the facts observed; a stop that was not observed is printed as requested.</summary>
@@ -670,76 +335,11 @@ internal static partial class Commands
         return Clean;
     });
 
-    private static void PrintRun(RunRow row)
-    {
-        Console.Out.WriteLine($"run {row.Run}  {row.Status}  {row.Launcher} as {row.Agent}  assignment {row.Assignment}  goal {row.Goal}");
-        Console.Out.WriteLine($"  workspace {row.Workspace}");
-        Console.Out.WriteLine($"  cap {Units(row.Cap)}");
-        Console.Out.WriteLine(row.Usage is JsonElement usage ? $"  usage {Units(usage)}" : "  usage: not settled yet, so charged at its cap");
-        Console.Out.WriteLine($"  charged {Units(row.Charged)}");
-        foreach (RunSignal signal in row.Signals ?? [])
-        {
-            Console.Out.WriteLine($"  worker {signal.Severity} {signal.Code}: {signal.Summary} ({(signal.Attention is null ? "attention recording pending" : "ask " + signal.Attention)})");
-        }
+    private static void PrintRun(RunRow row) => RunConsole.PrintRun(Context, row);
 
-        if (row.Stop is not null)
-        {
-            PrintStop(row.Stop);
-        }
+    private static void PrintStop(RunStop stop) => RunConsole.PrintStop(Context, stop);
 
-        if (row.Heartbeat is not null)
-        {
-            Console.Out.WriteLine(row.Observed ? $"  observed by a worker on this machine, its last heartbeat at {row.Heartbeat}" : $"  not observed by a worker now; its last heartbeat here was at {row.Heartbeat}");
-        }
-
-        if (row.Generic)
-        {
-            Console.Out.WriteLine("  " + Vericairn.Runtime.Workers.IAgentLauncher.GenericLabel);
-        }
-    }
-
-    private static void PrintStop(RunStop stop)
-    {
-        Console.Out.WriteLine($"  stop requested at {stop.RequestedAt} by {stop.RequestedBy}{(stop.Reason is null ? string.Empty : ": " + stop.Reason)}");
-        Console.Out.WriteLine(stop.TransmittedAt is null ? "    transmitted: not observed" : $"    transmitted at {stop.TransmittedAt}: {stop.Transmission}");
-        Console.Out.WriteLine(stop.AcknowledgedAt is null ? "    acknowledged: not observed" : $"    acknowledged at {stop.AcknowledgedAt}: {stop.Acknowledgment}");
-        if (stop.EscalatedAt is not null)
-        {
-            Console.Out.WriteLine($"    escalated at {stop.EscalatedAt}: {stop.Escalation}");
-        }
-
-        Console.Out.WriteLine(stop.ContainedAt is null ? "    contained: not observed" : $"    contained at {stop.ContainedAt}");
-    }
-
-    /// <summary>Caps, usage or charges in words: each unit and its amount, and the units not reported.</summary>
-    private static string Units(JsonElement? caps)
-    {
-        if (caps is not JsonElement element || element.ValueKind != JsonValueKind.Object)
-        {
-            return "none";
-        }
-
-        var parts = new List<string>();
-        foreach (JsonProperty unit in element.EnumerateObject().OrderBy(p => Array.IndexOf(Caps.UnitNames, p.Name) is int at and >= 0 ? at : Caps.UnitNames.Length))
-        {
-            if (unit.Name == "unreported")
-            {
-                List<string> names = unit.Value.ValueKind == JsonValueKind.Array ? unit.Value.EnumerateArray().Select(v => v.GetString() ?? "?").ToList() : [];
-                if (names.Count > 0)
-                {
-                    parts.Add($"not reported: {string.Join(", ", names)} (charged at the cap)");
-                }
-
-                continue;
-            }
-
-            parts.Add(unit.Value.ValueKind == JsonValueKind.Object
-                ? $"{unit.Name} {(unit.Value.TryGetProperty("amount", out JsonElement amount) ? amount.GetRawText() : "?")} {(unit.Value.TryGetProperty("unit", out JsonElement code) ? code.GetString() : string.Empty)}"
-                : $"{unit.Name} {unit.Value.GetRawText()}");
-        }
-
-        return parts.Count == 0 ? "nothing" : string.Join(", ", parts);
-    }
+    private static string Units(JsonElement? caps) => RunConsole.Units(caps);
 
 
     public static int Decisions(string root, string? id, bool json, CommunicationSelection? presentation = null) => WithApi(root, api =>
