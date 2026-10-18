@@ -46,29 +46,29 @@
       "vericairn.adapters.git": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.4.0-dev, )",
-          "Vericairn.Runtime": "[0.4.0-dev, )"
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "Vericairn.Runtime": "[0.7.3-dev, )"
         }
       },
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.4.0-dev, )",
-          "Vericairn.Runtime": "[0.4.0-dev, )",
-          "Vericairn.Sdk": "[0.4.0-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Runtime": "[0.7.3-dev, )",
+          "Vericairn.Sdk": "[0.7.3-dev, )"
         }
       },
       "vericairn.mcp": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.4.0-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )"
         }
       },
       "vericairn.packs.software": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.4.0-dev, )",
-          "Vericairn.Runtime": "[0.4.0-dev, )"
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "Vericairn.Runtime": "[0.7.3-dev, )"
         }
       },
       "vericairn.protocol": {
@@ -77,8 +77,15 @@
       "vericairn.providers.github": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.4.0-dev, )",
-          "Vericairn.Runtime": "[0.4.0-dev, )"
+          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "Vericairn.Runtime": "[0.7.3-dev, )"
+        }
+      },
+      "vericairn.providers.github.releases": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
       "vericairn.records": {
@@ -88,15 +95,15 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.4.0-dev, )",
-          "Vericairn.Records": "[0.4.0-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.4.0-dev, )",
-          "Vericairn.Records": "[0.4.0-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
       "Microsoft.Data.Sqlite": {

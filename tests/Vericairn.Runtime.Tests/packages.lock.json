@@ -184,8 +184,15 @@
       "vericairn.providers.github": {
         "type": "Project",
         "dependencies": {
+          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
           "Vericairn.Records": "[0.7.3-dev, )",
           "Vericairn.Runtime": "[0.7.3-dev, )"
+        }
+      },
+      "vericairn.providers.github.releases": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
       "vericairn.records": {

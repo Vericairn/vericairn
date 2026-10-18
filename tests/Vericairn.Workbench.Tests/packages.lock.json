@@ -346,6 +346,7 @@
           "Vericairn.Packs.Software": "[0.7.3-dev, )",
           "Vericairn.Protocol": "[0.7.3-dev, )",
           "Vericairn.Providers.GitHub": "[0.7.3-dev, )",
+          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
           "Vericairn.Records": "[0.7.3-dev, )",
           "Vericairn.Runtime": "[0.7.3-dev, )",
           "Vericairn.Sdk": "[0.7.3-dev, )"
@@ -359,7 +360,7 @@
           "Avalonia.Themes.Fluent": "[12.1.4, )",
           "Vericairn.Presentation": "[0.7.3-dev, )",
           "Vericairn.Protocol": "[0.7.3-dev, )",
-          "Vericairn.Providers.GitHub": "[0.7.3-dev, )",
+          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
           "Vericairn.Records": "[0.7.3-dev, )",
           "Vericairn.Sdk": "[0.7.3-dev, )"
         }
@@ -405,8 +406,15 @@
       "vericairn.providers.github": {
         "type": "Project",
         "dependencies": {
+          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
           "Vericairn.Records": "[0.7.3-dev, )",
           "Vericairn.Runtime": "[0.7.3-dev, )"
+        }
+      },
+      "vericairn.providers.github.releases": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
       "vericairn.records": {

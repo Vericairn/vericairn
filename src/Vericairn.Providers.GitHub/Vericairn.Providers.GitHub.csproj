@@ -10,6 +10,7 @@
     <InternalsVisibleTo Include="Vericairn.Cli.Tests" />
     <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
+    <ProjectReference Include="../Vericairn.Providers.GitHub.Releases/Vericairn.Providers.GitHub.Releases.csproj" />
   </ItemGroup>
 
 </Project>
