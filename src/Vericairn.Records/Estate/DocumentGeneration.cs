@@ -20,6 +20,15 @@ public sealed record DocumentGeneratorDescriptor(
     ImmutableArray<string> SourceKinds, ImmutableArray<string> Selections, string MediaType,
     string Ordering, string Audience, string PathMapping, int MaxMemberBytes = 1048576)
 {
+    /// <summary>False for readers whose output must remain on demand.</summary>
+    public bool AllowsRepositoryOutput { get; init; } = true;
+
+    /// <summary>A first-party revision register's exact destination and predecessor-source contract.</summary>
+    public string? RequiredPattern { get; init; }
+
+    /// <summary>The exact source metadata retained when a full item would exceed the member bound.</summary>
+    public ImmutableArray<string> PartialOverviewFields { get; init; } = [];
+
     /// <summary>Refuses incomplete descriptors before registration; implementations cannot silently replace each other.</summary>
     public void Validate(string id)
     {
@@ -32,7 +41,8 @@ public sealed record DocumentGeneratorDescriptor(
             || RecordTypes.Any(t => RecordTypeRegistry.Find(t) is null)
             || SourceKinds.Distinct(StringComparer.Ordinal).Count() != SourceKinds.Length
             || Selections.Distinct(StringComparer.Ordinal).Count() != Selections.Length
-            || Inputs.Any(p => p.Key == "format" || !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(v => !DocumentInputs.Supported(v))))
+            || Inputs.Any(p => p.Key == "format" || !Patterns.Slug.IsMatch(p.Key) || p.Value.IsDefaultOrEmpty || p.Value.Any(v => !DocumentInputs.Supported(v)))
+            || (RequiredPattern is not null && (PathMapping != "record-revision" || !DocumentPatterns.IsValid(RequiredPattern))))
         {
             throw new ArgumentException("The generator descriptor is incomplete, unsupported or cyclic.", nameof(id));
         }
@@ -52,7 +62,7 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
     public static DocumentSourceSnapshot Record(RecordEnvelope record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        return new("record", record.Id, record.ComputedHash, null, record.ExpectedPath, [], record.Type,
+        return new("record", record.Id, record.ComputedHash, null, "records/" + record.Type + "/" + record.At[..7] + "/" + record.Id + ".json", [], record.Type,
             record.At, EstateModel.BodyString(record, "title") ?? EstateModel.BodyString(record, "key") ?? EstateModel.BodyString(record, "token") ?? "item",
             record.Supersedes, record.Subject, record.Body.Clone()) { Author = record.By, RecordFormat = record.Format };
     }
@@ -65,6 +75,13 @@ public sealed record DocumentSourceSnapshot(string Kind, string Identity, string
             throw new ArgumentException("The source path or content hash is invalid.", nameof(bytes));
         return new(kind, identity, hash, repository, path, [.. bytes], null, null, null, null, null, null);
     }
+
+    /// <summary>Already redacted local metadata, without a fictional repository or machine path.</summary>
+    public static DocumentSourceSnapshot LocalMetadata(string identity, byte[] bytes)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        return new("local-inspection", identity, ContentHash.Sha256(bytes), null, null, [.. bytes], null, null, null, null, null, null);
+    }
 }
 
 /// <summary>Interface version 1: the complete authorized selection and explicit parameters, with no ambient access.</summary>
@@ -72,8 +89,19 @@ public sealed record DocumentGenerationContext(int InterfaceVersion, DocumentGen
     ImmutableDictionary<string, string> Parameters, string Selection, string? Region,
     ImmutableArray<DocumentSourceSnapshot> Sources)
 {
+    /// <summary>An explicit on-demand snapshot; absent for committed revision members.</summary>
+    public string? SnapshotIdentity { get; init; }
+
+    /// <summary>The one-based page within that on-demand snapshot.</summary>
+    public int Page { get; init; } = 1;
+
     /// <summary>A digest of this member's own source identities and parameters, independent of its enclosing output commit.</summary>
-    public string InputDigest => ContentHash.Sha256(Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(new
+    public string InputDigest => SnapshotIdentity is null ? SourceDigest : ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(new
+    {
+        generation = SourceDigest, snapshot = SnapshotIdentity, page = Page,
+    })));
+
+    private string SourceDigest => ContentHash.Sha256(Encoding.UTF8.GetBytes(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(new
     {
         contract = Generator.ContractVersion,
         generator = Generator.Id,
@@ -154,6 +182,9 @@ public static class DocumentGeneration
         if (sources.IsDefault || sources.Any(s => !descriptor.SourceKinds.Contains(s.Kind) || !ContentHash.IsValid(s.Hash)
             || string.IsNullOrWhiteSpace(s.Identity) || s.Bytes.IsDefault
             || (s.Kind == "record" ? !descriptor.RecordTypes.Contains(s.RecordType ?? string.Empty) || !ValidRecord(s)
+                : s.Kind == "local-inspection" ? s.Repository is not null || s.Path is not null || s.RecordType is not null || s.Body is not null
+                    || s.At is not null || s.Title is not null || s.Supersedes is not null || s.Subject is not null || s.Author is not null || s.RecordFormat is not null
+                    || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash
                 : string.IsNullOrWhiteSpace(s.Repository) || s.Path is null || !DocumentPatterns.IsSafeSourcePath(s.Path) || ContentHash.Sha256(s.Bytes.AsSpan()) != s.Hash))
             || sources.Select(s => (s.Kind, s.Identity)).Distinct().Count() != sources.Length)
             return "The source selection is inconsistent with the declared contract.";
@@ -192,6 +223,9 @@ public static class DocumentGeneration
         if (DocumentChecks.Generator(declaration) is not (string id, IReadOnlyList<string> inputs)
             || DocumentGenerators.Find(id)?.Descriptor is not { } descriptor)
             return Unavailable("The versioned generator is not installed.");
+        if (!descriptor.AllowsRepositoryOutput) return Error("This reader renders only on demand.");
+        if (descriptor.RequiredPattern is { } required && EstateModel.BodyString(declaration, "pathPattern") != required)
+            return Error("This revision generator requires its exact register pattern.");
 
         var parameters = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
         foreach (string input in inputs)
@@ -238,7 +272,14 @@ public static class DocumentGeneration
             string path = DocumentPatterns.Member(pattern, source.Identity,
                 DateTimeOffset.ParseExact(source.At, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal), source.Title);
             if (!DocumentPatterns.IsSafePath(path)) return Error("The mapped member exceeds the portable path contract.");
-            members.Add(new(path, context with { Selection = "item", Sources = [source] }));
+            ImmutableArray<DocumentSourceSnapshot> basis = [source];
+            if (descriptor.RequiredPattern is not null && source.Supersedes is { } previous)
+            {
+                DocumentSourceSnapshot? predecessor = sources.Sources.SingleOrDefault(s => s.Identity == previous && s.RecordType == source.RecordType);
+                if (predecessor is null) return Unavailable("An exact predecessor revision is unavailable.");
+                basis = [source, predecessor];
+            }
+            members.Add(new(path, context with { Selection = "item", Sources = basis }));
         }
 
         if (members.Select(m => m.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != members.Count)
