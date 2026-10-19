@@ -18,6 +18,7 @@ using Vericairn.Sdk;
 
 namespace Vericairn.Runtime.Tests;
 
+[Collection("policy-sources")]
 public sealed class ReleasePolicyGateTests
 {
     [Theory]

@@ -1,8 +1,10 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 5, October 19, 2026. Keep valid policy keys distinct from named read endpoints, preserve generic history authoring, and describe on-demand views, operator-only MCP review and prepared Workbench submission.
+Revision 6, October 19, 2026. Link the operating guide and exact first-party adoption proposals alongside the implemented surfaces.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
+
+For preparation, authoring and review steps, see [Adopting and operating estate policies](policy-adoption.md). The [first-party proposals](policy-adoption-proposals.md) remain subject to exact operator approval after the format-3 upgrade.
 
 | CLI command | API route | SDK method | MCP tool |
 |---|---|---|---|

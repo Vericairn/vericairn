@@ -1,6 +1,6 @@
 # Policy evaluator
 
-Revision 4, October 19, 2026. Connect the evaluator to policy and writing-registry reads with explicit source inventories.
+Revision 5, October 19, 2026. Describe the connected release gate and distinguish it from pending first-party adoption.
 
 The runtime service collects the basis for the [policy read surfaces](policies.md). Application composition installs the foundation kinds, the software pack's reference-coverage kind and the local Git source. A named release preview carries the candidate's exact product, version and commit with preview origin; it cannot authorize dispatch. Source collection reads retained objects and local bytes without fetching or building.
 
@@ -30,7 +30,7 @@ The `estate-draft/1` reader accepts a deliberately bounded YAML data subset betw
 
 To qualify, first and current bytes must preserve the stable entry id and release relation, and the first pin must follow the publication. The current bytes need a valid document pin, nonempty title, summary and body, `audience: internal`, `status: draft`, exact `applicability.versions`, and the publication in `sources`. The latest current ordinary review of that exact pin, ordered by `(at, id)`, must pass at the declared `independent` or `operator` independence. A later adverse qualifying review removes satisfaction; a content correction needs its own review. Living-document clearances do not count. Editorial quality remains the reviewer's judgment.
 
-Each publication has one `entry` finding. Exactly one qualifying identity and path satisfies it; missing entries and duplicates remain named. Copies of an old identity cannot acquire new authorship through a new path or pin. At refuse, unresolved publications hold later submissions for that product, while a candidate owes no account of its own future publication. The source, registration and typed findings are ready for the surface adapter; policy declaration and release-gate wiring belong to POLICY-03 and POLICY-04.
+Each publication has one `entry` finding. Exactly one qualifying identity and path satisfies it; missing entries and duplicates remain named. Copies of an old identity cannot acquire new authorship through a new path or pin. At refuse, unresolved publications hold later submissions for that product, while a candidate owes no account of its own future publication. The runtime's policy surfaces and release gate use this evaluator; first-party declarations remain subject to POLICY-04's exact adoption approval.
 
 `WritingEvaluation` shares the finite spacing scanner with the existing repository check. It scans supplied Markdown and the record format's prose fields. Exact, case-sensitive tokens and union scopes select occurrences; no diagnostic prose is parsed to obtain a token. Matched occurrences remain listed with every matching entry and leave the warning count once. Unused active entries warn only after the entire scan completes. A missing source leaves match counts unknown. Inline code is blanked without shifting offsets; fenced blocks use the scanner's explicit opening and closing grammar. Locations include original UTF-8 byte offsets and one-based lines.
 

@@ -33,6 +33,7 @@
     <ProjectReference Include="../../src/Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../../src/Vericairn.Records/Vericairn.Records.csproj" />
     <ProjectReference Include="../Vericairn.Records.Tests/Vericairn.Records.Tests.csproj" />
+    <ProjectReference Include="../Vericairn.Runtime.Tests/Vericairn.Runtime.Tests.csproj" />
   </ItemGroup>
 
 </Project>
