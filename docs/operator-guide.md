@@ -2,7 +2,11 @@
 
 For the development build's 0.8.0 additions, [Inspecting estate policies](policies.md)
 describes the policy commands, recurring-duty evidence, explicit-time previews and
-writing-exception registry reads.
+writing-exception registry reads. [Readable companions](readable-companions.md)
+describes `docs companions`, exact-revision and snapshot reads with `docs render`,
+compare-only regeneration, and their API, SDK, MCP and Workbench counterparts.
+These reads do not adopt register declarations or clear authored review. Estate
+adoption follows the qualified upgrade and the operator's declarations.
 
 This maintained guide describes the five changes in 0.7.3. The complete estate workflows are in the
 [0.7.3 operator guide](releases/0.7.3/operator-guide.md); earlier releases keep their own frozen guides

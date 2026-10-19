@@ -7,6 +7,7 @@ using System.Text.Json;
 namespace Vericairn.Cli.Tests;
 
 /// <summary>Published and withdrawn documentation sets retain every frozen byte; a future set remains editable until frozen.</summary>
+[Trait("Journey", "D19-G")]
 public class FrozenSetTests
 {
     [Fact]

@@ -18,6 +18,7 @@ public static class ApiRoutes
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(shutdown);
         string v = ApiVersion.Prefix;
+        CompanionRoutes.Map(app, service);
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/evaluate", (string? asOf, string? release) => Results.Json(service.PolicyEvaluate(asOf, release), ProtocolJson.Options));

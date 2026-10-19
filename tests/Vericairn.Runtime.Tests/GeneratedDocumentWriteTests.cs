@@ -22,6 +22,7 @@ public class GeneratedDocumentWriteTests
     private static readonly DecisionRenderer Renderer = Install();
 
     [Fact]
+    [Trait("Journey", "D19-H")]
     public void LocalOnlyRecordsStayAuthoritativeAndRenderOnDemandWithoutRepositoryCompanions()
     {
         using var f = new Fixture(localOnly: true);
@@ -43,6 +44,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-B")]
     public void SourceWritesAddTheirOwnMembersWithoutPinsOrRewritingEarlierRevisions()
     {
         using var f = new Fixture();
@@ -65,6 +67,7 @@ public class GeneratedDocumentWriteTests
     [InlineData("Refuse generation")]
     [InlineData("Unavailable generation")]
     [InlineData("Throw during generation")]
+    [Trait("Journey", "D19-I")]
     public void AFailedLaterMemberWritesNoDeclarationRecordOrPartialOutput(string title)
     {
         using var f = new Fixture();
@@ -81,6 +84,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-I")]
     public void ASourceThatFailsGenerationIsNotStoredAndExistingOutputBytesSurvive()
     {
         using var f = new Fixture();
@@ -96,6 +100,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-I")]
     public void InterruptedPublicationReportsTheStoredRecordAndRecoversTheExactRemainingOutputs()
     {
         using var f = new Fixture();
@@ -121,6 +126,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-I")]
     public void RecoveryPreservesAnOutputChangedAfterTheInterruptionAndHoldsFurtherWrites()
     {
         using var f = new Fixture();
@@ -141,6 +147,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
     public void RetirementRemovesOnlyVerifiedMembersAndKeepsTheSourceHistory()
     {
         using var f = new Fixture();
@@ -158,6 +165,7 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
     public void UnexpectedMembersPreventRetirementAndAreNeverPrunedByRepair()
     {
         using var f = new Fixture();
@@ -174,6 +182,8 @@ public class GeneratedDocumentWriteTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
+    [Trait("Journey", "D19-I")]
     public void InterruptedRetirementCannotPruneWhenItsAuthoritativeSourceBecomesUnavailable()
     {
         using var f = new Fixture();
@@ -202,6 +212,7 @@ public class GeneratedDocumentWriteTests
     [InlineData("before")]
     [InlineData("after")]
     [InlineData("path")]
+    [Trait("Journey", "D19-I")]
     public void CorruptOutputJournalsAreRetainedAndRefuseFurtherWrites(string field)
     {
         using var f = new Fixture();

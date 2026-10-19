@@ -64,6 +64,12 @@ public static class DocumentGenerators
         }
     }
 
+    /// <summary>Installed implementations, ordered by identity; enumeration performs no generation or source discovery.</summary>
+    public static IReadOnlyList<IDocumentGenerator> All
+    {
+        get { lock (Installed) return Installed.Values.OrderBy(g => g.Id, StringComparer.Ordinal).ToArray(); }
+    }
+
     /// <summary>
     /// vericairn.records/releases: a table of the published releases of the products its inputs name, by any revision of a product's
     /// record (all products when none), newest first, from release records only. It restates the releases in a document that must

@@ -26,6 +26,7 @@
         <MenuItem Header="Result _inbox" InputGesture="Ctrl+I" Click="OnOpenInbox" />
         <MenuItem Header="_Products" Click="OnOpenProducts" />
         <MenuItem Header="Living _documents" InputGesture="Ctrl+Shift+D" Click="OnOpenLivingDocuments" />
+        <MenuItem Header="Readable _views" InputGesture="Ctrl+Shift+V" Click="OnOpenCompanionCatalog" />
         <MenuItem Header="Progress _report" InputGesture="Ctrl+Shift+P" Click="OnOpenProgress" />
         <MenuItem Header="_Hand-over and resume" InputGesture="Ctrl+Shift+H" Click="OnOpenHandoff" />
         <MenuItem Header="_Goals workspace" InputGesture="Ctrl+Shift+G" Click="OnOpenGoals" />
@@ -177,6 +178,63 @@
               </DataTemplate>
             </TabControl.ItemTemplate>
             <TabControl.DataTemplates>
+              <DataTemplate x:DataType="local:CompanionCatalogDocument">
+                <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="8">
+                  <TextBlock Text="Readable collections" FontSize="18" FontWeight="SemiBold" />
+                  <SelectableTextBlock Grid.Row="1" Text="{Binding Note}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Companion collection guidance" />
+                  <ListBox Grid.Row="2" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Focusable="True" AutomationProperties.Name="Readable collections">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="proto:CompanionGeneratorRow">
+                        <StackPanel MinHeight="36" AutomationProperties.Name="{Binding Id}">
+                          <TextBlock Text="{Binding Id}" FontWeight="SemiBold" />
+                          <TextBlock Text="{Binding Audience}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                  <Button Grid.Row="3" Content="Open selected collection" Click="OnOpenCompanionCollection" MinHeight="32" />
+                </Grid>
+              </DataTemplate>
+              <DataTemplate x:DataType="local:CompanionDocument">
+                <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="8">
+                  <SelectableTextBlock Text="{Binding Basis}" TextWrapping="Wrap" Focusable="True" AutomationProperties.Name="Companion revision basis and currentness" />
+                  <TextBlock Grid.Row="1" Text="{Binding EditGuidance}" TextWrapping="Wrap" Margin="0,6" />
+                  <WrapPanel Grid.Row="2" Margin="0,0,0,6">
+                    <Button Content="Refresh current access and basis" Click="OnRefreshCompanion" MinHeight="32" Margin="0,0,6,0" />
+                    <Button Content="Previous page" Click="OnPreviousCompanionPage" MinHeight="32" Margin="0,0,6,0" />
+                    <Button Content="Next page" Click="OnNextCompanionPage" MinHeight="32" Margin="0,0,6,0" />
+                    <Button Content="Open selected exact source" Click="OnReadExactRecord" MinHeight="32" />
+                  </WrapPanel>
+                  <TabControl Grid.Row="3" AutomationProperties.Name="Readable companion and exact source">
+                    <TabItem Header="Readable view and sources">
+                      <Grid ColumnDefinitions="*,*" Margin="0,6">
+                        <TextBox Grid.Column="0" Text="{Binding Text}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" AutomationProperties.Name="Complete readable companion" />
+                        <Grid Grid.Column="1" RowDefinitions="Auto,*,Auto,*" Margin="8,0,0,0">
+                          <TextBlock Text="Exact sources — select a record and press Enter" TextWrapping="Wrap" FontWeight="SemiBold" />
+                          <ListBox Grid.Row="1" ItemsSource="{Binding Sources}" SelectedItem="{Binding SelectedSource}" Focusable="True" AutomationProperties.Name="Companion source identities hashes and currentness">
+                            <ListBox.ItemTemplate>
+                              <DataTemplate x:DataType="local:CompanionSourceRow">
+                                <StackPanel MinHeight="36" AutomationProperties.Name="{Binding AccessibleName}">
+                                  <TextBlock Text="{Binding Identity}" TextWrapping="Wrap" FontWeight="SemiBold" />
+                                  <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" />
+                                </StackPanel>
+                              </DataTemplate>
+                            </ListBox.ItemTemplate>
+                          </ListBox>
+                          <TextBlock Grid.Row="2" Text="Exact source inspector" FontWeight="SemiBold" />
+                          <TextBox Grid.Row="3" Text="{Binding SourceText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" FontFamily="{DynamicResource BrandMonoFont}" FontSize="11" AutomationProperties.Name="Exact source envelope or file basis" />
+                        </Grid>
+                      </Grid>
+                    </TabItem>
+                    <TabItem Header="Changes on refresh">
+                      <TextBox Text="{Binding Difference}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" AutomationProperties.Name="Generated rendition differences" />
+                    </TabItem>
+                    <TabItem Header="Earlier observation">
+                      <TextBox Text="{Binding PreviousText}" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" AutomationProperties.Name="Historical rendition and its basis" />
+                    </TabItem>
+                  </TabControl>
+                </Grid>
+              </DataTemplate>
               <DataTemplate x:DataType="local:HandoffDocument">
                 <Grid RowDefinitions="Auto,Auto,Auto,*" Margin="8">
                   <TextBlock Text="Hand-over and resume" FontSize="18" FontWeight="SemiBold" />
@@ -242,6 +300,7 @@
                       <Button Content="Open the selected assignment" MinHeight="28" Click="OnOpenSelectedAssignment" />
                       <Button Content="Review the selected result" MinHeight="28" Click="OnReviewSelectedAssignment" />
                       <Button Content="Compare with the earlier revision" MinHeight="28" Click="OnCompareOpen" />
+                      <Button Content="Read this exact definition" MinHeight="28" Click="OnReadExactRecord" />
                     </StackPanel>
                     <TextBlock Text="Assignments (Enter opens the assignment)" FontWeight="SemiBold" />
                     <ListBox ItemsSource="{Binding Assignments}" SelectedItem="{Binding SelectedAssignment}" Focusable="True" MaxHeight="240" AutomationProperties.Name="Assignments" DoubleTapped="OnOpenSelectedAssignment">
@@ -321,6 +380,10 @@
                 <ScrollViewer>
                   <StackPanel Margin="8" Spacing="6" MaxWidth="900" HorizontalAlignment="Left">
                     <TextBlock Text="Living documents" FontSize="18" FontWeight="SemiBold" />
+                    <WrapPanel>
+                      <Button Content="Browse readable collections" Click="OnOpenCompanionCatalog" MinHeight="32" Margin="0,0,6,0" />
+                      <Button Content="Read selected document's source" Click="OnOpenDeclaredCompanion" MinHeight="32" />
+                    </WrapPanel>
                     <TextBlock Text="{Binding Note}" TextWrapping="Wrap" Opacity="0.8" />
                     <ListBox ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" Focusable="True" MaxHeight="360" AutomationProperties.Name="Living documents">
                       <ListBox.ItemTemplate>
@@ -371,6 +434,7 @@
                     <TextBlock Text="{Binding Declaration}" TextWrapping="Wrap" Opacity="0.8" />
                     <SelectableTextBlock MinHeight="24" Text="{Binding SummaryText}" FontFamily="{DynamicResource BrandMonoFont}" FontSize="12" TextWrapping="Wrap" />
                     <TextBlock Text="Reviews on record (checked ones become the acceptance's basis)" FontWeight="SemiBold" />
+                    <Button Content="Read this exact subject" Click="OnReadExactRecord" MinHeight="32" />
                     <ItemsControl ItemsSource="{Binding Reviews}">
                       <ItemsControl.ItemTemplate>
                         <DataTemplate x:DataType="local:ReviewRow">
@@ -491,6 +555,7 @@
                           <StackPanel MinHeight="32">
                             <TextBlock Text="{Binding Version}" FontWeight="SemiBold" />
                             <TextBlock Text="{Binding StatusLabel}" FontSize="11" Opacity="0.8" />
+                            <Button Content="Read this exact release" Click="OnReadExactRecord" MinHeight="32" />
                           </StackPanel>
                         </DataTemplate>
                       </ListBox.ItemTemplate>

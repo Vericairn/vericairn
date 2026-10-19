@@ -18,6 +18,7 @@ public class RevisionCompanionTests
 
     [Theory]
     [MemberData(nameof(Registers))]
+    [Trait("Journey", "D19-A")]
     public void EachGeneratorMapsExactRevisionsAndRetainsAllRecordedTerms(string id, string type, string directory)
     {
         EstateModel model = EstateLoader.Load(Path.Combine(RecordCompanionTests.FindRepository(), "tests", "fixtures", "format-3-policy-estate"));
@@ -41,6 +42,7 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-B")]
     public void FiveIndependentBranchesAddFiveFilesAndTheirUnionPassesWithoutRegenerationOrPins()
     {
         using var f = new PolicyFixture();
@@ -81,6 +83,7 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-B")]
     public void DivergentSuccessorsHaveDisjointHistoricalFilesWithoutChoosingTheCurrentBranch()
     {
         using var f = new PolicyFixture();
@@ -102,6 +105,7 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
     public void NewMonthEqualAndNonAsciiTitlesDoNotChangeExistingPathsOrInputs()
     {
         using var f = new PolicyFixture();
@@ -121,6 +125,7 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
     public void NearLimitItemsStayCompleteAndOversizedRenditionsGiveAnHonestBoundedOverview()
     {
         using var f = new PolicyFixture();
@@ -140,6 +145,8 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-C")]
+    [Trait("Journey", "D19-D")]
     public void HandEditsCrlfMissingExtraMembersAndCaseAliasesFailFreshVerification()
     {
         using var f = new PolicyFixture();
@@ -164,6 +171,8 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-D")]
+    [Trait("Journey", "D19-I")]
     public void MissingCapabilitiesUnknownInputsAndWrongDestinationsReturnNoMembers()
     {
         using var f = new PolicyFixture();
@@ -188,6 +197,7 @@ public class RevisionCompanionTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-I")]
     public void ReleasesKeepTheirLegacyRegionGrammarAndBytes()
     {
         using var f = new PolicyFixture();

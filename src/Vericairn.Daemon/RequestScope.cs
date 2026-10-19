@@ -134,6 +134,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["GET /v1/companions"] = null,
+        ["GET /v1/companions/render"] = typeof(CompanionRequest),
+        ["GET /v1/companions/sources"] = typeof(CompanionRequest),
+        ["GET /v1/companions/compare"] = typeof(CompanionCompareRequest),
         ["GET /v1/estate-policies"] = null,
         ["GET /v1/estate-policies/kinds"] = null,
         ["GET /v1/estate-policies/evaluate"] = null,
@@ -253,6 +257,8 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
+        [typeof(CompanionRequest)] = (_, _, _) => null,
+        [typeof(CompanionCompareRequest)] = (_, _, _) => null,
         [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
         [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),

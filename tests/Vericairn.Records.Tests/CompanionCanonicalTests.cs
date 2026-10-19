@@ -13,6 +13,7 @@ namespace Vericairn.Records.Tests;
 public sealed class CompanionCultureScope;
 
 [Collection("Companion cultures")]
+[Trait("Journey", "D19-C")]
 public class CompanionCanonicalTests
 {
     [Fact]

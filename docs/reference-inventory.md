@@ -2,6 +2,16 @@
 
 Revision 2, October 18, 2026. Define the retained reference inventory used by document checks, readable companions and reference-coverage policies.
 
+The development build for 0.8.0 adds `vericairn docs companions` and
+`vericairn docs render` to the command inventory, and `GET /v1/companions`,
+`GET /v1/companions/render`, `GET /v1/companions/sources` and
+`GET /v1/companions/compare` to the operation inventory. The compare-only flag
+belongs to the existing `vericairn docs regenerate` identity. Their proposed
+vocabulary mapping is **Generated**, in the maintained
+[reference coverage proposals](policy-adoption-proposals.md#generated-reference-coverage).
+The generated inventory derives these identities from the build; no frozen set is
+rewritten and a proposed mapping is not estate adoption.
+
 `vericairn.reference-inventory/1` accompanies the generated CLI, record and API references as `reference-inventory.json`. Its exact build `commit` is a full lowercase Git commit. The `references` array binds each category to its generated file and SHA-256 byte hash: `command` to `cli-reference.md`, `record-type` to `record-reference.md`, and `api-operation` to `api-reference.md`. Its `items` array contains one `{category, name}` per public reference identity, in ordinal category/name order.
 
 Commands use the full canonical invocation, such as `vericairn release submit`, without arguments or flags. Record types use serialized names such as `release`. API operations use an uppercase method, one space and the exact route template, such as `GET /v1/records/{id}`. A command family does not cover its children. Aliases enter only if the generator declares them public. All comparisons are ordinal and case-sensitive.

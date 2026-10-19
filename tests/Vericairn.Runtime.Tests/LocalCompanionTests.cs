@@ -24,6 +24,7 @@ namespace Vericairn.Runtime.Tests;
 public sealed class LocalCompanionCultureScope;
 
 [Collection("Local companion cultures")]
+[Trait("Journey", "D19-H")]
 public class LocalCompanionTests
 {
     private const string At = "2026-10-17T12:00:00Z";

@@ -15,6 +15,10 @@ public static class OpenApiDocument
     /// <summary>Every route of version 1 with its method; the contract tests assert the daemon maps exactly these.</summary>
     public static IReadOnlyList<(string Method, string Path)> Routes { get; } =
     [
+        ("GET", "/v1/companions"),
+        ("GET", "/v1/companions/render"),
+        ("GET", "/v1/companions/sources"),
+        ("GET", "/v1/companions/compare"),
         ("GET", "/v1/estate-policies"),
         ("GET", "/v1/estate-policies/kinds"),
         ("GET", "/v1/estate-policies/evaluate"),
@@ -136,6 +140,26 @@ public static class OpenApiDocument
                 ["summary"] = Summary(method, path),
                 ["responses"] = Responses(method, path),
             };
+            if (path.StartsWith("/v1/companions/", StringComparison.Ordinal))
+            {
+                string[] names = path.EndsWith("/compare", StringComparison.Ordinal) ? ["selection", "commit", "audience"]
+                    : ["generator", "selection", "revision", "snapshot", "page", "field", "index", "audience", "contract", "declaration", "commit"];
+                operation["parameters"] = new JsonArray(names.Select(name => (JsonNode)new JsonObject
+                {
+                    ["name"] = name, ["in"] = "query", ["required"] = name is "generator" or "selection",
+                    ["schema"] = name is "page" or "contract" ? new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["default"] = 1 }
+                        : new JsonObject { ["type"] = "string" },
+                    ["description"] = name switch
+                    {
+                        "snapshot" => "Exact record or manifest snapshot returned by coverage. Refresh and select again if unavailable.",
+                        "revision" => "Exact immutable record revision; never follows a successor.",
+                        "audience" => "Internal by default. A requested audience grants no access; unsupported audiences are unavailable.",
+                        "commit" => "Exact retained source commit for a declared repository item; no clone-head substitution.",
+                        "selection" => "item or nested list at a revision; current or all-revisions at a snapshot. Comparison selects a declaration or destination.",
+                        _ => "Explicit reader input; inspect the installed contract through coverage.",
+                    },
+                }).ToArray());
+            }
             if (method == "GET" && path is "/v1/communication" or "/v1/work/{key}/brief" or "/v1/context/work/{key}/brief" or "/v1/operator/actions")
             {
                 operation["parameters"] = new JsonArray(CommunicationParameterNames
@@ -249,7 +273,16 @@ public static class OpenApiDocument
             responses["404"] = new JsonObject { ["description"] = "Nothing has that id, key or hash." };
         }
 
-        if (path is "/v1/resume")
+        if (path == "/v1/companions" || path.StartsWith("/v1/companions/", StringComparison.Ordinal))
+        {
+            string schema = path == "/v1/companions" ? "CompanionsResponse" : path.EndsWith("/compare", StringComparison.Ordinal) ? "CompanionComparison" : "CompanionResponse";
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "A versioned read result with explicit unavailable, historical, current or different basis. Generation grants no authority or authored clearance.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/" + schema } } },
+            };
+        }
+        else if (path is "/v1/resume")
         {
             responses["200"] = new JsonObject { ["description"] = "ResumeResponse: every difference, or an invalid-handoff problem. This POST is a read; it authors no record." };
         }
@@ -366,6 +399,12 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
+            ["CompanionCompareRequest"] = Object(("selection", "string"), ("commit", "string"), ("audience", "string")),
+            ["CompanionsResponse"] = Object(("version", "integer"), ("status", "string"), ("snapshot", "string"), ("manifestSnapshot", "string"), ("coverage", "array"), ("generators", "array"), ("destinations", "array"), ("reason", "string")),
+            ["CompanionResponse"] = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("completeness", "string"), ("audience", "string"), ("snapshot", "string"), ("commit", "string"), ("generator", "object"), ("sources", "array"), ("inputDigest", "string"), ("contentHash", "string"), ("text", "string"), ("reason", "string")),
+            ["CompanionComparison"] = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("snapshot", "string"), ("commit", "string"), ("differences", "array"), ("problems", "array")),
+            ["CompanionSource"] = Object(("kind", "string"), ("identity", "string"), ("hash", "string"), ("path", "string"), ("repository", "string"), ("recordType", "string"), ("at", "string"), ("current", "boolean"), ("bytes", "integer")),
             ["PolicyChangeRequest"] = Object(("by", "string"), ("body", "object"), ("expected", "string")),
             ["WritingExceptionRemoveRequest"] = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("basis", "object")),
             ["WorkPlaceRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedSelection", "string"), ("releasePlan", "string"), ("backlog", "string")),
@@ -488,6 +527,10 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/companions") => "Installed readable coverage, exact collection snapshots and declared destinations; no adoption is inferred.",
+        ("GET", "/v1/companions/render") => "Render one explicitly selected authorized item or collection; currentness describes its exact basis, not acceptance.",
+        ("GET", "/v1/companions/sources") => "Read the exact permitted source basis without invoking a generator; local inspectors stay local.",
+        ("GET", "/v1/companions/compare") => "Fresh byte and membership comparison without repair, generated pins or authored clearance.",
         ("GET", "/v1/estate-policies/access") => "PolicyAccess: admitted policy actions, with exact target bounds rechecked at submission.",
         ("POST", "/v1/estate-policies") => "PolicyDeclare: validate the expected hash and all source evidence, then sign as the acting principal.",
         ("POST", "/v1/estate-policies/{key}/revisions") => "PolicyRevise: validate the expected hash and all source evidence, then sign as the acting principal.",

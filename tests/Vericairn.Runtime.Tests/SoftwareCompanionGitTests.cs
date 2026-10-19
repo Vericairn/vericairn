@@ -6,14 +6,17 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
+using Vericairn.Protocol;
 using Vericairn.Packs.Software;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Workers;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
+[Trait("Journey", "D19-G")]
 public sealed class SoftwareCompanionGitTests : IDisposable
 {
     private readonly string scratch = Path.Combine(Path.GetTempPath(), "software-companion-git-" + Guid.NewGuid().ToString("N"));
@@ -71,6 +74,27 @@ public sealed class SoftwareCompanionGitTests : IDisposable
         Assert.Equal(first.Bytes, Assert.Single(stale.Actual).Bytes);
         Assert.Equal(DocumentGenerationStatus.Unavailable, GeneratedDocumentVerification.Plan(model, declaration, new string('f', 40)).Status);
         Assert.Equal(DocumentGenerationStatus.Unavailable, GeneratedDocumentVerification.Plan(model, declaration).Status);
+
+        // All public readers use the same retained candidate selection, even with a different registered head.
+        using (EstateService service = EstateService.Open(fixture.Estate.Root))
+        {
+            var request = new CompanionRequest("vericairn.software/checksums", "item", Declaration: declaration.Id, Commit: candidate);
+            CompanionResponse readable = service.CompanionRender(request);
+            Assert.Equal("success", readable.Status);
+            Assert.Equal("historical", readable.Currentness);
+            Assert.Equal(candidate, readable.Commit);
+            Assert.Equal(first.ContentHash, readable.ContentHash);
+            Assert.Equal(Encoding.UTF8.GetString(first.Bytes.AsSpan()), readable.Text);
+            CompanionResponse sources = service.CompanionSources(request);
+            Assert.Equal(readable.Sources, sources.Sources);
+            Assert.Equal(readable.InputDigest, sources.InputDigest);
+            Assert.Null(sources.Text);
+            Assert.Equal("current", service.CompanionCompare(new(declaration.Id, candidate)).Currentness);
+            Assert.Equal("different", service.CompanionCompare(new(declaration.Id, newer)).Currentness);
+            Assert.Equal("unavailable", service.CompanionRender(request with { Commit = new string('f', 40) }).Status);
+            Assert.Equal("unavailable", service.CompanionRender(request with { Commit = null }).Status);
+            Assert.Equal("unavailable", service.CompanionCompare(new(declaration.Id)).Status);
+        }
 
         // An inventory digest cannot excuse stale source bytes, even when the candidate commit exists.
         Write("docs/set/SHA256SUMS", Encoding.UTF8.GetBytes(firstList));

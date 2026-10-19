@@ -11,6 +11,7 @@ using Vericairn.Records.Types;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-F")]
 public class DocumentCoverageTests
 {
     private static readonly InventoryGenerator Generator = Install();
