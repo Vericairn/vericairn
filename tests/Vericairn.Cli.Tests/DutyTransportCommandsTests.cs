@@ -10,6 +10,7 @@ using Vericairn.Runtime.Service;
 
 namespace Vericairn.Cli.Tests;
 
+[Collection("cli")]
 public sealed class DutyTransportCommandsTests
 {
     [Fact]

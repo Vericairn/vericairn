@@ -575,5 +575,5 @@ public sealed partial class VericairnClient
     }
     /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
     public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
+        ClientOperation.RunAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true, cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
 }

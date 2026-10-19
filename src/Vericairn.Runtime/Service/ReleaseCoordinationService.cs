@@ -50,54 +50,6 @@ internal sealed class ReleaseCoordinationService(
         }
     }
 
-    internal IReadOnlyList<FindingDto> RecordSubmissionObjections(EstateModel model, RecordEnvelope record)
-    {
-        JsonElement target = record.Type == "operation" ? record.Body.GetProperty("target") : record.Body;
-        string? product = record.Subject?.Id;
-        string? version = target.TryGetProperty("version", out JsonElement v) ? v.GetString() : null;
-        string? destination = target.TryGetProperty("repository", out JsonElement r) ? r.GetString() : null;
-        string? commit = target.TryGetProperty("commit", out JsonElement c) ? c.GetString() : null;
-        if (commit is null && target.TryGetProperty("ref", out JsonElement reference) && reference.ValueKind == JsonValueKind.String && Patterns.Commit.IsMatch(reference.GetString()!)) commit = reference.GetString();
-        if (commit is null && record.Body.TryGetProperty("evidence", out JsonElement evidence))
-            foreach (JsonElement item in evidence.EnumerateArray().Reverse())
-            {
-                if (!item.TryGetProperty("hash", out JsonElement hash) || hash.ValueKind != JsonValueKind.String) continue;
-                try
-                {
-                    byte[]? bytes = session.Objects.Read(hash.GetString()!);
-                    if (bytes is null) continue;
-                    using JsonDocument retained = JsonDocument.Parse(bytes);
-                    if (retained.RootElement.TryGetProperty("format", out JsonElement format) && format.GetString() == "vericairn.release-basis/1")
-                        commit = retained.RootElement.GetProperty("basis").GetProperty("submission").GetProperty("commit").GetString();
-                }
-                catch (Exception error) when (error is JsonException or InvalidOperationException or KeyNotFoundException or IOException or Objects.ObjectCorruptedException) { }
-                if (commit is not null) break;
-            }
-        if (product is null || version is null) return [new("error", "release.target", "release", "A submission needs its exact product and version.")];
-        string? providerId = EstateModel.BodyString(record, "provider");
-        if (providerId is null && model.ById.TryGetValue(product, out RecordEnvelope? productRecord)) providerId = ReleaseProfile.FromProductBody(productRecord.Body).Destination?.Provider;
-        ProviderDescriptor? provider = providerId is null ? null : Providers.Release(providerId)?.Descriptor;
-        HashSet<string> repositories = provider is not null && destination is not null ? ReleaseRepositories(model, provider, destination) :
-            model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository" && r.Body.TryGetProperty("location", out JsonElement location) &&
-                location.TryGetProperty("github", out JsonElement github) && string.Equals(github.GetString(), destination, StringComparison.OrdinalIgnoreCase)).SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
-        ReleasePolicyAssessment assessment = assessPolicies(model, product, version, commit, repositories);
-        List<FindingDto> objections = [.. assessment.Objections];
-        if (model.Manifest?.RecordFormat >= 3 && (commit is null || !Patterns.Commit.IsMatch(commit))) objections.Add(new("error", "release.commit", "release", "The submission needs an exact commit, supplied in the target or retained preparation evidence."));
-        if (model.Manifest?.RecordFormat >= 3 && record.Signatures.Count == 0) objections.Add(new("error", "release.signature", "release", "The submission needs the acting principal's admitted signature."));
-        if (provider is not null && destination is not null)
-        {
-            var documents = ReleaseDocumentChecks(model, product, commit, provider, destination);
-            objections.AddRange(documents.Changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message)));
-        }
-        else
-        {
-            IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
-            var compared = CompareLivingDocuments(model, documents, repositories);
-            objections.AddRange(compared.Changed.Concat(documents.Where(d => d.Closes).Select(d => d.Describe())).Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message)));
-        }
-        return objections;
-    }
-
     private (ReleasePolicyAssessment Assessment, List<FindingDto> Objections, List<string> Compared) Admission(EstateModel model,
         ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true)
     {

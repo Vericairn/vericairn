@@ -64,6 +64,9 @@ public class LivingDocumentJourneyTests
             int operations = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
             CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
+            Assert.False(held.Json.GetProperty("ok").GetBoolean());
+            Assert.Equal("refused", held.Json.GetProperty("problem").GetProperty("code").GetString());
+            Assert.Contains(held.Json.GetProperty("problem").GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "document.release-hold");
             Assert.Contains("docs/overview.md", held.Out + held.Err, StringComparison.Ordinal);
             Assert.Equal(operations, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
             Assert.Single(provider.Dispatches);

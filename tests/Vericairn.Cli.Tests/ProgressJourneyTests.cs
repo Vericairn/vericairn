@@ -159,11 +159,20 @@ public class ProgressJourneyTests
             Assert.StartsWith("# Progress\n\nWritten by hand.\n<!-- vericairn:generated progress -->\n```text\nProgress of Example (example), rendered from its records", text, StringComparison.Ordinal);
             Assert.EndsWith("```\n<!-- vericairn:end progress -->\nMore by hand.\n", text, StringComparison.Ordinal);
 
-            // It is the report vericairn progress prints, except that its check names the records alone and says why.
+            // The generated region is the records-only report. DESIGN-18's on-demand policy and
+            // writing views include repository bytes, so embedding them here would hash this region itself.
             string region = GeneratedRegions.Content(text, "progress")!;
             using EstateService service = EstateService.Open(root);
             string printed = service.Progress().Text;
-            List<string> differing = printed.Split('\n').Except(region.Split('\n'), StringComparer.Ordinal).ToList();
+            int liveSections = printed.IndexOf("  Recurring duties and linked asks:\n", StringComparison.Ordinal);
+            Assert.True(liveSections > 0);
+            string onDemand = printed[liveSections..];
+            Assert.Contains("\nPolicies\n", onDemand, StringComparison.Ordinal);
+            Assert.Contains("\nWriting exceptions\n", onDemand, StringComparison.Ordinal);
+            Assert.Contains(service.Policies().Basis.Digest, onDemand, StringComparison.Ordinal);
+            Assert.DoesNotContain("\nPolicies\n", region, StringComparison.Ordinal);
+            Assert.DoesNotContain("\nWriting exceptions\n", region, StringComparison.Ordinal);
+            List<string> differing = printed[..liveSections].Split('\n').Except(region.Split('\n'), StringComparer.Ordinal).ToList();
             Assert.Equal(["  Check: 0 errors, 0 warnings [every record and the repository, as vericairn estate check runs them]"], differing);
             Assert.Contains("  Check: 0 errors, 0 warnings in the records [every record; the repository checks, which read this document, are vericairn estate check's]\n", region, StringComparison.Ordinal);
 

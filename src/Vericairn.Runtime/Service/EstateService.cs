@@ -111,7 +111,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
                 includeLocalObservations: false), ProtocolJson.Options);
-            return new StatusResponse(EstateStatus.Render(model, checks) + "\n" + sections.Policies.Text + "\n" + sections.Exceptions.Text + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors);
+            return new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 
@@ -138,7 +138,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
         List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
         json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
-        string text = ProgressReport.Render(model, checks) + OperatorDutyText(sections) + "\n" + sections.Policies.Text + "\n" + sections.Exceptions.Text;
+        string text = ProgressReport.Render(model, checks) + OperatorDutyText(sections) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false);
         if (claims.Count > 0)
         {
             text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
@@ -274,14 +274,14 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
-        if (IsPolicyWrite(draft) || IsReleaseSubmission(draft) && session.Manifest.RecordFormat >= 3 || request.Type is "result" or "review")
+        if (IsPolicyWrite(draft) || request.Type is "result" or "review")
         {
             lock (gate)
             {
                 EstateModel model = session.Load();
                 bool dutyEvidence = IsDutyEvidence(draft, model);
                 if (request.Type is "result" or "review" && !dutyEvidence) return WriteLocked(draft, model);
-                if (request.At is not null || request.Id is not null) return Refuse("Policy, duty evidence and release submission authoring uses the runtime's fresh time and record identity.");
+                if (request.At is not null || request.Id is not null) return Refuse("Policy and duty evidence authoring uses the runtime's fresh time and record identity.");
                 if (dutyEvidence && (subject is null || !model.ById.TryGetValue(subject.Id, out RecordEnvelope? evidenceSubject) ||
                     !model.IsCurrent(evidenceSubject) || subject != evidenceSubject.Reference)) return PolicyConflict();
                 string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
@@ -2180,8 +2180,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
             FindingList relevant = Invalid(proposed, records);
-            Problem? releaseProblem = JudgeReleaseSubmissions(records);
-            if (releaseProblem is not null) return releaseProblem with { Findings = releaseProblem.Findings.Concat(ToFindings(relevant, "rejected").Findings).Distinct().ToArray() };
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
                 : JudgePolicySources(records, proposed);

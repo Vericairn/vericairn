@@ -8,8 +8,8 @@ namespace Vericairn.Protocol;
 /// <summary>Human views of the same complete policy responses transported by every client.</summary>
 public static class PolicyPresentation
 {
-    /// <summary>Render declarations, findings, duty evidence and the explicit basis.</summary>
-    public static string Render(PolicyResponse response)
+    /// <summary>Render declarations, findings, duty evidence and the explicit basis; omit diagnostics only when the enclosing view already reports them.</summary>
+    public static string Render(PolicyResponse response, bool includeDiagnostics = true)
     {
         ArgumentNullException.ThrowIfNull(response);
         var text = new StringBuilder("Policies\n");
@@ -36,14 +36,15 @@ public static class PolicyPresentation
         }
         foreach (RecordResponse exception in response.Exceptions)
             text.AppendLine($"  Exception history {exception.Id} {exception.Hash}: {exception.Envelope.GetProperty("body").GetRawText()}");
-        foreach (FindingDto diagnostic in response.Diagnostics) text.AppendLine($"  {diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+        if (includeDiagnostics)
+            foreach (FindingDto diagnostic in response.Diagnostics) text.AppendLine($"  {diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
         if (response.Problem is { } problem) text.AppendLine(problem.Message);
         text.AppendLine($"{response.Holds} release holds; evaluation {(response.Complete ? "complete" : "incomplete")}.");
         return text.ToString().ReplaceLineEndings("\n");
     }
 
-    /// <summary>Render active entries, removal history and every matching location.</summary>
-    public static string Render(WritingExceptionsResponse response)
+    /// <summary>Render active entries, removal history and every matching location; omit diagnostics only when the enclosing view already reports them.</summary>
+    public static string Render(WritingExceptionsResponse response, bool includeDiagnostics = true)
     {
         ArgumentNullException.ThrowIfNull(response);
         var text = new StringBuilder("Writing exceptions\n");
@@ -55,7 +56,8 @@ public static class PolicyPresentation
         foreach (WritingOccurrenceDto occurrence in response.ExceptedOccurrences)
             text.AppendLine($"  excepted {occurrence.Occurrence.Token} at {occurrence.Location.Identity}:{occurrence.Location.Member}:{occurrence.Occurrence.Line}; entries {string.Join(", ", occurrence.Entries.Select(e => e.Id + " " + e.Hash))}");
         foreach (WritingOccurrenceDto occurrence in response.Warnings) text.AppendLine($"  warning {occurrence.Occurrence.Token} at {occurrence.Location.Identity}:{occurrence.Location.Member}:{occurrence.Occurrence.Line}");
-        foreach (FindingDto diagnostic in response.Diagnostics) text.AppendLine($"  {diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+        if (includeDiagnostics)
+            foreach (FindingDto diagnostic in response.Diagnostics) text.AppendLine($"  {diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
         text.AppendLine($"{response.ExceptedOccurrences.Count} excepted occurrences; scan {(response.Complete ? "complete" : "incomplete")}.");
         return text.ToString().ReplaceLineEndings("\n");
     }

@@ -262,29 +262,38 @@ public sealed class ReleasePolicyGateTests
     }
 
     [Fact]
-    public void GenericRecordAuthoringCannotUseAnOldTimeOrSkipReleaseHolds()
+    public void GenericHistoryKeepsItsAuthoringContractWhileSubmissionEnforcesLiveHolds()
     {
         using var f = new Fixture();
         f.Duty();
         f.Clock.Now = f.Due;
         JsonElement body = PolicyFixture.Element(ReleaseFlow.IntentBody(f.Provider.Provider, "Example/widget", new Dictionary<string, string> { ["repository"] = "Example/widget", ["ref"] = Fixture.Commit }, "1.0.0", f.Product.Id));
-        var request = new NewRecordRequest("operation", f.Records.Estate.OperatorId, body, "product:" + f.Product.Id, Expected: PolicyBasis.Hash(body));
-        Assert.False(f.Api.NewRecord(request with { At = RecordParser.FormatTimestamp(f.Due.AddSeconds(-1)) }).Ok);
-        WriteOutcome refused = f.Api.NewRecord(request);
-        Assert.False(refused.Ok);
-        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "policy.unmet");
-        Assert.Empty(f.Api.Records("operation"));
+        string recordedAt = RecordParser.FormatTimestamp(f.Due.AddSeconds(-1));
+        var request = new NewRecordRequest("operation", f.Records.Estate.OperatorId, body, "product:" + f.Product.Id, At: recordedAt);
+        WriteOutcome history = f.Api.NewRecord(request);
+        Assert.True(history.Ok, history.Problem?.Message);
+        Assert.Equal(recordedAt, f.Api.Record(history.Written!.Id)!.Envelope.GetProperty("at").GetString());
         Assert.Equal(0, f.Provider.Calls);
-        RecordEnvelope candidate = f.Candidate();
-        f.Records.Add("acceptance", new JsonObject { ["statement"] = "Fixture acceptance.", ["basis"] = new JsonArray(), ["self"] = true }, subject: candidate.Reference);
+        RecordEnvelope candidate = f.Candidate(withArtifact: true);
         JsonObject published = PolicyFixture.Body(candidate);
         published["status"] = "published";
         published["publishedAt"] = RecordParser.FormatTimestamp(f.Clock.Now);
         published["url"] = "https://example.invalid/release";
-        WriteOutcome publication = f.Api.NewRecord(new("release", f.Records.Estate.OperatorId, PolicyFixture.Element(published), "product:" + f.Product.Id, candidate.Id, Expected: candidate.ComputedHash));
-        Assert.False(publication.Ok);
-        Assert.Contains(publication.Problem!.Findings, finding => finding.Code == "policy.unmet");
+        var publicationRequest = new NewRecordRequest("release", f.Records.Estate.OperatorId, PolicyFixture.Element(published), "product:" + f.Product.Id, candidate.Id, At: RecordParser.FormatTimestamp(f.Clock.Now));
+        WriteOutcome unaccepted = f.Api.NewRecord(publicationRequest);
+        Assert.False(unaccepted.Ok);
+        Assert.Contains(unaccepted.Problem!.Findings, finding => finding.Code == "release.unaccepted");
+        f.Records.Add("acceptance", new JsonObject { ["statement"] = "Fixture acceptance.", ["basis"] = new JsonArray(), ["self"] = true }, subject: candidate.Reference);
+        WriteOutcome publication = f.Api.NewRecord(publicationRequest);
+        Assert.True(publication.Ok, JsonSerializer.Serialize(publication.Problem, ProtocolJson.Options));
+        Assert.Equal(candidate.Id, f.Api.Record(publication.Written!.Id)!.Envelope.GetProperty("supersedes").GetString());
         Assert.Single(f.Api.Records("release"));
+        int before = f.Api.Session.Load().Records.Count;
+        ReleaseResponse refused = f.Api.ReleaseSubmit(f.Request with { Version = "2.0.0" });
+        Assert.False(refused.Ok);
+        Assert.Contains(refused.Problem!.Findings, finding => finding.Code == "policy.unmet");
+        Assert.Equal(before, f.Api.Session.Load().Records.Count);
+        Assert.Equal(0, f.Provider.Calls);
     }
 
     [Fact]
@@ -369,9 +378,10 @@ public sealed class ReleasePolicyGateTests
             return Records.Policy(policy);
         }
 
-        internal RecordEnvelope Candidate() => Records.Add("release", new JsonObject
+        internal RecordEnvelope Candidate(bool withArtifact = false) => Records.Add("release", new JsonObject
         {
-            ["version"] = "1.0.0", ["repository"] = "Example/widget", ["commit"] = Commit, ["status"] = "candidate", ["artifacts"] = new JsonArray(),
+            ["version"] = "1.0.0", ["repository"] = "Example/widget", ["commit"] = Commit, ["status"] = "candidate",
+            ["artifacts"] = withArtifact ? new JsonArray(new JsonObject { ["name"] = "fixture.zip", ["hash"] = PolicyBasis.Hash("fixture"), ["bytes"] = 7, ["platform"] = "any" }) : new JsonArray(),
             ["recordFormat"] = new JsonObject { ["reads"] = new JsonArray(1, 2, 3), ["writes"] = 3 }, ["evidence"] = new JsonArray(), ["qualified"] = new JsonArray(),
             ["signing"] = "fixture", ["limitations"] = new JsonArray(),
         }, subject: Product.Reference);
