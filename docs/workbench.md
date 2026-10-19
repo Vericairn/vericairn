@@ -27,7 +27,7 @@ with `vericairn updates configure --enabled false` (or `dotnet vc updates config
 Use `--enabled true` to re-enable, or omit the option to show the setting. Both clients read the same
 machine-local setting under the Vericairn home before checking; cached notices can remain when disabled.
 The setting is reread at Workbench's next hourly check or when it is reopened. See the
-[operator guide](operator-guide.md) and [installation guide](install.md#release-check-and-upgrades-073).
+[operator guide](operator-guide.md) and [installation guide](install.md#release-check-and-upgrades-080).
 
 ## What exists
 
@@ -134,7 +134,7 @@ that companion executable. See the [installation draft](install.md).
 vericairn-workbench --estate <estate root> [--as <principal id>]
 ```
 
-`--as` names the principal Workbench writes as. The selector in the target bar then shows that principal's admitted device held on this machine, the one the runtime signs its records with, and choosing another device in the selector makes that device's principal the acting principal. When the named principal has no device held here, the target bar says so: its writes are refused where the estate requires signatures, and written unsigned where it does not, except an admission, which an estate at record format 2 refuses without a signature. (Release 0.3.1 showed such a principal under its first revision's name beside the first device held on the machine, whoever's it was; the records were still authored and signed correctly.)
+`--as` names the principal Workbench writes as. The selector in the target bar then shows that principal's admitted device held on this machine, the one the runtime signs its records with, and choosing another device in the selector makes that device's principal the acting principal. When the named principal has no device held here, the target bar says so: its writes are refused where the estate or record type requires signatures. Unsigned authoring remains available only where both permit it; admissions from format 2 and format-3 policy, duty and generated-declaration actions keep their mandatory signature rules. (Release 0.3.1 showed such a principal under its first revision's name beside the first device held on the machine, whoever's it was; the records were still authored and signed correctly.)
 
 The command line is found beside the executable, through `VERICAIRN_CLI`, or on the path; Workbench uses it to start and stop the daemon. The accessibility probe measures every focusable target of the shell at compact density and writes an observation for the platform obligations:
 

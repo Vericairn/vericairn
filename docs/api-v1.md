@@ -1052,7 +1052,7 @@ by automation do not count as a person viewing the estate.
 observe, device-signed requests act for their own principal, and the usual
 signing and admission rules apply. The runtime generates the time, exact estate
 subject and hashes of the pre-write record set, full pin and status. It records
-an `observation` with kind `estate`, requiring record format 2; format 1 is
+an `observation` with kind `estate`, requiring record format 2 or later; format 1 is
 refused with an explicit-upgrade instruction. This is an attributable observation
 of recorded status, not evidence of live external health or acceptance.
 
