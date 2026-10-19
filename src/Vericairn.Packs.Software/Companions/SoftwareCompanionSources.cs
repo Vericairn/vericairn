@@ -64,6 +64,9 @@ public static class SoftwareCompanionSources
             var visiting = new HashSet<string>(StringComparer.Ordinal);
             var complete = new HashSet<string>(StringComparer.Ordinal);
             var files = new Dictionary<string, DocumentSourceSnapshot>(StringComparer.Ordinal);
+            string[] needed = outputs.SelectMany(o => Array(o, "inputs")).Select(v => v.GetString()!).ToArray();
+            if (!needed.ToHashSet(StringComparer.Ordinal).SetEquals(inventory.Keys)) return Unavailable();
+            foreach (string path in inventory.Keys) _ = FileAt(path);
             ImmutableArray<DocumentSourceSnapshot> sources = SelectOutput(output, generator);
             return new(DocumentGenerationStatus.Success, sources, commit, null);
 
@@ -104,10 +107,11 @@ public static class SoftwareCompanionSources
                 return result;
             }
 
-            static DocumentGenerationContext Context(JsonElement item, DocumentGeneratorDescriptor descriptor, ImmutableArray<DocumentSourceSnapshot> sources)
+            DocumentGenerationContext Context(JsonElement item, DocumentGeneratorDescriptor descriptor, ImmutableArray<DocumentSourceSnapshot> sources)
             {
                 var inputs = item.GetProperty("parameters").EnumerateObject().ToImmutableDictionary(p => p.Name, p => p.Value.GetString()!, StringComparer.Ordinal);
-                if (inputs["source"] != String(item, "source") || String(item, "generator") != descriptor.Id || item.GetProperty("contract").GetInt32() != descriptor.ContractVersion)
+                if (inputs["source"] != String(item, "source") || inputs["build-commit"] != parameters["build-commit"]
+                    || String(item, "generator") != descriptor.Id || item.GetProperty("contract").GetInt32() != descriptor.ContractVersion)
                     throw new CompanionUnavailableException();
                 return new(DocumentGeneration.InterfaceVersion, descriptor, inputs, inputs["selection"], null, sources);
             }

@@ -75,8 +75,14 @@ public sealed class SoftwareCompanionGitTests : IDisposable
         Write("docs/set/SHA256SUMS", Encoding.UTF8.GetBytes(firstList));
         string inconsistent = Commit("Retain an inconsistent source inventory");
         Assert.Equal(DocumentGenerationStatus.Unavailable, GeneratedDocumentVerification.Plan(model, declaration, inconsistent).Status);
+        Set(firstList, parameters);
+        JsonNode manifest = JsonNode.Parse(File.ReadAllBytes(Path.Combine(repository, "docs/set/manifest.json")))!;
+        manifest["companions"]!["inputs"]!.AsArray().Add(new JsonObject { ["path"] = "unused.txt", ["hash"] = "sha256:" + new string('d', 64), ["bytes"] = 1 });
+        Write("docs/set/manifest.json", Encoding.UTF8.GetBytes(manifest.ToJsonString()));
+        string unowned = Commit("Retain an input outside the declared output selection");
+        Assert.Equal(DocumentGenerationStatus.Unavailable, GeneratedDocumentVerification.Plan(model, declaration, unowned).Status);
         Assert.True(GeneratedDocumentVerification.Plan(model, declaration, candidate).Current);
-        Assert.Equal(inconsistent, Git("rev-parse", "HEAD"));
+        Assert.Equal(unowned, Git("rev-parse", "HEAD"));
         Assert.Empty(Git("status", "--porcelain"));
     }
 

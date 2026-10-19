@@ -44,7 +44,7 @@ public class DocsTests
             string maintained = File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md"));
             maintained = maintained[maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd()
                 .Replace("| --- | --- | --- |", "|---|---|---|", StringComparison.Ordinal);
-            Assert.Equal(maintained, section);
+            Assert.Equal(maintained, System.Net.WebUtility.HtmlDecode(section));
             Assert.Contains("## Generation basis", excerpt, StringComparison.Ordinal);
         }
         finally { Directory.Delete(output, recursive: true); }

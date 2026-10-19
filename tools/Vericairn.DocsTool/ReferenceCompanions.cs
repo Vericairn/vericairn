@@ -59,9 +59,12 @@ internal static partial class ReferenceSet
             }),
             clientOutcomes = new
             {
+                introduction = "An interrupted client request writes its diagnostic to standard error. It does not emit a replacement JSON result on standard output. Existing command names, options, help and successful JSON responses are unchanged.",
                 rows = new Exception[] { new ClientTimeoutException(false), new ClientCancelledException(false, default), new ClientUnavailableException(false, new IOException()) }
                     .Select(e => ClientFailure.FromException(e)!).Select(f => new { code = f.Code, exitCode = f.ExitCode, diagnostic = "error: " + f.Message }),
                 uncertain = uncertain[plain.Length..].Trim(),
+                refusal = "A definite refusal keeps its diagnostic and exit code `2`; it is never called unavailable or of unknown outcome. Existing structured refusal responses keep their representation.",
+                cancellation = "Caller cancellation (including Ctrl+C for ordinary requests) and a per-operation deadline are separate outcomes. Cancellation does not undo an effect, and these clients do not retry it. Foreground worker following still interprets Ctrl+C as a request to stop the original run; runtime serving still interprets it as a request to stop the service. Their requests remain subject to deadlines.",
             },
         };
         object recordSource = new

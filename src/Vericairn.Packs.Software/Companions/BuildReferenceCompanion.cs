@@ -47,11 +47,12 @@ internal sealed class BuildReferenceCompanion(string name) : SoftwareCompanion(n
 
     private static string ClientOutcomes(JsonElement outcomes)
     {
-        var text = new StringBuilder("## Interrupted client requests\n\nAn interrupted client request writes its diagnostic to standard error. It does not emit a replacement JSON result on standard output. Existing command names, options, help and successful JSON responses are unchanged.\n\n| Outcome | Exit code | Diagnostic |\n|---|---|---|\n");
+        var text = new StringBuilder("## Interrupted client requests\n\n");
+        text.Append(DocumentMarkdown.Text(String(outcomes, "introduction"))).Append("\n\n| Outcome | Exit code | Diagnostic |\n|---|---|---|\n");
         foreach (JsonElement row in Array(outcomes, "rows")) text.Append("| ").Append(Code(String(row, "code"))).Append(" | ").Append(Code(Recorded(row, "exitCode"))).Append(" | ").Append(Code(String(row, "diagnostic"))).Append(" |\n");
         text.Append("\nWhen an effect may have happened, the diagnostic also says: ").Append(Code(String(outcomes, "uncertain"))).Append("\n\n")
-            .Append("A definite refusal keeps its diagnostic and exit code `2`; it is never called unavailable or of unknown outcome. Existing structured refusal responses keep their representation.\n\n")
-            .Append("Caller cancellation (including Ctrl+C for ordinary requests) and a per-operation deadline are separate outcomes. Cancellation does not undo an effect, and these clients do not retry it. Foreground worker following still interprets Ctrl+C as a request to stop the original run; runtime serving still interprets it as a request to stop the service. Their requests remain subject to deadlines.\n");
+            .Append(DocumentMarkdown.Text(String(outcomes, "refusal"))).Append("\n\n")
+            .Append(DocumentMarkdown.Text(String(outcomes, "cancellation"))).Append('\n');
         return text.ToString();
     }
 

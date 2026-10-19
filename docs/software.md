@@ -484,6 +484,7 @@ commit, even when the registered clone has a different head. A missing commit, s
 unavailable; the adapter neither fetches nor substitutes the checkout. The existing build tool's `compare` operation
 checks full output bytes, selected inputs, digests and membership as well as the public reference inventory.
 Hashing a hand-edited output or keeping its headings does not make it current.
+Both the candidate and retained build pins must be available locally; a shallow clone missing either is unavailable.
 
 For a serialized release, `generate --artifacts dist` additionally retains the SBOM, lock files, frozen index,
 documentation declarations, exact workflow originals and a capture from FIX-13's actual parser. It writes the

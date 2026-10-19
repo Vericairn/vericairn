@@ -59,6 +59,34 @@ public class SoftwareCompanionTests
     }
 
     [Fact]
+    public void ClientOutcomeProseComesFromTheRetainedBuildSnapshot()
+    {
+        string commands = JsonSerializer.Serialize(new
+        {
+            format = "vericairn.build-references/1", kind = "cli-reference", commit = Commit,
+            clientOutcomes = new
+            {
+                introduction = "Recorded introduction.", refusal = "Recorded refusal.", cancellation = "Recorded cancellation.",
+                uncertain = "Recorded uncertain effect.", rows = new[] { new { code = "fixture", exitCode = 7, diagnostic = "Exact diagnostic." } },
+            },
+        });
+        string text = Read(Render("cli-client-outcomes", "commands.json", File("commands.json", commands)));
+        Assert.Contains(DocumentMarkdown.Text("Recorded refusal."), text, StringComparison.Ordinal);
+        Assert.Contains("Recorded cancellation", text, StringComparison.Ordinal);
+        Assert.Contains("`7`", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Caller cancellation", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("exit code `2`", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CanonicalChecksumFixtureHasTheSameCompleteByteDigestOnEveryPlatform()
+    {
+        DocumentRendition output = Render("checksums", "SHA256SUMS", File("SHA256SUMS", new string('b', 64) + "  fixture.zip\n"));
+        Assert.Equal(DocumentGenerationStatus.Success, output.Status);
+        Assert.Equal("sha256:98235798476b3ede726e8a9a7b6a4e6299ef73db13eaa8c112384f81afd586e3", output.ContentHash);
+    }
+
+    [Fact]
     public void OpenApiIncludesSchemasReferencesExtensionsAndPathParametersWithoutGuessingDefaults()
     {
         const string api = """
