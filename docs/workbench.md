@@ -71,6 +71,9 @@ shows a bounded line comparison and the earlier rendition with its own historica
 basis. If a comparison exceeds its bound, both complete observed renditions remain
 available in separate tabs. A failed refresh, disconnect or access refusal clears
 the cached rendition, earlier text and source details and labels freshness unavailable.
+If the renderer alone is unavailable, Workbench can still show the exact record
+inspector after a separate successful runtime source-access check; it keeps the
+readable rendition labeled unavailable.
 
 The reader is a selectable text view with explicitly labeled source rows. Native
 screen-reader and desktop keyboard qualification must be observed on each platform;

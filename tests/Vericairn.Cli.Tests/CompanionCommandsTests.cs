@@ -6,8 +6,20 @@ using Vericairn.Records.Tests;
 namespace Vericairn.Cli.Tests;
 
 [Collection("cli")]
+[Trait("Journey", "D19-A")]
+[Trait("Journey", "D19-C")]
 public sealed class CompanionCommandsTests
 {
+    [Fact]
+    public void EveryNewVerbIsACommandClassInTheDocsFamily()
+    {
+        var docs = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken).Subcommands.Single(c => c.Name == "docs");
+        Assert.Equal("DocsCommand", docs.GetType().Name);
+        Assert.Equal("DocsCompanionsCommand", docs.Subcommands.Single(c => c.Name == "companions").GetType().Name);
+        Assert.Equal("DocsRenderCommand", docs.Subcommands.Single(c => c.Name == "render").GetType().Name);
+        Assert.Equal("DocsRegenerateCommand", docs.Subcommands.Single(c => c.Name == "regenerate").GetType().Name);
+    }
+
     [Fact]
     public void ReadersSelectExactRevisionsAndCompareOnlyNeverRepairs()
     {

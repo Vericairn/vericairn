@@ -78,7 +78,29 @@ public sealed class CompanionDocument(CompanionRequest request) : Document("Read
             next = next with { Snapshot = next.Generator == "vericairn.estate/manifest" ? coverage.ManifestSnapshot : coverage.Snapshot };
         }
         CompanionResponse response = await api.CompanionRenderAsync(next, cancellationToken).ConfigureAwait(true);
-        if (response.Status != "success") { Basis = "Unavailable. " + response.Reason; return; }
+        if (response.Status != "success")
+        {
+            Basis = "Unavailable. " + response.Reason;
+            if (next.Revision is { } exact)
+            {
+                // A missing specialist must not remove the source inspector. Resolve its access anew through the common reader.
+                CompanionResponse sourceBasis = await api.CompanionSourcesAsync(new("vericairn.records/items", "item", exact, Audience: next.Audience), cancellationToken).ConfigureAwait(true);
+                if (sourceBasis.Status == "success")
+                {
+                    RecordResponse? source = await api.RecordAsync(exact, cancellationToken).ConfigureAwait(true);
+                    if (source is not null && sourceBasis.Sources.Any(s => s.Identity == source.Id && s.Hash == source.Hash))
+                    {
+                        Request = next;
+                        SourceText = JsonSerializer.Serialize(source.Envelope, Pretty);
+                        foreach (CompanionSource row in sourceBasis.Sources) Sources.Add(new(row));
+                        SelectedSource = Sources.FirstOrDefault();
+                        Basis += "\nThe exact source is available for inspection; its lineage is " + sourceBasis.Currentness
+                            + " at snapshot " + sourceBasis.Snapshot + ". The readable rendition remains unavailable.";
+                    }
+                }
+            }
+            return;
+        }
         string inspected = string.Join('\n', response.Sources.Select(s => new CompanionSourceRow(s).AccessibleName));
         if (next.Revision is { } revision)
         {
@@ -94,7 +116,8 @@ public sealed class CompanionDocument(CompanionRequest request) : Document("Read
         Currentness = response.Currentness;
         Basis = response.Currentness + "; " + response.Completeness + "; page " + next.Page + "; audience " + response.Audience
             + "\nSnapshot: " + response.Snapshot + (response.Commit is null ? "" : "\nSource commit: " + response.Commit)
-            + "\nInput digest: " + response.InputDigest + "\nRendition hash: " + response.ContentHash;
+            + "\nInput digest: " + response.InputDigest + "\nRendition hash: " + response.ContentHash
+            + (response.Reason is null ? "" : "\n" + response.Reason);
         Text = WebUtility.HtmlDecode(response.Text ?? "");
         contentHash = response.ContentHash;
         SourceText = inspected;

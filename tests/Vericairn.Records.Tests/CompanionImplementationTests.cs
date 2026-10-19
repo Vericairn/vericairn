@@ -11,6 +11,8 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-C")]
+[Trait("Journey", "D19-I")]
 public class CompanionImplementationTests
 {
     public static IEnumerable<object[]> Generators => RevisionCompanionGenerator.Registers.Select(r => new object[] { r.Id })

@@ -52,6 +52,7 @@ internal static class CompanionReader
         {
             DocumentGenerationContext context;
             string currentness;
+            string? notice = null;
             if (request.Declaration is not null)
             {
                 if (request.Selection != "item" || request.Revision is not null || request.Field != "body" || request.Index != "all" || request.Page != 1
@@ -105,6 +106,13 @@ internal static class CompanionReader
                         || !descriptor.RecordTypes.Contains(record.Type)) return CompanionResponse.Unavailable("The exact revision selection is unavailable.");
                     sources = sources with { Sources = [DocumentSourceSnapshot.Record(record)] };
                     currentness = model.IsCurrent(record) ? "current" : "historical";
+                    var subjectFinding = model.Findings.FirstOrDefault(f => f.Location == record.ExpectedPath
+                        && f.Code is "record.subject-stale" or "record.subject-withdrawn");
+                    if (subjectFinding is not null)
+                    {
+                        currentness = "historical";
+                        notice = subjectFinding.Message;
+                    }
                     mode = request.Selection;
                     if (descriptor.RequiredPattern is not null)
                     {
@@ -125,15 +133,19 @@ internal static class CompanionReader
                         return Failure("error", "A collection requires an explicit snapshot and current or all-revisions selection.");
                     if (request.Selection == "current") sources = sources with { Sources = [.. sources.Sources.Where(s => model.IsCurrent(model.ById[s.Identity]))] };
                     currentness = request.Selection == "current" ? "current" : "historical";
+                    if (descriptor.Id == "vericairn.records/items" && request.Selection == "current")
+                        notice = "The runtime selected current lineage revisions at this exact snapshot. The generator restates their immutable fields; it makes no live status judgment.";
                     mode = "list";
                     if (descriptor.RequiredPattern is not null) parameters["selection"] = request.Selection;
                 }
-                if (descriptor.Id == "vericairn.records/items")
+                if (descriptor.RequiredPattern is null)
                 {
-                    parameters["selection"] = mode;
-                    parameters["field"] = request.Field;
-                    parameters["index"] = request.Index;
-                    parameters["page"] = request.Page.ToString(CultureInfo.InvariantCulture);
+                    if (descriptor.Inputs.ContainsKey("selection")) parameters["selection"] = mode;
+                    if (descriptor.Inputs.ContainsKey("field")) parameters["field"] = request.Field;
+                    else if (request.Field != "body") return Failure("error", "This reader does not select nested fields.");
+                    if (descriptor.Inputs.ContainsKey("index")) parameters["index"] = request.Index;
+                    else if (request.Index != "all") return Failure("error", "This reader does not select nested members.");
+                    if (descriptor.Inputs.ContainsKey("page")) parameters["page"] = request.Page.ToString(CultureInfo.InvariantCulture);
                 }
                 context = new(DocumentGeneration.InterfaceVersion, descriptor, parameters.ToImmutableDictionary(StringComparer.Ordinal), mode, null, sources.Sources)
                 { SnapshotIdentity = request.Revision is null ? snapshot : null, Page = request.Page };
@@ -150,7 +162,7 @@ internal static class CompanionReader
                 return new(1, Status(rendition.Status), "unavailable", "unavailable", "Internal", snapshot, request.Commit, Describe(descriptor), basis, null, null, null, rendition.Reason);
             string completeness = descriptor.RequiredPattern is not null && request.Revision is not null ? "bounded-overview" : "selected-page";
             return new(1, "success", currentness, render ? completeness : "source-basis", "Internal", snapshot, request.Commit, Describe(descriptor), basis,
-                context.InputDigest, rendition?.ContentHash, rendition is null ? null : Encoding.UTF8.GetString(rendition.Bytes.AsSpan()), null);
+                context.InputDigest, rendition?.ContentHash, rendition is null ? null : Encoding.UTF8.GetString(rendition.Bytes.AsSpan()), notice);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -162,7 +174,8 @@ internal static class CompanionReader
     {
         if (request.Audience != "Internal") return UnavailableComparison();
         RecordEnvelope[] declarations = model.Current("living-document").Where(d => d.Id == request.Selection
-            || DocumentPatterns.Destination(d) == request.Selection || GeneratedDocumentContract.Owns(d, request.Selection)).ToArray();
+            || DocumentPatterns.Destination(d) == request.Selection || GeneratedDocumentContract.RetirementPath(d) == request.Selection
+            || GeneratedDocumentContract.Owns(d, request.Selection)).ToArray();
         if (declarations.Length != 1) return new(1, "error", "unavailable", null, null, [], ["Select one declared document or register."]);
         RecordEnvelope declaration = declarations[0];
         string snapshot = DocumentOnDemand.RecordSnapshot(model);

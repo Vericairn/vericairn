@@ -15,6 +15,7 @@ namespace Vericairn.Runtime.Tests;
 public sealed class CompanionReadTests
 {
     [Fact]
+    [Trait("Journey", "D19-A")]
     public void ExactRevisionNeverFollowsItsSuccessorAndReadingWritesNoRecords()
     {
         using var fixture = new PolicyFixture();
@@ -40,6 +41,8 @@ public sealed class CompanionReadTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-A")]
+    [Trait("Journey", "D19-D")]
     public void CollectionsRequireTheExactSnapshotAndKeepEmptyDistinctFromUnavailable()
     {
         using var fixture = new PolicyFixture();
@@ -62,6 +65,8 @@ public sealed class CompanionReadTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-A")]
+    [Trait("Journey", "D19-F")]
     public void ManifestAndNestedSourceViewsRetainTheirExactBasis()
     {
         using var fixture = new PolicyFixture();
@@ -81,6 +86,8 @@ public sealed class CompanionReadTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-C")]
+    [Trait("Journey", "D19-D")]
     public void CompareFindsMissingChangedAndUnexpectedMembersWithoutRepairOrPins()
     {
         using var fixture = new PolicyFixture();
@@ -89,6 +96,7 @@ public sealed class CompanionReadTests
         int records = fixture.Estate.Load().Records.Count;
         CompanionComparison missing = service.CompanionCompare(new(declaration.Id));
         Assert.Equal("missing", Assert.Single(missing.Differences).Change);
+        Assert.Equal(missing.Differences, service.CompanionCompare(new("docs/registers/decisions")).Differences);
         Assert.False(Directory.Exists(Path.Combine(fixture.Estate.Root, "docs")));
         DocumentChangePlan repaired = DocumentRepairWriter.Repair(service.Session, declaration.Id);
         Assert.Empty(repaired.Problems);
@@ -109,6 +117,7 @@ public sealed class CompanionReadTests
     [Theory]
     [InlineData("Public")]
     [InlineData("Members only")]
+    [Trait("Journey", "D19-E")]
     public void UnsupportedAudienceRevealsNoTitlesHashesCountsOrChangedHiddenBasis(string audience)
     {
         using var fixture = new PolicyFixture();
@@ -126,6 +135,8 @@ public sealed class CompanionReadTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-E")]
+    [Trait("Journey", "D19-H")]
     public void DeviceAccessAndLocalOnlyScopeAreRecheckedForEveryRead()
     {
         using var fixture = new PolicyFixture();

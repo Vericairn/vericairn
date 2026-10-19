@@ -60,6 +60,7 @@ public sealed class PolicyReadTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-H")]
     public void WritingEntriesKeepCountsExactLocationsAndRemovedHistory()
     {
         using var fixture = new PolicyFixture();

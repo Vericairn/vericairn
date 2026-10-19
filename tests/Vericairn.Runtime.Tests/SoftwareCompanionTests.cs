@@ -12,6 +12,8 @@ using Vericairn.Records.Hashing;
 
 namespace Vericairn.Runtime.Tests;
 
+[Trait("Journey", "D19-C")]
+[Trait("Journey", "D19-G")]
 public class SoftwareCompanionTests
 {
     internal static readonly string Commit = new('a', 40);

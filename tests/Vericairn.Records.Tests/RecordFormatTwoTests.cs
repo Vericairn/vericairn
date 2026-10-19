@@ -9,6 +9,7 @@ using Vericairn.Records.Model;
 namespace Vericairn.Records.Tests;
 
 /// <summary>Record format 2: a record states its format and follows that format's rules; nothing written before changes.</summary>
+[Trait("Journey", "D19-I")]
 public class RecordFormatTwoTests
 {
     [Fact]

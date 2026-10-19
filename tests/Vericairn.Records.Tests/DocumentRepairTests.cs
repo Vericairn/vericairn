@@ -9,6 +9,8 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-C")]
+[Trait("Journey", "D19-I")]
 public class DocumentRepairTests
 {
     [Fact]

@@ -8,6 +8,8 @@ using Vericairn.Sdk;
 namespace Vericairn.Daemon.Tests;
 
 [Collection("daemon")]
+[Trait("Journey", "D19-A")]
+[Trait("Journey", "D19-E")]
 public sealed class CompanionApiTests
 {
     public CompanionApiTests() => DaemonTestHome.Ensure();

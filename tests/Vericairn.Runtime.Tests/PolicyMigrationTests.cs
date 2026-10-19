@@ -16,6 +16,7 @@ public sealed class UpgradeTestGroup;
 
 /// <summary>Format-3 compatibility is exercised only on disposable fixture estates.</summary>
 [Collection("upgrade")]
+[Trait("Journey", "D19-I")]
 public class PolicyMigrationTests
 {
     [Fact]

@@ -13,6 +13,8 @@ using Vericairn.Runtime.Service;
 namespace Vericairn.Workbench.Tests;
 
 [Collection("workbench")]
+[Trait("Journey", "D19-A")]
+[Trait("Journey", "D19-E")]
 public sealed class CompanionTests(HeadlessFixture fixture)
 {
     [Fact]
@@ -54,6 +56,26 @@ public sealed class CompanionTests(HeadlessFixture fixture)
         Assert.Empty(page.PreviousText);
         Assert.Empty(page.Sources);
         Assert.DoesNotContain(written.Written.Hash, page.Basis, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Journey", "D19-F")]
+    public async Task AMissingReaderRetainsTheAuthorizedExactSourceInspector()
+    {
+        string root = Seed.Temp("companion-unavailable-reader");
+        string person = Seed.Init(root);
+        using EstateService service = EstateService.Open(root);
+        var page = new CompanionDocument(new("example.journeys/removed", "item", person));
+        await fixture.UiAsync(() => page.RefreshAsync(service, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Equal("unavailable", page.Currentness);
+        Assert.Empty(page.Text);
+        Assert.Contains(person, page.SourceText, StringComparison.Ordinal);
+        Assert.Equal(service.Record(person)!.Hash, Assert.Single(page.Sources).Source.Hash);
+        Assert.Contains("rendition remains unavailable", page.Basis, StringComparison.Ordinal);
+        using (service.ForDeviceRequest("unavailable-device", "unavailable-key"))
+            await fixture.UiAsync(() => page.RefreshAsync(service, cancellationToken: TestContext.Current.CancellationToken));
+        Assert.Empty(page.SourceText);
+        Assert.Empty(page.Sources);
     }
 
     [Fact]

@@ -12,6 +12,7 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-C")]
 public class DocumentRenderingTests
 {
     [Fact]

@@ -40,7 +40,9 @@ Responses identify the audience, exact source ids and hashes, record lineage at
 the selected snapshot, generator implementation, input digest and rendition hash.
 `current` describes the selected record lineage or collection observation;
 `historical` describes an earlier revision, an all-revisions collection or a fixed
-declared source basis. Neither label is an acceptance. Completeness is explicit:
+declared source basis. A judgment about a superseded or withdrawn subject is also
+historical; the response carries the owning model's explanation. Neither label is
+an acceptance. Completeness is explicit:
 `selected-page`, `bounded-overview`, `source-basis`, or `unavailable`; the rendition
 labels its page or partial overview and how to inspect complete authoritative detail.
 

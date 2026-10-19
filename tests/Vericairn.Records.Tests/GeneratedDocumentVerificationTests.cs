@@ -10,6 +10,8 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-B")]
+[Trait("Journey", "D19-I")]
 public class GeneratedDocumentVerificationTests
 {
     [Fact]

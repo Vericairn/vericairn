@@ -11,6 +11,7 @@ using Vericairn.Runtime.Policies;
 
 namespace Vericairn.Runtime.Tests;
 
+[Trait("Journey", "D19-H")]
 public class PolicyExceptionEvaluationTests
 {
     [Fact]

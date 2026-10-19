@@ -8,6 +8,8 @@ using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
 
+[Trait("Journey", "D19-D")]
+[Trait("Journey", "D19-I")]
 public class DocumentGenerationTests
 {
     internal const string Pattern = "docs/registers/decisions/{month}/{date}-{slug}-{id}.md";

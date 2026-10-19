@@ -111,6 +111,7 @@ public class DocsTests
     }
 
     [Fact]
+    [Trait("Journey", "D19-G")]
     public void TheBuildToolingWritesTheReferencesAndTheManifestFromThisBuild()
     {
         string output = CliHarness.TempDirectory("docs-generate");
@@ -133,6 +134,10 @@ public class DocsTests
                 Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.Contains("docs check", commands);
+            Assert.Contains("docs companions", commands);
+            Assert.Contains("docs render", commands);
+            foreach (string route in new[] { "/v1/companions", "/v1/companions/render", "/v1/companions/sources", "/v1/companions/compare" })
+                Assert.Contains("GET " + route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.DoesNotContain("docs generate", commands);
             Assert.Contains("release providers", commands);
             Assert.Contains("records new", commands);
@@ -184,6 +189,44 @@ public class DocsTests
         {
             Directory.Delete(output, recursive: true);
         }
+    }
+
+    [Fact]
+    [Trait("Journey", "D19-G")]
+    public void ANewFixtureSetCanBeFrozenWithoutChangingTheEarlierSetOrItsDigests()
+    {
+        string root = CliHarness.TempDirectory("companion-frozen-sets");
+        try
+        {
+            string earlier = Path.Combine(root, "0.1.0"), next = Path.Combine(root, "0.2.0");
+            Directory.CreateDirectory(earlier);
+            string oldFile = Path.Combine(earlier, "reference.md");
+            File.WriteAllText(oldFile, "# Earlier retained fixture\n");
+            byte[] oldBytes = File.ReadAllBytes(oldFile);
+            string oldHash = Vericairn.Records.Hashing.ContentHash.Sha256(oldBytes);
+            var sets = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal)
+            {
+                ["0.1.0"] = new(StringComparer.Ordinal) { ["reference.md"] = oldHash },
+            };
+            string index = Path.Combine(root, "frozen-sha256.json");
+            File.WriteAllText(index, JsonSerializer.Serialize(new { format = "vericairn.frozen-docs/1", sets }));
+            string declaration = Declaration(next);
+            (int generated, string details) = Tool(() => ReferenceSet.Generate(next, declaration, json: true));
+            Assert.True(generated == 0, details);
+            Assert.Equal(0, Tool(() => ReferenceSet.CompareWithBuild(next, json: true)).Code);
+            sets["0.2.0"] = Directory.EnumerateFiles(next, "*", SearchOption.AllDirectories).ToDictionary(
+                p => Path.GetRelativePath(next, p).Replace('\\', '/'), Vericairn.Records.Hashing.ContentHash.Sha256File, StringComparer.Ordinal);
+            File.WriteAllText(index, JsonSerializer.Serialize(new { format = "vericairn.frozen-docs/1", sets }));
+            byte[] frozen = File.ReadAllBytes(index);
+            Assert.NotEqual(0, Tool(() => ReferenceSet.Generate(earlier, declaration, json: true)).Code);
+            Assert.NotEqual(0, Tool(() => ReferenceSet.Generate(next, declaration, json: true)).Code);
+            Assert.Equal(frozen, File.ReadAllBytes(index));
+            Assert.Equal(oldBytes, File.ReadAllBytes(oldFile));
+            Assert.Equal(oldHash, sets["0.1.0"]["reference.md"]);
+            Assert.All(sets["0.2.0"], member => Assert.Equal(member.Value,
+                Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(next, member.Key))));
+        }
+        finally { CliHarness.Delete(root); }
     }
 
     [Fact]
