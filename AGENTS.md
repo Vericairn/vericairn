@@ -31,6 +31,10 @@ Claude Code registers it with `claude mcp add vericairn -- vericairn --estate <e
 
 | Tool | Access | What it returns |
 |---|---|---|
+| `docs_companions` | read | Installed readable coverage, exact collection snapshots and declared destinations. Local inspector metadata grants no remote inspection access. |
+| `docs_render` | read | Render one permitted exact revision or snapshot. The runtime resolves access before generating. A rendition grants no authority or authored clearance. |
+| `docs_sources` | read | Inspect the exact authorized source basis for a reader selection without generating. Local-only inspectors remain local. |
+| `docs_compare` | read | Fresh byte and complete membership comparison for a declared generated document or register. Writes no repair, output pin, review or record. |
 | `policies_list` | read | Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record. |
 | `policy_kinds` | read | Installed policy kind versions, implementation hashes, selections, sources and bounds. |
 | `policy_access` | read | Policy write actions currently admitted for the connected principal. Exact bounds are rechecked for every write. |
