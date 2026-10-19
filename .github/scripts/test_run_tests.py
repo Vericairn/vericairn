@@ -13,7 +13,8 @@ import unittest
 SCRIPT = Path(__file__).with_name("run-tests.py")
 
 # A stand-in dotnet: the first run prints the scenario's output and exit code; a retry (--filter-method) records its
-# filter and exits as the scenario says. Output imitates the test platform's lines, colour codes included.
+# filter and exits as the scenario says. Output imitates the test platform's lines, colour codes included: each failed
+# test, each assembly's result as it finishes, and a summary that repeats every assembly's result.
 FAKE = textwrap.dedent('''\
     #!/usr/bin/env python3
     import os, sys
@@ -22,8 +23,15 @@ FAKE = textwrap.dedent('''\
     def failed(name, assembly="Vericairn.Cli.Tests"):
         print("\\x1b[31mfailed " + name + " (12ms)\\x1b[m")
         print("  from /work/artifacts/bin/" + assembly + "/release/" + assembly + ".dll (net10.0|x64)")
-    def errors(count, assembly="Vericairn.Cli.Tests"):
-        print("/work/artifacts/bin/" + assembly + "/release/" + assembly + ".dll (net10.0|x64) failed with " + str(count) + " error(s) (1m 2s)")
+    def result(outcome, assembly="Vericairn.Cli.Tests"):
+        return "/work/artifacts/bin/" + assembly + "/release/" + assembly + ".dll (net10.0|x64) " + outcome
+    def finish(results, failures, code=2):
+        for line in results: print(line)
+        print(""); print("Test run summary: Failed!")
+        for line in results: print("  " + line)
+        print(""); print("  total: 40"); print("  failed: " + str(failures)); print("  succeeded: " + str(40 - failures))
+        print("Test run completed with non-success exit code: " + str(code)); sys.exit(code)
+    passed = result("passed (5s 1ms)", "Vericairn.Records.Tests")
     if "--filter-method" in args:
         with open(os.path.join(state, "retries"), "a") as out:
             out.write(args[args.index("--filter-method") + 1] + " " + args[args.index("--project") + 1] + "\\n")
@@ -33,16 +41,23 @@ FAKE = textwrap.dedent('''\
     if scenario == "unicode":
         sys.stdout.buffer.write("skipped Vericairn.Records.Tests.TextTests.Keeps(text: \\"Cafe\\u0301\\") \\u2713\\n".encode("utf-8")); sys.exit(0)
     if scenario in ("flaky", "persistent"):
-        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); errors(1); sys.exit(2)
+        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 1 error(s) (1m 2s)"), passed], 1)
     if scenario == "crash":
-        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); errors(2); sys.exit(2)
+        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 2 error(s) (1m 2s)"), passed], 2)
+    if scenario == "unfinished":
+        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route")
+        finish([result("failed with 1 error(s) (1m 2s)"), result("crashed (3s)", "Vericairn.Runtime.Tests")], 1)
+    if scenario == "aborted":
+        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 1 error(s) (1m 2s)")], 1, code=3)
+    if scenario == "uncounted":
+        failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); finish([result("failed with 1 error(s) (1m 2s)"), passed], 2)
     if scenario == "many":
         for i in range(6): failed("Vericairn.Cli.Tests.ManyTests.Case" + str(i))
-        errors(6); sys.exit(2)
+        finish([result("failed with 6 error(s) (1m 2s)")], 6)
     if scenario == "theory":
         failed('Vericairn.Runtime.Tests.SdkTests.Preserves(kind: "json")', "Vericairn.Runtime.Tests")
         failed('Vericairn.Runtime.Tests.SdkTests.Preserves(kind: "io")', "Vericairn.Runtime.Tests")
-        errors(2, "Vericairn.Runtime.Tests"); sys.exit(2)
+        finish([result("failed with 2 error(s) (1m 2s)", "Vericairn.Runtime.Tests"), passed], 2)
     print("error: the build output is missing"); sys.exit(1)
     ''')
 
@@ -87,6 +102,21 @@ class RetryRunnerTests(unittest.TestCase):
 
     def test_errors_the_named_failures_do_not_account_for_are_not_retried(self):
         code, out, retries, summary = self.run_scenario("crash")
+        self.assertEqual((2, [], ""), (code, retries, summary))
+        self.assertIn("Not retried", out)
+
+    def test_an_assembly_that_did_not_finish_is_not_retried(self):
+        code, out, retries, summary = self.run_scenario("unfinished")
+        self.assertEqual((2, [], ""), (code, retries, summary))
+        self.assertIn("Not retried", out)
+
+    def test_a_run_that_ended_for_another_reason_is_not_retried(self):
+        code, out, retries, summary = self.run_scenario("aborted")
+        self.assertEqual((3, [], ""), (code, retries, summary))
+        self.assertIn("Not retried", out)
+
+    def test_a_failed_total_beyond_the_named_failures_is_not_retried(self):
+        code, out, retries, summary = self.run_scenario("uncounted")
         self.assertEqual((2, [], ""), (code, retries, summary))
         self.assertIn("Not retried", out)
 
