@@ -185,7 +185,9 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
                 errors = findings.Errors,
                 warnings = findings.Warnings,
                 findings = findings.Findings.Select(f => new { severity = f.Severity, f.Code, f.Location, f.Message }),
-            }));
+                policies = findings.Policies,
+                writingExceptions = findings.WritingExceptions,
+            }, ProtocolJson.Options));
         }
         else
         {
@@ -195,6 +197,8 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             }
 
             Output.WriteLine($"{findings.Summary}: {findings.Errors} errors, {findings.Warnings} warnings");
+            if (findings.Policies is { } policies) Output.Write(policies.Text);
+            if (findings.WritingExceptions is { } writing) Output.Write(writing.Text);
         }
 
         return findings.Errors > 0 ? HasErrors : Clean;

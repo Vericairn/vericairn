@@ -22,6 +22,9 @@ public sealed class PolicyCommandsTests
         Assert.Contains("Basis sha256:", CliHarness.Ok("--estate", root, "policies", "show", "maintenance").Out, StringComparison.Ordinal);
         Assert.Contains("recurring-duty", CliHarness.Ok("--estate", root, "policies", "kinds").Out, StringComparison.Ordinal);
         Assert.Contains("Writing exceptions", CliHarness.Ok("--estate", root, "estate", "writing-exceptions", "list").Out, StringComparison.Ordinal);
+        Assert.Equal(list.Json.GetProperty("basis").GetProperty("digest").GetString(), CliHarness.Ok("--estate", root, "estate", "check", "--json").Json.GetProperty("policies").GetProperty("basis").GetProperty("digest").GetString());
+        Assert.Contains("Policies\n", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+        Assert.Contains("Writing exceptions\n", CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
         Assert.Equal(2, CliHarness.Run("--estate", root, "policies", "show", "absent").Code);
         Assert.Equal(2, CliHarness.Run("--estate", root, "estate", "writing-exceptions", "show", "absent").Code);
         Assert.Equal(before, fixture.Estate.Load().Records.Count);

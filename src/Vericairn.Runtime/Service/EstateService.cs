@@ -102,13 +102,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            FindingList checks = ChecksWithBatches(model);
+            PolicySections sections = ReadPolicySections(model);
+            FindingList checks = SectionChecks(model, ChecksWithBatches(model), sections);
             JsonObject json = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
+            AddPolicySections(json, sections);
             // Status is portable: neither the progress projection nor the run projection may read local worker state.
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
                 includeLocalObservations: false), ProtocolJson.Options);
-            return new StatusResponse(EstateStatus.Render(model, checks), Element(json), model.Findings.HasErrors || checks.HasErrors);
+            return new StatusResponse(EstateStatus.Render(model, checks) + "\n" + sections.Policies.Text + "\n" + sections.Exceptions.Text + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 
@@ -127,12 +129,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
+        PolicySections sections = ReadPolicySections(model);
+        checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
+        AddPolicySections(json, sections);
         List<WorkProgressClaim> claims = ProgressClaims(model);
         json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
         List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
         json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
-        string text = ProgressReport.Render(model, checks);
+        string text = ProgressReport.Render(model, checks) + OperatorDutyText(sections) + "\n" + sections.Policies.Text + "\n" + sections.Exceptions.Text;
         if (claims.Count > 0)
         {
             text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
@@ -187,15 +192,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            PolicySections sections = ReadPolicySections(model);
             var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(ChecksWithBatches(model)))
+            foreach (Finding finding in model.Findings.Concat(SectionChecks(model, ChecksWithBatches(model), sections)))
             {
                 all.Add(finding);
             }
 
             ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
 
-            return ToFindings(all, $"{model.Records.Count} records");
+            return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
     }
 

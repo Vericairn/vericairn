@@ -34,6 +34,9 @@ public sealed class PolicyApiTests
         Assert.Equal("conflict", client.WritingExceptionAdd(new(fixture.Estate.OperatorId, PolicyFixture.Element(PolicyFixture.WritingBody()), "stale")).Problem!.Code);
         Assert.Equal("conflict", client.PolicyRevise("maintenance", new(fixture.Estate.OperatorId, fixture.Estate.Load().Current("estate-policy").Single().Body, "stale")).Problem!.Code);
         Assert.Contains("declare", client.PolicyAccess(fixture.Estate.OperatorId));
+        Assert.Equal(client.Policies().Basis.Digest, client.Check().Policies!.Basis.Digest);
+        Assert.Equal(client.Policies().Basis.Digest, client.Status().Json.GetProperty("policies").GetProperty("basis").GetProperty("digest").GetString());
+        Assert.Contains("Writing exceptions\n", client.Progress().Text, StringComparison.Ordinal);
         Assert.Equal(before, fixture.Estate.Load().Records.Count);
     }
 }

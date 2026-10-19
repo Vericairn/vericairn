@@ -79,3 +79,6 @@ public sealed record WritingExceptionRemoveRequest(string By, string Expected, s
 
 /// <summary>Place a work revision in one release plan or backlog. ExpectedSelection pins the current carrier or placement policy.</summary>
 public sealed record WorkPlaceRequest(string By, string Expected, string ExpectedSelection, string? ReleasePlan = null, string? Backlog = null);
+
+/// <summary>An unfinished duty waiting on an operator, with its unchanged owner and actual occurrence-linked asks.</summary>
+public sealed record OperatorDutyDto(string Operator, string Owner, PolicyFindingDto Finding, IReadOnlyList<PolicyRecordReference> Asks, string Preparation);

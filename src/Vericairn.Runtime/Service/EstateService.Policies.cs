@@ -68,6 +68,11 @@ public sealed partial class EstateService
             EstateModel.BodyString(candidate, "version") ?? "", EstateModel.BodyString(candidate, "commit") ?? "");
         PolicyBasis basis = PolicySnapshot(model, registry, asOf, submission, preview: asOf is not null || release is not null);
         PolicyEvaluation evaluated = PolicyEvaluator.Evaluate(basis, registry);
+        return PolicyView(model, basis, evaluated, selected, problem);
+    }
+
+    private PolicyResponse PolicyView(EstateModel model, PolicyBasis basis, PolicyEvaluation evaluated, RecordEnvelope? selected = null, Problem? problem = null)
+    {
         PolicyFinding[] findings = evaluated.Findings.Where(f => selected is null || f.PolicyIdentity == PolicyWork.Identity(model, selected)).ToArray();
         RecordEnvelope[] policies = model.Current("estate-policy").Where(p => selected is null || p.Id == selected.Id)
             .OrderBy(p => EstateModel.BodyString(p, "key"), StringComparer.Ordinal).ThenBy(p => p.Id, StringComparer.Ordinal).ToArray();
@@ -84,6 +89,11 @@ public sealed partial class EstateService
     {
         PolicyBasis basis = PolicySnapshot(model, PolicySources.Registry());
         WritingEvaluation evaluated = WritingEvaluation.Evaluate(basis);
+        return WritingView(model, basis, evaluated, selected);
+    }
+
+    private WritingExceptionsResponse WritingView(EstateModel model, PolicyBasis basis, WritingEvaluation evaluated, RecordEnvelope? selected = null)
+    {
         HashSet<string>? chain = selected is null ? null : model.Chain(selected).ToHashSet(StringComparer.Ordinal);
         WritingOccurrenceDto Occurrence(WritingOccurrence item) => new(ConvertPolicy<WritingLocationDto>(item.Location),
             new(item.Occurrence.Token, item.Occurrence.Line, item.Occurrence.ByteOffset, item.Occurrence.ByteLength, PolicyDiagnostic(item.Occurrence.Diagnostic)),

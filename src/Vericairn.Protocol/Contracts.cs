@@ -62,7 +62,7 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
 /// <param name="ProcessId">Process id.</param>
 public sealed record HealthResponse(string Api, string Vericairn, string Estate, string Root, string Profile, long RecordFormat, string StartedAt, int ProcessId);
 
-/// <summary>The estate's status: human text and canonical JSON, identical on every machine for the same records. Its compact attention references are derived from records alone.</summary>
+/// <summary>The estate's status: human text and canonical JSON. Compact attention derives from records alone; policy and writing sections identify their complete record and repository basis.</summary>
 /// <param name="Text">Rendered status.</param>
 /// <param name="Json">Canonical status document.</param>
 /// <param name="HasErrors">Whether errors exist.</param>
@@ -84,7 +84,10 @@ public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErr
 /// <param name="Errors">Error count.</param>
 /// <param name="Warnings">Warning count.</param>
 /// <param name="Findings">Sorted findings.</param>
-public sealed record FindingsResponse(string Summary, int Errors, int Warnings, IReadOnlyList<FindingDto> Findings);
+/// <param name="Policies">The same policy snapshot displayed by status and progress, when checking.</param>
+/// <param name="WritingExceptions">Entries, counts and occurrences from that snapshot, when checking.</param>
+public sealed record FindingsResponse(string Summary, int Errors, int Warnings, IReadOnlyList<FindingDto> Findings,
+    PolicyResponse? Policies = null, WritingExceptionsResponse? WritingExceptions = null);
 
 /// <summary>A record as stored.</summary>
 /// <param name="Path">Repository-relative path.</param>
