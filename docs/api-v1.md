@@ -1,9 +1,9 @@
 # API version 1
 
-The development build for 0.8.0 adds policy and writing-exception reads under
+Vericairn 0.8.0 adds policy and writing-exception reads under
 `/v1/estate-policies` and `/v1/writing-exceptions`. [Inspecting estate policies](policies.md)
 lists every route and SDK method, their asynchronous counterparts, explicit preview inputs,
-typed duty evidence and read-only behavior. These additions do not change a frozen release set.
+typed duty evidence, signed writes and read-only inspection behavior.
 
 Duty result submission preserves the complete `body.duties` array and requires `expected`, the current
 attempt hash, at `POST /v1/work/result`. `POST /v1/work/review` takes `ResultReviewRequest`: `result`,
@@ -13,19 +13,17 @@ with the retained original basis, bytes and findings, or 404 for a missing or un
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This maintained document describes 0.7.3: independent worker repositories (FIX-19), machine-local
-release notices (UPDATE-01), command-audit corrections (FIX-20), safe concurrent use of loaded and
-rotated TLS certificates (FIX-21), and compact current attention (FIX-22). Release checks add no estate
-API route and do not run through ordinary SDK calls. The existing 0.7.2 fixes remain:
-FIX-13 adds exact-commit release document checks
-and settlement of process attention asks; FIX-15 claims dispatch identities before provider effects;
-FIX-16 validates before publishing records and exposes unreadable recovery journals; FIX-18 adds
-Codex max effort, run-owned execution observations and corrected worker signals. FIX-14 hardens the
-CLI/runtime export restore path without adding an HTTP restore route. API v1 remains additive and
-record format 2 is unchanged. The 0.7.0 candidate's features shipped in 0.7.1 with FIX-12;
-the release index retains the withdrawn candidates' history. All eight 0.7.2 NuGet packages are published;
-the [release index](https://github.com/Vericairn/vericairn/blob/main/docs/releases/README.md#nuget-publication-setup)
-records the publication sequence. Availability of 0.7.3 packages follows its own publication workflow.
+This document describes 0.8.0. It adds policy and writing-exception authoring, typed duty evidence,
+readable companions, checked repository changes and the operator's signed record action. Every
+`IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
+See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
+and [API compatibility](api-compatibility-0.8.0.md) for the shared-value and option ownership changes.
+The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
+The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
+Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
+record-publication, certificate and attention corrections remain. Release notices add no estate
+API route and ordinary SDK calls do not initiate the daily release check. 0.8.0 package availability
+requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
 (`IEstateApi`), the request and response types, the `Problem` shape and the OpenAPI document
@@ -37,7 +35,7 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
-## Checked repository changes (unreleased addition)
+## Checked repository changes (0.8.0)
 
 | Route | Request | SDK method |
 |---|---|---|
@@ -132,7 +130,7 @@ Optional documents retain their working-tree-only selection and retrieval,
 including pins without the history marker. No object-store fallback, retained
 manifest, newer revision or older revision with different bytes is substituted.
 Unavailable required originals prevent a package with `context.original-unavailable`;
-retrieval returns `original-unavailable`. The earlier unreleased manifest/source
+retrieval returns `original-unavailable`. The earlier manifest/source
 route remains callable but returns unavailable after access checking; prepare
 again for a self-contained pin. The SDK exposes both API v1 routes. No new record
 type is introduced. Remote is not built.
@@ -231,7 +229,7 @@ files, registered clones or installed contributions differ.
 
 | Profile | Transport | Authentication |
 |---|---|---|
-| Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `/tmp/vericairn-<user>`), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
+| Local socket | A Unix domain socket in the user's runtime directory (`$XDG_RUNTIME_DIR/vericairn`, else `$TMPDIR/vericairn`, else `vericairn-<user>` below the system temporary directory), owner-only; a named pipe on Windows | Operating-system identity: only the same user reaches the socket |
 | Loopback | TLS 1.2 only on `127.0.0.1` with an ephemeral port, pinned to the runtime certificate | Device-signed requests |
 | Local network, from 0.6.0 | Mutual TLS 1.2 at the address and port the operator configured; off unless configured, and on a wildcard or public address only when the operator allows it | A paired device: a client certificate its device key issued, the runtime identity's proof on every connection, and device-signed requests bound to the estate and the runtime identity, under the device's permitted profiles |
 
@@ -622,7 +620,7 @@ pairing does not qualify a Remote client.
 | `GET /v1/validate`, `GET /v1/check` | Findings of validation, and of validation plus the repository checks. `record.subject-stale` and `acceptance.unresolved` apply only while the referring record is current; superseded judgments retain historical integrity validation but no longer need reconsideration. A stale replacement is still flagged. |
 | `GET /v1/records/{id}` | A record with its path, hash, whether it is current, and the whole envelope |
 | `GET /v1/records?type=<type>` | The current records of one type, oldest first, each with its envelope; empty for a type with none |
-| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), it is written unsigned, except an admission from record format 2, which is always signed. The proposed estate is validated before publication; refusal publishes no invalid record. |
+| `POST /v1/records` | Author a record (`NewRecordRequest`): signed with the author's admitted device held on the runtime's machine. When none is held and the estate's policy leaves signatures optional (the default), unsigned authoring is available only where the record type permits it. Admissions from format 2 and the format-3 policy, duty and generated-declaration actions retain their mandatory signature rules. The proposed estate is validated before publication; refusal publishes no invalid record. |
 | `GET /v1/decisions`, `GET /v1/decisions/{id}` | Current decisions; one decision by the id of any revision |
 | `GET /v1/work/{key}/brief`, `GET /v1/work/{key}` | The brief of a work order; what an observer sees |
 | `POST /v1/work/assign`, `attempt`, `result`, `amend` | Delegate, start, submit, request an amendment |
@@ -631,7 +629,7 @@ pairing does not qualify a Remote client.
 | `GET /v1/devices`, `POST /v1/devices`, `POST /v1/devices/admit`, `POST /v1/devices/revoke`, `POST /v1/devices/rename`, `POST /v1/devices/rotate`, `POST /v1/devices/recovery` | Devices and admission; a device is created, renamed and rotated on the machine that holds its key, and the operator's recovery device is made there and its key written once for offline keeping. Admit and revoke accept the recovery key's path and passphrase. From 0.6.0 each `DeviceRow` gives the device's permitted `profiles`; a device on another machine is recorded by pairing. |
 | `GET /v1/releases`, `POST /v1/estate/upgrade` | Release records; plan (`check`) or apply an upgrade to a published release (applying is refused over the local network) |
 | `GET /v1/documents` | The declared living documents (`DocumentRow`: path, repository, declaration, title, state current, due or unavailable, level, reasons, latest clearance, unavailable contributions, notes) |
-| `GET /v1/companions` | In the development build for 0.8.0: installed readable coverage, generator contracts, exact record and manifest snapshots, and current declared destinations (`CompanionsResponse`). Possible destinations are not adoption. |
+| `GET /v1/companions` | In 0.8.0: installed readable coverage, generator contracts, exact record and manifest snapshots, and current declared destinations (`CompanionsResponse`). Possible destinations are not adoption. |
 | `GET /v1/companions/render` | Render one permitted explicit revision or collection snapshot (`CompanionRequest` query; `CompanionResponse`). The runtime resolves device and source access before generating. |
 | `GET /v1/companions/sources` | Inspect the identical permitted source selection without generating (`CompanionRequest` query; `CompanionResponse` with no text or rendition hash). |
 | `GET /v1/companions/compare` | Compare fresh generated bytes and complete membership for a declaration (`CompanionCompareRequest` query; `CompanionComparison`). Writes no output, pin, journal or clearance. |
@@ -670,7 +668,7 @@ Restore, `recover compare`, `docs notes` and repairing `docs regenerate` do not 
 creates another copy. The other three load this copy (and, for compare, the other copy too) directly
 from its files and live store, even while a daemon serves it.
 
-In the development build for 0.8.0, `docs regenerate --compare` uses the companion
+In 0.8.0, `docs regenerate --compare` uses the companion
 comparison route. All four companion operations have synchronous and asynchronous
 SDK methods with normal deadlines and cancellation. Only Internal source projections
 are supported; requested audience is never authorization. Unsupported scopes and
@@ -720,7 +718,7 @@ FIX-12's credential scan still exempts only validated device `body.publicKey` an
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -804,7 +802,7 @@ record was rejected:
 | Code | Meaning | HTTP |
 |---|---|---|
 | `rejected` | The estate would be invalid with this record; the findings say why; nothing was written | 422 |
-| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or for an admission from record format 2), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep; with FIX-09, a loopback request when all eight slots for body reads awaiting signature verification are occupied | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit, a request above the HTTP body limit or a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept or full loopback authentication capacity) |
+| `refused` | Malformed input, an unknown type, no admitted device key on this machine where the estate requires signatures (or where the record type independently requires a signature), or a limit; from 0.6.0 also a run's stop asked by a principal who may not stop it, and a local-network write whose paired device the runtime cannot keep; with FIX-09, a loopback request when all eight slots for body reads awaiting signature verification are occupied | 422 (409 for upgrade and export, for a pairing code when no local-network profile is served or sixteen codes wait, and for a rotation without TLS; 413 for an object above the size limit, a request above the HTTP body limit or a pairing message above 16 KiB; 503 for a local-network write whose paired device cannot be kept or full loopback authentication capacity) |
 | `not-found` | The subject named does not exist | 404 |
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
@@ -859,7 +857,7 @@ the state of workers.
 
 ## The SDK
 
-The next release adds `GET /v1/operator/actions` and
+Vericairn 0.8.0 adds `GET /v1/operator/actions` and
 `VericairnClient.OperatorActions(recipient, assignment, view)`, returning `OperatorActionsResponse`
 (`text`, `json`, `hasErrors`). This read shows every recorded operator ask, pending operator
 acceptance and waiting reserved action, with reasons, dependencies and exact commands. The existing
@@ -1054,7 +1052,7 @@ by automation do not count as a person viewing the estate.
 observe, device-signed requests act for their own principal, and the usual
 signing and admission rules apply. The runtime generates the time, exact estate
 subject and hashes of the pre-write record set, full pin and status. It records
-an `observation` with kind `estate`, requiring record format 2; format 1 is
+an `observation` with kind `estate`, requiring record format 2 or later; format 1 is
 refused with an explicit-upgrade instruction. This is an attributable observation
 of recorded status, not evidence of live external health or acceptance.
 
@@ -1175,13 +1173,13 @@ the generic launcher and versions without such admission refuse. Automated contr
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
 The efficiency Adapter is unsupported (EFF-01, 0.8.1); only `disabled` is allowed. Remote is not built.
-These additions preserve API v1, record format 2, existing authority checks and local-only dispatch.
+These execution additions preserve API v1, existing authority checks and local-only dispatch. Their fields are available from record format 2 and remain available at format 3.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 
 ## Harness qualification (RUN-03)
 
 `POST /v1/harness-qualifications` and the SDK's `QualifyHarness(request)` run the native launcher's probes
-without starting an agent or MCP server, then author a format-2 `harness-qualification`. The request names
+without starting an agent or MCP server, then author a signed `harness-qualification`, available from format 2. The request names
 `launcher` (`codex` or `claude-code`), `by` and optional launcher `settings`. A human operator or a human
 with the operator's explicit `qualify` grant may request it; agents and services may not. The actual author
 and admitted signing device belong to the resulting record. A refused `WriteOutcome` uses the ordinary

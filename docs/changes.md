@@ -1,10 +1,11 @@
 # Checked repository changes
 
-The unreleased `changes` command family records pushes, pull-request openings,
+The 0.8.0 `changes` command family records pushes, pull-request openings,
 merges and observations. It uses the same runtime through the CLI, daemon API
 and SDK. These operations require the operator or a principal with
 `repository-write` authority currently in force, an admitted signing device
-when the estate requires signatures, and record format 2. They are not MCP tools.
+when the estate requires signatures, and record format 3 for the product's
+`changes` declaration and the operation's check and scan evidence. They are not MCP tools.
 
 Add a `changes` declaration to the product record, retaining the product's other
 fields. The repository is an estate resource of kind `repository`; its `location.github`
@@ -134,4 +135,6 @@ is refused; the runtime never chooses a replacement destination.
 The four API routes are `POST /v1/changes/push`, `/open`, `/merge` and `/observe`.
 Their SDK methods are `ChangesPush`, `ChangesOpen`, `ChangesMerge` and
 `ChangesObserve`, with matching request types and a shared `ChangeResponse`.
+Each has a cancellable `Async` counterpart. An interrupted observation does not
+undo an effect; reconcile the original operation before considering a retry.
 The generated API description and CLI reference include this additive surface.

@@ -1,6 +1,6 @@
 # Readable companion contracts
 
-The development build for 0.8.0 exposes the immutable generator and verification
+Vericairn 0.8.0 exposes the immutable generator and verification
 contracts through the docs commands, API, SDK, MCP and Workbench. These are read
 models, with no new record type or record field. Source selection and authorization
 precede rendering; a rendition grants no authority, acceptance or authored clearance.

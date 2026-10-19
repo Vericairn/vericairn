@@ -3,7 +3,30 @@
 How a software product goes from a repository to a published release with its evidence as records,
 intent recorded before every external effect, and publication left to the operator.
 
-## Checked repository changes (unreleased)
+## Command and service ownership in 0.8.0
+
+CODE-02 gives each command its own class with explicit registration and shared
+`CommandContext` handling. CODE-05 keeps the `EstateService` API facade while
+explicitly composing `RunAdmissionService`, `RunDispatchService` and
+`ReleaseCoordinationService`. They retain the shared estate gate and record
+access, final admission rechecks, run supervision and original operation identities.
+No dependency container or reflection-based service discovery is introduced.
+
+CODE-06 places worker Git preparation, audit and retention in the Git adapter
+behind `IWorkspaceProvider`. `IReleaseSource` belongs to Records; its recorded
+implementation makes no request. The anonymous GitHub source belongs to
+`Vericairn.Providers.GitHub.Releases`, composed by the CLI and Workbench. The
+older runtime entry point delegates for compatibility. Workbench's dependency
+closure includes neither the runtime nor SQLite. This separation does not widen
+worker authority or change the daily release-check disclosure and request limits.
+
+CODE-03 adds [cancellable client operations](client-operations.md), preserving
+synchronous contracts. CODE-04 makes shared vocabularies immutable, copies option
+collections at ownership boundaries and moves the fake release provider to test
+support. Public array-field types and the removed fake are compatibility changes;
+[API compatibility](api-compatibility-0.8.0.md) lists every affected member and caveat.
+
+## Checked repository changes (0.8.0)
 
 The additive `changes push`, `changes open`, `changes merge` and `changes observe`
 commands record their intent and observed outcome. Pushes require a successful
@@ -33,7 +56,7 @@ vericairn status --recipient <person-id> --depth comprehensive
 vericairn records show <record-id>
 ```
 
-Settings and delegations are signed format-2 records with retained revisions.
+Settings and delegations are signed records available from format 2, with retained revisions.
 The person changes their own settings; an explicit `communication delegate
 --as <person-id> --to <principal-id>` grants only that scope, and its exact
 record must be supplied as `--authority` by the actual delegated author.
@@ -81,12 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This maintained document describes 0.7.3: FIX-19's independent workspace repositories, UPDATE-01's
-newer-release notice, FIX-20's command-audit corrections, FIX-21's concurrent TLS handshake correction
-and FIX-22's current required attention. The [API guide](api-v1.md#transports) describes certificate
-preparation and handshake diagnostics. Earlier guides retain the behavior of their own releases.
+This document describes 0.8.0, including estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations. FIX-23 through FIX-28
+are described with their owning flows below. It retains FIX-19's independent workspace
+repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
+FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
+The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
+Earlier guides retain the behavior of their own releases.
 The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
-0.7.3 retains the existing hand-over, watching, communication, measured context and explicit qualified
+0.8.0 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -287,7 +313,7 @@ destination is the one named, else the location's value. Continuous integration 
 result is observed and recorded by the CLI, under the user's own login with the host; the logs are not
 inspected by this command and the record says so.
 
-In an estate at record format 2, `check run` records its verification as an observation by automation
+In an estate at record format 2 or 3, `check run` records its verification as an observation by automation
 (`evidenceClass: observation`, `observer: automation`), and `check observe` records its verification as the
 provider's report (`evidenceClass: report`, `observer: provider`).
 
@@ -309,7 +335,7 @@ compile that shared test support; the fake is absent from the runtime assembly a
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
-earlier release reads none. The development build for 0.8.0 takes the prepared exact commit in the submission,
+earlier release reads none. Vericairn 0.8.0 takes the prepared exact commit in the submission,
 so document and policy admission can refuse without provider I/O. `DispatchRequest.ExpectedCommit` carries it to
 the provider, which must refuse a moved ref before starting a build. GitHub uses `ResolveCommit` inside dispatch
 for that check. Documents in other repositories use their own registered HEAD commits, or the reviewed commit
@@ -435,9 +461,9 @@ The "Milestone and release acceptances" section includes every operator acceptan
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-The 0.7.3 notes render the estate's records with
-`vericairn docs notes --from 0.7.2 --to 0.7.3 --out docs/releases/0.7.3`.
-Their exclusive start follows 0.7.2's recorded end; the manifest records the exact window.
+To render the 0.8.0 notes from the estate's records, use
+`vericairn docs notes --from 0.7.3 --to 0.8.0 --out docs/releases/0.8.0`.
+The exclusive start follows 0.7.3's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
 The product's CLI test suite checks every file of each frozen set against
@@ -752,7 +778,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.7.3 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.0 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -960,7 +986,7 @@ file is byte for byte what it was. When the estate holds admissions recorded wit
 them: the migration record lists them by id and hash, and the upgrade is refused unless the operator, or a
 principal with the `administer` scope, applies it with an admitted device held on this machine.
 
-POLICY-01 adds `record-format-3` for the planned 0.8.0 release
+POLICY-01 adds `record-format-3` for 0.8.0
 ([record-format-v3.md](record-format-v3.md)). This step also stages no file and infers no policy, duty, authority,
 placement or exception. The manifest supplies the refusal boundary for older runtimes. Reapplying the installed
 target makes no change. Fixture tests preserve every original record byte and include a refuse-level duty when
@@ -977,7 +1003,7 @@ resume reports a newly completed phase as an added record.
 
 ## Command observations (0.7.0)
 
-**Command audit in 0.7.3.** FIX-20 corrects recognition of the Vericairn home's credential reads,
+**Command audit retained from 0.7.3.** FIX-20 corrects recognition of the Vericairn home's credential reads,
 token-output commands and additional write forms, and excludes null-device output from outside-write
 classification. These corrections retire the corresponding 0.7.2 review limits for the recognized
 cases below. The audit remains a signal over reported invocations, not an enforcement boundary.
@@ -1233,7 +1259,7 @@ not permission to change an inherited restriction. Configure a stock native work
 runs it before starting a run or an agent goal step:
 
 ```sh
-vericairn worker configure --launcher codex --model gpt-6-astra --effort max
+vericairn worker configure --launcher codex --model <model> --effort max
 vericairn worker configure --launcher codex
 ```
 
@@ -1411,7 +1437,7 @@ act, and withdrawing the grant does not erase an earlier authorized qualificatio
 The command uses the runtime's installed executable, or the local `--setting command=<executable or JSON array>`
 binding. It prepares a temporary isolated workspace and harness home, imports only the permitted harness login,
 runs the launcher's own probes and removes that scratch state. It does not start a coding agent or the configured
-MCP server. The signed `harness-qualification` record uses record format 2 and holds only `launcher`, `version`,
+MCP server. The signed `harness-qualification` record is available from format 2 and holds only `launcher`, `version`,
 `status: "qualified"` and these six `probes` digests:
 
 | Probe | What is digested after the check succeeds |
@@ -1514,7 +1540,7 @@ This is a qualification of the launcher inventory protocol using stand-in execut
 qualification. The live observations below cover only the reported runs; other provider/account-dependent behavior
 and remote managed policy have not been qualified.
 FIX-18 covers `max` argument construction, configuration, admission and observed harness refusal with stand-ins.
-The builder's first live run of `6bab07f` with Codex 0.159.0-alpha.12.1 reported `gpt-6-astra` at `max`
+The builder's first live run of `6bab07f` with Codex 0.159.0-alpha.12.1 reported the selected model at `max`
 in its session, with 1 wall minute and 34,573 tokens recorded. It exited cleanly but every tool call failed
 because the code-mode host was disabled; the agent recorded no attempt or result.
 The builder's second live run of `80423b5`, using the same Codex version at `max`, executed its first shell command,
@@ -1564,7 +1590,7 @@ attestation. Environment and filesystem inspection is not an operating-system sa
 Programs deliberately invoked by a shell tool and changes made after the dispatch boundary remain subject to the
 existing `worker-user`, workspace-audit and process-containment limitations. Cross-platform release qualification
 still requires the builder's three-platform CI run. API v1 stays additive; harness qualifications add a type within
-record format 2, never format 3. RUN-02 and RUN-03 add no MCP tools.
+record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
 refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.1. Remote is not

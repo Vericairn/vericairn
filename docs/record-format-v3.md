@@ -1,7 +1,7 @@
 # Record format 3
 
 Record format 3 adds attributable policy definitions, bounded exceptions and recurring-duty evidence. It is
-the POLICY-01 record and migration contract for the planned 0.8.0 release. A manifest at format 3 makes a
+the POLICY-01 record and migration contract for 0.8.0. A manifest at format 3 makes a
 format-2 reader refuse the estate before opening a writable runtime. Each older record retains its original
 format, bytes, hash, signatures and validation rules.
 
@@ -145,10 +145,24 @@ hide an occurrence already due. Ending debt never labels the work completed.
 `work-order.releasePlan` contains `{product, version}`. A release carrier can place itself in its own plan.
 These fields organize work under its existing authority and do not create dependencies or acceptance.
 
-The checked-in format-3 policy estate pins every fixture byte in `inventory.sha256`. Tests cover all new
-record types and registry fields, round trips, signatures, bounded authority, occurrence identities, debt
-dispositions and the migration refusal boundary. Runtime tests use fixture estates and isolated homes.
-The platform matrix must run on the eventual pushed commit before integration.
+## Checked repository changes
+
+A product's optional `changes` object has `provider`, a repository resource id in
+`repository`, the target branch in `target`, and exact host check names in
+`requiredChecks`. An absent or empty required-check declaration authorizes no merge.
+`product.changes` is a format-3 field. Repository-change operations retain their
+existing identity and intent/effect lifecycle and add `checks`, `requiredChecks`
+and `scan`, also gated at format 3. Checks bind each reported name, head, status
+and optional conclusion. A push scan retains only the tool, version, range,
+verdict and optional finding count, never matched text or raw output.
+
+The runtime requires repository-write authority and exact source revisions;
+[checked changes](changes.md) describes the scan, head lease, synchronous merge
+and target-run observations. [Operator record](operator-actions.md) uses these
+operations after signing one ordinary record with the operator's own device.
+It requires repository-synced storage at format 3 and adds no record type. A
+recorded successful merge and its required target checks remain separate from
+acceptance or publication.
 
 ## Generated living documents
 

@@ -29,8 +29,12 @@ public keys and signatures. Its earlier frozen set remains unchanged. All eight 
 packages are available at 0.7.3 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
 records publication and the earlier 0.7.1 recovery.
 
-Ordinary source builds retain `0.7.3-dev`. The maintained guides describe 0.7.3; earlier release sets
-keep their original bytes. Release checks reach only GitHub, ignore system proxies and retain cached
+Ordinary source builds retain `0.8.0-dev`. The maintained guides and the
+[0.8.0 documentation set](docs/releases/0.8.0/README.md) describe record format 3,
+estate policies and recurring duties, readable companions, cancellable clients,
+operator actions and checked repository changes, with FIX-23 through FIX-28.
+0.8.0 has no publication or platform qualification established by this documentation.
+Earlier release sets keep their original bytes. Release checks reach only GitHub, ignore system proxies and retain cached
 information when disabled. Command observations remain signals, not an enforcement boundary. Required
 attention cannot infer closure from prose or missing evidence; its [rules](docs/required-attention.md)
 keep undecidable items visible as unknown.
@@ -117,12 +121,13 @@ Commands written as `vericairn ...` in the archive documentation take the same a
 
 ## What is here
 
-The following capabilities are in 0.7.3.
+The following capabilities are in the 0.8.0 source.
 
-- `Vericairn.Records`: record formats 1 and 2 (canonical JSON, ULIDs, content hashes, signed records, devices
+- `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
   [docs/record-format-v1.md](docs/record-format-v1.md) and, for what format 2 changes,
-  [docs/record-format-v2.md](docs/record-format-v2.md). Device keys are held in the strongest custody the machine
+  [docs/record-format-v2.md](docs/record-format-v2.md), with policies, duties and generated-document contracts in
+  [docs/record-format-v3.md](docs/record-format-v3.md). Device keys are held in the strongest custody the machine
   offers: CNG on Windows, the Secure Enclave on a Mac through the `vericairn-enclave` helper
   (`src/Vericairn.Enclave`, in Swift), the secret service on Linux, otherwise a file in per-user state (owner-only permissions on Unix; inherited directory ACLs on Windows).
 - `Vericairn.Runtime`: the live store, objects, storage profiles, export and restore, recovery, upgrades, and
@@ -134,14 +139,14 @@ The following capabilities are in 0.7.3.
   [docs/api-v1.md](docs/api-v1.md) with the threat model of pairing.
 - The software journey: `Vericairn.Packs.Software` (repositories as resources, build and test checks as
   verification evidence, and the coding-agent launchers and independent Git workspaces the worker uses),
-  `Vericairn.Adapters.Git` (read-only observation of a repository) and
+  `Vericairn.Adapters.Git` (repository observation, exact source reads and checked workspace/push operations) and
   `Vericairn.Providers.GitHub` (releases built by a GitHub Actions workflow and held as drafts, with intent
   recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
   `check`, `runtime`, `recover`, `objects`, `docs`, `mcp`, `status`, `progress`, `ask`, `decisions`, `handoff`, `resume`,
-  `communication`, `context`, `doctor`, `version`, `updates`; a
+  `communication`, `context`, `policies`, `operator`, `changes`, `doctor`, `version`, `updates`; a
   client of the daemon when one serves the estate, the embedded runtime otherwise. `vericairn progress` renders the progress
   report from the records, with repository-check findings: where the estate stands, the work orders by state, each
   published release and what it contained, what comes next by release, the next eligible work and what waits on the
