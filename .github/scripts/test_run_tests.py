@@ -30,6 +30,8 @@ FAKE = textwrap.dedent('''\
         sys.exit(2 if scenario == "persistent" else 0)
     if scenario == "pass":
         sys.exit(0)
+    if scenario == "unicode":
+        sys.stdout.buffer.write("skipped Vericairn.Records.Tests.TextTests.Keeps(text: \\"Cafe\\u0301\\") \\u2713\\n".encode("utf-8")); sys.exit(0)
     if scenario in ("flaky", "persistent"):
         failed("Vericairn.Cli.Tests.SoftwareJourneyTests.J04_Route"); errors(1); sys.exit(2)
     if scenario == "crash":
@@ -56,10 +58,11 @@ class RetryRunnerTests(unittest.TestCase):
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
         self.summary = self.root / "summary.md"
 
-    def run_scenario(self, scenario):
+    def run_scenario(self, scenario, **extra):
         env = dict(os.environ, FAKE_SCENARIO=scenario, FAKE_STATE=str(self.root), GITHUB_STEP_SUMMARY=str(self.summary),
-                   PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"])
-        result = subprocess.run([sys.executable, str(SCRIPT)], cwd=self.root, env=env, capture_output=True, text=True)
+                   PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"], **extra)
+        result = subprocess.run([sys.executable, str(SCRIPT)], cwd=self.root, env=env, capture_output=True, text=True,
+                                encoding="utf-8")
         retries = (self.root / "retries").read_text().splitlines() if (self.root / "retries").exists() else []
         summary = self.summary.read_text() if self.summary.exists() else ""
         return result.returncode, result.stdout, retries, summary
@@ -96,6 +99,12 @@ class RetryRunnerTests(unittest.TestCase):
         code, _, retries, _ = self.run_scenario("theory")
         self.assertEqual(0, code)
         self.assertEqual(["Vericairn.Runtime.Tests.SdkTests.Preserves " + os.path.join("tests", "Vericairn.Runtime.Tests")], retries)
+
+    def test_output_the_console_code_page_cannot_encode_is_echoed_as_utf8(self):
+        # A Windows runner's console code page, imitated on any platform.
+        code, out, _, _ = self.run_scenario("unicode", PYTHONIOENCODING="cp1252")
+        self.assertEqual(0, code)
+        self.assertIn("Cafe\u0301\") \u2713", out)
 
     def test_a_failure_that_names_no_test_is_not_retried(self):
         code, out, retries, _ = self.run_scenario("unnamed")

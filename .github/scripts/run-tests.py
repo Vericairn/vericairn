@@ -57,6 +57,8 @@ def failures(lines):
 
 
 def main():
+    # Test output can hold any character; a Windows runner's default code page cannot encode them all.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     code, lines = run(["dotnet", "test", "--no-build", "--configuration", "Release"])
     if code == 0:
         return 0
