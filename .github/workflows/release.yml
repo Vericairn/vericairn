@@ -56,7 +56,8 @@ jobs:
           sudo apt-get install -y -q --no-install-recommends gnome-keyring libsecret-tools dbus-daemon
       - name: Test
         if: runner.os != 'Linux'
-        run: dotnet test --no-build --configuration Release
+        # Each failed test is retried once and reported in the run's summary; a second failure fails the job.
+        run: python .github/scripts/run-tests.py
       - name: Test, with a secret service
         if: runner.os == 'Linux'
         env:
@@ -67,7 +68,7 @@ jobs:
             printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
             printf probe | secret-tool store --label "Vericairn release probe" application vericairn-ci probe 1
             test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
-            dotnet test --no-build --configuration Release'
+            python3 .github/scripts/run-tests.py'
 
   enclave-helper:
     # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
