@@ -137,7 +137,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/estate-policies"] = null,
         ["GET /v1/estate-policies/kinds"] = null,
         ["GET /v1/estate-policies/evaluate"] = null,
-        ["GET /v1/estate-policies/{key}"] = null,
+        ["GET /v1/estate-policies/{key}/view"] = null,
         ["GET /v1/writing-exceptions"] = null,
         ["GET /v1/writing-exceptions/{id}"] = null,
         ["GET /v1/estate-policies/access"] = null,

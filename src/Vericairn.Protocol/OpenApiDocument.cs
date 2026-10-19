@@ -18,7 +18,7 @@ public static class OpenApiDocument
         ("GET", "/v1/estate-policies"),
         ("GET", "/v1/estate-policies/kinds"),
         ("GET", "/v1/estate-policies/evaluate"),
-        ("GET", "/v1/estate-policies/{key}"),
+        ("GET", "/v1/estate-policies/{key}/view"),
         ("GET", "/v1/writing-exceptions"),
         ("GET", "/v1/writing-exceptions/{id}"),
         ("GET", "/v1/estate-policies/access"),
@@ -499,7 +499,7 @@ public static class OpenApiDocument
         ("POST", "/v1/work/{key}/placement") => "WorkPlace: validate the expected hash and all source evidence, then sign as the acting principal.",
 
         ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
-        ("GET", "/v1/estate-policies/{key}") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
+        ("GET", "/v1/estate-policies/{key}/view") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
         ("GET", "/v1/estate-policies/kinds") => "Installed kind versions, implementation hashes, supported selections, sources and bounds.",
         ("GET", "/v1/estate-policies/evaluate") => "PolicyResponse evaluated from server sources, with optional canonical UTC asOf and exact release record preview; never authorizes submission.",
         ("GET", "/v1/writing-exceptions") => "WritingExceptionsResponse: registry history, authors, reasons, scopes, counts and exact warning and excepted locations with the basis.",

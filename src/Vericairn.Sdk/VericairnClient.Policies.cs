@@ -38,7 +38,7 @@ public sealed partial class VericairnClient
     public PolicyResponse Policies() => Get<PolicyResponse>("/v1/estate-policies")!;
 
     /// <inheritdoc />
-    public PolicyResponse? Policy(string key) => Get<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key), allowNotFound: true);
+    public PolicyResponse? Policy(string key) => Get<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/view", allowNotFound: true);
 
     /// <inheritdoc />
     public IReadOnlyList<PolicyKindDto> PolicyKinds() => Get<List<PolicyKindDto>>("/v1/estate-policies/kinds")!;

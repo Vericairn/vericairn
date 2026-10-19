@@ -52,7 +52,7 @@ public sealed partial class VericairnClient
 
     /// <summary>The cancellable Policy read, with a response deadline.</summary>
     public Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
+        ClientOperation.RunAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/view", allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
 
     /// <summary>The cancellable PolicyKinds read, with a response deadline.</summary>
     public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>

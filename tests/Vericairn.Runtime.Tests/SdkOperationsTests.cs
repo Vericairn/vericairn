@@ -66,6 +66,22 @@ public sealed class SdkOperationsTests
     }
 
     [Theory]
+    [InlineData("kinds")]
+    [InlineData("evaluate")]
+    [InlineData("access")]
+    public async Task PolicyKeysCannotCollideWithNamedReadRoutes(string key)
+    {
+        using var client = Client((request, _) =>
+        {
+            Assert.Equal("/v1/estate-policies/" + key + "/view", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        Assert.Null(client.Policy(key));
+        Assert.Null(await client.PolicyAsync(key, TestContext.Current.CancellationToken));
+        Assert.Null(new CancellationBoundApi(client, TestContext.Current.CancellationToken).Policy(key));
+    }
+
+    [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.ServiceUnavailable)]

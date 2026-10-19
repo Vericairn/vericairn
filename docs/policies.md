@@ -1,19 +1,21 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 4, October 19, 2026. Preserve generic history authoring, distinguish on-demand views from generated records reports, and describe operator-only MCP review and prepared Workbench submission.
+Revision 5, October 19, 2026. Keep valid policy keys distinct from named read endpoints, preserve generic history authoring, and describe on-demand views, operator-only MCP review and prepared Workbench submission.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
 | CLI command | API route | SDK method | MCP tool |
 |---|---|---|---|
 | `policies list` | `GET /v1/estate-policies` | `Policies` | `policies_list` |
-| `policies show <key>` | `GET /v1/estate-policies/{key}` | `Policy` | `policy_show` |
+| `policies show <key>` | `GET /v1/estate-policies/{key}/view` | `Policy` | `policy_show` |
 | `policies kinds` | `GET /v1/estate-policies/kinds` | `PolicyKinds` | `policy_kinds` |
 | `policies check` | `GET /v1/estate-policies/evaluate` | `PolicyEvaluate` | `policy_evaluate` |
 | `estate writing-exceptions list` | `GET /v1/writing-exceptions` | `WritingExceptions` | `writing_exceptions_list` |
 | `estate writing-exceptions show <id>` | `GET /v1/writing-exceptions/{id}` | `WritingException` | `writing_exception_show` |
 
 Each SDK method has an `Async` counterpart with cancellation and a response deadline. The CLI uses the same operations through the embedded runtime or daemon. `--json` returns the complete typed response; the human view always names the basis. A policy key or any revision id selects its current declaration. Exception records and writing removals remain visible as history.
+
+The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate` and `access` remain distinct from the named collection operations.
 
 `policies check --as-of 2026-11-01T00:00:00Z` previews an explicit canonical UTC instant. `--release <release-id>` selects a recorded release's product, version and exact commit; both options may be combined. The API and MCP arguments are `asOf` and `release`. A missing target is reported as a problem. An instant before a record in the snapshot is unavailable; historical replay requires the historical snapshot. Preview output grants no release authority.
 
