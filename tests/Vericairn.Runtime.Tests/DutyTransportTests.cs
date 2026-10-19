@@ -123,6 +123,25 @@ public sealed class DutyTransportTests
         Assert.Equal(before, f.Model.Records.Count);
     }
 
+    [Fact]
+    public async Task AWorkerCannotListOrCallTheResultJudgmentTool()
+    {
+        using var f = new Fixture();
+        RecordEnvelope result = f.Records.Result();
+        var worker = new ToolRegistry(f.Api, f.Records.Estate.BuilderId);
+        Assert.True(await worker.WritesVisibleAsync(TestContext.Current.CancellationToken));
+        Assert.DoesNotContain(await worker.VisibleAsync(TestContext.Current.CancellationToken), t => t.Name == "work_review");
+        int before = f.Model.Records.Count;
+        ToolCallResult refused = await worker.CallAsync("work_review", new()
+        {
+            ["result"] = result.Id, ["expected"] = result.ComputedHash,
+            ["body"] = JsonSerializer.SerializeToNode(new ResultReviewBody("self", "pass", "A worker claim cannot become a judgment through MCP.", [], []), ProtocolJson.Options),
+        }, TestContext.Current.CancellationToken);
+        Assert.True(refused.Unknown);
+        Assert.True(refused.IsError);
+        Assert.Equal(before, f.Model.Records.Count);
+    }
+
     private static JsonObject ResultBody(ResultDutyDto duty) => JsonSerializer.SerializeToNode(new
     {
         outcome = "completed", summary = "Checked the exact inventory.", outputs = Array.Empty<object>(), evidence = Array.Empty<object>(),
