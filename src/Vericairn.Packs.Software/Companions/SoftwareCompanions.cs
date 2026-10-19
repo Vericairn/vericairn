@@ -23,7 +23,7 @@ public static class SoftwareCompanions
     [
         new BuildReferenceCompanion("cli-reference"), new BuildReferenceCompanion("cli-client-outcomes"), new BuildReferenceCompanion("record-reference"),
         new BuildReferenceCompanion("api-reference"), new FrozenIndexCompanion(), new WorkflowCompanion(),
-        new ComponentsCompanion(), new ChecksumsCompanion(), new ExportCompanion(), new ReferenceIndexCompanion(),
+        new ComponentsCompanion(), new ChecksumsCompanion(), new ExportCompanion(), new ReferenceIndexCompanion(), new DocumentationSetCompanion(),
     ];
 
     /// <summary>Registers these implementations and their exact managed-kind coverage once per process.</summary>
@@ -44,15 +44,17 @@ public static class SoftwareCompanions
 internal abstract class SoftwareCompanion : IDocumentGenerator
 {
     private static readonly string ImplementationHash = SourceHash();
-    protected SoftwareCompanion(string name)
+    protected SoftwareCompanion(string name, IReadOnlyDictionary<string, ImmutableArray<string>>? extraInputs = null)
     {
         Id = "vericairn.software/" + name;
-        Descriptor = new(Id, 1, "vericairn.software.companions/1", ImplementationHash,
-            new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal)
+        var inputs = new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal)
             {
                 ["audience"] = ["Internal"], ["selection"] = ["item", "list"],
                 ["build-commit"] = ["@commit"], ["source"] = ["@text"],
-            }.ToImmutableDictionary(StringComparer.Ordinal), [], ["file"], ["item", "list"], "text/markdown",
+            };
+        foreach (var input in extraInputs ?? ImmutableDictionary<string, ImmutableArray<string>>.Empty) inputs.Add(input.Key, input.Value);
+        Descriptor = new(Id, 1, "vericairn.software.companions/1", ImplementationHash,
+            inputs.ToImmutableDictionary(StringComparer.Ordinal), [], ["file"], ["item", "list"], "text/markdown",
             "Ordinal source path and identity; source array order where meaningful.", "Internal", "single");
     }
 

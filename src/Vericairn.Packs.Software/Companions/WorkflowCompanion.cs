@@ -19,9 +19,10 @@ internal sealed class WorkflowCompanion() : SoftwareCompanion("workflow-actions"
         foreach (JsonElement source in Array(root, "sources"))
         {
             string path = String(source, "path");
-            if (!expected.Add(path) || input.File(path).Hash != String(source, "hash")) throw new CompanionUnavailableException();
+            string retained = input.Relative(path);
+            if (!expected.Add(retained) || input.File(retained).Hash != String(source, "hash")) throw new CompanionUnavailableException();
         }
-        if (!expected.Contains(".github/workflows/actions.allow") || !expected.Contains(".github/scripts/check-workflow-actions.rb")
+        if (!expected.Contains(input.Relative(".github/workflows/actions.allow")) || !expected.Contains(input.Relative(".github/scripts/check-workflow-actions.rb"))
             || expected.Count != input.Context.Sources.Length) throw new CompanionUnavailableException();
         var text = new StringBuilder("# Workflow actions\n\nThis is the selected allow-list and the uses observed by the retained workflow parser. FIX-13's separate check enforces its policy; this rendition grants no permission.\n\n## Allowed identities\n\n| Action at exact commit |\n|---|\n");
         foreach (JsonElement action in Array(root, "allowed").OrderBy(a => a.GetString(), StringComparer.Ordinal)) Row(text, action.GetString()!);
@@ -29,7 +30,7 @@ internal sealed class WorkflowCompanion() : SoftwareCompanion("workflow-actions"
         foreach (JsonElement use in Array(root, "uses").OrderBy(u => String(u, "path"), StringComparer.Ordinal).ThenBy(u => u.GetProperty("line").GetInt32()))
         {
             string path = String(use, "path");
-            if (!expected.Contains(path)) throw new CompanionUnavailableException();
+            if (!expected.Contains(input.Relative(path))) throw new CompanionUnavailableException();
             Row(text, path, Recorded(use, "line"), String(use, "action"));
         }
         return text.ToString();

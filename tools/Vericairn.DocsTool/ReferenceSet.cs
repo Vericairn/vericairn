@@ -59,7 +59,7 @@ internal static partial class ReferenceSet
     }
 
     /// <summary>Writes the command-line, API and record references and the manifest of this build into a directory; the manifest lists the documents the product declares.</summary>
-    public static int Generate(string output, string declaration, bool json, string? provenanceAt = null)
+    public static int Generate(string output, string declaration, bool json, string? provenanceAt = null, string? register = null, string? artifacts = null)
     {
         try
         {
@@ -111,8 +111,10 @@ internal static partial class ReferenceSet
                 manifest["notes"] = notes;
             }
 
-            WriteReferenceIndex(output, companions);
+            WriteReferenceIndex(output, companions, register);
+            if (artifacts is not null) WriteArtifactCompanions(output, artifacts, companions);
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
+            if (artifacts is not null) PackageCompanions(output, artifacts);
 
             if (json)
             {
@@ -132,7 +134,7 @@ internal static partial class ReferenceSet
     }
 
     /// <summary>Refuses a set whose manifest does not match this build: a command, an operation or a record type the build has and the set lacks, or the reverse; every difference at once.</summary>
-    public static int CompareWithBuild(string directory, bool json)
+    public static int CompareWithBuild(string directory, bool json, string? artifacts = null)
     {
         var findings = new List<FindingDto>();
         string manifestPath = Path.Combine(directory, "manifest.json");
@@ -157,10 +159,10 @@ internal static partial class ReferenceSet
 
             if (Str(manifest, "referenceInventory") != ReferenceInventoryFiles.Name)
                 findings.Add(new("error", "docs.reference-inventory", "manifest.json", "The set must name reference-inventory.json."));
-            findings.AddRange(ReferenceInventoryFiles.Check(directory, Commit,
+            findings.AddRange(ReferenceInventoryFiles.Check(directory, Str(manifest, "commit"),
                 Walk(CliApp.Build(), string.Empty).Select(c => "vericairn " + c.Path), Operations(api.RootElement), RecordTypeRegistry.All.Select(t => t.Name)));
 
-            findings.AddRange(CompareCompanions(directory, manifest));
+            findings.AddRange(CompareCompanions(directory, manifest, artifacts));
 
             // The release observer records the record formats the set states as the release's own, so they must be this build's.
             string built = DescribeFormats(BuildRecordFormat());

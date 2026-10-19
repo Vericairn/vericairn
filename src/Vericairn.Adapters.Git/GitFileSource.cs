@@ -2,12 +2,19 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
+using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Hashing;
+using Vericairn.Records.Types;
 
 namespace Vericairn.Adapters.Git;
+
+/// <summary>A pack selects its exact retained inputs through a read-only, candidate-commit file reader.</summary>
+public delegate DocumentSourceSelection GitDocumentSelection(RecordEnvelope declaration, DocumentGeneratorDescriptor generator,
+    string commit, Func<string, DocumentSourceSnapshot?> read);
 
 /// <summary>
 /// The software pack's source vericairn.software/git-file: a living document of another repository read at a commit from the
@@ -16,6 +23,14 @@ namespace Vericairn.Adapters.Git;
 /// </summary>
 public sealed class GitFileSource : IDocumentSource
 {
+    private readonly GitDocumentSelection? select;
+    private readonly Func<EstateModel, RecordEnvelope, string?> clone;
+
+    /// <summary>Installs an optional pack-owned immutable input selector; no clone is discovered during rendering.</summary>
+    public GitFileSource(GitDocumentSelection? selection = null) { select = selection; clone = Clone; }
+
+    internal GitFileSource(string directory, GitDocumentSelection selection) { select = selection; clone = (_, _) => directory; }
+
     /// <summary>The source's name, as declarations name it.</summary>
     public const string Name = "vericairn.software/git-file";
 
@@ -23,31 +38,82 @@ public sealed class GitFileSource : IDocumentSource
     public string Id => Name;
 
     /// <inheritdoc />
-    public string? Head(EstateModel model, RecordEnvelope declaration) => Clone(model, declaration) is string clone ? Text(clone, "rev-parse", "--verify", "HEAD") : null;
+    public int SnapshotVersion => DocumentGeneration.InterfaceVersion;
+
+    /// <inheritdoc />
+    public DocumentSourceSelection ReadSelection(EstateModel model, RecordEnvelope declaration, string commit, DocumentGeneratorDescriptor generator)
+    {
+        if (select is null || clone(model, declaration) is not { } directory || Tree(directory, commit) is not { } tree)
+            return new(DocumentGenerationStatus.Unavailable, [], commit, "The exact commit or installed source selector is unavailable.");
+        long total = 0;
+        return select(declaration, generator, commit, path =>
+        {
+            if (!DocumentPatterns.IsSafeSourcePath(path) || !tree.TryGetValue(path, out string? mode) || mode is not ("100644" or "100755")
+                || Run(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || (total += bytes.Length) > 64L * 1024 * 1024) return null;
+            return DocumentSourceSnapshot.Content("file", path, EstateModel.BodyString(declaration, "repository") ?? "repository", path, ContentHash.Sha256(bytes), bytes);
+        });
+    }
+
+    /// <inheritdoc />
+    public DocumentFileInventory ReadInventory(EstateModel model, RecordEnvelope declaration, string commit)
+    {
+        if (clone(model, declaration) is not { } directory || Tree(directory, commit) is not { } tree)
+            return new(DocumentGenerationStatus.Unavailable, [], commit, "The complete candidate tree is unavailable.");
+        var files = ImmutableArray.CreateBuilder<DocumentFile>();
+        long total = 0;
+        foreach ((string path, string mode) in tree.Where(p => GeneratedDocumentContract.Owns(declaration, p.Key)).OrderBy(p => p.Key, StringComparer.Ordinal))
+        {
+            if (mode is not ("100644" or "100755") || !DocumentPatterns.IsSafePath(path)
+                || Run(directory, out byte[] bytes, "cat-file", "blob", commit + ":" + path) != 0 || bytes.Length > 1048576 || (total += bytes.Length) > 64L * 1024 * 1024)
+                return new(DocumentGenerationStatus.Unavailable, [], commit, "A candidate member cannot be read as a bounded regular file.");
+            files.Add(new(path, [.. bytes]));
+        }
+        return new(DocumentGenerationStatus.Success, files.ToImmutable(), commit, null);
+    }
+
+    private static Dictionary<string, string>? Tree(string directory, string commit)
+    {
+        if (!Patterns.Commit.IsMatch(commit) || Text(directory, "rev-parse", "--verify", "--quiet", commit + "^{commit}") != commit
+            || Run(directory, out byte[] bytes, "ls-tree", "-r", "-z", "--full-tree", commit) != 0) return null;
+        var tree = new Dictionary<string, string>(StringComparer.Ordinal);
+        var portable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string entry in new UTF8Encoding(false, true).GetString(bytes).Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int tab = entry.IndexOf('\t');
+            if (tab < 0 || tree.Count >= 100000) return null;
+            string[] metadata = entry[..tab].Split(' ');
+            string path = entry[(tab + 1)..];
+            if (metadata.Length != 3 || !tree.TryAdd(path, metadata[0]) || !portable.Add(path)) return null;
+        }
+        return tree;
+    }
+
+    /// <inheritdoc />
+    public string? Head(EstateModel model, RecordEnvelope declaration) => clone(model, declaration) is string directory ? Text(directory, "rev-parse", "--verify", "HEAD") : null;
 
     /// <inheritdoc />
     public string? Resolve(EstateModel model, RecordEnvelope declaration, string reference)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reference);
-        return Clone(model, declaration) is string clone ? Text(clone, "rev-parse", "--verify", "--quiet", reference + "^{commit}") : null;
+        return clone(model, declaration) is string directory ? Text(directory, "rev-parse", "--verify", "--quiet", reference + "^{commit}") : null;
     }
 
     /// <inheritdoc />
     public bool IsAncestor(EstateModel model, RecordEnvelope declaration, string ancestor, string descendant) =>
-        Clone(model, declaration) is string clone && Run(clone, out _, "merge-base", "--is-ancestor", ancestor, descendant) == 0;
+        this.clone(model, declaration) is string clone && Run(clone, out _, "merge-base", "--is-ancestor", ancestor, descendant) == 0;
 
     /// <inheritdoc />
     public byte[]? Read(EstateModel model, RecordEnvelope declaration, string commit)
     {
         string? path = EstateModel.BodyString(declaration, "path");
-        return Clone(model, declaration) is string clone && path is not null && Run(clone, out byte[] bytes, "cat-file", "blob", $"{commit}:{path}") == 0 ? bytes : null;
+        return this.clone(model, declaration) is string clone && path is not null && Run(clone, out byte[] bytes, "cat-file", "blob", $"{commit}:{path}") == 0 ? bytes : null;
     }
 
     /// <inheritdoc />
     public string? Covered(EstateModel model, RecordEnvelope declaration, IReadOnlyList<string> paths, string commit)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        if (Clone(model, declaration) is not string clone || Text(clone, "rev-parse", "--verify", "--quiet", commit + "^{commit}") is null)
+        if (this.clone(model, declaration) is not string clone || Text(clone, "rev-parse", "--verify", "--quiet", commit + "^{commit}") is null)
         {
             return null;
         }
@@ -64,7 +130,7 @@ public sealed class GitFileSource : IDocumentSource
 
     /// <inheritdoc />
     public bool Exists(EstateModel model, RecordEnvelope declaration, string commit, string path) =>
-        Clone(model, declaration) is string clone && Run(clone, out _, "cat-file", "-e", $"{commit}:{path}") == 0;
+        this.clone(model, declaration) is string clone && Run(clone, out _, "cat-file", "-e", $"{commit}:{path}") == 0;
 
     private static string? Clone(EstateModel model, RecordEnvelope declaration)
     {
@@ -85,6 +151,7 @@ public sealed class GitFileSource : IDocumentSource
     private static int Run(string clone, out byte[] output, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
+        info.ArgumentList.Add("--no-replace-objects");
         info.ArgumentList.Add("-c");
         info.ArgumentList.Add("core.quotepath=off");
         foreach (string argument in arguments)
@@ -93,11 +160,12 @@ public sealed class GitFileSource : IDocumentSource
         }
 
         info.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        info.Environment["GIT_NO_LAZY_FETCH"] = "1";
         try
         {
             using Process process = Process.Start(info) ?? throw new InvalidOperationException("git did not start.");
             using var buffer = new MemoryStream();
-            Task copy = process.StandardOutput.BaseStream.CopyToAsync(buffer);
+            Task copy = CopyBounded(process.StandardOutput.BaseStream, buffer);
             Task<string> error = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(30_000))
             {
@@ -106,7 +174,8 @@ public sealed class GitFileSource : IDocumentSource
                 return -1;
             }
 
-            copy.Wait();
+            try { copy.GetAwaiter().GetResult(); }
+            catch (IOException) { output = []; return -1; }
             _ = error.Result;
             output = buffer.ToArray();
             return process.ExitCode;
@@ -115,6 +184,17 @@ public sealed class GitFileSource : IDocumentSource
         {
             output = [];
             return -1;
+        }
+    }
+
+    private static async Task CopyBounded(Stream input, Stream output)
+    {
+        byte[] buffer = new byte[8192];
+        int count;
+        while ((count = await input.ReadAsync(buffer).ConfigureAwait(false)) != 0)
+        {
+            if (output.Length + count > 64L * 1024 * 1024) throw new IOException("The candidate input byte bound was exhausted.");
+            await output.WriteAsync(buffer.AsMemory(0, count)).ConfigureAwait(false);
         }
     }
 }

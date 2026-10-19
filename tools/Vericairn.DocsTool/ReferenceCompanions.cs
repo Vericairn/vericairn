@@ -21,22 +21,24 @@ namespace Vericairn.DocsTool;
 internal static partial class ReferenceSet
 {
     private const string CompanionFormat = "vericairn.software-companions/1";
+    private const string RegisterPath = "inputs/reference-register.md";
     private static readonly (string Name, string Source)[] Readers =
     [
         ("cli-reference", "inputs/commands.json"), ("cli-client-outcomes", "inputs/commands.json"),
         ("record-reference", "inputs/record-types.json"), ("api-reference", "inputs/openapi.json"),
     ];
 
-    private static Dictionary<string, byte[]> BuildInputs(string at)
+    private static Dictionary<string, byte[]> BuildInputs(string at, string? buildCommit = null)
     {
-        if (!Patterns.Commit.IsMatch(Commit ?? "") || !RecordParser.IsTimestamp(at)) throw new InvalidOperationException("An exact build commit and UTC provenance instant are required.");
+        buildCommit ??= Commit;
+        if (!Patterns.Commit.IsMatch(buildCommit ?? "") || !RecordParser.IsTimestamp(at)) throw new InvalidOperationException("An exact build commit and UTC provenance instant are required.");
         System.CommandLine.RootCommand root = CliApp.Build();
         List<CommandDoc> commands = Walk(root, string.Empty);
         string uncertain = ClientFailure.FromException(new ClientTimeoutException(true))!.Message;
         string plain = ClientFailure.FromException(new ClientTimeoutException(false))!.Message;
         object commandSource = new
         {
-            format = "vericairn.build-references/1", kind = "cli-reference", commit = Commit, version = ReleaseVersion, provenanceAt = at,
+            format = "vericairn.build-references/1", kind = "cli-reference", commit = buildCommit, version = ReleaseVersion, provenanceAt = at,
             rootOptions = root.Options.Where(o => !o.Hidden).Select(o => new { name = Display(o), description = Describe(o) }),
             commands = commands.OrderBy(c => c.Path, StringComparer.Ordinal).Select(c => new
             {
@@ -53,7 +55,7 @@ internal static partial class ReferenceSet
         };
         object recordSource = new
         {
-            format = "vericairn.build-references/1", kind = "record-reference", commit = Commit, version = ReleaseVersion, provenanceAt = at,
+            format = "vericairn.build-references/1", kind = "record-reference", commit = buildCommit, version = ReleaseVersion, provenanceAt = at,
             types = RecordTypeRegistry.All.OrderBy(t => t.Name, StringComparer.Ordinal).Select(t => new
             {
                 name = t.Name, summary = t.Summary, subjectType = t.SubjectType, subjectHashRequired = t.SubjectHashRequired, sinceFormat = t.SinceFormat,
@@ -78,12 +80,13 @@ internal static partial class ReferenceSet
         {
             DocumentRendition rendition = Render(name, source, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [source] = retained[source] });
             WriteBytes(directory, name + ".md", rendition.Bytes.ToArray());
-            outputs.Add(Output(name, source, rendition));
+            outputs.Add(Output(name, source, rendition, [source]));
         }
         foreach ((string path, byte[] bytes) in retained) WriteBytes(directory, path, bytes);
         return new JsonObject
         {
-            ["format"] = CompanionFormat, ["provenanceAt"] = at,
+            ["format"] = CompanionFormat, ["scope"] = "references", ["provenanceAt"] = at,
+            ["repository"] = "Vericairn/vericairn",
             ["implementation"] = SoftwareCompanions.Generators[0].Descriptor!.Implementation,
             ["implementationHash"] = SoftwareCompanions.Generators[0].Descriptor!.ImplementationHash,
             ["inputs"] = Inputs(retained), ["outputs"] = outputs,
@@ -93,48 +96,85 @@ internal static partial class ReferenceSet
     private static JsonArray Inputs(IReadOnlyDictionary<string, byte[]> files) => new(files.OrderBy(f => f.Key, StringComparer.Ordinal)
         .Select(f => (JsonNode)new JsonObject { ["path"] = f.Key, ["hash"] = ContentHash.Sha256(f.Value), ["bytes"] = f.Value.Length }).ToArray());
 
-    private static JsonObject Output(string name, string source, DocumentRendition rendition) => new()
+    private static JsonObject Output(string name, string source, DocumentRendition rendition, IEnumerable<string> inputs, string? buildCommit = null) => new()
     {
         ["path"] = name + ".md", ["generator"] = "vericairn.software/" + name, ["contract"] = 1,
         ["source"] = source, ["inputDigest"] = rendition.InputDigest,
+        ["inputs"] = new JsonArray(inputs.Order(StringComparer.Ordinal).Select(p => (JsonNode)p).ToArray()),
+        ["parameters"] = JsonNode.Parse(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(Parameters(name, source, inputs, buildCommit)))),
     };
 
-    private static void WriteReferenceIndex(string directory, JsonObject companions)
+    private static void WriteReferenceIndex(string directory, JsonObject companions, string? register)
     {
-        Dictionary<string, byte[]> files = ReadReferenceFiles(directory);
+        bool hasRegister = register is not null || RetainedRegister(directory);
+        if (register is not null) WriteBytes(directory, RegisterPath, File.ReadAllBytes(register));
+        Dictionary<string, byte[]> files = ReadReferenceFiles(directory, hasRegister);
         DocumentRendition rendition = Render("reference-index", ReferenceInventory.FileName, files);
         WriteBytes(directory, "reference-index.md", rendition.Bytes.ToArray());
         companions["referenceInputs"] = Inputs(files);
-        companions["outputs"]!.AsArray().Add(Output("reference-index", ReferenceInventory.FileName, rendition));
+        companions["outputs"]!.AsArray().Add(Output("reference-index", ReferenceInventory.FileName, rendition, files.Keys));
     }
 
-    private static Dictionary<string, byte[]> ReadReferenceFiles(string directory) => ReferenceInventory.ReferencePaths.Values.Append(ReferenceInventory.FileName)
+    private static Dictionary<string, byte[]> ReadReferenceFiles(string directory, bool register) => ReferenceInventory.ReferencePaths.Values.Append(ReferenceInventory.FileName).Concat(register ? [RegisterPath] : [])
         .ToDictionary(p => p, p => ReadBytes(directory, p), StringComparer.Ordinal);
 
-    private static DocumentRendition Render(string name, string source, IReadOnlyDictionary<string, byte[]> files)
+    private static bool RetainedRegister(string directory)
+    {
+        string path = Path.Combine(directory, "manifest.json");
+        if (!File.Exists(path)) return false;
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllBytes(path));
+        return document.RootElement.TryGetProperty("companions", out JsonElement companions) && SelectedRegister(companions);
+    }
+
+    private static bool SelectedRegister(JsonElement declaration)
+    {
+        JsonElement output = declaration.GetProperty("outputs").EnumerateArray().Single(o => Str(o, "path") == "reference-index.md");
+        string? register = Str(output.GetProperty("parameters"), "register");
+        return register switch { "none" => false, RegisterPath => true, _ => throw new InvalidOperationException("The selected register snapshot is unavailable.") };
+    }
+
+    private static ImmutableDictionary<string, string> Parameters(string name, string source, IEnumerable<string> paths, string? buildCommit = null)
+    {
+        var inputs = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["format"] = "1", ["audience"] = "Internal", ["selection"] = "list", ["build-commit"] = buildCommit ?? Commit!, ["source"] = source,
+        };
+        if (name == "reference-index") inputs["register"] = paths.Contains(RegisterPath, StringComparer.Ordinal) ? RegisterPath : "none";
+        if (name == "checksums") inputs["artifacts"] = paths.Contains(ArtifactInventory, StringComparer.Ordinal) ? ArtifactInventory : "none";
+        if (name == "documentation-contents") inputs["declaration"] = ProductDocuments;
+        return inputs.ToImmutableDictionary(StringComparer.Ordinal);
+    }
+
+    private static DocumentRendition Render(string name, string source, IReadOnlyDictionary<string, byte[]> files, string? buildCommit = null)
     {
         IDocumentGenerator generator = SoftwareCompanions.Generators.Single(g => g.Id == "vericairn.software/" + name);
-        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["format"] = "1", ["audience"] = "Internal", ["selection"] = "list", ["build-commit"] = Commit!, ["source"] = source,
-        }.ToImmutableDictionary(StringComparer.Ordinal);
+        var parameters = Parameters(name, source, files.Keys, buildCommit);
         DocumentRendition rendition = DocumentRendering.Render(generator, new(1, generator.Descriptor!, parameters, "list", null,
             [.. files.Select(f => DocumentSourceSnapshot.Content("file", f.Key, "Vericairn/vericairn", f.Key, ContentHash.Sha256(f.Value), f.Value))]));
         if (rendition.Status != DocumentGenerationStatus.Success) throw new InvalidOperationException("A required software companion is unavailable: " + name + ". " + rendition.Reason);
         return rendition;
     }
 
-    private static List<FindingDto> CompareCompanions(string directory, JsonElement manifest)
+    private static List<FindingDto> CompareCompanions(string directory, JsonElement manifest, string? artifacts)
     {
         var findings = new List<FindingDto>();
         try
         {
-            if (Str(manifest, "commit") != Commit || !manifest.TryGetProperty("companions", out JsonElement declaration)
+            string buildCommit = Str(manifest, "commit") ?? "";
+            if (!CompatibleBuild(buildCommit) || !manifest.TryGetProperty("companions", out JsonElement declaration)
                 || Str(declaration, "format") != CompanionFormat || Str(declaration, "implementation") != SoftwareCompanions.Generators[0].Descriptor!.Implementation
-                || Str(declaration, "implementationHash") != SoftwareCompanions.Generators[0].Descriptor!.ImplementationHash)
+                || Str(declaration, "implementationHash") != SoftwareCompanions.Generators[0].Descriptor!.ImplementationHash || Str(declaration, "repository") != "Vericairn/vericairn")
                 throw new InvalidOperationException("The retained companion contract, build or generator implementation differs from this build.");
             string at = Str(declaration, "provenanceAt") ?? "";
-            Dictionary<string, byte[]> expected = BuildInputs(at);
+            string[] declaredOutputs = declaration.GetProperty("outputs").EnumerateArray().Select(o => Str(o, "path") ?? "").ToArray();
+            string[] expectedOutputs = [.. Readers.Select(r => r.Name + ".md"), "reference-index.md", .. Str(declaration, "scope") == "release"
+                ? ArtifactReaders([]).Select(r => r.Name + ".md") : []];
+            if (declaredOutputs.Length != expectedOutputs.Length || !declaredOutputs.ToHashSet(StringComparer.Ordinal).SetEquals(expectedOutputs))
+            {
+                findings.Add(new("error", "docs.companion-inventory", "manifest.json", "The exact companion output inventory has missing, duplicated or unexpected members."));
+                return findings;
+            }
+            Dictionary<string, byte[]> expected = BuildInputs(at, buildCommit);
             if (Str(manifest, "generatedAt") != at[..10]) throw new InvalidOperationException("The provenance date differs from the retained instant.");
             CheckInputInventory(expected, declaration.GetProperty("inputs"));
             foreach ((string path, byte[] bytes) in expected)
@@ -142,20 +182,24 @@ internal static partial class ReferenceSet
             var outputs = new JsonArray();
             foreach ((string name, string source) in Readers)
             {
-                DocumentRendition rendition = Render(name, source, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [source] = expected[source] });
+                DocumentRendition rendition = Render(name, source, new Dictionary<string, byte[]>(StringComparer.Ordinal) { [source] = expected[source] }, buildCommit);
                 CheckOutput(name, rendition);
-                outputs.Add(Output(name, source, rendition));
+                outputs.Add(Output(name, source, rendition, [source], buildCommit));
             }
-            Dictionary<string, byte[]> references = ReadReferenceFiles(directory);
+            bool hasRegister = SelectedRegister(declaration);
+            Dictionary<string, byte[]> references = ReadReferenceFiles(directory, hasRegister);
             CheckInputInventory(references, declaration.GetProperty("referenceInputs"));
-            DocumentRendition index = Render("reference-index", ReferenceInventory.FileName, references);
+            DocumentRendition index = Render("reference-index", ReferenceInventory.FileName, references, buildCommit);
             CheckOutput("reference-index", index);
-            outputs.Add(Output("reference-index", ReferenceInventory.FileName, index));
+            outputs.Add(Output("reference-index", ReferenceInventory.FileName, index, references.Keys, buildCommit));
+            string[] artifactPaths = [];
+            if (Str(declaration, "scope") == "release") artifactPaths = CompareArtifactCompanions(directory, declaration, outputs, buildCommit, artifacts);
+            else if (Str(declaration, "scope") != "references" || artifacts is not null) throw new InvalidOperationException("The required serialized release companion inventory is unavailable.");
             if (CanonicalJson.Serialize(JsonSerializer.SerializeToElement(outputs)) != CanonicalJson.Serialize(declaration.GetProperty("outputs")))
                 findings.Add(new("error", "docs.companion-inventory", "manifest.json", "The companion output inventory or its input digests differ from this exact build."));
             string inputDirectory = Path.Combine(directory, "inputs");
             string[] actual = Directory.EnumerateFiles(inputDirectory, "*", SearchOption.AllDirectories).Select(p => Path.GetRelativePath(directory, p).Replace('\\', '/')).ToArray();
-            if (!actual.ToHashSet(StringComparer.Ordinal).SetEquals(expected.Keys)) findings.Add(new("error", "docs.companion-inventory", "inputs", "The retained input directory has missing or unexpected files."));
+            if (!actual.ToHashSet(StringComparer.Ordinal).SetEquals(expected.Keys.Concat(hasRegister ? [RegisterPath] : []).Concat(artifactPaths))) findings.Add(new("error", "docs.companion-inventory", "inputs", "The retained input directory has missing or unexpected files."));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
         {
@@ -175,6 +219,30 @@ internal static partial class ReferenceSet
     {
         if (CanonicalJson.Serialize(JsonSerializer.SerializeToElement(Inputs(expected))) != CanonicalJson.Serialize(inventory))
             throw new InvalidOperationException("The retained input inventory differs from this exact build.");
+    }
+
+    private static bool CompatibleBuild(string retained)
+    {
+        if (!Patterns.Commit.IsMatch(retained) || !Patterns.Commit.IsMatch(Commit ?? "")) return false;
+        // A later documentation-only commit can retain this independent source/build pin without self-reference.
+        // Both commits must be local, and the complete build source trees must agree.
+        return GitSucceeds("cat-file", "-e", retained + "^{commit}") && GitSucceeds("diff", "--quiet", retained, Commit!, "--",
+            "src", "tools", "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json", "Vericairn.slnx", ".gitattributes", "NuGet.Config");
+    }
+
+    private static bool GitSucceeds(params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        start.ArgumentList.Add("--no-replace-objects");
+        foreach (string argument in arguments) start.ArgumentList.Add(argument);
+        start.Environment["GIT_NO_LAZY_FETCH"] = "1";
+        start.Environment["GIT_OPTIONAL_LOCKS"] = "0";
+        using Process process = Process.Start(start) ?? throw new InvalidOperationException("The exact build source is unavailable.");
+        Task<string> output = process.StandardOutput.ReadToEndAsync();
+        Task<string> error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(30_000)) { process.Kill(true); return false; }
+        _ = output.Result; _ = error.Result;
+        return process.ExitCode == 0;
     }
 
     private static string ProvenanceAt(string directory, string? supplied)
@@ -232,7 +300,14 @@ internal static partial class ReferenceSet
         string full = Path.GetFullPath(Path.Combine(directory, path));
         string boundary = Path.GetFullPath(directory);
         for (string? part = full; part is not null; part = part == boundary ? null : Path.GetDirectoryName(part))
-            if ((File.Exists(part) || Directory.Exists(part)) && (File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
-                throw new InvalidOperationException("A retained input or destination redirects through a symbolic link.");
+        {
+            try
+            {
+                if ((File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidOperationException("A retained input or destination redirects through a symbolic link.");
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
     }
 }

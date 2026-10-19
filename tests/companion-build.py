@@ -10,6 +10,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL = ROOT / "artifacts/bin/Vericairn.DocsTool/release/vericairn-docs.dll"
@@ -106,6 +107,62 @@ class CompanionBuildTests(unittest.TestCase):
         after = self.snapshot()
         self.assertNotEqual(before["cli-reference.md"], after["cli-reference.md"])
         self.assertEqual(window, json.loads(after["manifest.json"])["notes"])
+        self.tool("compare", self.output)
+
+    def test_serial_release_retains_exact_inputs_and_reproducible_archive_without_a_checksum_cycle(self):
+        self.generate()
+        version = json.loads((self.output / "manifest.json").read_bytes())["version"]
+        artifacts = self.root / "payload"
+        artifacts.mkdir()
+        (artifacts / "fixture.bin").write_bytes(b"Exact payload bytes.\n")
+        (artifacts / f"vericairn-{version}-sbom.cdx.json").write_text(
+            '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"library","name":"Fixture","version":"1"}],"dependencies":[]}\n', encoding="utf-8")
+        args = ["generate", "--out", self.output, "--documents", self.declaration, "--artifacts", artifacts]
+        self.tool(*args)
+        snapshot = self.snapshot()
+        archive = artifacts / f"vericairn-{version}-companions.zip"
+        before = archive.read_bytes()
+        self.assertNotIn(archive.name.encode(), snapshot["inputs/artifacts/SHA256SUMS"])
+        self.assertIn(b"fixture", snapshot["checksums.md"])
+        self.assertIn(b"Not recorded", snapshot["components.md"])
+        with zipfile.ZipFile(archive) as package:
+            self.assertEqual(set(snapshot), set(package.namelist()))
+            for item in package.infolist():
+                self.assertEqual((1980, 1, 1, 0, 0, 0), item.date_time)
+                self.assertEqual(0, item.create_system)
+                self.assertEqual(zipfile.ZIP_STORED, item.compress_type)
+                self.assertEqual(snapshot[item.filename], package.read(item))
+        self.tool(*args)
+        self.assertEqual(snapshot, self.snapshot())
+        self.assertEqual(before, archive.read_bytes())
+        self.tool("compare", self.output, "--artifacts", artifacts)
+
+        # Updating the capture's declared digest cannot make invented parser results authoritative.
+        capture_path = "inputs/workflows/workflow-inputs.json"
+        capture = json.loads(snapshot[capture_path])
+        capture["allowed"].append("invented/action@" + "a" * 40)
+        changed = json.dumps(capture).encode()
+        (self.output / capture_path).write_bytes(changed)
+        manifest = json.loads(snapshot["manifest.json"])
+        entry = next(i for i in manifest["companions"]["artifactInputs"] if i["path"] == capture_path)
+        entry["hash"] = "sha256:" + hashlib.sha256(changed).hexdigest()
+        entry["bytes"] = len(changed)
+        (self.output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertIn("actual retained parser", self.tool("compare", self.output, expected=1))
+        (self.output / capture_path).write_bytes(snapshot[capture_path])
+        (self.output / "manifest.json").write_bytes(snapshot["manifest.json"])
+        (artifacts / "fixture.bin").write_bytes(b"Different payload.\n")
+        self.assertIn("payload bytes differ", self.tool("compare", self.output, "--artifacts", artifacts, expected=1))
+
+    def test_index_links_selected_register_snapshot_and_preserves_it_on_regeneration(self):
+        register = self.root / "register.md"
+        register.write_text("# Vocabulary\n\n## Generated reference coverage\n\n| Category | Reference | Term |\n|---|---|---|\n| command | vericairn status | Estate state |\n", encoding="utf-8")
+        self.tool("generate", "--out", self.output, "--documents", self.declaration, "--register", register,
+                  "--provenance-at", "2026-10-18T00:00:00Z")
+        before = self.snapshot()
+        self.assertIn(b"[Estate state](inputs/reference-register.md#generated-reference-coverage)", before["reference-index.md"])
+        self.generate(None)
+        self.assertEqual(before, self.snapshot())
         self.tool("compare", self.output)
 
 

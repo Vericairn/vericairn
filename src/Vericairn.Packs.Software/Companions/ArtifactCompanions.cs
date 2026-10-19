@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Globalization;
+using System.Collections.Immutable;
 using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
@@ -35,7 +36,7 @@ internal sealed class FrozenIndexCompanion() : SoftwareCompanion("frozen-index")
     }
 }
 
-internal sealed partial class ChecksumsCompanion() : SoftwareCompanion("checksums")
+internal sealed partial class ChecksumsCompanion() : SoftwareCompanion("checksums", new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal) { ["artifacts"] = ["none", "@path"] })
 {
     protected override string Render(CompanionInput input)
     {
@@ -51,11 +52,47 @@ internal sealed partial class ChecksumsCompanion() : SoftwareCompanion("checksum
         }
         foreach ((string path, string hash) in rows) Row(text, path, "SHA-256", hash);
         if (rows.Count == 0) text.Append("\nThe retained list is empty.\n");
+        string artifacts = input.Context.Parameters["artifacts"];
+        if (artifacts != "none")
+        {
+            JsonElement inventory = input.Json(artifacts);
+            input.Build(inventory, "vericairn.artifact-inputs/1");
+            text.Append("\n## Retained artifact observations\n\nThese observations were captured with the payload before companion packaging. They do not describe the later companion archive or the final encompassing checksum list. Platform, signing, producer identity and rights are not inferred from filenames.\n\n| Artifact | Recorded bytes | Recorded SHA-256 |\n|---|---|---|\n");
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (JsonElement artifact in Array(inventory, "artifacts").OrderBy(a => String(a, "path"), StringComparer.Ordinal))
+            {
+                string path = String(artifact, "path");
+                string hash = String(artifact, "hash");
+                if (!seen.Add(path) || !rows.TryGetValue(path, out string? checksum) || hash != "sha256:" + checksum.ToLowerInvariant() || artifact.GetProperty("bytes").GetInt64() < 0)
+                    throw new CompanionUnavailableException();
+                Row(text, path, Recorded(artifact, "bytes"), hash);
+            }
+            if (seen.Count != rows.Count) throw new CompanionUnavailableException();
+        }
         return text.ToString();
     }
 
     [GeneratedRegex("^([0-9a-fA-F]{64}) [ *](.+)$", RegexOptions.CultureInvariant)]
     private static partial Regex ChecksumLine();
+}
+
+internal sealed class DocumentationSetCompanion() : SoftwareCompanion("documentation-contents", new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal) { ["declaration"] = ["@path"] })
+{
+    protected override string Render(CompanionInput input)
+    {
+        JsonElement manifest = input.Json();
+        if (String(manifest, "format") != "vericairn.docs/1") throw new CompanionUnavailableException();
+        JsonElement required = input.Json(input.Context.Parameters["declaration"]);
+        string[] declared = required.EnumerateArray().Select(v => v.GetString()!).ToArray();
+        string[] listed = Array(manifest, "documents").Select(v => v.GetString()!).ToArray();
+        if (declared.Concat(listed).Any(p => !DocumentPatterns.IsSafeSourcePath(p)) || declared.Distinct(StringComparer.OrdinalIgnoreCase).Count() != declared.Length
+            || listed.Distinct(StringComparer.OrdinalIgnoreCase).Count() != listed.Length) throw new CompanionUnavailableException();
+        var text = new StringBuilder("# Documentation set contents\n\nThe retained product declaration and set manifest are the sources of this table. Listing a document does not establish its availability, frozen status or acceptance.\n\n| Document | Product declaration | Set manifest |\n|---|---|---|\n");
+        foreach (string path in declared.Concat(listed).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+            Row(text, path, declared.Contains(path, StringComparer.Ordinal) ? "Required" : "Not listed", listed.Contains(path, StringComparer.Ordinal) ? "Listed" : "Not listed");
+        text.Append("\n## Complete recorded manifest\n\nThe set's own build identity and notes interval below are independent of this report's build identity. An absent notes interval remains unrecorded.\n\n").Append(Table(manifest));
+        return text.ToString();
+    }
 }
 
 internal sealed class ComponentsCompanion() : SoftwareCompanion("components")

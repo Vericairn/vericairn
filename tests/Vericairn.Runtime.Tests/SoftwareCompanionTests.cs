@@ -157,6 +157,28 @@ public class SoftwareCompanionTests
     }
 
     [Fact]
+    public void ReferenceIndexLinksOnlyMappingsInTheExplicitRetainedRegister()
+    {
+        const string register = """
+            # Vocabulary
+
+            ## Generated reference coverage
+
+            | Category | Reference | Term |
+            |---|---|---|
+            | command | vericairn status | Estate state |
+            | command | vericairn obsolete | Historical term |
+            """;
+        DocumentSourceSnapshot[] sources = [.. ReferenceInventoryTests.Repository().Files.Select(f => File(f.Path, f.Bytes.ToArray())), File("register.md", register)];
+        string text = Read(Render("reference-index", "reference-inventory.json", sources));
+        Assert.Contains("[Estate state](register.md#generated-reference-coverage)", text, StringComparison.Ordinal);
+        Assert.Contains("Historical term", text, StringComparison.Ordinal);
+        Assert.Contains("Not recorded", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Not selected", text, StringComparison.Ordinal);
+        Assert.Equal(DocumentGenerationStatus.Unavailable, Render("reference-index", "reference-inventory.json", [.. sources.SkipLast(1), File("register.md", "# Missing the selected table\n")]).Status);
+    }
+
+    [Fact]
     public void WorkflowReportBindsTheActualAllowListParserAndWorkflowSources()
     {
         DocumentSourceSnapshot[] originals = [File(".github/workflows/actions.allow", "example/action@" + Commit + "\n"),
@@ -223,10 +245,13 @@ public class SoftwareCompanionTests
     internal static DocumentRendition Render(string name, string source, DocumentSourceSnapshot[] sources, string commit)
     {
         IDocumentGenerator generator = SoftwareCompanions.Generators.Single(g => g.Id == "vericairn.software/" + name);
-        var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
+        var inputs = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["format"] = "1", ["audience"] = "Internal", ["selection"] = "list", ["source"] = source, ["build-commit"] = commit,
-        }.ToImmutableDictionary(StringComparer.Ordinal);
+        };
+        if (name == "reference-index") inputs["register"] = sources.Any(s => s.Path == "register.md") ? "register.md" : "none";
+        if (name == "checksums") inputs["artifacts"] = "none";
+        var parameters = inputs.ToImmutableDictionary(StringComparer.Ordinal);
         return DocumentRendering.Render(generator, new(1, generator.Descriptor!, parameters, "list", null, [.. sources]));
     }
     private static string Read(DocumentRendition rendition)
