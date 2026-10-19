@@ -23,6 +23,12 @@ public sealed partial class EstateService
         lock (gate)
         {
             EstateModel model = session.Load();
+            if (model.Current("estate-policy").Count(r => EstateModel.BodyString(r, "key") == key) > 1)
+            {
+                PolicyResponse conflict = PolicyRead(model, null, null) with { Complete = false,
+                    Problem = new("conflict", "The policy key has conflicting declarations; inspect their exact identities and reconcile the records.", []) };
+                return conflict with { Text = PolicyPresentation.Render(conflict) };
+            }
             RecordEnvelope? policy = FindPolicy(model, key);
             return policy is null ? null : PolicyRead(model, null, null, policy);
         }
@@ -57,7 +63,7 @@ public sealed partial class EstateService
 
     private static RecordEnvelope? FindPolicy(EstateModel model, string key) =>
         EstateServiceValues.Latest(model, key, "estate-policy") ?? model.Current("estate-policy")
-            .SingleOrDefault(r => EstateModel.BodyString(r, "key") == key);
+            .OrderBy(r => r.Id, StringComparer.Ordinal).FirstOrDefault(r => EstateModel.BodyString(r, "key") == key);
 
     private PolicyResponse PolicyRead(EstateModel model, string? asOf, string? release, RecordEnvelope? selected = null)
     {
@@ -84,7 +90,9 @@ public sealed partial class EstateService
             .OrderBy(e => e.At, StringComparer.Ordinal).ThenBy(e => e.Id, StringComparer.Ordinal).Select(e => PolicyRecord(model, e)).ToArray();
         var response = new PolicyResponse("", BasisView(basis), policies.Select(p => PolicyRecord(model, p)).ToArray(), exceptions,
             findings.Select(ConvertPolicy<PolicyFindingDto>).ToArray(), evaluated.Rules.Where(r => policies.Any(p => p.Id == r.Policy.Id)).Select(ConvertPolicy<PolicyRuleSummaryDto>).ToArray(),
-            evaluated.Diagnostics.Select(PolicyDiagnostic).ToArray(), evaluated.Complete && problem is null, findings.Count(f => f.ReleaseHold), problem);
+            evaluated.Diagnostics.Select(PolicyDiagnostic).ToArray(), evaluated.Complete && problem is null, findings.Count(f => f.ReleaseHold), problem)
+        { Requirements = evaluated.Requirements?.Where(r => selected is null || r.Policy == EstateModel.BodyString(selected, "key") || identities.Contains(r.Policy))
+            .Select(ConvertPolicy<PolicyRequirementDto>).ToArray() };
         return response with { Text = PolicyPresentation.Render(response) };
     }
 
@@ -163,7 +171,8 @@ public sealed partial class EstateService
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectCorruptedException) { objects.Add(new(hash, [], false)); }
         }
-        string? time = asOf ?? model.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault();
+        // Live time is sampled after source acquisition, so a deadline crossed while reading cannot use the earlier instant.
+        string? time = live ? RecordParser.FormatTimestamp(PolicyClock.GetUtcNow()) : asOf ?? model.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault();
         return new(model, time, live ? PolicyTimeOrigin.Submission : preview ? PolicyTimeOrigin.Preview : PolicyTimeOrigin.Recorded, repositories, objects, registry.Implementations, submission);
 
         void SelectRepositories(JsonElement value)

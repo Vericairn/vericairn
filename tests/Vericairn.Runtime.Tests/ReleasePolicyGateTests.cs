@@ -21,6 +21,74 @@ namespace Vericairn.Runtime.Tests;
 public sealed class ReleasePolicyGateTests
 {
     [Theory]
+    [InlineData("prepared")]
+    [InlineData("before-dispatch")]
+    public void RevokedSigningAuthorityIsRecheckedBeforeIntentAndDispatch(string boundary)
+    {
+        using var f = new Fixture();
+        f.Api.ReleaseBoundary = stage =>
+        {
+            if (stage != boundary) return;
+            var device = f.Api.Session.Load().ById[Assert.Single(f.Api.Devices(), d => d.HeldHere && d.Principal == f.Records.Estate.OperatorId).Id];
+            f.Records.Estate.SetClock(f.Clock.Now);
+            f.Records.Add("admission", new() { ["principal"] = f.Records.Estate.OperatorId, ["status"] = "revoked", ["note"] = "Withdraw the prepared signing device." }, subject: device.Reference);
+            f.Clock.Now = f.Records.Estate.Clock.AddSeconds(1);
+        };
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+        Assert.False(response.Ok);
+        Assert.Equal(0, f.Provider.Calls);
+        Assert.Contains(response.Problem!.Findings, finding => finding.Code is "release.signature" or "release.author");
+        if (boundary == "prepared") Assert.Empty(f.Api.Records("operation"));
+        else
+        {
+            Assert.Equal("not-started", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+            Assert.Contains("reconcile", response.Message, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData("intent")]
+    [InlineData("prepared")]
+    [InlineData("before-dispatch")]
+    public void DeadlineCrossedWhileAcquiringSourcesUsesTheFreshInstant(string boundary)
+    {
+        using var f = new Fixture();
+        f.Duty();
+        var repository = f.Records.Add("resource", new() { ["kind"] = "repository", ["name"] = "Source inventory", ["role"] = "Read exact sources.", ["location"] = new JsonObject { ["github"] = "Example/widget" }, ["visibility"] = "public" });
+        JsonObject definition = f.Records.PolicyBody("source");
+        definition["startsAt"] = RecordParser.FormatTimestamp(f.Clock.Now.AddSeconds(-10));
+        definition["level"] = "remind";
+        definition["appliesTo"] = new JsonObject { ["kind"] = "repository", ["repository"] = repository.Id, ["selectors"] = new JsonArray("docs/**") };
+        definition["rules"] = new JsonArray(new JsonObject { ["key"] = "revision", ["kind"] = "vericairn.estate/revision-line", ["version"] = 1, ["parameters"] = new JsonObject { ["selectors"] = new JsonArray("docs/**"), ["style"] = "estate-design/1" } });
+        f.Records.Policy(definition);
+        bool cross = boundary == "intent";
+        int prepared = 0;
+        f.Api.ReleaseBoundary = stage => { if (stage == "prepared") prepared++; if (stage == boundary) cross = true; };
+        IPolicyRepositorySource? previous = PolicySources.RepositorySource;
+        try
+        {
+            PolicySources.RepositorySource = new CrossingSource(() => { if (cross) f.Clock.Now = f.Due; });
+            ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+            Assert.False(response.Ok);
+            Assert.Equal(0, f.Provider.Calls);
+            Assert.Contains(response.Policies!.Findings, finding => finding.ReleaseHold && finding.Duty is not null);
+            Assert.Equal(RecordParser.FormatTimestamp(f.Due), response.Policies.Basis.AsOf);
+            if (boundary == "intent") Assert.Equal(0, prepared);
+            if (boundary != "before-dispatch") Assert.Empty(f.Api.Records("operation"));
+        }
+        finally { PolicySources.RepositorySource = previous; }
+    }
+
+    private sealed class CrossingSource(Action read) : IPolicyRepositorySource
+    {
+        public PolicyRepository Read(EstateModel model, RecordEnvelope repository, string? commit)
+        {
+            read();
+            return new(repository.Id, commit ?? "fixture-source", PolicyBasis.RepositoryContract, true, []);
+        }
+    }
+
+    [Theory]
     [InlineData("intent")]
     [InlineData("prepared")]
     [InlineData("before-dispatch")]

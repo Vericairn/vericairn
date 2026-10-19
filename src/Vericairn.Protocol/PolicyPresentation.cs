@@ -14,19 +14,25 @@ public static class PolicyPresentation
         ArgumentNullException.ThrowIfNull(response);
         var text = new StringBuilder("Policies\n");
         Basis(text, response.Basis);
+        foreach (PolicyRequirementDto requirement in response.Requirements ?? [])
+            text.AppendLine($"  Requirement {requirement.Decision.Id}/{requirement.Key}: {requirement.State}; {requirement.Action} {requirement.Policy}. {requirement.Change} {requirement.Reason} Decision {requirement.Decision.Hash}; recorded {requirement.Recorded?.Id ?? "none"} {requirement.Recorded?.Hash ?? ""}");
         foreach (RecordResponse policy in response.Policies)
         {
             var body = policy.Envelope.GetProperty("body");
             text.AppendLine($"  {body.GetProperty("key").GetString()}: {body.GetProperty("state").GetString()} at {body.GetProperty("level").GetString()}; owner {body.GetProperty("owner").GetString()} [{policy.Id} {policy.Hash}]");
         }
-        foreach (PolicyFindingDto finding in response.Findings)
+        foreach (var group in response.Findings.GroupBy(f => f.Duty is null ? (Owner: "", Subject: "") : (Owner: f.Owner, Subject: f.Duty.SubjectIdentity)))
         {
-            text.AppendLine($"  {finding.PolicyKey}/{finding.Rule} {finding.Target.Identity}: {finding.Verdict} ({finding.Disposition}), {finding.Level}{(finding.ReleaseHold ? "; release hold" : "")}");
-            text.AppendLine($"    {finding.Actual} Required: {finding.Required} Next: {finding.NextAction}");
-            if (finding.Duty is { } duty)
-                text.AppendLine($"    Recurring duty: due {duty.DueAt}; deadline {duty.Deadline}; completed {duty.Completed}; missed {duty.Missed}; completed at {duty.CompletedAt ?? "none"}; occurrence {duty.Occurrence.GetRawText()}");
-            foreach (PolicyRecordReference evidence in finding.Evidence) text.AppendLine($"    evidence {evidence.Type} {evidence.Id} {evidence.Hash}");
-            foreach (PolicyRecordReference exception in finding.Exceptions) text.AppendLine($"    exception {exception.Id} {exception.Hash}");
+            if (group.Key.Owner.Length > 0) text.AppendLine($"  Duties owned by {group.Key.Owner}, subject {group.Key.Subject}:");
+            foreach (PolicyFindingDto finding in group)
+            {
+                text.AppendLine($"  {finding.PolicyKey}/{finding.Rule} {finding.Target.Identity}: {finding.Verdict} ({finding.Disposition}), {finding.Level}{(finding.ReleaseHold ? "; release hold" : "")}");
+                text.AppendLine($"    {finding.Actual} Required: {finding.Required} Next: {finding.NextAction}");
+                if (finding.Duty is { } duty)
+                    text.AppendLine($"    Recurring duty: due {duty.DueAt}; deadline {duty.Deadline}; completed {duty.Completed}; missed {duty.Missed}; completed at {duty.CompletedAt ?? "none"}; occurrence {duty.Occurrence.GetRawText()}");
+                foreach (PolicyRecordReference evidence in finding.Evidence) text.AppendLine($"    evidence {evidence.Type} {evidence.Id} {evidence.Hash}");
+                foreach (PolicyRecordReference exception in finding.Exceptions) text.AppendLine($"    exception {exception.Id} {exception.Hash}");
+            }
         }
         foreach (RecordResponse exception in response.Exceptions)
             text.AppendLine($"  Exception history {exception.Id} {exception.Hash}: {exception.Envelope.GetProperty("body").GetRawText()}");

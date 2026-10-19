@@ -52,6 +52,9 @@ public sealed partial class EstateService
             checks.Add(new(finding.Severity, code, "policy:" + finding.PolicyKey + "/" + finding.Rule + ":" + finding.Target.Identity,
                 $"Policy {finding.Policy.Id} {finding.Policy.Hash}; rule {finding.Rule}; {finding.Verdict} ({finding.Disposition}) at {finding.Level}: {finding.Actual}{deadline} Required: {finding.Required} Next: {finding.NextAction} Basis {finding.Basis}."));
         }
+        foreach (PolicyRequirement requirement in sections.Evaluation.Requirements ?? [])
+            checks.Info("policy.requirement-" + requirement.State, "decision:" + requirement.Decision.Id + "/" + requirement.Key,
+                $"{requirement.Action} {requirement.Policy}: {requirement.Change} {requirement.Reason} Decision {requirement.Decision.Hash}; recorded revision {requirement.Recorded?.Hash ?? "none"}; basis {sections.Evaluation.Basis}.");
         return checks;
     }
 

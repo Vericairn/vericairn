@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace Vericairn.Protocol;
 
@@ -49,7 +50,16 @@ public sealed record PolicyBasisDto(string Digest, string RecordDigest, string? 
 /// <summary>Policy declarations, exception history and complete derived findings; reading this authors nothing.</summary>
 public sealed record PolicyResponse(string Text, PolicyBasisDto Basis, IReadOnlyList<RecordResponse> Policies,
     IReadOnlyList<RecordResponse> Exceptions, IReadOnlyList<PolicyFindingDto> Findings, IReadOnlyList<PolicyRuleSummaryDto> Rules,
-    IReadOnlyList<FindingDto> Diagnostics, bool Complete, int Holds, Problem? Problem = null);
+    IReadOnlyList<FindingDto> Diagnostics, bool Complete, int Holds, Problem? Problem = null)
+{
+    /// <summary>Exact decision requirements and their recorded changes; a pending requirement alone holds no release.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PolicyRequirementDto>? Requirements { get; init; }
+}
+
+/// <summary>A decision's pending or recorded policy change, independent of rule findings and separate obligations.</summary>
+public sealed record PolicyRequirementDto(PolicyRecordReference Decision, string Key, string Action, string Policy, string Change,
+    string? PriorHash, string? DefinitionHash, string State, PolicyRecordReference? Recorded, string Reason);
 
 /// <summary>An installed kind's supported selections, source contracts and evaluation bounds.</summary>
 public sealed record PolicyKindDto(string Kind, int Version, string ImplementationDigest, IReadOnlyList<string> Selections,

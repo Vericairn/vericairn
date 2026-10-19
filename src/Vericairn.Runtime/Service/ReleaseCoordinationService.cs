@@ -101,6 +101,7 @@ internal sealed class ReleaseCoordinationService(
     private (ReleasePolicyAssessment Assessment, List<FindingDto> Objections, List<string> Compared) Admission(EstateModel model,
         ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true)
     {
+        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, commit, provider, destination);
         ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination));
         List<FindingDto> objections = [.. assessment.Objections];
         if (recordAccess.RequestDeviceRefusal(model) is { } denied) objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", "release", denied.Message)]);
@@ -110,7 +111,6 @@ internal sealed class ReleaseCoordinationService(
             objections.Add(new("error", "release.expected", "release", "The expected product hash is missing or stale; prepare again from its current revision."));
         if (commit is not null && !Patterns.Commit.IsMatch(commit) || model.Manifest?.RecordFormat >= 3 && commit is null)
             objections.Add(new("error", "release.commit", "release", "Supply the prepared exact lower-case forty-digit commit; a branch name or preview verdict cannot authorize a release."));
-        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, commit, provider, destination);
         objections.AddRange(changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message)));
         // Validate current authority and the actual proposed record without recording it, even when another gate holds.
         if (probe)
@@ -124,7 +124,7 @@ internal sealed class ReleaseCoordinationService(
                     .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
             }
         }
-        else if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering))
+        else if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, now()))
             objections.Add(new("error", "release.author", "release", "Release authority is no longer in force for the acting principal."));
         return (assessment, objections.Distinct().ToList(), compared);
     }

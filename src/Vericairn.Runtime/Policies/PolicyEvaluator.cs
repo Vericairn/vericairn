@@ -49,7 +49,37 @@ internal static class PolicyEvaluator
             g.Count(f => f.Verdict == "unavailable"), g.Count(f => f.Disposition == "excepted"))).ToImmutableArray();
         ImmutableArray<Finding> diagnostics = basis.Findings.AddRange(parameterErrors.OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal));
         if (unavailable is not null) diagnostics = diagnostics.Add(new(Severity.Warning, "policy.basis-unavailable", "policy-basis", unavailable));
-        return new(basis.Digest, basis.AsOf, basis.Origin, unavailable is null && ordered.All(f => f.Verdict != "unavailable"), diagnostics, ordered, rules);
+        PolicyRequirement[] requirements = Requirements(basis).ToArray();
+        return new(basis.Digest, basis.AsOf, basis.Origin, unavailable is null && ordered.All(f => f.Verdict != "unavailable"), diagnostics, ordered, rules)
+        { Requirements = requirements.Length == 0 ? null : requirements };
+    }
+
+    // A decision requirement tracks whether its exact approved change was recorded. It supplies no rule or release hold.
+    private static IEnumerable<PolicyRequirement> Requirements(PolicyBasis basis)
+    {
+        var candidates = basis.Model.OfType("estate-policy").OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal)
+            .SelectMany(r => PolicyInputs.Items(PolicyInputs.Get(r.Body, "basis")).Select(b => (Record: r, Basis: b)))
+            .ToLookup(x => (PolicyInputs.Text(PolicyInputs.Get(x.Basis, "decision"), "id"),
+                PolicyInputs.Text(PolicyInputs.Get(x.Basis, "decision"), "hash"), PolicyInputs.Text(x.Basis, "requirement")), x => x.Record);
+        foreach (RecordEnvelope decision in basis.Model.Current("decision").OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal))
+        foreach (JsonElement requirement in PolicyInputs.Items(PolicyInputs.Get(decision.Body, "policies")))
+        {
+            string key = PolicyInputs.Text(requirement, "key") ?? "?", action = PolicyInputs.Text(requirement, "action") ?? "?";
+            string policy = PolicyInputs.Text(requirement, "policy") ?? "?";
+            string? definition = PolicyInputs.Text(requirement, "definitionHash"), prior = PolicyInputs.Text(requirement, "priorHash");
+            RecordEnvelope? recorded = definition is null || basis.UnavailableReason() is not null ? null : candidates[(decision.Id, decision.ComputedHash, key)].FirstOrDefault(r =>
+                    r.AtTime >= decision.AtTime && SignatureChecks.IsAuthentic(basis.Model, r) &&
+                    (r.Supersedes is null ? "declare" : EstateModel.BodyString(r, "state") == "retired" ? "retire" : "revise") == action &&
+                    (r.Supersedes is null ? EstateModel.BodyString(r, "key") : PolicyWork.Identity(basis.Model, r)) == policy &&
+                    (r.Supersedes is { } previous ? basis.Model.ById.GetValueOrDefault(previous)?.ComputedHash : null) == prior &&
+                    PolicyRequirements.DefinitionHash(r.Body) == definition);
+            string state = basis.UnavailableReason() is not null ? "unavailable" : recorded is null ? "pending" : "recorded";
+            yield return new(decision.Reference, key, action, policy, PolicyInputs.Text(requirement, "change") ?? "", prior, definition, state,
+                recorded?.Reference, state == "unavailable" ? "The record basis is invalid or incomplete." : recorded is not null
+                    ? "The exact approved change was recorded; any separate review or obligation remains in force."
+                    : definition is null ? "The decision requires design or reconsideration; no exact definition has been approved."
+                    : "No authorized policy revision records this exact approved definition and prior revision.");
+        }
     }
 
     private static bool Applies(EstateModel model, RecordEnvelope policy, PolicySubmission submission)
