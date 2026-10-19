@@ -69,7 +69,7 @@ internal static class ReleaseEntry
             // A candidate owes no account of its future publication; a replay of that
             // publication cannot hold itself. Earlier publications still hold this submission.
             publications = submission.Product != product ? [] : publications.Where(r =>
-                EstateModel.BodyString(r, "version") != submission.Version && !context.Model.Chain(r).Contains(submission.Release.Id, StringComparer.Ordinal)).ToArray();
+                EstateModel.BodyString(r, "version") != submission.Version && (submission.Release is null || !context.Model.Chain(r).Contains(submission.Release.Id, StringComparer.Ordinal))).ToArray();
         }
         if (publications.Length == 0) return [context.Finding(new("policy", context.Identity, context.Policy.Reference), "", "satisfied",
             "No publications in the applicable cohort.", "An entry for each observed in-range publication.", "No action.", subjects: 0)];

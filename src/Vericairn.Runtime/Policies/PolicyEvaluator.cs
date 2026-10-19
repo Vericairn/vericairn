@@ -40,6 +40,8 @@ internal static class PolicyEvaluator
                 }
             }
         }
+        if (basis.Submission is { } submission)
+            findings = findings.Select(f => f with { Enforced = f.Enforced && Applies(basis.Model, basis.Model.ById[f.Policy.Id], submission) }).ToList();
         ImmutableArray<PolicyFinding> ordered = PolicyExceptions.Apply(basis, findings).OrderBy(f => f.PolicyKey, StringComparer.Ordinal).ThenBy(f => f.Rule, StringComparer.Ordinal)
             .ThenBy(f => f.Target.Identity, StringComparer.Ordinal).ThenBy(f => f.Item, StringComparer.Ordinal).ThenBy(f => f.Policy.Id, StringComparer.Ordinal).ToImmutableArray();
         ImmutableArray<PolicyRuleSummary> rules = ordered.GroupBy(f => (f.Policy, f.Rule)).Select(g => new PolicyRuleSummary(g.Key.Policy, g.Key.Rule,
@@ -48,6 +50,21 @@ internal static class PolicyEvaluator
         ImmutableArray<Finding> diagnostics = basis.Findings.AddRange(parameterErrors.OrderBy(f => f.Location, StringComparer.Ordinal).ThenBy(f => f.Message, StringComparer.Ordinal));
         if (unavailable is not null) diagnostics = diagnostics.Add(new(Severity.Warning, "policy.basis-unavailable", "policy-basis", unavailable));
         return new(basis.Digest, basis.AsOf, basis.Origin, unavailable is null && ordered.All(f => f.Verdict != "unavailable"), diagnostics, ordered, rules);
+    }
+
+    private static bool Applies(EstateModel model, RecordEnvelope policy, PolicySubmission submission)
+    {
+        JsonElement selection = PolicyRecords.Property(policy.Body, "appliesTo");
+        string Identity(string id) => model.ById.TryGetValue(id, out RecordEnvelope? record) ? PolicyWork.Identity(model, record) : id;
+        return PolicyRecords.Text(selection, "kind") switch
+        {
+            "estate" => true,
+            "product" => Identity(PolicyRecords.Text(selection, "product") ?? "") == Identity(submission.Product),
+            "repository" => submission.Repositories?.Contains(Identity(PolicyRecords.Text(selection, "repository") ?? ""), StringComparer.Ordinal) ?? true,
+            "work-orders" => submission.WorkOrders is null || PolicyRecords.Items(PolicyRecords.Property(selection, "workOrders"))
+                .Any(w => w.ValueKind == JsonValueKind.String && submission.WorkOrders.Contains(Identity(w.GetString()!), StringComparer.Ordinal)),
+            _ => true,
+        };
     }
 }
 

@@ -1,6 +1,6 @@
-# Inspecting estate policies and writing exceptions
+# Estate policies, writing exceptions and release admission
 
-Revision 1, October 19, 2026. Describe the policy and writing-registry reads in the development build for 0.8.0.
+Revision 2, October 19, 2026. Describe reads, signed authoring, shared views and release admission in the development build for 0.8.0.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -46,4 +46,14 @@ All authoring commands take `--by`. Revisions, retirement, exception grants and 
 
 Progress and status group unfinished operator-owned duties under **What waits on the operator**, including exact subject, occurrence, deadline, required action and current evidence, even without an ask. An actual ask addressed to an operator can link an occurrence by pinning a result with the exact `duties` binding as its subject. The view groups that ask with the duty, preserving the duty's owner. A builder's linked reserved-action ask therefore does not transfer ownership. Only real asks enter the ask queue; a completed duty does not answer or withdraw an ask. Reads create no asks or other records. These views authorize no effects.
 
-Release enforcement is a separate implementation stage; a recorded-time read alone makes no readiness claim. The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).
+`release submit --product <id> --version <version> --commit <exact-commit> --expected <product-hash> --by <principal>` admits the conjunction of built-in conditions, living-document gates and applicable policy holds. It reports every known objection with its mechanism. Format 3 requires the exact commit, expected current product hash and an admitted held signing device. An older-format submission also needs the exact commit when its release repository has a document comparison. Supplying a commit replaces the earlier provider-resolution step: admission reads local exact source bytes and makes no provider call on refusal. An unrelated clone HEAD cannot stand in for the commit.
+
+Estate-wide policies apply to every product release. Product and repository policies apply to the declared product or release repository. Explicit-work policies apply to work carried by typed release plans and placements for that product and version. Other findings remain visible with enforcement disabled. A missing selected policy source at refuse level holds the release even without a registered clone. A prepared candidate of the same product, version and commit supplies the exact release identity for a submission-bound exception; a general preview exception cannot authorize a build.
+
+The runtime supplies fresh time at preparation, intent and before dispatch. It reads the sources again and rechecks authority, record revisions, exceptions, deadlines and document evidence. A refused initial admission writes no intent and starts no build. If admission changes after intent, the runtime records cancellation when it can; if authority or storage prevents that record, the retained intent requires reconciliation. An unresolved identity is never retried automatically.
+
+Admitted operation evidence retains `vericairn.release-basis/1` objects with the complete policy and duty findings, source bytes and hashes, record digest, exact target and submission time. Preparation remains retained if a later evaluation differs. Pre-dispatch evaluation excludes only that submission's own new operation revisions and pins those exclusions separately, avoiding a circular hash while retaining unrelated changes. API and SDK release responses expose `policies` and `basisEvidence`; CLI JSON preserves them on refusal too. These are ordinary evidence objects, without new record fields. Generic release-intent and publication authoring also passes the shared gate.
+
+Providers receive the prepared commit as `DispatchRequest.ExpectedCommit` and must refuse a moved ref before starting a build. GitHub checks that ref at dispatch; observation checks the commit actually built again before admitting a candidate. A remote branch can still move after dispatch, so an observed effect remains under its original identity and is never represented as undone by a later policy refusal. Publication remains the operator's separate action. MCP exposes no release-admission or acceptance shortcut.
+
+The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).

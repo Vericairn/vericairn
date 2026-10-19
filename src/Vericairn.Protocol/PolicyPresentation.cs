@@ -57,6 +57,6 @@ public static class PolicyPresentation
     private static void Basis(StringBuilder text, PolicyBasisDto basis)
     {
         text.AppendLine($"Basis {basis.Digest}; as of {basis.Origin} time {basis.AsOf ?? "unavailable"}; records {basis.RecordDigest}.");
-        if (basis.Submission is { } release) text.AppendLine($"Release target {release.Release.Id}: {release.Product} {release.Version} at {release.Commit}.");
+        if (basis.Submission is { } release) text.AppendLine($"Release target {release.Release?.Id ?? "proposed"}: {release.Product} {release.Version} at {release.Commit}.");
     }
 }

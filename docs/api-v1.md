@@ -75,7 +75,11 @@ The operator can restore readable journal data or inspect stored effects and pre
 outside the batches directory before retrying. Separate service reads can reconcile journals too;
 [software.md](software.md#record-publication-and-local-recovery-072) states the single-service boundary.
 
-Release submit resolves the provider's exact build commit for document checks in the release repository and claims
+Release submit takes a prepared exact `commit` for source checks and an `expected` current product hash;
+both and an admitted signing device are required in format 3. Admission makes no provider call on refusal.
+It reports built-in, document and policy objections together, re-evaluates after preparation and before dispatch,
+and retains exact policy and duty bases in ordinary operation evidence. `policies` and `basisEvidence` remain
+in the response on refusal. See [policy admission](policies.md). It claims
 its operation identity before dispatch. A receiptless intent is uncertain, so observe and reconcile it
 before retrying. Observation persists that uncertainty even when it subsequently waits for a run or
 draft; the response can include the recorded operation. Observation checks the release repository's documents at the

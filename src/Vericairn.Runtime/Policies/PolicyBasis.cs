@@ -16,7 +16,8 @@ internal sealed record PolicyFile(string Path, string Hash, ImmutableArray<byte>
 internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files);
 internal sealed record PolicyObject(string Hash, ImmutableArray<byte> Bytes, bool Available = true);
 internal sealed record PolicyImplementation(string Kind, int Version, string Digest);
-internal sealed record PolicySubmission(RecordReference Release, string Product, string Version, string Commit);
+internal sealed record PolicySubmission(RecordReference? Release, string Product, string Version, string Commit,
+    IReadOnlyList<string>? Repositories = null, IReadOnlyList<string>? WorkOrders = null);
 
 internal enum PolicyTimeOrigin { Recorded, Preview, Submission }
 
@@ -56,7 +57,7 @@ internal sealed class PolicyBasis
         Implementations = (implementations ?? []).OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Version).ThenBy(i => i.Digest, StringComparer.Ordinal).ToImmutableArray();
         AsOf = asOf;
         Origin = origin;
-        Submission = submission;
+        Submission = submission is null ? null : submission with { Repositories = submission.Repositories?.ToImmutableArray(), WorkOrders = submission.WorkOrders?.ToImmutableArray() };
         Complete = complete;
         RecordDigest = Hash(Records.Select(r => new { r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body, r.DeclaredHash, r.ComputedHash, r.Signatures, r.Format }));
         Digest = Hash(new

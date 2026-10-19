@@ -7,7 +7,8 @@ namespace Vericairn.Runtime.Providers;
 /// <param name="Destination">Where the release lands, named by the provider's destination setting (for GitHub, owner/name).</param>
 /// <param name="Settings">The provider's settings for this operation, defaults applied (for GitHub: repository, workflow, ref, checksums).</param>
 /// <param name="Inputs">The build's inputs (the version).</param>
-public sealed record DispatchRequest(string Destination, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Inputs)
+/// <param name="ExpectedCommit">Exact commit used for admission. A provider must refuse before starting a build if its ref no longer resolves to this commit.</param>
+public sealed record DispatchRequest(string Destination, IReadOnlyDictionary<string, string> Settings, IReadOnlyDictionary<string, string> Inputs, string? ExpectedCommit = null)
 {
     /// <summary>A setting's value, or the fallback when the request does not carry it.</summary>
     public string Setting(string name, string fallback) => Settings.TryGetValue(name, out string? value) && !string.IsNullOrWhiteSpace(value) ? value : fallback;
@@ -66,8 +67,8 @@ public interface IReleaseProvider
 
     /// <summary>
     /// Resolves the build's ref at its destination to an exact commit, without dispatching. Null means this implementation cannot
-    /// establish it; a release needing document checks in its own repository is then refused. Documents in other repositories
-    /// use their own commits. The observed run's commit is checked again.
+    /// establish it. Admission uses the caller's prepared exact commit without invoking this method; a provider may use it
+    /// inside dispatch to verify ExpectedCommit before an effect. The observed run's commit is checked again.
     /// </summary>
     string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) => null;
 

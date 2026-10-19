@@ -57,7 +57,7 @@ public sealed class ReleaseDocumentGateTests
     [InlineData("behind", true)]
     [InlineData("ahead", true)]
     [InlineData("exact", true)]
-    public void SubmissionComparesTheProvidersCommitRegardlessOfCloneHead(string position, bool covers)
+    public void SubmissionComparesThePreparedCommitRegardlessOfCloneHead(string position, bool covers)
     {
         using var fixture = new Fixture(covers);
         string first = fixture.Commit("Old documentation.");
@@ -104,16 +104,16 @@ public sealed class ReleaseDocumentGateTests
     }
 
     [Fact]
-    public void AnUnresolvedProviderCommitCannotFallBackToTheReviewedCloneHead()
+    public void AnAbsentPreparedCommitCannotFallBackToTheReviewedCloneHeadOrCallTheProvider()
     {
         using var fixture = new Fixture();
         fixture.Review(fixture.Commit("Reviewed documentation."));
         var registry = new ProviderRegistry();
         registry.Register(new MovingProvider(fixture.Provider, null));
         fixture.Service.Providers = registry;
-        ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
+        ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request with { Commit = null });
         Assert.False(response.Ok);
-        Assert.Contains("could not resolve", response.Message, StringComparison.Ordinal);
+        Assert.Contains("exact release commit is unavailable", response.Message, StringComparison.Ordinal);
         Assert.Empty(fixture.Service.Records("operation"));
         Assert.Empty(fixture.Provider.Dispatches);
     }
@@ -129,7 +129,7 @@ public sealed class ReleaseDocumentGateTests
         var registry = new ProviderRegistry();
         registry.Register(new MovingProvider(fixture.Provider, reviewed));
         fixture.Service.Providers = registry;
-        ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request);
+        ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request with { Commit = reviewed });
         Assert.True(submitted.Ok, submitted.Message);
         fixture.Provider.CompleteRun("Example/widget", submitted.Run!, true, "1.0.0");
         var request = new ReleaseObserveRequest("1.0.0", "Example/widget", fixture.Estate.OperatorId);
@@ -357,7 +357,8 @@ public sealed class ReleaseDocumentGateTests
         public RecordEnvelope Declaration { get; }
         public EstateService Service { get; }
         public FakeReleaseProvider Provider { get; } = new();
-        public ReleaseSubmitRequest Request { get; }
+        private readonly ReleaseSubmitRequest request;
+        public ReleaseSubmitRequest Request => request with { Commit = Provider.HeadSha };
 
         public Fixture(bool covers = true, bool otherRepository = false)
         {
@@ -375,7 +376,7 @@ public sealed class ReleaseDocumentGateTests
             var registry = new ProviderRegistry();
             registry.Register(Provider);
             Service.Providers = registry;
-            Request = new ReleaseSubmitRequest(product.Id, "1.0.0", "Example/widget", Estate.OperatorId);
+            request = new ReleaseSubmitRequest(product.Id, "1.0.0", "Example/widget", Estate.OperatorId);
             if (otherRepository)
             {
                 string productRepository = Path.Combine(Scratch.Root, "product");

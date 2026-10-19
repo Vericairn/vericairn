@@ -410,7 +410,9 @@ public sealed record ReleaseRow(string? Version, string? Status, string? Commit,
 /// <param name="Reconciliation">How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry.</param>
 /// <param name="Provider">The provider id, for example github-releases; the product's declared provider when absent.</param>
 /// <param name="Settings">The provider's settings by name; they override the product's declared settings and the provider's defaults.</param>
-public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null);
+/// <param name="Commit">Prepared exact commit, required in format 3 and for release-repository document comparisons; never resolved by a provider during admission.</param>
+/// <param name="Expected">Expected current product hash, required in format 3.</param>
+public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null, string? Commit = null, string? Expected = null);
 
 /// <summary>
 /// Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect. The operation
@@ -468,7 +470,9 @@ public sealed record ProviderRow(string Provider, string Kind, string Implementa
 /// <param name="PublishedAt">When the release was observed published.</param>
 /// <param name="Url">Where the release or run is.</param>
 /// <param name="Problem">Why nothing could proceed.</param>
-public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null);
+/// <param name="Policies">Fresh server evaluation at the last admission boundary, including any refused holds.</param>
+/// <param name="BasisEvidence">Retained basis object hashes in evaluation order, also pinned by the operation's ordinary evidence.</param>
+public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null, PolicyResponse? Policies = null, IReadOnlyList<string>? BasisEvidence = null);
 
 /// <summary>
 /// Start a coding agent's run on an assignment through a launcher (the worker contract, vericairn.worker/1): the runtime prepares a

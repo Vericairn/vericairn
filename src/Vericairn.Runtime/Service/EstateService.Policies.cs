@@ -64,8 +64,11 @@ public sealed partial class EstateService
         PolicyKindRegistry registry = PolicySources.Registry();
         RecordEnvelope? candidate = release is null ? null : EstateServiceValues.Latest(model, release, "release");
         Problem? problem = release is not null && candidate is null ? new("not-found", "The named release target is unavailable; use its release record id.", []) : null;
-        PolicySubmission? submission = candidate is null ? null : new(candidate.Reference, candidate.Subject?.Id ?? "",
-            EstateModel.BodyString(candidate, "version") ?? "", EstateModel.BodyString(candidate, "commit") ?? "");
+        HashSet<string> repositories = candidate is null ? [] : model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository" &&
+            string.Equals(PolicyInputs.Text(PolicyInputs.Get(r.Body, "location"), "github"), EstateModel.BodyString(candidate, "repository"), StringComparison.OrdinalIgnoreCase))
+            .SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
+        PolicySubmission? submission = candidate is null ? null : SelectRelease(model, candidate.Subject?.Id ?? "",
+            EstateModel.BodyString(candidate, "version") ?? "", EstateModel.BodyString(candidate, "commit"), repositories, candidate.Reference);
         PolicyBasis basis = PolicySnapshot(model, registry, asOf, submission, preview: asOf is not null || release is not null);
         PolicyEvaluation evaluated = PolicyEvaluator.Evaluate(basis, registry);
         return PolicyView(model, basis, evaluated, selected, problem);
@@ -106,12 +109,12 @@ public sealed partial class EstateService
         return response with { Text = PolicyPresentation.Render(response) };
     }
 
-    private PolicyBasis PolicySnapshot(EstateModel model, PolicyKindRegistry registry, string? asOf = null, PolicySubmission? submission = null, bool preview = false)
+    private PolicyBasis PolicySnapshot(EstateModel model, PolicyKindRegistry registry, string? asOf = null, PolicySubmission? submission = null, bool preview = false, bool live = false)
     {
         List<PolicyRepository> repositories = [PolicySources.Estate(model)];
         // Only explicit repository relations select another repository. No network or provider lookup is involved.
         HashSet<string> selected = [];
-        foreach (RecordEnvelope record in model.Current("estate-policy").Concat(model.Current("writing-exception"))) SelectRepositories(record.Body);
+        foreach (RecordEnvelope record in model.Current("estate-policy").Concat(model.Current("writing-exception")).Concat(model.OfType("result"))) SelectRepositories(record.Body);
         foreach (RecordEnvelope resource in model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository"))
         {
             if (!model.Chain(resource).Any(selected.Contains)) continue;
@@ -134,16 +137,19 @@ public sealed partial class EstateService
             catch (Exception error) when (error is IOException or UnauthorizedAccessException or ObjectCorruptedException) { objects.Add(new(hash, [], false)); }
         }
         string? time = asOf ?? model.Records.Select(r => r.At).Where(RecordParser.IsTimestamp).Order(StringComparer.Ordinal).LastOrDefault();
-        return new(model, time, preview ? PolicyTimeOrigin.Preview : PolicyTimeOrigin.Recorded, repositories, objects, registry.Implementations, submission);
+        return new(model, time, live ? PolicyTimeOrigin.Submission : preview ? PolicyTimeOrigin.Preview : PolicyTimeOrigin.Recorded, repositories, objects, registry.Implementations, submission);
 
         void SelectRepositories(JsonElement value)
         {
             if (value.ValueKind == JsonValueKind.Object)
+            {
+                if (PolicyInputs.Text(value, "type") == "resource" && PolicyInputs.Text(value, "id") is { } resource) selected.Add(resource);
                 foreach (JsonProperty property in value.EnumerateObject())
                 {
                     if (property.Name is "repository" or "registerRepository" && property.Value.ValueKind == JsonValueKind.String) selected.Add(property.Value.GetString()!);
                     SelectRepositories(property.Value);
                 }
+            }
             else if (value.ValueKind == JsonValueKind.Array) foreach (JsonElement item in value.EnumerateArray()) SelectRepositories(item);
         }
         void FindObjects(JsonElement value)
@@ -163,7 +169,8 @@ public sealed partial class EstateService
     private static string? RepositoryCommit(EstateModel model, RecordEnvelope resource, PolicySubmission? submission)
     {
         string? location = PolicyInputs.Text(PolicyInputs.Get(resource.Body, "location"), "github");
-        if (submission is not null && model.ById.TryGetValue(submission.Release.Id, out RecordEnvelope? release) &&
+        if (submission?.Repositories?.Contains(PolicyWork.Identity(model, resource), StringComparer.Ordinal) == true) return submission.Commit;
+        if (submission?.Release is { } selected && model.ById.TryGetValue(selected.Id, out RecordEnvelope? release) &&
             (location is not null && location == EstateModel.BodyString(release, "repository") || resource.Subject?.Id == submission.Product ||
              model.ById.TryGetValue(submission.Product, out RecordEnvelope? product) && model.Chain(resource).Contains(PolicyInputs.Text(PolicyInputs.Get(product.Body, "changes"), "repository") ?? "", StringComparer.Ordinal)))
             return submission.Commit;

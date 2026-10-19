@@ -54,7 +54,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (model, files, order, maxBytes, recipient, assignment) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
-        releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord);
+        releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
+            AssessReleasePolicies, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
     }
 
     /// <summary>
@@ -273,12 +274,12 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
-        if (IsPolicyWrite(draft))
+        if (IsPolicyWrite(draft) || IsReleaseSubmission(draft) && session.Manifest.RecordFormat >= 3)
         {
             lock (gate)
             {
                 EstateModel model = session.Load();
-                if (request.At is not null || request.Id is not null) return Refuse("Policy authoring uses the runtime's fresh time and record identity.");
+                if (request.At is not null || request.Id is not null) return Refuse("Policy and release submission authoring uses the runtime's fresh time and record identity.");
                 string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
                     : request.Type == "policy-exception" ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
                 if (expected is null || request.Expected != expected) return PolicyConflict();
@@ -2173,6 +2174,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             BeforeValidatingRecords?.Invoke(records);
             EstateModel proposed = LoadWith(records);
             FindingList relevant = Invalid(proposed, records);
+            Problem? releaseProblem = JudgeReleaseSubmissions(records);
+            if (releaseProblem is not null) return releaseProblem with { Findings = releaseProblem.Findings.Concat(ToFindings(relevant, "rejected").Findings).Distinct().ToArray() };
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
                 : JudgePolicySources(records, proposed);

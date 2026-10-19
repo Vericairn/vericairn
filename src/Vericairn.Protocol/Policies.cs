@@ -30,7 +30,8 @@ public sealed record PolicyFindingDto(string PolicyIdentity, PolicyRecordReferen
 public sealed record PolicyRuleSummaryDto(PolicyRecordReference Policy, string Rule, int Subjects, int Satisfied, int Unmet, int Unavailable, int Excepted);
 
 /// <summary>The named candidate used by an evaluation; a preview grants no submission authority.</summary>
-public sealed record PolicySubmissionDto(PolicyRecordReference Release, string Product, string Version, string Commit);
+public sealed record PolicySubmissionDto(PolicyRecordReference? Release, string Product, string Version, string Commit,
+    IReadOnlyList<string>? Repositories = null, IReadOnlyList<string>? WorkOrders = null);
 
 /// <summary>A repository inventory identity without machine paths or source bytes.</summary>
 public sealed record PolicyRepositoryDto(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<PolicyFileDto> Files);

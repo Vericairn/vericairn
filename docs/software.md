@@ -309,11 +309,12 @@ compile that shared test support; the fake is absent from the runtime assembly a
 provider refuses before any effect (`ProviderRefusedException`, for example not logged in) or reports that it
 cannot say whether an effect happened (`ProviderUncertainException`); the two are recorded differently. An
 implementation also reads one asset of a release by its name (`ReadAsset`, from 0.6.0); one written for an
-earlier release reads none. From 0.7.2, `ResolveCommit` resolves the requested build ref at the provider to an
-exact commit for the living-document gate. Its default returns unknown, which refuses submission when refuse-level
-documents in the release repository need that commit. Documents in other repositories use their own registered HEAD
-commits, or the reviewed commit when HEAD is its ancestor. GitHub resolves through its commits API; the runtime compares
-the release repository's registered clone at that commit and refuses with fetch guidance if it is absent. The actual
+earlier release reads none. The development build for 0.8.0 takes the prepared exact commit in the submission,
+so document and policy admission can refuse without provider I/O. `DispatchRequest.ExpectedCommit` carries it to
+the provider, which must refuse a moved ref before starting a build. GitHub uses `ResolveCommit` inside dispatch
+for that check. Documents in other repositories use their own registered HEAD commits, or the reviewed commit
+when HEAD is its ancestor. The runtime compares the release repository's registered clone at the prepared commit
+and refuses with fetch guidance if it is absent. The actual
 run commit and the other repositories' commits are checked again before a candidate is recorded, since a branch can
 move after submission.
 
@@ -348,7 +349,7 @@ archive is documentation, and a draft is complete when its checksum file names e
 
 The release as intent, then observed effect:
 
-1. `vericairn release submit --product <id> --version X --by <id> [--provider <id>] [--repository ...] [--ref ...] [--workflow ...] [--setting name=value]...`
+1. `vericairn release submit --product <id> --version X --by <id> --commit <exact-commit> --expected <product-hash> [--provider <id>] [--repository ...] [--ref ...] [--workflow ...] [--setting name=value]...`
    resolves the provider (the request's, else the product's declared one; neither is refused), the
    settings (the provider's defaults, then the product's declared settings, then the request's own; a
    missing required setting is refused), and writes an `operation` with status `not-started` under the
@@ -366,8 +367,8 @@ The release as intent, then observed effect:
    `refuse`, or is unavailable while it declares `refuse`, the submission is refused before the intent,
    naming every such document ([record-format-v2.md](record-format-v2.md#living-documents-due)). This first gate
    derives repository `covers` triggers and compares reviewed document bytes at a commit of each
-   document's own repository. Documents in the release repository use the exact commit resolved by
-   the provider for the requested release ref; that clone's HEAD need not move. Documents in other
+   document's own repository. Documents in the release repository use the prepared exact commit;
+   that clone's HEAD need not move. Documents in other
    repositories use their registered clones' HEAD commits, or the reviewed commit when HEAD is its ancestor.
    Newer or divergent HEADs still require review when content or covered paths changed. Repository identity
    follows resource revisions and the provider's location keys at the effective release destination,
@@ -376,6 +377,11 @@ The release as intent, then observed effect:
    gate. A document with no registered clone is reported as not compared; the independent review
    reads it at a commit of its own repository. The runtime neither fetches nor checks out anything,
    and the intent records the comparisons. Estate-file checks still read the estate's working tree.
+   [Estate policies](policies.md) add their applicable refuse holds to this same conjunction, including
+   unavailable sources and overdue duties. Format 3 requires the exact commit, expected product hash and
+   acting principal's signature. The runtime re-evaluates after preparation and before dispatch and retains
+   both bases when they differ. A refused gate makes no build or provider call; a changed admission after
+   intent is canceled when authority permits, otherwise that identity remains for reconciliation.
 2. `vericairn release observe --version X --by <id> [--product <id>] [--provider <id> --repository <destination>] [--qualified rid]... [--limitation text]... [--signing ...]`
    finds the operation (by provider and destination, by product and version, or by a destination one
    current operation alone matches) and observes the run and the draft through the provider that
