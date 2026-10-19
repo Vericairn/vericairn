@@ -144,6 +144,20 @@ public class ContinuousIntegrationTests
         Assert.True(checkout > 0 && history > checkout && compare > history, "The package job checks out the complete history before it compares the documentation set.");
     }
 
+    [Fact]
+    public void PullRequestsPublishTheSingleFileApplicationsTheReleaseShips()
+    {
+        string job = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), "build-test:", 2);
+        int step = job.IndexOf("- name: Publish the single-file applications", StringComparison.Ordinal);
+        Assert.True(step > 0, "The build-test job publishes the single-file applications, so the single-file analyzer runs on every change.");
+        string publish = job[step..];
+        Assert.Contains("-p:PublishSingleFile=true", publish, StringComparison.Ordinal);
+        Assert.Contains("src/Vericairn.Cli/Vericairn.Cli.csproj", publish, StringComparison.Ordinal);
+        Assert.Contains("src/Vericairn.Workbench/Vericairn.Workbench.csproj", publish, StringComparison.Ordinal);
+        Assert.Contains("git checkout -- $(git ls-files '*packages.lock.json')", publish, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", publish, StringComparison.Ordinal);
+    }
+
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
 
     /// <summary>A key's block in a workflow: its own line and every following line indented deeper, blank lines included.</summary>
