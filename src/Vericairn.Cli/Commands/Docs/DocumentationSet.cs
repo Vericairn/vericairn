@@ -240,6 +240,16 @@ internal static partial class Docs
             Covered(directory, "cli-reference.md", Strings(manifest, "commands"), c => $"`vericairn {c}`", "docs.command", findings);
             Covered(directory, "api-reference.md", Strings(manifest, "operations"), o => $"`{o}`", "docs.operation", findings);
             Covered(directory, "record-reference.md", Strings(manifest, "recordTypes"), t => $"`{t}`", "docs.record-type", findings);
+            bool inventoryRequired = manifest.TryGetProperty("referenceInventory", out _) ||
+                manifest.TryGetProperty("recordFormat", out JsonElement format) && format.ValueKind == JsonValueKind.Object &&
+                format.TryGetProperty("writes", out JsonElement writes) && writes.ValueKind == JsonValueKind.Number && writes.TryGetInt32(out int recordFormat) && recordFormat >= 3 ||
+                Version.TryParse(version, out Version? parsedVersion) && parsedVersion >= new Version(0, 8, 0);
+            if (inventoryRequired)
+            {
+                if (Str(manifest, "referenceInventory") != ReferenceInventoryFiles.Name)
+                    findings.Add(new("error", "docs.reference-inventory", "manifest.json", "The set must name reference-inventory.json."));
+                findings.AddRange(ReferenceInventoryFiles.Check(directory, Str(manifest, "commit"), Strings(manifest, "commands").Select(c => "vericairn " + c), Strings(manifest, "operations"), Strings(manifest, "recordTypes")));
+            }
             string readme = Path.Combine(directory, "README.md");
             if (File.Exists(readme) && !File.ReadAllText(readme).Contains(version, StringComparison.Ordinal))
             {

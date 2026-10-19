@@ -42,6 +42,12 @@ internal sealed class PolicyBasis
         foreach (Finding finding in Findings) findings.Add(finding);
         Model = new EstateModel(string.Empty, Records, Records.GroupBy(r => r.Id, StringComparer.Ordinal).ToImmutableDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal),
             validated.SupersededBy.ToImmutableDictionary(StringComparer.Ordinal), findings);
+        if (validated.Manifest is { } manifest) Model.Manifest = new()
+        {
+            Estate = manifest.Estate, RecordFormat = manifest.RecordFormat, Profile = manifest.Profile, Mode = manifest.Mode,
+            Repository = manifest.Repository, Commit = manifest.Commit, Version = manifest.Version,
+            Artifacts = manifest.Artifacts?.ToImmutableSortedDictionary(StringComparer.Ordinal),
+        };
         Repositories = (repositories ?? []).Select(r => r with { Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
                 .ThenBy(f => f.Available).ThenBy(f => f.IsLink).ThenBy(f => ContentHash.Sha256(f.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray() })
             .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ThenBy(r => r.Contract, StringComparer.Ordinal).ThenBy(r => r.Complete)
@@ -61,6 +67,7 @@ internal sealed class PolicyBasis
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
         });
+        if (Model.Manifest is not null) Digest = Hash(new { snapshot = Digest, manifest = Model.Manifest });
         unavailable = CheckUnavailable();
     }
 

@@ -192,12 +192,18 @@
       "vericairn.presentation": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.4.1-dev, )",
-          "Vericairn.Sdk": "[0.4.1-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Sdk": "[0.7.3-dev, )"
         }
       },
       "vericairn.protocol": {
         "type": "Project"
+      },
+      "vericairn.providers.github.releases": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.7.3-dev, )"
+        }
       },
       "vericairn.records": {
         "type": "Project"
@@ -205,8 +211,8 @@
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.4.1-dev, )",
-          "Vericairn.Records": "[0.4.1-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )"
         }
       }
     }

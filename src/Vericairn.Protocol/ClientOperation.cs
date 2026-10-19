@@ -109,7 +109,7 @@ public static class ClientOperation
     {
         "Check" or "Validate" or "Context" or "BriefContext" or "Handoff" or "ResumeHandoff" or
         "ObjectsVerify" or "ObjectGet" or "ObjectPut" or "Export" or "Upgrade" or "DocumentReview" or
-        "QualifyHarness" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" => TimeSpan.FromMinutes(15),
+        "QualifyHarness" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" => TimeSpan.FromMinutes(15),
         _ => TimeSpan.FromSeconds(30),
     };
 

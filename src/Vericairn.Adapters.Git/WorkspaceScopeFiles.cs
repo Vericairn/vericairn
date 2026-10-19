@@ -3,7 +3,7 @@
 
 using System.Diagnostics;
 
-namespace Vericairn.Packs.Software;
+namespace Vericairn.Adapters.Git;
 
 /// <summary>Repository ignore rules and tracked names, without loading agent-controlled Git configuration.</summary>
 internal sealed class WorkspaceScopeFiles

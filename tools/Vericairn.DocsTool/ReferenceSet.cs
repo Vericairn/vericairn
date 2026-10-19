@@ -96,6 +96,7 @@ internal static class ReferenceSet
             Write(output, "cli-client-outcomes.md", "# Generated CLI reference: client outcomes\n\nGenerated from `ClientFailure` by `vericairn-docs generate`.\n\n" + InterruptedClientRequests());
             Write(output, "api-reference.md", ApiReference(api.RootElement, date));
             Write(output, "record-reference.md", RecordReference(date));
+            ReferenceInventoryFiles.Generate(output, Commit, commands.Select(c => "vericairn " + c.Path), operations, types);
             var manifest = new JsonObject
             {
                 ["format"] = ManifestFormat,
@@ -104,6 +105,7 @@ internal static class ReferenceSet
                 ["generatedAt"] = date,
                 ["generator"] = "vericairn-docs generate " + InformationalVersion,
                 ["recordFormat"] = BuildRecordFormat(),
+                ["referenceInventory"] = ReferenceInventoryFiles.Name,
                 ["documents"] = new JsonArray(documents.Select(d => (JsonNode)d).ToArray()),
                 ["commands"] = new JsonArray(commands.Select(c => (JsonNode)c.Path).ToArray()),
                 ["operations"] = new JsonArray(operations.Select(o => (JsonNode)o).ToArray()),
@@ -156,6 +158,11 @@ internal static class ReferenceSet
             using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
             Compare(Operations(api.RootElement), Strings(manifest, "operations"), "operation", "api-reference.md", o => o, findings);
             Compare(RecordTypeRegistry.All.Select(t => t.Name).ToList(), Strings(manifest, "recordTypes"), "record type", "record-reference.md", t => t, findings);
+
+            if (Str(manifest, "referenceInventory") != ReferenceInventoryFiles.Name)
+                findings.Add(new("error", "docs.reference-inventory", "manifest.json", "The set must name reference-inventory.json."));
+            findings.AddRange(ReferenceInventoryFiles.Check(directory, Commit,
+                Walk(CliApp.Build(), string.Empty).Select(c => "vericairn " + c.Path), Operations(api.RootElement), RecordTypeRegistry.All.Select(t => t.Name)));
 
             // The release observer records the record formats the set states as the release's own, so they must be this build's.
             string built = DescribeFormats(BuildRecordFormat());

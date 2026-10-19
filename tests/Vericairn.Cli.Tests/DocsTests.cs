@@ -115,12 +115,18 @@ public class DocsTests
             (int code, string text) = Tool(() => ReferenceSet.Generate(output, Declaration(output), json: true));
             Assert.True(code == 0, text);
             Assert.Equal(ReferenceSet.ReleaseVersion, JsonDocument.Parse(text).RootElement.GetProperty("version").GetString());
-            foreach (string name in new[] { "cli-reference.md", "api-reference.md", "record-reference.md", "manifest.json" })
+            foreach (string name in new[] { "cli-reference.md", "api-reference.md", "record-reference.md", "manifest.json", "reference-inventory.json" })
             {
                 Assert.True(File.Exists(Path.Combine(output, name)), name);
             }
 
             using JsonDocument manifest = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "manifest.json")));
+            Assert.Equal("reference-inventory.json", manifest.RootElement.GetProperty("referenceInventory").GetString());
+            using JsonDocument inventory = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "reference-inventory.json")));
+            Assert.Equal("vericairn.reference-inventory/1", inventory.RootElement.GetProperty("format").GetString());
+            Assert.Equal(manifest.RootElement.GetProperty("commit").GetString(), inventory.RootElement.GetProperty("commit").GetString());
+            foreach (JsonElement reference in inventory.RootElement.GetProperty("references").EnumerateArray())
+                Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.Contains("docs check", commands);
             Assert.DoesNotContain("docs generate", commands);
@@ -209,12 +215,13 @@ public class DocsTests
             CliHarness.Outcome incomplete = CliHarness.Run("--json", "docs", "check", output);
             Assert.Equal(1, incomplete.Code);
             JsonElement findings = incomplete.Json;
-            Assert.Equal(4, findings.GetProperty("errors").GetInt32());
+            Assert.Equal(5, findings.GetProperty("errors").GetInt32());
             List<string> messages = findings.GetProperty("findings").EnumerateArray().Select(f => f.GetProperty("Location").GetString() + ": " + f.GetProperty("Message").GetString()).ToList();
             Assert.Contains(messages, m => m.StartsWith("install.md: Missing", StringComparison.Ordinal));
             Assert.Contains(messages, m => m.StartsWith("README.md: Does not name the version", StringComparison.Ordinal));
             Assert.Contains(messages, m => m.StartsWith("cli-reference.md: No heading for `vericairn docs check`", StringComparison.Ordinal));
             Assert.Contains(messages, m => m.StartsWith("record-reference.md: No heading for `acceptance`", StringComparison.Ordinal));
+            Assert.Contains(messages, m => m.StartsWith("reference-inventory.json: A generated reference hash differs", StringComparison.Ordinal));
 
             // A manifest that drops a document the product declares is refused against the declaration.
             string manifestPath = Path.Combine(output, "manifest.json");
@@ -266,6 +273,42 @@ public class DocsTests
         {
             Directory.Delete(output, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("commit")]
+    [InlineData("hash")]
+    [InlineData("duplicate")]
+    [InlineData("declaration")]
+    public void ExistingBuildAndDocumentChecksRefuseAnInvalidReferenceInventory(string defect)
+    {
+        string output = CliHarness.TempDirectory("docs-inventory");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            foreach (string name in Authored) File.WriteAllText(Path.Combine(output, name), "# " + ReferenceSet.ReleaseVersion + "\n");
+            string path = Path.Combine(output, "reference-inventory.json");
+            var inventory = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            if (defect == "commit") inventory["commit"] = new string('0', 40);
+            if (defect == "hash") inventory["references"]![0]!["hash"] = "sha256:" + new string('0', 64);
+            if (defect == "duplicate") inventory["items"]!.AsArray().Add(inventory["items"]![0]!.DeepClone());
+            File.WriteAllText(path, inventory.ToJsonString());
+            if (defect == "missing") File.Delete(path);
+            if (defect == "declaration")
+            {
+                string manifestPath = Path.Combine(output, "manifest.json");
+                var manifest = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+                manifest.Remove("referenceInventory"); File.WriteAllText(manifestPath, manifest.ToJsonString());
+            }
+            (int code, string text) = Tool(() => ReferenceSet.CompareWithBuild(output, json: false));
+            Assert.Equal(1, code);
+            Assert.Contains("docs.reference-inventory", text, StringComparison.Ordinal);
+            CliHarness.Outcome check = CliHarness.Run("docs", "check", output);
+            Assert.Equal(1, check.Code);
+            Assert.Contains("docs.reference-inventory", check.Out, StringComparison.Ordinal);
+        }
+        finally { Directory.Delete(output, recursive: true); }
     }
 
     [Fact]

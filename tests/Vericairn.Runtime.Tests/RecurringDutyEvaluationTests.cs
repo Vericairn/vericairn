@@ -246,7 +246,7 @@ public class RecurringDutyEvaluationTests
             foreach (string name in new[] { "en-US", "tr-TR", "ar-SA", "fr-FR" })
             {
                 CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(name); CultureInfo.CurrentUICulture = CultureInfo.CurrentCulture;
-                var shuffled = new EstateModel(string.Empty, model.Records.Reverse().ToArray(), model.ById, model.SupersededBy, model.Findings);
+                var shuffled = new EstateModel(string.Empty, model.Records.Reverse().ToArray(), model.ById, model.SupersededBy, model.Findings) { Manifest = model.Manifest };
                 PolicyEvaluation actual = PolicyEvaluator.Evaluate(new(shuffled, RecordParser.FormatTimestamp(f.Estate.Clock), PolicyTimeOrigin.Preview, implementations: FoundationPolicyTests.Kinds.Implementations), FoundationPolicyTests.Kinds);
                 Assert.Equal(expected, actual.Canonical());
             }
