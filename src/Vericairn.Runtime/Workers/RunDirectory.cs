@@ -79,9 +79,20 @@ public sealed class RunObservedState
 /// </summary>
 public sealed class RunDirectory
 {
+    private static readonly TimeSpan FileRetryLimit = TimeSpan.FromMilliseconds(250);
+    private static readonly TimeSpan FileRetryDelay = TimeSpan.FromMilliseconds(10);
+
     internal Action? BeforeStopRequestSerialization { get; init; }
 
     internal Action? AfterReadOpen { get; init; }
+
+    internal Action? BeforeReadOpen { get; init; }
+
+    internal Action? BeforeMove { get; init; }
+
+    internal TimeProvider RetryClock { get; init; } = TimeProvider.System;
+
+    internal Action<TimeSpan> RetryWait { get; init; } = Thread.Sleep;
 
     /// <summary>The directory of a run of an estate on this machine.</summary>
     public RunDirectory(string estate, string run)
@@ -140,7 +151,7 @@ public sealed class RunDirectory
         }
     }
 
-    /// <summary>What the supervising worker observed, or null when nothing was written or it cannot be read.</summary>
+    /// <summary>What the supervising worker observed, or null when absent. An unreadable snapshot throws after bounded retries of sharing or access failures.</summary>
     public RunObservedState? Read() => ReadJson<RunObservedState>(StateFile);
 
     /// <summary>Writes what the supervising worker observed, whole, so that a reader never sees half of it.</summary>
@@ -153,7 +164,7 @@ public sealed class RunDirectory
     /// <summary>Publishes the stop file whole, replacing an existing entry without opening it for writing.</summary>
     internal void TransmitStop(StopRequest request) => WriteWhole(StopFile, request);
 
-    /// <summary>The stop asked of the run, or null.</summary>
+    /// <summary>The stop asked of the run, or null when absent. An unreadable request throws after bounded retries of sharing or access failures.</summary>
     public StopRequest? ReadStop() => ReadJson<StopRequest>(StopRequestFile);
 
     /// <summary>Asks the run to stop; the first completely published request stands and a later one changes nothing. Returns the request that stands.</summary>
@@ -172,7 +183,7 @@ public sealed class RunDirectory
         }
     }
 
-    private static void WriteWhole<T>(string target, T value, bool overwrite = true, Action? beforeSerialization = null)
+    private void WriteWhole<T>(string target, T value, bool overwrite = true, Action? beforeSerialization = null)
     {
         // CREATE_ALWAYS refuses an existing hidden/system file on Windows. Exclusive staging plus rename also avoids
         // writing through an existing link, and a unique staging name leaves a stranded earlier write untouched.
@@ -187,7 +198,12 @@ public sealed class RunDirectory
 
             // A stop request becomes visible only when complete. A non-overwriting move elects one
             // winner across processes; competing callers read that winner, never their own unkept request.
-            File.Move(temporary, target, overwrite);
+            WithFileRetries(() =>
+            {
+                BeforeMove?.Invoke();
+                File.Move(temporary, target, overwrite);
+                return true;
+            });
         }
         finally
         {
@@ -195,19 +211,53 @@ public sealed class RunDirectory
         }
     }
 
-    private T? ReadJson<T>(string file)
-        where T : class
+    private T? ReadJson<T>(string file) where T : class => WithFileRetries<T?>(() =>
     {
+        FileStream stream;
         try
         {
-            // Keep a complete snapshot open while permitting atomic replacement on Windows too.
-            using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
-            AfterReadOpen?.Invoke();
-            return JsonSerializer.Deserialize<T>(stream, ProtocolJson.Options);
+            // Delete sharing permits overlapping access, but Windows MoveFileEx can still refuse
+            // replacement until this handle closes. The writer retries that contention separately.
+            BeforeReadOpen?.Invoke();
+            stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
         }
-        catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException)
+        catch (FileNotFoundException)
         {
             return null;
         }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+
+        using (stream)
+        {
+            AfterReadOpen?.Invoke();
+            return JsonSerializer.Deserialize<T>(stream, ProtocolJson.Options)
+                ?? throw new JsonException("A run snapshot must contain an object.");
+        }
+    });
+
+    private T WithFileRetries<T>(Func<T> operation)
+    {
+        long started = RetryClock.GetTimestamp();
+        while (true)
+        {
+            try
+            {
+                return operation();
+            }
+            catch (Exception exception) when (IsSharingOrAccessFailure(exception))
+            {
+                TimeSpan remaining = FileRetryLimit - RetryClock.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero) throw;
+                RetryWait(remaining < FileRetryDelay ? remaining : FileRetryDelay);
+            }
+        }
     }
+
+    // Access denied can be temporary on Windows as well as a permanent permissions error. Retry it
+    // briefly, then preserve the error. Missing files, bad JSON and other storage faults are distinct.
+    private static bool IsSharingOrAccessFailure(Exception exception) => exception is UnauthorizedAccessException
+        || (exception is IOException && (exception.HResult & 0xffff) is 5 or 32 or 33);
 }

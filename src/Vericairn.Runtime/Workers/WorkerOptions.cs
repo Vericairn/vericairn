@@ -24,6 +24,8 @@ public sealed record WorkerOptions
 
     internal Func<uint>? WindowsJobInventory { get; init; }
 
+    internal Func<string, string, RunDirectory> OpenRunDirectory { get; init; } = (estate, run) => new RunDirectory(estate, run);
+
     /// <summary>Host-supplied configurations, copied on initialization. Otherwise the launcher supplies one, or native runs read the user's WorkerConfigurationStore.</summary>
     public IReadOnlyDictionary<string, RunConfiguration> Configurations
     {
