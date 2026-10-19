@@ -111,6 +111,10 @@ The proposal uses these term names that need current definitions in the register
 | api-operation | `GET /v1/asks` | Ask |
 | api-operation | `GET /v1/check` | Estate check |
 | api-operation | `GET /v1/communication` | Communication setting |
+| api-operation | `GET /v1/companions` | Generated |
+| api-operation | `GET /v1/companions/compare` | Generated |
+| api-operation | `GET /v1/companions/render` | Generated |
+| api-operation | `GET /v1/companions/sources` | Generated |
 | api-operation | `GET /v1/context/original/{pin}` | Context package |
 | api-operation | `GET /v1/context/work/{key}` | Context package |
 | api-operation | `GET /v1/context/work/{key}/brief` | Brief |
@@ -220,10 +224,12 @@ The proposal uses these term names that need current definitions in the register
 | command | `vericairn devices writes` | Admission |
 | command | `vericairn docs` | Frozen documentation set |
 | command | `vericairn docs check` | Frozen documentation set |
+| command | `vericairn docs companions` | Generated |
 | command | `vericairn docs declare` | Living document |
 | command | `vericairn docs living` | Living document |
 | command | `vericairn docs notes` | Notes window |
 | command | `vericairn docs regenerate` | Generated |
+| command | `vericairn docs render` | Generated |
 | command | `vericairn docs review` | Clearance |
 | command | `vericairn doctor` | Runtime |
 | command | `vericairn estate` | Estate |

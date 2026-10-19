@@ -48,6 +48,36 @@ The setting is reread at Workbench's next hourly check or when it is reopened. S
 - Theme: the brand's token contract is bound in one resource (`Theme.axaml`): eight color roles in light and dark variants, four type roles, three scale roles and two motion roles. The first values were adopted on October 14, 2026 (design/brand.md revision 2): Inter for title, heading and body and JetBrains Mono for identifiers, both bundled under the SIL Open Font License, one accent blue, one attention amber used only for the attention kinds, neutral surfaces and outlines. The probe measures the contrast ratio of every pair the roles form in both variants (text and muted text on the surfaces at 4.5 or better, outlines at 3 or better) and reports it beside the target sizes. The mark and the wordmark (`brand/`) appear on the arrival page; the shell binds roles, never values.
 - Records: open any record by id.
 
+## Readable views (development build for 0.8.0)
+
+**Work → Readable views**, or Ctrl+Shift+V (Cmd+Shift+V on macOS), opens the installed
+record collections and manifest. Select a collection and press Enter. Opening a
+record by id shows its readable rendition beside the exact source envelope;
+work-order, review and release pages also provide explicit exact-source buttons.
+The Documents page opens its selected declaration's generator. For a retained
+software source, supply the exact Commit in that page; no clone-head fallback is used.
+
+Every view shows its snapshot or source commit, input and rendition hashes,
+currentness, completeness and page. Source rows label each exact identity, hash,
+path, repository, recorded time and lineage. They have complete accessible names;
+Enter on a selected record opens that exact revision. Tab reaches the basis,
+refresh and page controls, read-only text and source inspector. Reading grants no
+review or acceptance, and the guidance directs edits to the authoritative source.
+
+F5 and **Refresh current access and basis** renew permission and collection
+selection. Exact item revisions never follow successors. Page buttons retain the
+same snapshot and return unavailable when it has changed. A successful refresh
+shows a bounded line comparison and the earlier rendition with its own historical
+basis. If a comparison exceeds its bound, both complete observed renditions remain
+available in separate tabs. A failed refresh, disconnect or access refusal clears
+the cached rendition, earlier text and source details and labels freshness unavailable.
+
+The reader is a selectable text view with explicitly labeled source rows. Native
+screen-reader and desktop keyboard qualification must be observed on each platform;
+compilation or headless tests alone do not establish it. The API's Internal-only
+projection and local-inspector boundary apply unchanged. See
+[readable companions](readable-companions.md) for source and output contracts.
+
 ## Personal communication (0.7.0)
 
 Estate → Communication settings opens the recipient, scope and five fields.

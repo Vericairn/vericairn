@@ -1,8 +1,90 @@
 # Readable companion contracts
 
-Companions extend the READ-01 immutable generator and verification contracts.
-They introduce no command, API operation or record field. Source selection and
-authorization precede rendering; a rendition grants no authority or acceptance.
+The development build for 0.8.0 exposes the immutable generator and verification
+contracts through the docs commands, API, SDK, MCP and Workbench. These are read
+models, with no new record type or record field. Source selection and authorization
+precede rendering; a rendition grants no authority, acceptance or authored clearance.
+
+## Reading and comparing
+
+`vericairn docs companions` lists installed item and list coverage, input contracts,
+bounded no-reader reasons and actual current declarations. A possible register path
+in a generator descriptor is not an adopted destination. Use `--json` to retain the
+exact `snapshot` for record collections or `manifestSnapshot` for the manifest.
+Coverage also names the existing brief, context, handoff and communication readers;
+their original-content, withholding and measurement contracts remain intact.
+
+```sh
+vericairn docs render vericairn.records/items --selection item --revision <revision-id>
+vericairn docs render vericairn.records/items --selection list --revision <revision-id> --field effects
+vericairn docs render vericairn.records/decisions --selection current --snapshot <snapshot-digest>
+vericairn docs render vericairn.estate/manifest --selection item --snapshot <manifest-snapshot-digest>
+vericairn docs render vericairn.records/items --selection item --revision <revision-id> --sources
+vericairn docs regenerate <declared-path-or-declaration-id> --compare
+```
+
+An item retains the exact immutable revision even after a successor appears.
+Collections require `current` or `all-revisions` and an explicit snapshot from the
+runtime; an obsolete snapshot returns unavailable. Refresh coverage explicitly to
+choose a new basis. `--page` and `--index` are one-based; a nonexistent page or nested
+member is unavailable, not an empty list. Use a nested field's registered schema
+path, such as `duties[].proofs`. `--contract` selects the exact installed contract.
+`--sources` selects and checks the same source basis without invoking the generator.
+
+A retained software companion uses `--selection item --declaration <declaration-id>`
+and `--commit <full-commit>`. The runtime reads that exact source selection through
+its registered adapter. Missing source commits never fall back to the clone head.
+These reads do not select an ambient file or accept supplied source bytes.
+
+Responses identify the audience, exact source ids and hashes, record lineage at
+the selected snapshot, generator implementation, input digest and rendition hash.
+`current` describes the selected record lineage or collection observation;
+`historical` describes an earlier revision, an all-revisions collection or a fixed
+declared source basis. Neither label is an acceptance. Completeness is explicit:
+`selected-page`, `bounded-overview`, `source-basis`, or `unavailable`; the rendition
+labels its page or partial overview and how to inspect complete authoritative detail.
+
+`docs regenerate --compare` checks bytes and complete membership without writing
+output, a journal, a pin or a review. Missing, changed and unexpected members are
+distinct. It exits zero only when current, one for differences, and nonzero when
+unavailable or invalid. External comparisons require `--commit <full-commit>`.
+Without `--compare`, the existing local repair behavior applies. Repair of an
+authored generated region preserves everything outside the markers and cannot
+clear its authored review. Whole generated members acquire no document-revision
+pins. Strict adoption and explicit legacy conversion remain separate operations.
+
+## Surface contract and access
+
+| CLI | GET route | SDK sync / async | MCP read tool |
+|---|---|---|---|
+| `docs companions` | `/v1/companions` | `Companions` / `CompanionsAsync` | `docs_companions` |
+| `docs render` | `/v1/companions/render` | `CompanionRender` / `CompanionRenderAsync` | `docs_render` |
+| `docs render --sources` | `/v1/companions/sources` | `CompanionSources` / `CompanionSourcesAsync` | `docs_sources` |
+| `docs regenerate --compare` | `/v1/companions/compare` | `CompanionCompare` / `CompanionCompareAsync` | `docs_compare` |
+
+Render and sources accept the same `CompanionRequest` query fields: `generator`,
+`selection`, `revision`, `snapshot`, `page`, `field`, `index`, `audience`, `contract`,
+`declaration` and `commit`. Compare takes `selection`, `commit` and `audience`.
+Defaults are Internal, contract 1, page 1, field `body` and index `all`. MCP uses
+decimal strings for page and contract. SDK async operations share the normal
+operation deadline, cancellation and read-failure semantics. No operation is a write.
+
+The runtime checks current device access and source validity before generation.
+Only the complete authorized Internal projection is supported in this build;
+Public and Members-only requests return unavailable without source metadata,
+counts or a digest. Requesting an audience grants no access. Local inspectors
+remain in their owning local surfaces; these routes and tools cannot render them.
+Missing generators or unsupported contracts return unavailable and direct readers
+to source inspection. An unavailable basis never becomes a successful empty view.
+
+Workbench's **Work → Readable views** (`Ctrl+Shift+V`, or `Cmd+Shift+V`) opens the
+collection catalog. Enter opens a collection or a selected exact record source.
+The read-only rendition sits beside labeled source rows and the exact record
+envelope or file basis. F5 renews access and freshness; page navigation retains
+the selected snapshot. Failed refresh clears cached content and currentness.
+Successful refresh retains the prior rendition with its own historical basis and
+a bounded line comparison. Correct the authoritative source, then refresh;
+generated text has no editor or submission action. See [Workbench](workbench.md).
 
 ## Record coverage
 
@@ -99,7 +181,7 @@ charter, their original formats, and migration history. The manifest's current
 record format is distinct from the format in which a charter was recorded.
 Manifest and artifact-map coverage is registered through `DocumentCoverage`.
 This generator refuses repository declarations; neither reader writes a file or
-record. Snapshot selection is a read model for future surfaces, not a new operation.
+record. The runtime exposes these exact selections through the read operations above.
 
 ## Local metadata inspectors
 
@@ -136,4 +218,4 @@ arguments. Certificate dates use the requested instant and establish no trust.
 Device admission remains distinct from key possession; run observations remain
 distinct from contributor claims or recorded acceptance. Retained context shows
 hashes, byte accounting and unknown tokens without originals or presentations.
-These are read models for later surfaces; no command or API operation is added.
+These local read models are not callable through the companion API or MCP tools.

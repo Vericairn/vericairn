@@ -77,6 +77,32 @@ Writes are visible only when the server was started with `--as <principal id>` a
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
+## Readable companions (development build for 0.8.0)
+
+Four read tools share the runtime's companion operations: `docs_companions` lists
+coverage, generator contracts, exact snapshots and adopted destinations;
+`docs_render` reads an explicit revision or snapshot; `docs_sources` inspects the
+same source basis without generating; `docs_compare` compares bytes and complete
+membership without repairing. All four use the asynchronous API and its cancellation
+boundary. They author no record and grant no review clearance.
+
+Render and sources require `generator` and `selection`. Supply `revision` for an
+exact record item or nested list, `snapshot` for a current or all-revisions
+collection, or `declaration` and an exact `commit` for a retained software item.
+Optional `page`, `field`, `index`, `audience` and `contract` have the same meaning
+as the [docs commands](readable-companions.md); page and contract are decimal strings.
+Compare requires `selection` (a declaration id or declared path), with `commit`
+for an external repository. Read the response's currentness, completeness and
+differences; a successful comparison can still report differing bytes.
+
+The runtime resolves current device and source access before generation. This
+build admits Internal projections only and returns unavailable for Public or
+Members-only requests without source metadata or a digest. Local-only inspectors
+cannot be rendered through MCP, even when their safe coverage metadata is listed.
+An unavailable or unsupported basis returns an error result, not an empty view.
+The existing context tools retain their original, derivative and withheld-source
+contracts; a companion does not replace required original evidence.
+
 ## Running it
 
 After 0.7.3's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
