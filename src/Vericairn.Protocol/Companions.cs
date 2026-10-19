@@ -13,7 +13,7 @@ public sealed record CompanionCompareRequest(string Selection, string? Commit = 
 
 /// <summary>Installed reader coverage and its placement; a destination does not mean an estate adopted it.</summary>
 public sealed record CompanionCoverageRow(string Kind, string ReaderTask, string? Item, string? List,
-    string InputSchema, string Audience, string Destination, string? NoReaderReason);
+    string InputSchema, string Audience, string Destination, string? NoReaderReason, string? ReaderOperation = null);
 
 /// <summary>An installed output contract and its supported selections, without local machine configuration.</summary>
 public sealed record CompanionGeneratorRow(string Id, int Contract, string Implementation, string ImplementationHash,

@@ -17,7 +17,8 @@ public static class CompanionPresentation
         text.Append("Manifest snapshot: ").Append(response.ManifestSnapshot).Append('\n');
         foreach (CompanionCoverageRow row in response.Coverage)
             text.Append(row.Kind).Append(": ").Append(row.NoReaderReason ?? row.ReaderTask).Append("; ")
-                .Append(row.Destination).Append("; item ").Append(row.Item).Append("; list ").Append(row.List).Append('\n');
+                .Append(row.Destination).Append("; item ").Append(row.Item).Append("; list ").Append(row.List)
+                .Append(row.ReaderOperation is null ? "" : "; owning reader " + row.ReaderOperation).Append('\n');
         text.Append("\nInstalled generators (a pattern is a capability, not an adoption):\n");
         foreach (CompanionGeneratorRow row in response.Generators)
             text.Append(row.Id).Append('/').Append(row.Contract).Append("; ").AppendJoin(", ", row.Selections)

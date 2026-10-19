@@ -33,7 +33,7 @@ public sealed record ToolDefinition(string Name, string Description, JsonObject 
 /// admitted device whose key this machine holds, because that is what the runtime will sign with; a tool the connection
 /// cannot use is absent, not refused.
 /// </summary>
-public sealed class ToolRegistry
+public sealed partial class ToolRegistry
 {
     private readonly IEstateApi api;
     private readonly string? actingPrincipal;
@@ -138,6 +138,7 @@ public sealed class ToolRegistry
         string by = actingPrincipal ?? string.Empty;
         return
         [
+            .. CompanionTools(),
             Read("policies_list", "Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record.", NoArguments(),
                 async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
             Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),

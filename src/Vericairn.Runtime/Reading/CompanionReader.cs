@@ -14,9 +14,17 @@ namespace Vericairn.Runtime.Reading;
 /// <summary>Selects only the authorized Internal record/source basis before invoking a registered pure renderer.</summary>
 internal static class CompanionReader
 {
+    private static readonly CompanionCoverageRow[] ExistingReaders =
+    [
+        new("view/work-brief", "Read the measured brief with its exact originals, derivatives and withheld list.", null, null, "BriefResponse", "Internal", "on-demand", null, "BriefContext"),
+        new("view/context", "Read the measured context and retrieve pinned originals without inferring token fit.", null, null, "ContextResponse", "Internal", "on-demand", null, "Context"),
+        new("view/handoff", "Read the retained handoff basis, its exclusions and measurement limits.", null, null, "HandoffResponse", "Internal", "on-demand", null, "Handoff"),
+        new("view/communication", "Read effective settings with their contributing revisions, conflicts and freshness.", null, null, "CommunicationProfile", "Internal", "on-demand", null, "Communication"),
+    ];
+
     internal static CompanionsResponse Coverage(EstateModel model, byte[] manifest) => new(1, "success", DocumentOnDemand.RecordSnapshot(model),
         DocumentCoverage.All.Select(d => new CompanionCoverageRow(d.Kind, d.ReaderTask, d.Item?.Generator, d.List?.Generator,
-            d.InputSchema, d.Audience, d.Destination, d.NoReaderReason)).ToArray(),
+            d.InputSchema, d.Audience, d.Destination, d.NoReaderReason)).Concat(ExistingReaders).OrderBy(d => d.Kind, StringComparer.Ordinal).ToArray(),
         DocumentGenerators.All.Where(g => g.Descriptor is not null).Select(g => Describe(g.Descriptor!)).ToArray(),
         model.Current("living-document").Where(d => DocumentChecks.Generator(d) is not null)
             .OrderBy(d => d.Id, StringComparer.Ordinal).Select(d => new CompanionDestination(d.Id, d.ComputedHash,
