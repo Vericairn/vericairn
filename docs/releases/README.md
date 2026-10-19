@@ -17,8 +17,8 @@ remain the operator's work after upgrading. The source version is `0.8.0-dev`.
 The set records no 0.8.0 publication, tag, package availability or platform qualification.
 Its references retain build commit `9393a977a6b7d7f2b09a93cf5c087260e22dd784`,
 with 141 commands, 99 API operations, 42 record types and 31 required documents.
-The builder renders its notes from the estate's records with `--from 0.7.3 --to 0.8.0`
-and then freezes the complete set. It has no entry in `frozen-sha256.json` until that freeze.
+Its notes render the estate's records with `--from 0.7.3 --to 0.8.0`. The set is frozen for its
+release build, with every file's checksum in `frozen-sha256.json`.
 
 The [0.7.3 set](0.7.3/README.md) documents FIX-19, UPDATE-01, FIX-20, FIX-21 and FIX-22 after published 0.7.2:
 independent worker workspace repositories and sandboxed Codex commits; a disclosed, machine-local daily
