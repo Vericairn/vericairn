@@ -8,6 +8,8 @@ public sealed record WorkerOptions
 {
     internal Action? AfterEvent { get; init; }
 
+    internal Action<RunDirectory>? BeforeReadersStart { get; init; }
+
     internal Action<TimeSpan>? BeforeCredentialCheck { get; init; }
 
     internal TimeProvider Clock { get; init; } = TimeProvider.System;
@@ -21,6 +23,8 @@ public sealed record WorkerOptions
     internal Action? BeforeAttentionRecord { get; init; }
 
     internal Func<uint>? WindowsJobInventory { get; init; }
+
+    internal Func<string, string, RunDirectory> OpenRunDirectory { get; init; } = (estate, run) => new RunDirectory(estate, run);
 
     /// <summary>Host-supplied configurations, copied on initialization. Otherwise the launcher supplies one, or native runs read the user's WorkerConfigurationStore.</summary>
     public IReadOnlyDictionary<string, RunConfiguration> Configurations

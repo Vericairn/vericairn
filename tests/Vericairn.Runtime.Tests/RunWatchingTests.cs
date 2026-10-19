@@ -10,6 +10,34 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class RunWatchingTests
 {
+    [Fact]
+    public void InitialStateIsPublishedBeforeOutputReadersCanObserveACriticalStop()
+    {
+        RunObservedState? initial = null;
+        var clock = new WorkerClock();
+        using var run = new RunEstate(options: new WorkerOptions
+        {
+            Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(20), Grace = TimeSpan.FromSeconds(1),
+            BeforeReadersStart = directory => initial = directory.Read(),
+        });
+        RunResponse started = run.Start("codex", "watch-codex-critical-hold", run.Report("initial-state"));
+        Assert.True(started.Ok, started.Message);
+        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        RunRow settled = run.Settled(started.Run);
+
+        // An initial snapshot staged after the readers start can replace their newer stop observation.
+        // The startup snapshot must be completely published before either reader can mutate or save it.
+        Assert.NotNull(initial);
+        Assert.Equal(started.Run, initial.Run);
+        Assert.NotNull(initial.ProcessId);
+        Assert.NotNull(initial.Liveness);
+        Assert.Null(initial.Stop);
+        Assert.Equal("known-failure", settled.Status);
+        Assert.NotNull(settled.Stop!.TransmittedAt);
+        Assert.NotNull(settled.Stop.ContainedAt);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

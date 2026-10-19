@@ -12,6 +12,142 @@ namespace Vericairn.Runtime.Tests;
 public class RunDirectoryTests
 {
     [Fact]
+    public void AStateReadSharingWithReplacementDoesNotLoseTheStop()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "Windows requires readers to share a replacement's delete access.");
+        using var run = new RunEstate();
+        var directory = new RunDirectory(run.Service.Session.Manifest.Estate, Ulid.NewUlid().Value);
+        directory.Create();
+        var stop = new RunStop("2026-10-15T12:00:00Z", "worker", "stop") { TransmittedAt = "2026-10-15T12:00:01Z" };
+        directory.Write(new RunObservedState { Stop = stop });
+
+        // A rename needs DELETE access. Hold that access without completing the replacement so the
+        // reader deterministically overlaps it; File.ReadAllText's FileShare.Read rejects this handle.
+        using var replacing = new FileStream(directory.StateFile, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.DeleteOnClose);
+        Assert.Equal(stop, directory.Read()?.Stop);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnOpenStateReaderKeepsAWholeSnapshotWhileTheNextStopObservationIsPublished(bool injectContention)
+    {
+        using var run = new RunEstate();
+        string estate = run.Service.Session.Manifest.Estate;
+        string id = Ulid.NewUlid().Value;
+        using var readerOpened = new ManualResetEventSlim();
+        using var moveAttempted = new ManualResetEventSlim();
+        using var readerClosed = new ManualResetEventSlim();
+        var clock = new WorkerClock();
+        int moves = 0;
+        var writer = new RunDirectory(estate, id)
+        {
+            BeforeMove = () =>
+            {
+                if (injectContention && readerOpened.IsSet && Interlocked.Increment(ref moves) == 1)
+                {
+                    throw new UnauthorizedAccessException("Synthetic open-reader contention.");
+                }
+            },
+            RetryClock = clock,
+            RetryWait = delay =>
+            {
+                // Windows cannot replace the open destination even with delete sharing. Let the
+                // reader finish after the failed move, then retry without racing a wall-clock budget.
+                moveAttempted.Set();
+                Assert.True(readerClosed.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+                clock.Advance(delay);
+            },
+        };
+        writer.Create();
+        var stop = new RunStop("2026-10-15T12:00:00Z", "worker", "stop");
+        var transmitted = stop with { TransmittedAt = "2026-10-15T12:00:01Z", Transmission = "stop file" };
+        writer.Write(new RunObservedState { Run = id, Stop = stop });
+        var reader = new RunDirectory(estate, id)
+        {
+            AfterReadOpen = () =>
+            {
+                readerOpened.Set();
+                Assert.True(moveAttempted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            },
+        };
+
+        Task publishing = Task.Run(() =>
+        {
+            Assert.True(readerOpened.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            try { writer.Write(new RunObservedState { Run = id, Stop = transmitted }); }
+            finally { moveAttempted.Set(); }
+        }, TestContext.Current.CancellationToken);
+        RunObservedState? snapshot;
+        try { snapshot = reader.Read(); }
+        finally
+        {
+            readerClosed.Set();
+            // Observe the writer's own exception; it must never be swallowed by the reader's catch.
+            await publishing.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(stop, snapshot!.Stop);
+        Assert.Equal(transmitted, writer.Read()!.Stop);
+        Assert.Empty(Directory.EnumerateFiles(writer.Path, "*.tmp"));
+        if (injectContention) Assert.Equal(2, moves);
+    }
+
+    [Fact]
+    public void ConcurrentStopRequestsReturnTheFirstCompletelyPublishedRequest()
+    {
+        using var run = new RunEstate();
+        string estate = run.Service.Session.Manifest.Estate;
+        string id = Ulid.NewUlid().Value;
+        var observer = new RunDirectory(estate, id);
+        var first = new StopRequest("2026-10-15T12:00:00Z", "first", "first writer");
+        var second = new StopRequest("2026-10-15T12:01:00Z", "second", "second writer");
+        bool exposedUnserializedRequest = false;
+        StopRequest? competing = null;
+        var writer = new RunDirectory(estate, id)
+        {
+            BeforeStopRequestSerialization = () =>
+            {
+                // Pause the first writer after opening its file, before writing any JSON. Another instance
+                // represents a different worker process: a process-local lock cannot protect this reader.
+                exposedUnserializedRequest = File.Exists(observer.StopRequestFile);
+                Assert.Null(observer.ReadStop());
+                competing = observer.RequestStop(second);
+            },
+        };
+
+        StopRequest published = writer.RequestStop(first);
+        Assert.False(exposedUnserializedRequest);
+        Assert.Equal(second, competing);
+        Assert.Equal(second, published);
+        Assert.Equal(second, observer.ReadStop());
+        Assert.Equal(second, observer.RequestStop(first));
+        Assert.Empty(Directory.EnumerateFiles(observer.Path, "*.tmp"));
+    }
+
+    [Fact]
+    public void AnInterruptedStopWriteLeavesNoRequestAndCanBeRetried()
+    {
+        using var run = new RunEstate();
+        string estate = run.Service.Session.Manifest.Estate;
+        string id = Ulid.NewUlid().Value;
+        var writer = new RunDirectory(estate, id)
+        {
+            BeforeStopRequestSerialization = () => throw new IOException("Interrupted before serialization."),
+        };
+        var request = new StopRequest("2026-10-15T12:00:00Z", "worker", "stop");
+
+        Assert.Throws<IOException>(() => writer.RequestStop(request));
+        Assert.False(File.Exists(writer.StopRequestFile));
+        Assert.Null(writer.ReadStop());
+        Assert.Empty(Directory.EnumerateFiles(writer.Path, "*.tmp"));
+        var retry = new RunDirectory(estate, id);
+        Assert.Equal(request, retry.RequestStop(request));
+        Assert.Equal(request, retry.ReadStop());
+    }
+
+    [Fact]
     public void StateAndStopPublicationCanReplaceHiddenFilesWithoutLeavingStagingFiles()
     {
         using var run = new RunEstate();

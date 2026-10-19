@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
 using Vericairn.Sdk;
+using Vericairn.TestSupport;
 
 namespace Vericairn.Daemon.Tests;
 
@@ -31,19 +32,33 @@ public sealed class LocalClientCancellationTests
             var connection = new RuntimeConnection(Ulid.NewUlid().Value, address, Ulid.NewUlid().Value, null,
                 publicKey, device, publicKey, Ulid.NewUlid().Value, null, ["local-network"], "2026-10-18T00:00:00Z");
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            TimeSpan timeout = cancel ? TimeSpan.FromSeconds(10) : TimeSpan.FromMilliseconds(100);
+            // Caller cancellation is triggered by acceptance, independently of elapsed startup time.
+            TimeSpan timeout = cancel ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(100);
             Task operation = pairing
                 ? RuntimePairing.PairAsync(address, PairingProtocol.NewCode(), new PairingOptions("Test device") { KeyStore = keys, Timeout = timeout }, stop.Token)
                 : new RuntimeConnections(home, keys).ProbeAsync(connection, timeout, cancellationToken: stop.Token);
-            using TcpClient accepted = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken).AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-            if (cancel) stop.Cancel();
-            Exception failure = cancel
-                ? await Assert.ThrowsAsync<ClientCancelledException>(() => operation)
-                : await Assert.ThrowsAsync<ClientTimeoutException>(() => operation);
-            // Neither a silent handshake nor a read-only probe has sent a pairing confirmation or another effect.
-            Assert.False(((IClientOperationFailure)failure).OutcomeUnknown);
-            Assert.Equal(cancel ? "cancelled" : "timed-out", ClientFailure.FromException(failure)?.Code);
+            try
+            {
+                using TcpClient? accepted = await SilentPeer.AcceptUntilCompletedAsync(
+                    token => listener.AcceptTcpClientAsync(token).AsTask(), operation, TestContext.Current.CancellationToken);
+                if (cancel)
+                {
+                    Assert.NotNull(accepted);
+                    stop.Cancel();
+                }
+                Exception failure = cancel
+                    ? await Assert.ThrowsAsync<ClientCancelledException>(() => operation)
+                    : await Assert.ThrowsAsync<ClientTimeoutException>(() => operation);
+                // Neither connection setup, a silent handshake nor a read-only probe has sent a pairing confirmation or another effect.
+                Assert.False(((IClientOperationFailure)failure).OutcomeUnknown);
+                Assert.Equal(cancel ? "cancelled" : "timed-out", ClientFailure.FromException(failure)?.Code);
+            }
+            finally
+            {
+                stop.Cancel();
+                _ = operation.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
+                    TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            }
         }
         finally { Directory.Delete(home, recursive: true); }
     }
