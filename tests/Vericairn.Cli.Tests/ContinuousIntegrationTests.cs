@@ -131,6 +131,19 @@ public class ContinuousIntegrationTests
         }
     }
 
+    [Fact]
+    public void TheReleasePackageJobChecksOutTheHistoryItsDocumentationComparisonReads()
+    {
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml")), "package:", 2);
+
+        // A set's references are pinned to the commit that generated them, and the comparison proves that the release commit's
+        // build sources agree with that commit; a shallow checkout lacks it, so 0.8.0's first release run stopped there.
+        int checkout = package.IndexOf("- uses: actions/checkout@", StringComparison.Ordinal);
+        int history = package.IndexOf("\n          fetch-depth: 0\n", StringComparison.Ordinal);
+        int compare = package.IndexOf("--project tools/Vericairn.DocsTool -- compare", StringComparison.Ordinal);
+        Assert.True(checkout > 0 && history > checkout && compare > history, "The package job checks out the complete history before it compares the documentation set.");
+    }
+
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
 
     /// <summary>A key's block in a workflow: its own line and every following line indented deeper, blank lines included.</summary>
