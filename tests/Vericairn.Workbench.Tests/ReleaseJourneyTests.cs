@@ -32,6 +32,11 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
         string decision = Seed.Id(Seed.Cli("--estate", root, "--json", "records", "new", "decision", "--by", builder, "--body", Seed.Write(scratch, "decision.json", $$"""{"title":"Delegate","stake":"low","notAuthorized":[],"statement":"Engineer.","summary":"Delegation.","synthesis":"Standing delegation.","effects":["builder engineers"],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z"}""")));
         Seed.Cli("--estate", root, "--json", "records", "new", "authority", "--by", op, "--body", Seed.Write(scratch, "authority.json", $$"""{"grantee":"{{builder}}","scope":["local-engineering"],"reserved":["publication"],"conditions":["label self-review"],"basis":"{{decision}}"}"""));
         Seed.Cli("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", Seed.Write(scratch, "product.json", Product));
+        foreach ((string principal, string name) in new[] { (op, "Release operator"), (builder, "Release builder") })
+        {
+            string device = Seed.Id(Seed.Cli("--estate", root, "--json", "devices", "create", "--principal", principal, "--name", name, "--custody", "file"));
+            Seed.Cli("--estate", root, "--json", "devices", "admit", device, "--by", op, "--note", "Admitted for the release journey.");
+        }
 
         var provider = new FakeReleaseProvider();
         IReleaseProvider? previous = ProviderRegistry.Current.Register(provider);
@@ -64,6 +69,19 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             await fixture.Ui(() => Keys.Focus(window, "repository"));
             await fixture.Ui(() => Keys.Type(window, "Example/widget", "repository"));
             Assert.Equal("Example/widget", workspace.Settings.Single(s => s.Name == "repository").Value);
+            // An unprepared commit refuses without an intent or a provider call; the form carries the exact preparation next.
+            await fixture.UiAsync(async () =>
+            {
+                window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
+                await shell.PendingOperation;
+            });
+            Assert.Contains("release.commit", workspace.Status, StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+            Assert.Empty(shell.Api!.Records("operation"));
+            await fixture.Ui(() => Keys.Focus(window, "Commit"));
+            await fixture.Ui(() => Keys.Type(window, provider.HeadSha, "Commit"));
+            Assert.Equal(provider.HeadSha, workspace.Commit);
+            Assert.Equal(shell.Api.Record(workspace.Product!.Id)!.Hash, workspace.Product.Hash);
             await fixture.UiAsync(async () =>
             {
                 window.KeyPress(Key.Enter, RawInputModifiers.Control, PhysicalKey.Enter, null);
@@ -71,6 +89,8 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             });
             Assert.True(workspace.Status.Contains("intent was recorded before the dispatch", StringComparison.Ordinal), workspace.Status);
             Assert.Equal("dispatched", workspace.LastResponse!.Status);
+            Assert.Contains("Basis sha256:", workspace.Status, StringComparison.Ordinal);
+            Assert.NotEmpty(workspace.LastResponse.BasisEvidence!);
             string run = workspace.LastResponse.Run!;
             DestinationRow destination = Assert.Single(workspace.Destinations);
             Assert.Equal("intent recorded", destination.Preparation);
@@ -117,7 +137,7 @@ public class ReleaseJourneyTests(HeadlessFixture fixture)
             // The operator acts now: Enter on the destination opens the candidate in the review workspace; the acceptance is typed and sent with Ctrl+Shift+Enter.
             shell.ActingOverride = op;
             await fixture.UiAsync(() => shell.RefreshAsync(cancellationToken: TestContext.Current.CancellationToken));
-            Assert.Equal("Operator (named with --as; no device of this principal is held here, so its records will be unsigned)", shell.ActingPrincipal);
+            Assert.Equal("Operator (device Release operator)", shell.ActingPrincipal);
             await fixture.UiAsync(async () =>
             {
                 window.UpdateLayout();
