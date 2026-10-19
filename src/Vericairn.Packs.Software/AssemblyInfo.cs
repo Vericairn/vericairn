@@ -5,3 +5,4 @@ using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("Vericairn.Runtime.Tests")]
 [assembly: InternalsVisibleTo("vericairn")]
+[assembly: InternalsVisibleTo("vericairn-docs")]

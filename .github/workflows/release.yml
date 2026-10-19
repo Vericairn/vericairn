@@ -32,6 +32,8 @@ jobs:
         run: dotnet restore --locked-mode
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      - name: Verify retained companion inputs and bytes
+        run: python tests/companion-build.py
       - name: Build the Secure Enclave helper
         # The release's own test run exercises real key custody on every platform it qualifies. Unlike continuous integration, it
         # requires the Apple-silicon runner's Secure Enclave: the helper must find one, and the enclave tests fail rather than skip
@@ -222,6 +224,12 @@ jobs:
         run: |
           set -eu
           (cd docs/releases && zip -q -X -r "../../dist/vericairn-$VERSION-docs.zip" "$VERSION")
+      - name: Retain and verify readable build reports
+        shell: bash
+        run: |
+          set -eu
+          dotnet run --no-restore --configuration Release --project tools/Vericairn.DocsTool -- generate --out artifacts/release-companions --documents docs/releases/documents.json --artifacts dist
+          dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare artifacts/release-companions --artifacts dist
       - name: Checksums and notes
         shell: bash
         env:

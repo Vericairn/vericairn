@@ -29,7 +29,8 @@ internal static class Composition
         registry.RegisterIfAbsent(new ClaudeCodeLauncher());
         registry.RegisterIfAbsent(new CodexLauncher());
         registry.RegisterIfAbsent(new GenericLauncher());
-        Records.Estate.DocumentSources.Register(new GitFileSource());
+        Records.Estate.DocumentSources.Register(new GitFileSource(SoftwareCompanionSources.Select));
+        SoftwareCompanions.Register();
         Runtime.Policies.PolicySources.RepositorySource ??= new GitPolicySource();
         Runtime.Policies.PolicySources.Register(ReferenceCoverage.Registration(Runtime.Policies.PolicySources.Digest(typeof(ReferenceInventory).Assembly)));
     }

@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <PackageReference Include="System.CommandLine" />
+    <None Update="workflow-inputs.rb" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../.github/scripts/check-workflow-actions.rb" Link="check-workflow-actions.rb" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
