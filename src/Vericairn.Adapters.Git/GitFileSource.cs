@@ -148,7 +148,7 @@ public sealed class GitFileSource : IDocumentSource
     private static string? Text(string clone, params string[] arguments) =>
         Run(clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
 
-    private static int Run(string clone, out byte[] output, params string[] arguments)
+    internal static int Run(string clone, out byte[] output, params string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
         info.ArgumentList.Add("--no-replace-objects");

@@ -28,6 +28,7 @@
     <ProjectReference Include="../../src/Vericairn.Cli/Vericairn.Cli.csproj" />
     <ProjectReference Include="../../tools/Vericairn.DocsTool/Vericairn.DocsTool.csproj" />
     <ProjectReference Include="../../src/Vericairn.Records/Vericairn.Records.csproj" />
+    <ProjectReference Include="../Vericairn.Records.Tests/Vericairn.Records.Tests.csproj" />
   </ItemGroup>
 
 </Project>

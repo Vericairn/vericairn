@@ -55,7 +55,8 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             (model, files, order, maxBytes, recipient, assignment) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
-        releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord);
+        releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
+            AssessReleasePolicies, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
     }
 
     /// <summary>
@@ -103,13 +104,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            FindingList checks = ChecksWithBatches(model);
+            PolicySections sections = ReadPolicySections(model);
+            FindingList checks = SectionChecks(model, ChecksWithBatches(model), sections);
             JsonObject json = JsonNode.Parse(EstateStatus.RenderJson(model, checks))!.AsObject();
+            AddPolicySections(json, sections);
             // Status is portable: neither the progress projection nor the run projection may read local worker state.
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model,
                 () => new ProgressResponse(string.Empty, JsonSerializer.Deserialize<JsonElement>(ProgressReport.RenderJson(model, null)), model.Findings.HasErrors),
                 includeLocalObservations: false), ProtocolJson.Options);
-            return new StatusResponse(EstateStatus.Render(model, checks), Element(json), model.Findings.HasErrors || checks.HasErrors);
+            return new StatusResponse(EstateStatus.Render(model, checks) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false) + "\nWhat waits on the operator\n" + OperatorDutyText(sections), Element(json), model.Findings.HasErrors || checks.HasErrors);
         }
     }
 
@@ -128,12 +131,15 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private ProgressResponse ProgressCore(EstateModel model, FindingList checks)
     {
+        PolicySections sections = ReadPolicySections(model);
+        checks = SectionChecks(model, checks, sections);
         JsonObject json = JsonNode.Parse(ProgressReport.RenderJson(model, checks))!.AsObject();
+        AddPolicySections(json, sections);
         List<WorkProgressClaim> claims = ProgressClaims(model);
         json["agentClaims"] = JsonSerializer.SerializeToNode(claims, ProtocolJson.Options);
         List<RunRow> watched = Runs(model).Runs.Where(r => r.Signals is { Count: > 0 }).ToList();
         json["runSignals"] = JsonSerializer.SerializeToNode(watched.Select(r => new { r.Run, r.Status, r.Signals }), ProtocolJson.Options);
-        string text = ProgressReport.Render(model, checks);
+        string text = ProgressReport.Render(model, checks) + OperatorDutyText(sections) + "\n" + PolicyPresentation.Render(sections.Policies, includeDiagnostics: false) + "\n" + PolicyPresentation.Render(sections.Exceptions, includeDiagnostics: false);
         if (claims.Count > 0)
         {
             text += "\nAgent progress claims (latest local notes; not worker observations or acceptance):\n"
@@ -188,15 +194,16 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
+            PolicySections sections = ReadPolicySections(model);
             var all = new FindingList();
-            foreach (Finding finding in model.Findings.Concat(ChecksWithBatches(model)))
+            foreach (Finding finding in model.Findings.Concat(SectionChecks(model, ChecksWithBatches(model), sections)))
             {
                 all.Add(finding);
             }
 
             ReleasePinWarning.Add(model, all, new ReleaseUpdateStore().CachedRelease());
 
-            return ToFindings(all, $"{model.Records.Count} records");
+            return ToFindings(all, $"{model.Records.Count} records") with { Policies = sections.Policies, WritingExceptions = sections.Exceptions };
         }
     }
 
@@ -267,7 +274,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("An explicit id must be a ULID.");
         }
 
-        return Write(new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id));
+        var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
+        if (IsPolicyWrite(draft) || request.Type is "result" or "review")
+        {
+            lock (gate)
+            {
+                EstateModel model = session.Load();
+                bool dutyEvidence = IsDutyEvidence(draft, model);
+                if (request.Type is "result" or "review" && !dutyEvidence) return WriteLocked(draft, model);
+                if (request.At is not null || request.Id is not null) return Refuse("Policy and duty evidence authoring uses the runtime's fresh time and record identity.");
+                if (dutyEvidence && (subject is null || !model.ById.TryGetValue(subject.Id, out RecordEnvelope? evidenceSubject) ||
+                    !model.IsCurrent(evidenceSubject) || subject != evidenceSubject.Reference)) return PolicyConflict();
+                string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
+                    : request.Type == "policy-exception" || dutyEvidence ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
+                if (expected is null || request.Expected != expected) return PolicyConflict();
+                return SignedPolicyWrite(draft, model);
+            }
+        }
+        return Write(draft);
     }
 
     /// <inheritdoc />
@@ -392,7 +416,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public WriteOutcome Result(ResultRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return About("result", "attempt", request.Attempt, request.By, request.Body);
+        return HasDuties(request.Body) || request.Expected is not null
+            ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, request.Body, request.Expected)
+            : About("result", "attempt", request.Attempt, request.By, request.Body);
     }
 
     /// <inheritdoc />
@@ -2153,10 +2179,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         try
         {
             BeforeValidatingRecords?.Invoke(records);
-            FindingList relevant = Invalid(LoadWith(records), records);
+            EstateModel proposed = LoadWith(records);
+            FindingList relevant = Invalid(proposed, records);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
-                : null;
+                : JudgePolicySources(records, proposed);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {

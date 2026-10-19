@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Immutable;
+using System.Text.Json.Serialization;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Runtime.Policies;
@@ -21,9 +22,14 @@ internal sealed record PolicyFinding(
 
 internal sealed record PolicyRuleSummary(RecordReference Policy, string Rule, int Subjects, int Satisfied, int Unmet, int Unavailable, int Excepted);
 
+internal sealed record PolicyRequirement(RecordReference Decision, string Key, string Action, string Policy, string Change,
+    string? PriorHash, string? DefinitionHash, string State, RecordReference? Recorded, string Reason);
+
 internal sealed record PolicyEvaluation(string Basis, string? AsOf, PolicyTimeOrigin Origin, bool Complete,
     ImmutableArray<Finding> Diagnostics, ImmutableArray<PolicyFinding> Findings, ImmutableArray<PolicyRuleSummary> Rules)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PolicyRequirement>? Requirements { get; init; }
     public int Errors => Diagnostics.Count(f => f.Severity == Severity.Error);
     public int Warnings => Diagnostics.Count(f => f.Severity == Severity.Warning) + Findings.Count(f => f.Severity == Severity.Warning);
     public int Holds => Findings.Count(f => f.ReleaseHold);

@@ -109,6 +109,8 @@ public static class ClientOperation
     {
         "Check" or "Validate" or "Context" or "BriefContext" or "Handoff" or "ResumeHandoff" or
         "ObjectsVerify" or "ObjectGet" or "ObjectPut" or "Export" or "Upgrade" or "DocumentReview" or
+        "Policies" or "Policy" or "PolicyEvaluate" or "WritingExceptions" or "WritingException" or
+        "PolicyDeclare" or "PolicyRevise" or "PolicyRetire" or "PolicyExcept" or "PolicyRevokeException" or "WritingExceptionAdd" or "WritingExceptionRemove" or "WorkPlace" or "Result" or "ReviewResult" or "ReleaseBasis" or
         "QualifyHarness" or "RunStart" or "GoalStep" or "ReleaseSubmit" or "ReleaseObserve" or "OperatorRecord" => TimeSpan.FromMinutes(15),
         _ => TimeSpan.FromSeconds(30),
     };

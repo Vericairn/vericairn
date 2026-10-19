@@ -264,6 +264,9 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     /// <inheritdoc />
     public WriteOutcome Result(ResultRequest request) => Post<ResultRequest, WriteOutcome>("/v1/work/result", request)!;
 
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    public WriteOutcome ReviewResult(ResultReviewRequest request) => Post<ResultReviewRequest, WriteOutcome>("/v1/work/review", request)!;
+
     /// <inheritdoc />
     public WriteOutcome Amend(AmendRequest request) => Post<AmendRequest, WriteOutcome>("/v1/work/amend", request)!;
 
@@ -562,4 +565,6 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    public ReleaseBasisResponse? ReleaseBasis(string hash) => Get<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true);
 }

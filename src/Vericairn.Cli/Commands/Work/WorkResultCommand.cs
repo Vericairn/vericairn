@@ -14,6 +14,8 @@ internal sealed class WorkResultCommand : Command
         var byOption = new Option<string>("--by") { Description = "Authoring principal id (ULID).", Required = true };
         var attemptArgument = new Argument<string>("attempt") { Description = "Attempt record id." };
         var bodyOption = new Option<string>("--body") { Description = "Path to a JSON file holding the body, or '-' for standard input.", Required = true };
+        var expectedOption = new Option<string?>("--expected") { Description = "Expected current attempt hash; required when the result carries duties." };
+        Options.Add(expectedOption);
         Arguments.Add(attemptArgument);
         Options.Add(byOption);
         Options.Add(bodyOption);
@@ -22,6 +24,7 @@ internal sealed class WorkResultCommand : Command
             parseResult.GetValue(attemptArgument)!,
             parseResult.GetValue(byOption)!,
             parseResult.GetValue(bodyOption)!,
+            parseResult.GetValue(expectedOption),
             parseResult.GetValue(context.JsonOption)));
     }
 }

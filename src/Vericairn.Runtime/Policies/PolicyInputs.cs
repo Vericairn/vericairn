@@ -75,9 +75,9 @@ internal static class PolicyInputs
         return found;
     }
 
-    internal static PolicyRepository Repository(PolicyBasis basis, string identity)
+    internal static PolicyRepository Repository(PolicyBasis basis, string identity, string? revision = null)
     {
-        PolicyRepository[] found = basis.Repositories.Where(r => r.Identity == identity).ToArray();
+        PolicyRepository[] found = basis.Repositories.Where(r => r.Identity == identity && (revision is null ? !r.Evidence : r.Revision == revision)).ToArray();
         if (found.Length != 1) throw new PolicyInputException("The named repository inventory is missing or conflicting: " + identity + ".");
         PolicyRepository repository = found[0];
         if (!repository.Complete || repository.Contract != PolicyBasis.RepositoryContract || string.IsNullOrWhiteSpace(repository.Revision))

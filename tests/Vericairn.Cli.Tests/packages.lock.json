@@ -184,9 +184,9 @@
         "type": "Project",
         "dependencies": {
           "System.CommandLine": "[2.0.12, )",
-          "Vericairn.Protocol": "[0.6.1-dev, )",
-          "Vericairn.Records": "[0.6.1-dev, )",
-          "dotnet-vc": "[0.6.1-dev, )"
+          "Vericairn.Protocol": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "dotnet-vc": "[0.7.3-dev, )"
         }
       },
       "vericairn.adapters.git": {
@@ -236,6 +236,13 @@
       },
       "vericairn.records": {
         "type": "Project"
+      },
+      "vericairn.records.tests": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "xunit.v3": "[4.0.2, )"
+        }
       },
       "vericairn.runtime": {
         "type": "Project",

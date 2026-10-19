@@ -86,9 +86,17 @@ public sealed class TestEstate : IDisposable
     {
         try
         {
+            // Git's object files are read-only on Windows, which Directory.Delete refuses. Clear that first, without
+            // following links and without skipping hidden entries, since Git for Windows hides .git.
+            var walk = new EnumerationOptions { RecurseSubdirectories = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            foreach (string file in Directory.EnumerateFiles(Root, "*", walk))
+            {
+                FileAttributes attributes = File.GetAttributes(file);
+                if ((attributes & FileAttributes.ReadOnly) != 0) File.SetAttributes(file, attributes & ~FileAttributes.ReadOnly);
+            }
             Directory.Delete(Root, recursive: true);
         }
-        catch (IOException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             // Best effort.
         }

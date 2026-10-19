@@ -10,10 +10,26 @@ namespace Vericairn.Protocol;
 public static class OpenApiDocument
 {
     private static readonly string[] CommunicationParameterNames = ["recipient", "assignment", "progress", "status", "decision", "result", "handoff"];
+    private static readonly string[] PolicyParameterNames = ["asOf", "release"];
 
     /// <summary>Every route of version 1 with its method; the contract tests assert the daemon maps exactly these.</summary>
     public static IReadOnlyList<(string Method, string Path)> Routes { get; } =
     [
+        ("GET", "/v1/estate-policies"),
+        ("GET", "/v1/estate-policies/kinds"),
+        ("GET", "/v1/estate-policies/evaluate"),
+        ("GET", "/v1/estate-policies/{key}/view"),
+        ("GET", "/v1/writing-exceptions"),
+        ("GET", "/v1/writing-exceptions/{id}"),
+        ("GET", "/v1/estate-policies/access"),
+        ("POST", "/v1/estate-policies"),
+        ("POST", "/v1/estate-policies/{key}/revisions"),
+        ("POST", "/v1/estate-policies/{key}/retire"),
+        ("POST", "/v1/estate-policies/{key}/exceptions"),
+        ("POST", "/v1/estate-policies/{key}/exceptions/{id}/revoke"),
+        ("POST", "/v1/writing-exceptions"),
+        ("POST", "/v1/writing-exceptions/{id}/remove"),
+        ("POST", "/v1/work/{key}/placement"),
         ("GET", "/v1/health"),
         ("GET", "/v1/communication"),
         ("POST", "/v1/communication"),
@@ -40,6 +56,8 @@ public static class OpenApiDocument
         ("POST", "/v1/work/attempt"),
         ("POST", "/v1/work/progress"),
         ("POST", "/v1/work/result"),
+        ("POST", "/v1/work/review"),
+        ("GET", "/v1/release-bases/{hash}"),
         ("POST", "/v1/work/amend"),
         ("POST", "/v1/work/takeover"),
         ("GET", "/v1/devices"),
@@ -124,10 +142,22 @@ public static class OpenApiDocument
                     .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
             }
 
+            if (method == "GET" && path == "/v1/estate-policies/evaluate")
+            {
+                operation["parameters"] = new JsonArray(PolicyParameterNames.Select(name => (JsonNode)new JsonObject
+                {
+                    ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
+                    ["description"] = name == "asOf" ? "Explicit canonical UTC preview time. Never authorizes submission." : "Exact release record id selecting its product, version and commit.",
+                }).ToArray());
+            }
+
             if (method == "GET" && path == "/v1/records")
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
             }
+
+            if (method == "GET" && path == "/v1/estate-policies/access")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "Acting principal whose current policy action admission is inspected; exact bounds are rechecked for every write." });
 
             if (method == "GET" && path == RuntimeIdentityScheme.Path)
             {
@@ -336,16 +366,20 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["PolicyChangeRequest"] = Object(("by", "string"), ("body", "object"), ("expected", "string")),
+            ["WritingExceptionRemoveRequest"] = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("basis", "object")),
+            ["WorkPlaceRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedSelection", "string"), ("releasePlan", "string"), ("backlog", "string")),
             ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
-            ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
+            ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
-            ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object")),
+            ["ResultRequest"] = Object(("attempt", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
+            ["ResultReviewRequest"] = Object(("result", "string"), ("by", "string"), ("body", "object"), ("expected", "string")),
             ["AmendRequest"] = Object(("assignment", "string"), ("by", "string"), ("body", "object")),
             ["DeviceCreateRequest"] = Object(("principal", "string"), ("name", "string"), ("custody", "string"), ("profiles", "array"), ("presence", "boolean")),
             ["AdmitRequest"] = Object(("device", "string"), ("by", "string"), ("note", "string"), ("recovery", "string"), ("passphrase", "string")),
@@ -370,7 +404,7 @@ public static class OpenApiDocument
             ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesObserveRequest"] = Object(("operation", "string"), ("by", "string"), ("cancel", "string")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
-            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object")),
+            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
             ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
@@ -380,7 +414,7 @@ public static class OpenApiDocument
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
             ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
-            ["ReleaseResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object")),
+            ["ReleaseResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object"), ("policies", "object"), ("basisEvidence", "array")),
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
@@ -395,6 +429,15 @@ public static class OpenApiDocument
 
     private static string RequestSchema(string path) => path switch
     {
+        "/v1/estate-policies" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/revisions" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/retire" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/exceptions" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/exceptions/{id}/revoke" => "PolicyChangeRequest",
+        "/v1/writing-exceptions" => "PolicyChangeRequest",
+        "/v1/writing-exceptions/{id}/remove" => "WritingExceptionRemoveRequest",
+        "/v1/work/{key}/placement" => "WorkPlaceRequest",
+
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/communication/delegations" => "CommunicationDelegateRequest",
         "/v1/status/observations" => "EstateObserveRequest",
@@ -404,6 +447,7 @@ public static class OpenApiDocument
         "/v1/work/attempt" => "AttemptRequest",
         "/v1/work/progress" => "WorkProgressRequest",
         "/v1/work/result" => "ResultRequest",
+        "/v1/work/review" => "ResultReviewRequest",
         "/v1/work/amend" => "AmendRequest",
         "/v1/work/takeover" => "TakeoverRequest",
         "/v1/goals/{id}/step" => "GoalStepRequest",
@@ -444,6 +488,22 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/estate-policies/access") => "PolicyAccess: admitted policy actions, with exact target bounds rechecked at submission.",
+        ("POST", "/v1/estate-policies") => "PolicyDeclare: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/revisions") => "PolicyRevise: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/retire") => "PolicyRetire: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/exceptions") => "PolicyExcept: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/exceptions/{id}/revoke") => "PolicyRevokeException: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/writing-exceptions") => "WritingExceptionAdd: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/writing-exceptions/{id}/remove") => "WritingExceptionRemove: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/work/{key}/placement") => "WorkPlace: validate the expected hash and all source evidence, then sign as the acting principal.",
+
+        ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
+        ("GET", "/v1/estate-policies/{key}/view") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
+        ("GET", "/v1/estate-policies/kinds") => "Installed kind versions, implementation hashes, supported selections, sources and bounds.",
+        ("GET", "/v1/estate-policies/evaluate") => "PolicyResponse evaluated from server sources, with optional canonical UTC asOf and exact release record preview; never authorizes submission.",
+        ("GET", "/v1/writing-exceptions") => "WritingExceptionsResponse: registry history, authors, reasons, scopes, counts and exact warning and excepted locations with the basis.",
+        ("GET", "/v1/writing-exceptions/{id}") => "WritingExceptionsResponse for one entry identity, including removal history and current matches; creates no record.",
         ("GET", "/v1/communication") => "The effective recipient profile with every contributing revision, conflicts and freshness. Query values override this view only. No record is authored.",
         ("POST", "/v1/communication") => "Replace or reset one scoped communication profile with its expected prior hash. Only its owner or an explicit delegate may change it; stale edits return conflict.",
         ("POST", "/v1/communication/delegations") => "A person grants or revokes permission to change one scope of their communication setting, with the expected prior hash.",
@@ -469,7 +529,9 @@ public static class OpenApiDocument
         ("POST", "/v1/work/assign") => "Delegate a work order to a contributor under a brief.",
         ("POST", "/v1/work/attempt") => "Record the start of an attempt.",
         ("POST", "/v1/work/progress") => "Publish the contributor's latest progress claim on its own attempt. Active notes replace local state; a completed phase is recorded once, and an identical completion retry returns its record. Claims never establish worker liveness, scope or acceptance.",
-        ("POST", "/v1/work/result") => "Submit the result of an attempt: a claim to inspect.",
+        ("POST", "/v1/work/result") => "Submit a result with exact duty proof bindings; a duty result requires the current attempt hash and an admitted signature.",
+        ("GET", "/v1/release-bases/{hash}") => "Read retained exact release-admission inputs and findings; historical evidence grants no new authority.",
+        ("POST", "/v1/work/review") => "Review the expected exact result revision with its evidence read, signed as the acting principal; no acceptance is recorded.",
         ("POST", "/v1/work/amend") => "Request an amendment; it authorizes nothing.",
         ("POST", "/v1/work/takeover") => "Hand a step an agent holds over to a person: a new assignment of the step to the person, carrying the agent's brief with the agent's assignment among its sources, which holds the step from then on; every run of the agent's assignment still in flight is asked to stop, each stop's facts reported as observed. Recorded by a person only, the one taking the step over, the sponsor of its goal or an operator, never by an agent.",
         ("GET", "/v1/devices") => "Devices known to the estate and whether this machine holds their keys.",

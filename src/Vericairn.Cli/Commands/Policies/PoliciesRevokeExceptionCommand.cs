@@ -1,0 +1,21 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using System.CommandLine;
+
+namespace Vericairn.Cli;
+
+internal sealed class PoliciesRevokeExceptionCommand : Command
+{
+    public PoliciesRevokeExceptionCommand(CommandContext context)
+        : base("revoke-exception", "Prepare and validate the exact policy change, then sign as the acting principal.")
+    {
+        var key = new Argument<string>("key");
+        Arguments.Add(key);
+        var id = new Argument<string>("id");
+        Arguments.Add(id);
+        var options = new PolicyWriteOptions(this, true);
+        var operations = new PolicyWriteOperations(context);
+        SetAction(p => operations.RevokeException(p.GetValue(context.EstateOption)!, p.GetValue(key)!, p.GetValue(id)!, p.GetValue(options.Expected)!, p.GetValue(options.By)!, p.GetValue(options.Body)!, p.GetValue(context.JsonOption)));
+    }
+}

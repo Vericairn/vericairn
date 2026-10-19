@@ -62,7 +62,7 @@ public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)
 /// <param name="ProcessId">Process id.</param>
 public sealed record HealthResponse(string Api, string Vericairn, string Estate, string Root, string Profile, long RecordFormat, string StartedAt, int ProcessId);
 
-/// <summary>The estate's status: human text and canonical JSON, identical on every machine for the same records. Its compact attention references are derived from records alone.</summary>
+/// <summary>The estate's status: human text and canonical JSON. Compact attention derives from records alone; policy and writing sections identify their complete record and repository basis.</summary>
 /// <param name="Text">Rendered status.</param>
 /// <param name="Json">Canonical status document.</param>
 /// <param name="HasErrors">Whether errors exist.</param>
@@ -84,7 +84,10 @@ public sealed record ProgressResponse(string Text, JsonElement Json, bool HasErr
 /// <param name="Errors">Error count.</param>
 /// <param name="Warnings">Warning count.</param>
 /// <param name="Findings">Sorted findings.</param>
-public sealed record FindingsResponse(string Summary, int Errors, int Warnings, IReadOnlyList<FindingDto> Findings);
+/// <param name="Policies">The same policy snapshot displayed by status and progress, when checking.</param>
+/// <param name="WritingExceptions">Entries, counts and occurrences from that snapshot, when checking.</param>
+public sealed record FindingsResponse(string Summary, int Errors, int Warnings, IReadOnlyList<FindingDto> Findings,
+    PolicyResponse? Policies = null, WritingExceptionsResponse? WritingExceptions = null);
 
 /// <summary>A record as stored.</summary>
 /// <param name="Path">Repository-relative path.</param>
@@ -103,7 +106,8 @@ public sealed record RecordResponse(string Path, string Id, string Type, string 
 /// <param name="Supersedes">Predecessor id.</param>
 /// <param name="At">Authoring time.</param>
 /// <param name="Id">Explicit id (root operator only).</param>
-public sealed record NewRecordRequest(string Type, string By, JsonElement Body, string? Subject = null, string? Supersedes = null, string? At = null, string? Id = null);
+/// <param name="Expected">Required for policy and placement authoring: the current predecessor or policy hash, or canonical body hash for a creation.</param>
+public sealed record NewRecordRequest(string Type, string By, JsonElement Body, string? Subject = null, string? Supersedes = null, string? At = null, string? Id = null, string? Expected = null);
 
 /// <summary>A brief: everything a contributor needs, from the records alone.</summary>
 /// <param name="Markdown">Human form.</param>
@@ -165,8 +169,9 @@ public sealed record WorkProgressResponse(WorkProgressClaim? Claim, RecordWritte
 /// <summary>Submit the result of an attempt.</summary>
 /// <param name="Attempt">Attempt id.</param>
 /// <param name="By">The contributor.</param>
-/// <param name="Body">Result body.</param>
-public sealed record ResultRequest(string Attempt, string By, JsonElement Body);
+/// <param name="Body">Result body, including exact duty bindings when supplied.</param>
+/// <param name="Expected">Expected current attempt hash; required for a duty result.</param>
+public sealed record ResultRequest(string Attempt, string By, JsonElement Body, string? Expected = null);
 
 /// <summary>Request an amendment of an assignment.</summary>
 /// <param name="Assignment">Assignment id.</param>
@@ -406,7 +411,9 @@ public sealed record ReleaseRow(string? Version, string? Status, string? Commit,
 /// <param name="Reconciliation">How an earlier failed, canceled or uncertain attempt under the same identity was settled; required for a retry.</param>
 /// <param name="Provider">The provider id, for example github-releases; the product's declared provider when absent.</param>
 /// <param name="Settings">The provider's settings by name; they override the product's declared settings and the provider's defaults.</param>
-public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null);
+/// <param name="Commit">Prepared exact commit, required in format 3 and for release-repository document comparisons; never resolved by a provider during admission.</param>
+/// <param name="Expected">Expected current product hash, required in format 3.</param>
+public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null, string? Commit = null, string? Expected = null);
 
 /// <summary>
 /// Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect. The operation
@@ -464,7 +471,9 @@ public sealed record ProviderRow(string Provider, string Kind, string Implementa
 /// <param name="PublishedAt">When the release was observed published.</param>
 /// <param name="Url">Where the release or run is.</param>
 /// <param name="Problem">Why nothing could proceed.</param>
-public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null);
+/// <param name="Policies">Fresh server evaluation at the last admission boundary, including any refused holds.</param>
+/// <param name="BasisEvidence">Retained basis object hashes in evaluation order, also pinned by the operation's ordinary evidence.</param>
+public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null, PolicyResponse? Policies = null, IReadOnlyList<string>? BasisEvidence = null);
 
 /// <summary>
 /// Start a coding agent's run on an assignment through a launcher (the worker contract, vericairn.worker/1): the runtime prepares a

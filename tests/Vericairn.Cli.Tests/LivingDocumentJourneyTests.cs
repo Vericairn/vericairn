@@ -47,7 +47,7 @@ public class LivingDocumentJourneyTests
             product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--supersedes", product, "--body", CliHarness.WriteJson(scratch, "product-revised.json", Product.Replace("A widget.", "A widget, revised.", StringComparison.Ordinal))).Id;
 
             // Release 0.2.0 runs through intent, effect, acceptance and publication.
-            string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
+            string run = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
             provider.CompleteRun("Example/widget", run, true, "0.2.0");
             JsonElement candidate = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", "0.2.0", "--repository", "Example/widget", "--by", builder, "--qualified", "linux-x64", "--limitation", "Nothing signed.").Json.GetProperty("candidate");
             CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.GetProperty("id").GetString()}:{candidate.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, "accept.json", """{"statement":"Accepted 0.2.0.","basis":[],"self":false}"""));
@@ -62,8 +62,11 @@ public class LivingDocumentJourneyTests
             Assert.Equal(0, check.Code);
             Assert.Contains("document.due", check.Out, StringComparison.Ordinal);
             int operations = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count();
-            CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
+            Assert.False(held.Json.GetProperty("ok").GetBoolean());
+            Assert.Equal("refused", held.Json.GetProperty("problem").GetProperty("code").GetString());
+            Assert.Contains(held.Json.GetProperty("problem").GetProperty("findings").EnumerateArray(), f => f.GetProperty("code").GetString() == "document.release-hold");
             Assert.Contains("docs/overview.md", held.Out + held.Err, StringComparison.Ordinal);
             Assert.Equal(operations, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
             Assert.Single(provider.Dispatches);
@@ -71,7 +74,7 @@ public class LivingDocumentJourneyTests
             // The operator reads it against 0.2.0 and records that it holds; the gate opens.
             CliHarness.Ok("--estate", root, "--json", "records", "new", "document-review", "--by", op, "--subject", $"living-document:{declared.Id}:{declared.Hash}", "--body", CliHarness.WriteJson(scratch, "review.json", $$"""{"outcome":"current","content":{"hash":"{{ContentHash.Sha256File(overview)}}","bytes":{{new FileInfo(overview).Length}}},"answers":[{"on":"release"}],"independence":"self","summary":"It names no release and points to the releases page.","findings":[],"checks":[]}"""));
             Assert.Contains("Living documents: 0 due of 1 declared", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
-            Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+            Assert.Equal("dispatched", ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
         }
         finally
         {
@@ -210,7 +213,7 @@ public class LivingDocumentJourneyTests
 
             // Release 0.2.0: the intent records that the README at the commit being released is what its review cleared.
             provider.HeadSha = second;
-            string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
+            string run = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
             string intent = Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Select(File.ReadAllText).Single(t => t.Contains("\"not-started\"", StringComparison.Ordinal));
             Assert.Contains($"README.md at {second[..12]} is the content its review", intent, StringComparison.Ordinal);
             provider.CompleteRun("Example/widget", run, true, "0.2.0");
@@ -229,11 +232,11 @@ public class LivingDocumentJourneyTests
             Git(repo, "commit", "-q", "-am", "Edit the README");
             string third = GitOutput(repo, "rev-parse", "HEAD");
             provider.HeadSha = third;
-            CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
             Assert.Contains($"README.md changed after its review at {second[..12]}: at {third[..12]}", held.Out + held.Err, StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "docs", "review", "README.md", "--by", op, "--outcome", "current", "--summary", "The new sentence holds.", "--commit", third);
-            Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+            Assert.Equal("dispatched", ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
         }
         finally
         {
@@ -282,7 +285,7 @@ public class LivingDocumentJourneyTests
             }
 
             provider.HeadSha = GitOutput(repo, "rev-parse", "HEAD");
-            CliHarness.Outcome unreviewed = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome unreviewed = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, unreviewed.Code);
             Assert.Contains("no review has cleared its content", unreviewed.Out + unreviewed.Err, StringComparison.Ordinal);
             Assert.Empty(provider.Dispatches);
@@ -307,7 +310,7 @@ public class LivingDocumentJourneyTests
             // A declaration naming a check no installed pack provides is shown unavailable and holds the release until it is revised.
             CliHarness.Outcome unavailable = CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "notices.json", $$"""{"path":"NOTICE","repository":"{{resource}}","title":"Notices","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"}],"checks":["vericairn.example/notices-cover-locks"],"summary":"Names every bundled component."}"""));
             Assert.Contains("unavailable: vericairn.example/notices-cover-locks", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
-            CliHarness.Outcome held = CliHarness.Run("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
+            CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
             Assert.Contains("NOTICE: unavailable", held.Out + held.Err, StringComparison.Ordinal);
             CliHarness.Ok("--estate", root, "--json", "docs", "declare", "--by", op, "--supersedes", unavailable.Id, "--body", CliHarness.WriteJson(scratch, "notices-revised.json", $$"""{"path":"NOTICE","repository":"{{resource}}","title":"Notices","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"warn","product":"{{product}}"}],"summary":"Names every bundled component; its check waits for the pack."}"""));
@@ -318,7 +321,7 @@ public class LivingDocumentJourneyTests
 
             // The next release passes, with both documents compared at the commit it builds.
             provider.HeadSha = GitOutput(repo, "rev-parse", "HEAD");
-            Assert.Equal("dispatched", CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
+            Assert.Equal("dispatched", ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder).Json.GetProperty("status").GetString());
         }
         finally
         {
@@ -491,7 +494,7 @@ public class LivingDocumentJourneyTests
 
     private static void Publish(string root, string scratch, FakeReleaseProvider provider, string op, string builder, string product, string version)
     {
-        string run = CliHarness.Ok("--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", version, "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
+        string run = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", version, "--repository", "Example/widget", "--by", builder).Json.GetProperty("run").GetString()!;
         provider.CompleteRun("Example/widget", run, true, version);
         JsonElement candidate = CliHarness.Ok("--estate", root, "--json", "release", "observe", "--version", version, "--repository", "Example/widget", "--by", builder, "--qualified", "linux-x64", "--limitation", "Nothing signed.").Json.GetProperty("candidate");
         CliHarness.Ok("--estate", root, "--json", "records", "new", "acceptance", "--by", op, "--subject", $"release:{candidate.GetProperty("id").GetString()}:{candidate.GetProperty("hash").GetString()}", "--body", CliHarness.WriteJson(scratch, $"accept-{version}.json", $$"""{"statement":"Accepted {{version}}.","basis":[],"self":false}"""));

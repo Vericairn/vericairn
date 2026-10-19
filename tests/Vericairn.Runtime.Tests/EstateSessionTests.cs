@@ -11,6 +11,7 @@ using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Store;
 using Vericairn.Runtime.Service;
+using Vericairn.Runtime.Portability;
 using Vericairn.Protocol;
 
 namespace Vericairn.Runtime.Tests;
@@ -192,6 +193,31 @@ public class EstateSessionTests
                 }
                 Assert.False(service.ResumeHandoff(package).Json!.Value.GetProperty("changed").GetBoolean());
                 Assert.False(Directory.Exists(Path.Combine(root, EstateLayout.RecordsDirectory)));
+            }
+
+            // Export changes storage, not history. The manifest's profile is an intentional
+            // policy-basis input; its changed digest must be the only status difference.
+            string archive = root + "-copy.zip", restoredRoot = root + "-restored";
+            try
+            {
+                using EstateService source = EstateService.Open(root);
+                StatusResponse before = source.Status();
+                PolicyResponse sourcePolicies = source.Policies();
+                EstateExport.Write(session, archive);
+                EstateExport.Restore(archive, restoredRoot);
+                using EstateService restored = EstateService.Open(restoredRoot);
+                Assert.Equal("local-only", source.Session.Profile);
+                Assert.Equal("repository-synced", restored.Session.Profile);
+                PolicyResponse restoredPolicies = restored.Policies();
+                Assert.Equal(sourcePolicies.Basis.RecordDigest, restoredPolicies.Basis.RecordDigest);
+                Assert.NotEqual(sourcePolicies.Basis.Digest, restoredPolicies.Basis.Digest);
+                Assert.Equal(before.Json.GetRawText().Replace(sourcePolicies.Basis.Digest, restoredPolicies.Basis.Digest, StringComparison.Ordinal), restored.Status().Json.GetRawText());
+                Assert.Equal(before.Json.GetRawText(), source.Status().Json.GetRawText());
+            }
+            finally
+            {
+                File.Delete(archive);
+                if (Directory.Exists(restoredRoot)) Directory.Delete(restoredRoot, recursive: true);
             }
 
             // Local-only roots refer to one canonical store, so they also share its batch journals.

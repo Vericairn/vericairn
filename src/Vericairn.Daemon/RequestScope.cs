@@ -134,6 +134,21 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["GET /v1/estate-policies"] = null,
+        ["GET /v1/estate-policies/kinds"] = null,
+        ["GET /v1/estate-policies/evaluate"] = null,
+        ["GET /v1/estate-policies/{key}/view"] = null,
+        ["GET /v1/writing-exceptions"] = null,
+        ["GET /v1/writing-exceptions/{id}"] = null,
+        ["GET /v1/estate-policies/access"] = null,
+        ["POST /v1/estate-policies"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/revisions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/retire"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/exceptions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/exceptions/{id}/revoke"] = typeof(PolicyChangeRequest),
+        ["POST /v1/writing-exceptions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/writing-exceptions/{id}/remove"] = typeof(WritingExceptionRemoveRequest),
+        ["POST /v1/work/{key}/placement"] = typeof(WorkPlaceRequest),
         ["GET /v1/health"] = null,
         ["GET /v1/communication"] = null,
         ["POST /v1/communication"] = typeof(CommunicationSetRequest),
@@ -160,6 +175,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/work/attempt"] = typeof(AttemptRequest),
         ["POST /v1/work/progress"] = typeof(WorkProgressRequest),
         ["POST /v1/work/result"] = typeof(ResultRequest),
+        ["POST /v1/work/review"] = typeof(ResultReviewRequest),
         ["POST /v1/work/amend"] = typeof(AmendRequest),
         ["POST /v1/work/takeover"] = typeof(TakeoverRequest),
         ["GET /v1/devices"] = null,
@@ -170,6 +186,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/devices/revoke"] = typeof(RevokeRequest),
         ["POST /v1/devices/recovery"] = typeof(DeviceRecoveryRequest),
         ["GET /v1/releases"] = null,
+        ["GET /v1/release-bases/{hash}"] = null,
         ["GET /v1/documents"] = null,
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
         ["GET /v1/asks"] = null,
@@ -236,6 +253,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
+        [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
+        [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
+        [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),
         [typeof(HandoffPackage)] = (_, _, _) => null,
         [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),
@@ -248,6 +268,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(AttemptRequest)] = (_, r, d) => Acting(((AttemptRequest)r).By, d),
         [typeof(WorkProgressRequest)] = (_, r, d) => Acting(((WorkProgressRequest)r).By, d),
         [typeof(ResultRequest)] = (_, r, d) => Acting(((ResultRequest)r).By, d),
+        [typeof(ResultReviewRequest)] = (_, r, d) => Acting(((ResultReviewRequest)r).By, d),
         [typeof(AmendRequest)] = (_, r, d) => Acting(((AmendRequest)r).By, d),
         [typeof(DeviceCreateRequest)] = (_, r, d) => Acting(((DeviceCreateRequest)r).Principal, d),
         [typeof(AdmitRequest)] = (_, r, d) => Acting(((AdmitRequest)r).By, d) ?? Recovery(((AdmitRequest)r).Recovery, d),

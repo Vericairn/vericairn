@@ -9,6 +9,51 @@ namespace Vericairn.Protocol;
 /// </summary>
 public partial interface IEstateApi
 {
+    /// <summary>List admitted policy write actions; exact bounds are checked again on submission.</summary>
+    IReadOnlyList<string> PolicyAccess(string principal) => [];
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyDeclare(PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRevise(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRetire(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyExcept(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRevokeException(string key, string id, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WritingExceptionAdd(PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WritingExceptionRemove(string id, WritingExceptionRemoveRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WorkPlace(string key, WorkPlaceRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Read Policies; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse Policies() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read Policy; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse? Policy(string key) => null;
+
+    /// <summary>Read PolicyKinds; returns server-derived evidence and creates no record.</summary>
+    IReadOnlyList<PolicyKindDto> PolicyKinds() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read PolicyEvaluate; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read WritingExceptions; returns server-derived evidence and creates no record.</summary>
+    WritingExceptionsResponse WritingExceptions() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read WritingException; returns server-derived evidence and creates no record.</summary>
+    WritingExceptionsResponse? WritingException(string id) => null;
+
     /// <summary>The daemon's or embedded runtime's identity and what it serves.</summary>
     HealthResponse Health();
 
@@ -96,6 +141,9 @@ public partial interface IEstateApi
 
     /// <summary>Submit a result.</summary>
     WriteOutcome Result(ResultRequest request);
+
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    WriteOutcome ReviewResult(ResultReviewRequest request);
 
     /// <summary>Request an amendment.</summary>
     WriteOutcome Amend(AmendRequest request);
@@ -255,4 +303,6 @@ public partial interface IEstateApi
 
     /// <summary>Verify every object.</summary>
     FindingsResponse ObjectsVerify();
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    ReleaseBasisResponse? ReleaseBasis(string hash);
 }

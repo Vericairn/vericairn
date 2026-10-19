@@ -5,6 +5,66 @@ namespace Vericairn.Protocol;
 
 public partial interface IEstateApi
 {
+    /// <summary>The cancellable PolicyAccess operation.</summary>
+    Task<IReadOnlyList<string>> PolicyAccessAsync(string principal, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyAccess), () => PolicyAccess(principal), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyDeclare operation.</summary>
+    Task<WriteOutcome> PolicyDeclareAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyDeclare), () => PolicyDeclare(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRevise operation.</summary>
+    Task<WriteOutcome> PolicyReviseAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRevise), () => PolicyRevise(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRetire operation.</summary>
+    Task<WriteOutcome> PolicyRetireAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRetire), () => PolicyRetire(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyExcept operation.</summary>
+    Task<WriteOutcome> PolicyExceptAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyExcept), () => PolicyExcept(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRevokeException operation.</summary>
+    Task<WriteOutcome> PolicyRevokeExceptionAsync(string key, string id, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRevokeException), () => PolicyRevokeException(key, id, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionAdd operation.</summary>
+    Task<WriteOutcome> WritingExceptionAddAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptionAdd), () => WritingExceptionAdd(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionRemove operation.</summary>
+    Task<WriteOutcome> WritingExceptionRemoveAsync(string id, WritingExceptionRemoveRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptionRemove), () => WritingExceptionRemove(id, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WorkPlace operation.</summary>
+    Task<WriteOutcome> WorkPlaceAsync(string key, WorkPlaceRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkPlace), () => WorkPlace(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable Policies read.</summary>
+    Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(Policies), () => Policies(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable Policy read.</summary>
+    Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(Policy), () => Policy(key), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyKinds read.</summary>
+    Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyKinds), () => PolicyKinds(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyEvaluate read.</summary>
+    Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyEvaluate), () => PolicyEvaluate(asOf, release), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptions read.</summary>
+    Task<WritingExceptionsResponse> WritingExceptionsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptions), () => WritingExceptions(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingException read.</summary>
+    Task<WritingExceptionsResponse?> WritingExceptionAsync(string id, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingException), () => WritingException(id), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Health"/>; a stopped observation does not undo an effect.</summary>
     Task<HealthResponse> HealthAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Health), () => Health(), false, this as IClientOperationLifetime, cancellationToken);
@@ -112,6 +172,10 @@ public partial interface IEstateApi
     /// <summary>The cancellable counterpart of <see cref="Result"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> ResultAsync(ResultRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Result), () => Result(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ReviewResult), () => ReviewResult(request), true, this as IClientOperationLifetime, cancellationToken);
 
     /// <summary>The cancellable counterpart of <see cref="Amend"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
@@ -297,4 +361,7 @@ public partial interface IEstateApi
     Task<FindingsResponse> ObjectsVerifyAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(ObjectsVerify), () => ObjectsVerify(), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ReleaseBasis), () => ReleaseBasis(hash), false, this as IClientOperationLifetime, cancellationToken);
 }

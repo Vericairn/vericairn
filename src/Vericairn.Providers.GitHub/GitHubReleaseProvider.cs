@@ -61,6 +61,8 @@ public sealed class GitHubReleaseProvider : IReleaseProvider
     public DispatchReceipt Dispatch(DispatchRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.ExpectedCommit is { } expected && ResolveCommit(request.Destination, request.Settings) != expected)
+            throw new ProviderRefusedException("The prepared release commit no longer matches the provider's build ref; prepare and evaluate the new exact commit before retrying.");
         if (Gh(out string auth, "auth", "status") != 0)
         {
             throw new ProviderRefusedException("The GitHub CLI is not logged in on this machine; run 'gh auth login' yourself. Vericairn stores no token.");

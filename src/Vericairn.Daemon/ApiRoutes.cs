@@ -18,6 +18,21 @@ public static class ApiRoutes
         ArgumentNullException.ThrowIfNull(service);
         ArgumentNullException.ThrowIfNull(shutdown);
         string v = ApiVersion.Prefix;
+        app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
+        app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
+        app.MapGet($"{v}/estate-policies/evaluate", (string? asOf, string? release) => Results.Json(service.PolicyEvaluate(asOf, release), ProtocolJson.Options));
+        app.MapGet($"{v}/estate-policies/{{key}}/view", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/writing-exceptions", () => Results.Json(service.WritingExceptions(), ProtocolJson.Options));
+        app.MapGet($"{v}/writing-exceptions/{{id}}", (string id) => service.WritingException(id) is { } entry ? Results.Json(entry, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/estate-policies/access", (string principal) => Results.Json(service.PolicyAccess(principal), ProtocolJson.Options));
+        app.MapPost($"{v}/estate-policies", (PolicyChangeRequest request) => Outcome(service.PolicyDeclare(request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/revisions", (string key, PolicyChangeRequest request) => Outcome(service.PolicyRevise(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/retire", (string key, PolicyChangeRequest request) => Outcome(service.PolicyRetire(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/exceptions", (string key, PolicyChangeRequest request) => Outcome(service.PolicyExcept(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/exceptions/{{id}}/revoke", (string key, string id, PolicyChangeRequest request) => Outcome(service.PolicyRevokeException(key, id, request)));
+        app.MapPost($"{v}/writing-exceptions", (PolicyChangeRequest request) => Outcome(service.WritingExceptionAdd(request)));
+        app.MapPost($"{v}/writing-exceptions/{{id}}/remove", (string id, WritingExceptionRemoveRequest request) => Outcome(service.WritingExceptionRemove(id, request)));
+        app.MapPost($"{v}/work/{{key}}/placement", (string key, WorkPlaceRequest request) => Outcome(service.WorkPlace(key, request)));
         app.MapGet($"{v}/health", () => Results.Json(service.Health(), ProtocolJson.Options));
         app.MapGet($"{v}/communication", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
             Results.Json(service.Communication(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));
@@ -45,6 +60,8 @@ public static class ApiRoutes
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
         app.MapPost($"{v}/work/progress", (WorkProgressRequest request) => Results.Json(service.WorkProgress(request), ProtocolJson.Options));
         app.MapPost($"{v}/work/result", (ResultRequest request) => Outcome(service.Result(request)));
+        app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Ok(basis) : Results.NotFound());
+        app.MapPost($"{v}/work/review", (ResultReviewRequest request) => Outcome(service.ReviewResult(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));

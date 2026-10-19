@@ -45,7 +45,7 @@ internal static class PolicyExceptions
             PolicyRecords.Contains(Get(authority.Body, "scope"), Scopes.GrantPolicyExceptions);
     }
 
-    private static bool TargetMatches(PolicyBasis basis, JsonElement target, PolicyFinding finding)
+    internal static bool TargetMatches(PolicyBasis basis, JsonElement target, PolicyFinding finding)
     {
         JsonElement submission = Get(target, "submission");
         if (submission.ValueKind != JsonValueKind.Undefined)

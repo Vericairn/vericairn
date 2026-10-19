@@ -52,6 +52,35 @@ public sealed class SdkOperationsTests
             client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken))).OutcomeUnknown);
     }
 
+    [Fact]
+    public async Task AnAbsentReleaseBasisIsNullAcrossSynchronousAsyncAndBoundClients()
+    {
+        using var client = Client((request, _) =>
+        {
+            Assert.Equal("/v1/release-bases/missing", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        Assert.Null(client.ReleaseBasis("missing"));
+        Assert.Null(await client.ReleaseBasisAsync("missing", TestContext.Current.CancellationToken));
+        Assert.Null(new CancellationBoundApi(client, TestContext.Current.CancellationToken).ReleaseBasis("missing"));
+    }
+
+    [Theory]
+    [InlineData("kinds")]
+    [InlineData("evaluate")]
+    [InlineData("access")]
+    public async Task PolicyKeysCannotCollideWithNamedReadRoutes(string key)
+    {
+        using var client = Client((request, _) =>
+        {
+            Assert.Equal("/v1/estate-policies/" + key + "/view", request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+        });
+        Assert.Null(client.Policy(key));
+        Assert.Null(await client.PolicyAsync(key, TestContext.Current.CancellationToken));
+        Assert.Null(new CancellationBoundApi(client, TestContext.Current.CancellationToken).Policy(key));
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Unauthorized)]
@@ -144,7 +173,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(73, synchronous.Length);
+        Assert.Equal(90, synchronous.Length);
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];

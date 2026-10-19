@@ -27,7 +27,7 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
         string? unavailable = basis.UnavailableReason();
         bool complete = unavailable is null;
         if (unavailable is not null) diagnostics.Add(new(Severity.Warning, "writing.basis-unavailable", "writing", unavailable));
-        foreach (PolicyRepository inventory in basis.Repositories)
+        foreach (PolicyRepository inventory in basis.Repositories.Where(r => !r.Evidence))
         {
             try
             {

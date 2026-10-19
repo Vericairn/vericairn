@@ -66,8 +66,10 @@ public sealed partial class WritingExceptionType : IRecordType
 
     internal static void ValidateToken(BodyReader body, string field, string token)
     {
-        if (!TokenPattern().IsMatch(token)) body.Error("writing.token", field, "A token is one literal spacing token: at least four letters, lowercase after an optional capital, followed by digits.");
+        if (!IsToken(token)) body.Error("writing.token", field, "A token is one literal spacing token: at least four letters, lowercase after an optional capital, followed by digits.");
     }
+
+    internal static bool IsToken(string token) => TokenPattern().IsMatch(token);
 
     [GeneratedRegex(@"\A[A-Za-z][a-z]{3,}[0-9]+\z")]
     private static partial Regex TokenPattern();

@@ -272,7 +272,13 @@ public static partial class EstateChecks
         try
         {
             using JsonDocument document = JsonDocument.Parse(bytes);
-            ScanKeys(document.RootElement, relative, "$", findings);
+            JsonElement record = document.RootElement;
+            bool writingToken = record.TryGetProperty("type", out JsonElement type) && type.ValueKind == JsonValueKind.String && type.GetString() == "writing-exception" &&
+                record.TryGetProperty("format", out JsonElement format) && format.ValueKind == JsonValueKind.String && format.GetString() == RecordEnvelope.Format3 &&
+                record.TryGetProperty("body", out JsonElement body) && body.ValueKind == JsonValueKind.Object &&
+                body.TryGetProperty("code", out JsonElement code) && code.ValueKind == JsonValueKind.String && code.GetString() == "writing.spacing" &&
+                body.TryGetProperty("token", out JsonElement token) && token.ValueKind == JsonValueKind.String && Types.WritingExceptionType.IsToken(token.GetString()!);
+            ScanKeys(record, relative, "$", findings, writingToken);
         }
         catch (JsonException)
         {
@@ -280,19 +286,19 @@ public static partial class EstateChecks
         }
     }
 
-    private static void ScanKeys(JsonElement element, string relative, string path, FindingList findings)
+    private static void ScanKeys(JsonElement element, string relative, string path, FindingList findings, bool writingToken)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    if (SecretKeyName().IsMatch(property.Name))
+                    if (SecretKeyName().IsMatch(property.Name) && !(writingToken && path == "$.body" && property.Name == "token"))
                     {
                         findings.Error("secrets.key", $"{relative}#{path}.{property.Name}", "Records never hold secret values; reference a credential by id and purpose.");
                     }
 
-                    ScanKeys(property.Value, relative, path + "." + property.Name, findings);
+                    ScanKeys(property.Value, relative, path + "." + property.Name, findings, writingToken);
                 }
 
                 break;
@@ -300,7 +306,7 @@ public static partial class EstateChecks
                 int index = 0;
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    ScanKeys(item, relative, $"{path}[{index++}]", findings);
+                    ScanKeys(item, relative, $"{path}[{index++}]", findings, writingToken);
                 }
 
                 break;

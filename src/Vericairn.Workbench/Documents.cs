@@ -222,7 +222,7 @@ public sealed class GoalsWorkspace : Document
 }
 
 /// <summary>A product as its record states it.</summary>
-public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces, string? ReleaseProvider = null, IReadOnlyDictionary<string, string>? ReleaseSettings = null);
+public sealed record ProductRow(string Id, string Name, string Slug, string Summary, string Editions, string Surfaces, string? ReleaseProvider = null, IReadOnlyDictionary<string, string>? ReleaseSettings = null, string? Hash = null);
 
 /// <summary>The products of the estate from their records; projects are not a record type of format 1 and the page says so.</summary>
 public sealed class ProductsDocument(IReadOnlyList<ProductRow> products) : Document("Products", "products")
@@ -866,7 +866,7 @@ public sealed class SettingField(ProviderSettingRow setting, string? declared) :
 /// </summary>
 public sealed class ReleaseWorkspace : Document
 {
-    private string version = string.Empty, reconciliation = string.Empty, qualified = string.Empty, limitations = string.Empty, signing = "unsigned developer build", cancelReason = string.Empty, status = "Nothing sent.", publish = string.Empty;
+    private string version = string.Empty, commit = string.Empty, reconciliation = string.Empty, qualified = string.Empty, limitations = string.Empty, signing = "unsigned developer build", cancelReason = string.Empty, status = "Nothing sent.", publish = string.Empty;
     private ProductRow? product;
     private ProviderRow? provider;
     private DestinationRow? selected;
@@ -908,6 +908,7 @@ public sealed class ReleaseWorkspace : Document
         {
             if (Set(ref product, value))
             {
+                Commit = string.Empty;
                 SelectedProvider = value?.ReleaseProvider is string declared ? Providers.FirstOrDefault(p => p.Provider == declared) : null;
                 RebuildSettings();
             }
@@ -929,6 +930,9 @@ public sealed class ReleaseWorkspace : Document
 
     /// <summary>Version to release.</summary>
     public string Version { get => version; set => Set(ref version, value); }
+
+    /// <summary>The exact prepared commit the runtime evaluates before dispatch.</summary>
+    public string Commit { get => commit; set => Set(ref commit, value); }
 
     /// <summary>How an earlier failed, canceled or uncertain attempt was settled; required for a retry.</summary>
     public string Reconciliation { get => reconciliation; set => Set(ref reconciliation, value); }
@@ -986,7 +990,8 @@ public sealed class ReleaseWorkspace : Document
         }
 
         var values = Settings.Where(s => s.Value.Trim().Length > 0).ToDictionary(s => s.Name, s => s.Value.Trim(), StringComparer.Ordinal);
-        await AnswerAsync(async () => (await api.ReleaseSubmitAsync(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values), cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true);
+        await AnswerAsync(async () => (await api.ReleaseSubmitAsync(new ReleaseSubmitRequest(Product.Id, Version.Trim(), null, by, null, null, string.IsNullOrWhiteSpace(Reconciliation) ? null : Reconciliation.Trim(), SelectedProvider.Provider, values,
+            string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim(), Product.Hash), cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true);
     }
 
     /// <summary>Observes the selected destination (or the form's product and version): the run, the draft, the publication; or cancels with the reason given.</summary>
@@ -1037,6 +1042,8 @@ public sealed class ReleaseWorkspace : Document
             ReleaseResponse response = await call().ConfigureAwait(true);
             LastResponse = response;
             Status = response.Problem is null ? response.Message : AssignmentComposer.Refusal(response.Problem);
+            if (response.Policies is { } policies) Status += "\n" + policies.Text;
+            foreach (string hash in response.BasisEvidence ?? []) Status += "\nRetained evidence: vericairn release basis " + hash;
             if (response.Publish is not null)
             {
                 Publish = response.Publish;

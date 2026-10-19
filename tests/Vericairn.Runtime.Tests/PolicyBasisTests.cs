@@ -67,7 +67,8 @@ public class PolicyBasisTests
         Assert.NotNull(new PolicyBasis(model, "2026-01-02T00:00:00Z", PolicyTimeOrigin.Recorded).UnavailableReason());
         Assert.NotNull(new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Submission).UnavailableReason());
         var submission = new PolicySubmission(new("release", "candidate", "hash"), "product", "1.0.0", new string('a', 40));
-        Assert.NotNull(new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Preview, submission: submission).UnavailableReason());
+        Assert.Null(new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Preview, submission: submission).UnavailableReason());
+        Assert.NotNull(new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Recorded, submission: submission).UnavailableReason());
         Assert.Null(new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Submission, submission: submission).UnavailableReason());
         Assert.NotEqual(recorded.Digest, new PolicyBasis(model, recorded.AsOf, PolicyTimeOrigin.Preview).Digest);
         Assert.NotNull(PolicyBasis.Recorded(Model([])).UnavailableReason());

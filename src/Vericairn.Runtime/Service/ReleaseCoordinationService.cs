@@ -4,6 +4,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
+using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Identity;
@@ -21,12 +22,90 @@ internal sealed class ReleaseCoordinationService(
     EstateRecordAccess recordAccess,
     Func<ProviderRegistry> providers,
     Func<string, RecordResponse?> readRecord,
-    Func<NewRecordRequest, WriteOutcome> writeRecord)
+    Func<NewRecordRequest, WriteOutcome> writeRecord,
+    Func<EstateModel, string, string, string?, IReadOnlySet<string>, ReleasePolicyAssessment> assessPolicies,
+    Func<ReleasePolicyAssessment, IReadOnlyList<string>, IReadOnlyList<RecordReference>, string> retainBasis,
+    Func<DateTimeOffset> now,
+    Action<string> boundary)
 {
     private readonly object gate = recordAccess.Gate;
     private readonly EstateSession session = recordAccess.Session;
     private readonly HashSet<string> releaseDispatches = new(StringComparer.Ordinal);
     private ProviderRegistry Providers => providers();
+
+    private WriteOutcome WriteRecord(NewRecordRequest request)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            if (model.Manifest?.RecordFormat >= 3)
+            {
+                string[] parts = request.Subject?.Split(':', 3) ?? [];
+                RecordReference? subject = parts.Length >= 2 ? new(parts[0], parts[1], parts.Length == 3 ? parts[2] : null) : null;
+                (AuthoredRecord? signed, string? refusal) = recordAccess.AuthorLocked(new(request.Type, request.By, request.Body, subject, request.Supersedes, now()), model);
+                if (refusal is not null || signed?.Envelope.Signatures.Count is not > 0)
+                    return WriteOutcome.Fail(new("refused", refusal ?? "The acting principal has no admitted held signing device for the release evidence; retain and reconcile the original identity.", []));
+            }
+            return writeRecord(request);
+        }
+    }
+
+    private (ReleasePolicyAssessment Assessment, List<FindingDto> Objections, List<string> Compared) Admission(EstateModel model,
+        ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true)
+    {
+        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, commit, provider, destination);
+        ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination));
+        List<FindingDto> objections = [.. assessment.Objections];
+        if (recordAccess.RequestDeviceRefusal(model) is { } denied) objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", "release", denied.Message)]);
+        RecordEnvelope? product = model.ById.GetValueOrDefault(request.Product);
+        if (product is not { Type: "product" } || !model.IsCurrent(product)) objections.Add(new("error", "release.product", "release", "The prepared product revision is no longer current."));
+        if ((model.Manifest?.RecordFormat >= 3 || request.Expected is not null) && request.Expected != product?.ComputedHash)
+            objections.Add(new("error", "release.expected", "release", "The expected product hash is missing or stale; prepare again from its current revision."));
+        if (commit is not null && !Patterns.Commit.IsMatch(commit) || model.Manifest?.RecordFormat >= 3 && commit is null)
+            objections.Add(new("error", "release.commit", "release", "Supply the prepared exact lower-case forty-digit commit; a branch name or preview verdict cannot authorize a release."));
+        objections.AddRange(changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message)));
+        // Validate current authority and the actual proposed record without recording it, even when another gate holds.
+        if (probe)
+        {
+            (AuthoredRecord? authored, string? refusal) = recordAccess.AuthorLocked(new("operation", request.By, Element(body), new("product", request.Product, null), previous, now()), model);
+            if (refusal is not null) objections.Add(new("error", "release.author", "release", refusal));
+            if (authored is not null)
+            {
+                if (model.Manifest?.RecordFormat >= 3 && authored.Envelope.Signatures.Count == 0) objections.Add(new("error", "release.signature", "release", "A format-3 release intent needs the acting principal's admitted signing device."));
+                objections.AddRange(recordAccess.LoadWith([authored]).Findings.Concat(EstateChecks.Content(authored.RelativePath, authored.Bytes)).Where(f => f.Severity == Severity.Error)
+                    .Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
+            }
+        }
+        else if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, now()))
+            objections.Add(new("error", "release.author", "release", "Release authority is no longer in force for the acting principal."));
+        return (assessment, objections.Distinct().ToList(), compared);
+    }
+
+    private void Retain(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, JsonObject body, IReadOnlyList<RecordReference> excluded, List<string> hashes)
+    {
+        string hash = retainBasis(assessment, documents, excluded);
+        hashes.Add(hash);
+        body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = $"Release admission basis {assessment.Basis.Digest}, at {assessment.Basis.AsOf} (submission time); exact policy, duty and source evidence.", ["hash"] = hash });
+    }
+
+    private static ReleaseResponse GateRefusal(string identity, string status, ReleasePolicyAssessment assessment, IReadOnlyList<FindingDto> objections) =>
+        ReleaseProblem(identity, status, new Problem("refused", "Release admission refused: " + string.Join(" | ", objections.Select(o => o.Code + ": " + o.Message)) + ". No build or provider call was made.", objections)) with { Policies = assessment.View };
+
+    private ReleaseResponse SetupRefusal(ReleaseSubmitRequest request, string message)
+    {
+        lock (gate)
+        {
+            EstateModel model = session.Load();
+            HashSet<string> repositories = model.Current("resource").Where(r => EstateModel.BodyString(r, "kind") == "repository" && r.Body.TryGetProperty("location", out JsonElement location) &&
+                location.TryGetProperty("github", out JsonElement github) && string.Equals(github.GetString(), request.Repository, StringComparison.OrdinalIgnoreCase)).SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
+            ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, request.Commit, repositories);
+            IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, request.Product, request.Commit, repositories);
+            var compared = CompareLivingDocuments(model, documents, repositories);
+            List<FindingDto> objections = [new("error", "release.setup", "release", message), .. assessment.Objections,
+                .. compared.Changed.Concat(documents.Where(d => d.Closes).Select(d => d.Describe())).Select(m => new FindingDto("warning", "document.release-hold", "release-documents", m))];
+            return GateRefusal("release " + request.Version, "not-started", assessment, objections);
+        }
+    }
 
     /// <summary>
     /// Reads each refuse-level repository document at its selected commit, where a clone is registered here: those whose bytes
@@ -122,13 +201,10 @@ internal sealed class ReleaseCoordinationService(
     {
         IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
         // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
-        if (commit is null && NeedsReleaseCommit(model, product, repositories))
-        {
-            return (["The exact release commit is unavailable for the product's living documents; resolve it at the build provider before submitting again"], []);
-        }
-
         IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
         (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories);
+        if (commit is null && NeedsReleaseCommit(model, product, repositories))
+            changed.Add("The exact release commit is unavailable for the product's living documents; prepare its exact commit and submit it explicitly");
         foreach (LivingDocuments.State document in documents.Where(d => d.Repository is null && d.Generation is null && GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration)))
         {
             try
@@ -188,13 +264,13 @@ internal sealed class ReleaseCoordinationService(
         string? providerId = string.IsNullOrWhiteSpace(request.Provider) ? profile.Destination?.Provider : request.Provider.Trim();
         if (providerId is null)
         {
-            return ReleaseProblem(pending, "not-started", "refused", $"No release provider is selected: product {request.Product} declares no release destination and the request names no provider. Declare the destination on the product record or name the provider; nothing was recorded.");
+            return SetupRefusal(request, $"No release provider is selected: product {request.Product} declares no release destination and the request names no provider. Declare the destination on the product record or name the provider; nothing was recorded.");
         }
 
         IReleaseProvider? provider = Providers.Release(providerId);
         if (provider is null)
         {
-            return ReleaseProblem(pending, "not-started", "refused", $"The release provider '{providerId}' has no implementation on the runtime's machine; nothing selected another and nothing was recorded. Available: {string.Join(", ", Providers.ReleaseProviders.Select(p => p.Provider).DefaultIfEmpty("none"))}.");
+            return SetupRefusal(request, $"The release provider '{providerId}' has no implementation on the runtime's machine; nothing selected another and nothing was recorded. Available: {string.Join(", ", Providers.ReleaseProviders.Select(p => p.Provider).DefaultIfEmpty("none"))}.");
         }
 
         var requested = new Dictionary<string, string>(request.Settings ?? new Dictionary<string, string>(StringComparer.Ordinal), StringComparer.Ordinal);
@@ -211,111 +287,100 @@ internal sealed class ReleaseCoordinationService(
 
         if (missing.Count > 0)
         {
-            return ReleaseProblem(pending, "not-started", "refused", $"The provider '{providerId}' needs the settings {string.Join(", ", missing)}; neither the request nor product {request.Product}'s declared destination gives them, and nothing was recorded.");
+            return SetupRefusal(request, $"The provider '{providerId}' needs the settings {string.Join(", ", missing)}; neither the request nor product {request.Product}'s declared destination gives them, and nothing was recorded.");
         }
 
         string destination = destinationSetting is null ? providerId : settings[destinationSetting];
         string identity = ReleaseFlow.Identity(providerId, destination, request.Version);
-        bool needsCommit;
+        string? releaseCommit = request.Commit ?? (settings.TryGetValue("ref", out string? exactRef) && Patterns.Commit.IsMatch(exactRef) ? exactRef : null);
+        List<string> basisEvidence = [];
+        List<RecordReference> excluded = [];
+        string previousId;
+        JsonElement previousBody;
+        ReleasePolicyAssessment admitted;
+        // All gates run before the durable claim. Resolving a provider ref is not part of admission.
         lock (gate)
         {
             EstateModel model = session.Load();
-            needsCommit = NeedsReleaseCommit(model, request.Product, ReleaseRepositories(model, provider.Descriptor, destination));
-        }
-
-        // Resolve at the build provider, not at a potentially stale clone. Provider I/O never holds the service gate.
-        string? releaseCommit = null;
-        if (needsCommit)
-        {
-            try
-            {
-                releaseCommit = provider.ResolveCommit(destination, settings);
-            }
-            catch (ProviderRefusedException exception)
-            {
-                return ReleaseProblem(identity, "not-started", "refused", exception.Message);
-            }
-
-            if (releaseCommit is null || !Patterns.Commit.IsMatch(releaseCommit))
-            {
-                return ReleaseProblem(identity, "not-started", "refused", $"The provider '{providerId}' could not resolve the release's exact commit at {destination}; its living documents cannot be compared. Nothing was recorded or dispatched.");
-            }
-        }
-
-        string previousId;
-        JsonElement previousBody;
-        // Checking the identity and recording its claim are one admission boundary. The claim survives a restart.
-        lock (gate)
-        {
             RecordEnvelope? current = CurrentOperation(identity);
             string? status = current is null ? null : EstateModel.BodyString(current, "status");
-            if (releaseDispatches.Contains(identity))
-            {
-                return ReleaseProblem(identity, "uncertain", "refused", $"A dispatch under {identity} is still in progress; observe and reconcile it before any retry.");
-            }
-
-            switch (status)
-            {
-                case "observed-success":
-                    return ReleaseProblem(identity, status, "refused", $"Release {request.Version} was already observed as built under {identity}; a corrective release is a new version.");
-                case "not-started":
-                    return ReleaseProblem(identity, "uncertain", "refused", $"The intent under {identity} has no dispatch receipt; its effect is unknown. Observe and reconcile it before any retry.");
-                case "dispatched" or "uncertain":
-                    return ReleaseProblem(identity, status, "refused", $"An operation under {identity} is {status}; observe and reconcile it before any retry.");
-                case "known-failure" or "canceled" when string.IsNullOrWhiteSpace(request.Reconciliation):
-                    return ReleaseProblem(identity, status, "refused", $"The earlier attempt under {identity} is {status}; retry with a reconciliation stating how it was settled under that identity.");
-            }
-
-            // The living-document gate: the product's documents due at level refuse, or unavailable while they declare it, refuse the
-            // submission before any intent is recorded, all named at once, so a refused release costs no build.
-            (List<string> changed, List<string> compared) = ReleaseDocumentChecks(session.Load(), request.Product, releaseCommit, provider.Descriptor, destination);
-            if (changed.Count > 0)
-            {
-                return ReleaseProblem(identity, "not-started", "refused", $"Release {request.Version} waits for the product's living documents: {string.Join(" | ", changed)}. Review each at its repository's required commit, then submit again; nothing was recorded.");
-            }
-
             JsonObject intentBody = ReleaseFlow.IntentBody(providerId, destination, settings, request.Version, request.Product);
-            if (compared.Count > 0)
+            JsonObject claimBody = current is null ? intentBody : ReleaseFlow.RetryIntent(current.Body, intentBody, string.IsNullOrWhiteSpace(request.Reconciliation) ? "Pending admission." : request.Reconciliation);
+            if (current is not null) claimBody["dispatchedAt"] = RecordParser.FormatTimestamp(now());
+            var first = Admission(model, request, releaseCommit, provider.Descriptor, destination, claimBody, current?.Id);
+            string? identityProblem = releaseDispatches.Contains(identity) ? "A dispatch is still in progress; observe and reconcile it before any retry." : status switch
             {
-                intentBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at their repository commits: " + string.Join("; ", compared) + "." });
-            }
-
-            if (current is null)
-            {
-                WriteOutcome intent = writeRecord(new NewRecordRequest("operation", request.By, Element(intentBody), $"product:{request.Product}"));
-                if (!intent.Ok)
-                {
-                    return ReleaseProblem(identity, "not-started", intent.Problem!);
-                }
-
-                previousId = intent.Written!.Id;
-                previousBody = readRecord(previousId)!.Envelope.GetProperty("body");
-            }
-            else
-            {
-                // A reconciled retry also needs a durable claim: leaving the old failure or cancellation current
-                // would authorize another dispatch if this process stopped before storing the receipt.
-                JsonObject retry = ReleaseFlow.RetryIntent(current.Body, intentBody, request.Reconciliation!);
-                WriteOutcome claim = writeRecord(new NewRecordRequest("operation", request.By, Element(retry), $"product:{request.Product}", current.Id));
-                if (!claim.Ok)
-                {
-                    return ReleaseProblem(identity, status!, claim.Problem!);
-                }
-
-                previousId = claim.Written!.Id;
-                previousBody = Element(retry);
-            }
-
+                "observed-success" => "This release was already observed as built; a corrective release is a new version.",
+                "not-started" => "The intent has no dispatch receipt; its effect is unknown. Observe and reconcile it before any retry.",
+                "dispatched" or "uncertain" => "The operation is unresolved; observe and reconcile it before any retry.",
+                "known-failure" or "canceled" when string.IsNullOrWhiteSpace(request.Reconciliation) => "Retry only with a reconciliation stating how the earlier attempt was settled under this identity.",
+                _ => null,
+            };
+            if (identityProblem is not null) first.Objections.Add(new("error", "release.identity", identity, identityProblem));
+            if (first.Objections.Count > 0) return GateRefusal(identity, status is "not-started" ? "uncertain" : status ?? "not-started", first.Assessment, first.Objections);
+            boundary("prepared");
+            var fresh = Admission(session.Load(), request, releaseCommit, provider.Descriptor, destination, claimBody, current?.Id);
+            if (fresh.Objections.Count > 0) return GateRefusal(identity, "not-started", fresh.Assessment, fresh.Objections);
+            admitted = fresh.Assessment;
+            Retain(first.Assessment, first.Compared, claimBody, excluded, basisEvidence);
+            if (first.Assessment.Basis.Digest != admitted.Basis.Digest) Retain(admitted, fresh.Compared, claimBody, excluded, basisEvidence);
+            if (fresh.Compared.Count > 0) claimBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at their repository commits: " + string.Join("; ", fresh.Compared) + "." });
+            WriteOutcome claim = recordAccess.WriteLocked(new("operation", request.By, Element(claimBody), new("product", request.Product, null), current?.Id, now()), session.Load());
+            if (!claim.Ok) return ReleaseProblem(identity, status ?? "not-started", claim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
+            previousId = claim.Written!.Id;
+            RecordEnvelope stored = session.Load().ById[previousId];
+            excluded.Add(stored.Reference);
+            previousBody = stored.Body;
             releaseDispatches.Add(identity);
         }
 
         try
         {
+            boundary("before-dispatch");
+            lock (gate)
+            {
+                EstateModel currentModel = session.Load();
+                HashSet<string> ownPaths = excluded.Select(e => currentModel.ById[e.Id].ExpectedPath).ToHashSet(StringComparer.Ordinal);
+                EstateModel basisModel = EstateLoader.Load(session.Root, session.Files().Where(f => !ownPaths.Contains(f.Path)).ToArray());
+                var fresh = Admission(basisModel, request, releaseCommit, provider.Descriptor, destination, JsonNode.Parse(previousBody.GetRawText())!.AsObject(),
+                    currentModel.ById[previousId].Supersedes, probe: false);
+                if (recordAccess.RequestDeviceRefusal(currentModel) is { } denied) fresh.Objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", identity, denied.Message)]);
+                if (!currentModel.IsCurrent(currentModel.ById[previousId])) fresh.Objections.Add(new("error", "release.intent-changed", identity, "The admitted intent is no longer current; reconcile its identity."));
+                JsonObject authorityProbe = ReleaseFlow.Canceled(previousBody, "Validate the current acting principal before dispatch.");
+                (AuthoredRecord? probeRecord, string? signerRefusal) = recordAccess.AuthorLocked(new("operation", request.By, Element(authorityProbe), new("product", request.Product, null), previousId, now()), currentModel);
+                if (signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && probeRecord?.Envelope.Signatures.Count is not > 0)
+                    fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
+                if (probeRecord is not null) fresh.Objections.AddRange(recordAccess.LoadWith([probeRecord]).Findings.Where(f => f.Severity == Severity.Error).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
+                JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
+                if (fresh.Assessment.Basis.Digest != admitted.Basis.Digest) Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
+                admitted = fresh.Assessment;
+                if (fresh.Objections.Count > 0)
+                {
+                    JsonObject canceled = ReleaseFlow.Canceled(Element(checkedBody), "Admission changed before dispatch; no provider was called. " + string.Join(" | ", fresh.Objections.Select(f => f.Message)));
+                    WriteOutcome settled = signerRefusal is not null || currentModel.Manifest?.RecordFormat >= 3 && probeRecord?.Envelope.Signatures.Count is not > 0
+                        ? WriteOutcome.Fail(new("refused", signerRefusal ?? "No admitted held signer remains to record cancellation.", []))
+                        : recordAccess.WriteLocked(new("operation", request.By, Element(canceled), new("product", request.Product, null), previousId, now()), currentModel);
+                    ReleaseResponse refusal = GateRefusal(identity, settled.Ok ? "canceled" : "not-started", admitted, fresh.Objections);
+                    return refusal with { Operation = settled.Written, BasisEvidence = basisEvidence, Message = refusal.Message + (settled.Ok ? " The intent was canceled before effects." : " The intent could not be canceled; reconcile it before retrying. " + settled.Problem!.Message) };
+                }
+                // A changed pre-dispatch basis must survive a crash before the provider returns a receipt.
+                if (checkedBody.ToJsonString() != JsonNode.Parse(previousBody.GetRawText())!.ToJsonString())
+                {
+                    checkedBody["status"] = "uncertain";
+                    checkedBody["dispatchedAt"] = RecordParser.FormatTimestamp(now());
+                    checkedBody["reconciliation"] = "Preparation re-evaluated before dispatch; this identity is reserved and no provider has yet been called.";
+                    WriteOutcome checkedClaim = recordAccess.WriteLocked(new("operation", request.By, Element(checkedBody), new("product", request.Product, null), previousId, now()), currentModel);
+                    if (!checkedClaim.Ok) return ReleaseProblem(identity, "not-started", checkedClaim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
+                    previousId = checkedClaim.Written!.Id;
+                    excluded.Add(session.Load().ById[previousId].Reference);
+                }
+                previousBody = Element(checkedBody);
+            }
             // The provider is called outside the gate: a dispatch may wait for the host, and every other operation must keep answering.
             JsonObject body;
             try
             {
-                DispatchReceipt receipt = provider.Dispatch(new DispatchRequest(destination, settings, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = request.Version }));
+                DispatchReceipt receipt = provider.Dispatch(new DispatchRequest(destination, settings, new Dictionary<string, string>(StringComparer.Ordinal) { ["version"] = request.Version }, releaseCommit));
                 body = ReleaseFlow.AfterDispatch(previousBody, receipt);
             }
             catch (ProviderRefusedException exception)
@@ -327,7 +392,7 @@ internal sealed class ReleaseCoordinationService(
                 body = ReleaseFlow.AfterUncertainty(previousBody, exception.Message);
             }
 
-            WriteOutcome revision = writeRecord(new NewRecordRequest("operation", request.By, Element(body), $"product:{request.Product}", previousId));
+            WriteOutcome revision = WriteRecord(new NewRecordRequest("operation", request.By, Element(body), $"product:{request.Product}", previousId));
             if (!revision.Ok)
             {
                 Problem problem = revision.Problem! with { Message = revision.Problem!.Message + " The dispatch receipt was not recorded; observe and reconcile under this identity before any retry." };
@@ -342,7 +407,7 @@ internal sealed class ReleaseCoordinationService(
                 "uncertain" => "The dispatch may or may not have started a run. Observe and reconcile under this identity before any retry.",
                 _ => "Nothing was dispatched. Fix the cause, then retry with a reconciliation.",
             };
-            return new ReleaseResponse(identity, newStatus, message, newStatus == "dispatched", revision.Written, Run: run);
+            return new ReleaseResponse(identity, newStatus, message, newStatus == "dispatched", revision.Written, Run: run, Policies: admitted.View, BasisEvidence: basisEvidence);
         }
         finally
         {
@@ -398,7 +463,7 @@ internal sealed class ReleaseCoordinationService(
                     return ReleaseProblem(identity, status, "refused", $"An operation that is {status} is not canceled; cancellation settles an intent that was never dispatched or an outcome reconciled as having had no effect.");
                 }
 
-                WriteOutcome canceled = writeRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.Canceled(body, request.Cancel)), $"product:{product}", current.Id));
+                WriteOutcome canceled = WriteRecord(new NewRecordRequest("operation", request.By, Element(ReleaseFlow.Canceled(body, request.Cancel)), $"product:{product}", current.Id));
                 return canceled.Ok ? new ReleaseResponse(identity, "canceled", $"{identity}: canceled; {request.Cancel}", true, canceled.Written) : ReleaseProblem(identity, status, canceled.Problem!);
             }
 
@@ -406,7 +471,7 @@ internal sealed class ReleaseCoordinationService(
             {
                 // An intent without a receipt is not proof that no effect happened. Persist that uncertainty before observing it.
                 body = Element(ReleaseFlow.AfterUncertainty(body, "The intent has no dispatch receipt; the external effect is unknown and must be observed and reconciled."));
-                WriteOutcome uncertain = writeRecord(new NewRecordRequest("operation", request.By, body, $"product:{product}", current.Id));
+                WriteOutcome uncertain = WriteRecord(new NewRecordRequest("operation", request.By, body, $"product:{product}", current.Id));
                 if (!uncertain.Ok)
                 {
                     return ReleaseProblem(identity, "uncertain", uncertain.Problem!);
@@ -473,6 +538,8 @@ internal sealed class ReleaseCoordinationService(
 
                 // A branch may move after submission. Judge the commit actually built before recording success or a candidate,
                 // so a failed document check can be reviewed and observed again without losing the dispatched operation.
+                ReleasePolicyAssessment? observedPolicies = null;
+                List<string> observedBasis = [];
                 if (revisionBody["status"]?.GetValue<string>() == "observed-success")
                 {
                     string? built = run?.HeadSha ?? release?.TargetCommit;
@@ -483,15 +550,19 @@ internal sealed class ReleaseCoordinationService(
 
                     lock (gate)
                     {
-                        (List<string> changed, _) = ReleaseDocumentChecks(session.Load(), product, built, provider.Descriptor, destination);
-                        if (changed.Count > 0)
+                        EstateModel model = session.Load();
+                        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, product, built, provider.Descriptor, destination);
+                        observedPolicies = assessPolicies(model, product, request.Version, built, ReleaseRepositories(model, provider.Descriptor, destination));
+                        List<FindingDto> objections = [.. observedPolicies.Objections, .. changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message))];
+                        if (objections.Count > 0)
                         {
-                            return ReleaseProblem(identity, status, "refused", $"Release {request.Version} waits for its living documents for built commit {built}: {string.Join(" | ", changed)}. Review each at its repository's required commit, then observe again; no candidate was recorded.");
+                            return ReleaseProblem(identity, status, new Problem("refused", $"Release {request.Version} waits at built commit {built}: {string.Join(" | ", objections.Select(o => o.Message))}. No candidate was recorded; the observed effect remains under its original identity.", objections)) with { Policies = observedPolicies.View };
                         }
+                        Retain(observedPolicies, compared, revisionBody, [], observedBasis);
                     }
                 }
 
-                WriteOutcome revision = writeRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
+                WriteOutcome revision = WriteRecord(new NewRecordRequest("operation", request.By, Element(revisionBody), $"product:{product}", current.Id));
                 if (!revision.Ok)
                 {
                     return ReleaseProblem(identity, status, revision.Problem!);
@@ -522,7 +593,9 @@ internal sealed class ReleaseCoordinationService(
 
                 (ReleaseRecordFormat formats, string formatEvidence, bool stated) = CandidateFormats(provider, destination, tag, request.Version, release, profile, checksums);
                 evidence.Add(formatEvidence);
-                WriteOutcome candidate = writeRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums, formats)), $"product:{product}"));
+                JsonObject candidateBody = ReleaseFlow.CandidateBody(request.Version, destination, commit, release, evidence, request.Qualified ?? [], request.Signing, request.Limitations ?? [], profile, checksums, formats);
+                foreach (string hash in observedBasis) candidateBody["evidence"]!.AsArray().Insert(0, new JsonObject { ["summary"] = "Exact policy and duty basis at observed candidate admission.", ["hash"] = hash });
+                WriteOutcome candidate = WriteRecord(new NewRecordRequest("release", request.By, Element(candidateBody), $"product:{product}"));
                 if (!candidate.Ok)
                 {
                     return ReleaseProblem(identity, newStatus, candidate.Problem!);
@@ -612,7 +685,7 @@ internal sealed class ReleaseCoordinationService(
         }
 
         RecordResponse candidate = readRecord(recorded.Id)!;
-        WriteOutcome published = writeRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id));
+        WriteOutcome published = WriteRecord(new NewRecordRequest("release", request.By, Element(ReleaseFlow.PublishedBody(candidate.Envelope.GetProperty("body"), release)), $"product:{product}", recorded.Id, Expected: candidate.Hash));
         if (!published.Ok)
         {
             return ReleaseProblem(identity, recorded.Status ?? "candidate", published.Problem!);

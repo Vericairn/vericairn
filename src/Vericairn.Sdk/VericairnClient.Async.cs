@@ -10,6 +10,66 @@ namespace Vericairn.Sdk;
 
 public sealed partial class VericairnClient
 {
+    /// <summary>The cancellable PolicyAccess operation, preserving uncertainty after dispatch.</summary>
+    public Task<IReadOnlyList<string>> PolicyAccessAsync(string principal, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<IReadOnlyList<string>>(nameof(PolicyAccess), async token => (await GetAsync<List<string>>("/v1/estate-policies/access?principal=" + Uri.EscapeDataString(principal), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyAccess)), cancellationToken);
+
+    /// <summary>The cancellable PolicyDeclare operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> PolicyDeclareAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(PolicyDeclare), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PolicyDeclare)), cancellationToken);
+
+    /// <summary>The cancellable PolicyRevise operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> PolicyReviseAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(PolicyRevise), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/revisions", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PolicyRevise)), cancellationToken);
+
+    /// <summary>The cancellable PolicyRetire operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> PolicyRetireAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(PolicyRetire), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/retire", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PolicyRetire)), cancellationToken);
+
+    /// <summary>The cancellable PolicyExcept operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> PolicyExceptAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(PolicyExcept), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/exceptions", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PolicyExcept)), cancellationToken);
+
+    /// <summary>The cancellable PolicyRevokeException operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> PolicyRevokeExceptionAsync(string key, string id, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(PolicyRevokeException), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/exceptions/" + Uri.EscapeDataString(id) + "/revoke", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(PolicyRevokeException)), cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionAdd operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> WritingExceptionAddAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(WritingExceptionAdd), async token => (await PostAsync<PolicyChangeRequest, WriteOutcome>("/v1/writing-exceptions", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WritingExceptionAdd)), cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionRemove operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> WritingExceptionRemoveAsync(string id, WritingExceptionRemoveRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(WritingExceptionRemove), async token => (await PostAsync<WritingExceptionRemoveRequest, WriteOutcome>("/v1/writing-exceptions/" + Uri.EscapeDataString(id) + "/remove", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WritingExceptionRemove)), cancellationToken);
+
+    /// <summary>The cancellable WorkPlace operation, preserving uncertainty after dispatch.</summary>
+    public Task<WriteOutcome> WorkPlaceAsync(string key, WorkPlaceRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(WorkPlace), async token => (await PostAsync<WorkPlaceRequest, WriteOutcome>("/v1/work/" + Uri.EscapeDataString(key) + "/placement", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WorkPlace)), cancellationToken);
+
+    /// <summary>The cancellable Policies read, with a response deadline.</summary>
+    public Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync<PolicyResponse>(nameof(Policies), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Policies)), cancellationToken);
+
+    /// <summary>The cancellable Policy read, with a response deadline.</summary>
+    public Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/view", allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
+
+    /// <summary>The cancellable PolicyKinds read, with a response deadline.</summary>
+    public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync<IReadOnlyList<PolicyKindDto>>(nameof(PolicyKinds), async token => (await GetAsync<List<PolicyKindDto>>("/v1/estate-policies/kinds", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyKinds)), cancellationToken);
+
+    /// <summary>The cancellable PolicyEvaluate read, with a response deadline.</summary>
+    public Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<PolicyResponse>(nameof(PolicyEvaluate), async token => (await GetAsync<PolicyResponse>(PolicyEvaluationPath(asOf, release), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyEvaluate)), cancellationToken);
+
+    /// <summary>The cancellable WritingExceptions read, with a response deadline.</summary>
+    public Task<WritingExceptionsResponse> WritingExceptionsAsync(CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WritingExceptionsResponse>(nameof(WritingExceptions), async token => (await GetAsync<WritingExceptionsResponse>("/v1/writing-exceptions", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WritingExceptions)), cancellationToken);
+
+    /// <summary>The cancellable WritingException read, with a response deadline.</summary>
+    public Task<WritingExceptionsResponse?> WritingExceptionAsync(string id, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WritingExceptionsResponse?>(nameof(WritingException), async token => (await GetAsync<WritingExceptionsResponse>("/v1/writing-exceptions/" + Uri.EscapeDataString(id), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(WritingException)), cancellationToken);
+
     /// <summary>Uses and owns the supplied HTTP transport. Operation deadlines replace its global timeout.</summary>
     public VericairnClient(HttpClient http)
     {
@@ -177,6 +237,10 @@ public sealed partial class VericairnClient
     /// <summary>The cancellable Result operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> ResultAsync(ResultRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(Result), async token => (await PostAsync<ResultRequest, WriteOutcome>("/v1/work/result", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Result)), cancellationToken);
+
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    public Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(ReviewResult), async token => (await PostAsync<ResultReviewRequest, WriteOutcome>("/v1/work/review", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReviewResult)), cancellationToken);
 
     /// <summary>The cancellable Amend operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
@@ -515,4 +579,7 @@ public sealed partial class VericairnClient
             throw UnreadableRefusal(response, exception);
         }
     }
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true, cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
 }

@@ -13,6 +13,26 @@ namespace Vericairn.Records.Tests;
 
 public class EstateChecksTests
 {
+    [Fact]
+    public void WritingTokenIsAllowedOnlyInItsValidatedSchemaSlot()
+    {
+        var body = new JsonObject { ["code"] = "writing.spacing", ["token"] = "Open311" };
+        var record = new JsonObject { ["format"] = RecordEnvelope.Format3, ["type"] = "writing-exception", ["body"] = body };
+        Finding[] Scan() => EstateChecks.Content("records/writing-exception/example.json", Encoding.UTF8.GetBytes(record.ToJsonString())).ToArray();
+        Assert.DoesNotContain(Scan(), f => f.Code == "secrets.key");
+        body["nested"] = new JsonObject { ["token"] = "Open311" };
+        Assert.Contains(Scan(), f => f.Code == "secrets.key");
+        body.Remove("nested");
+        record["type"] = "work-order";
+        Assert.Contains(Scan(), f => f.Code == "secrets.key");
+        record["type"] = "writing-exception";
+        body["code"] = "another.code";
+        Assert.Contains(Scan(), f => f.Code == "secrets.key");
+        body["code"] = "writing.spacing";
+        body["token"] = "two words";
+        Assert.Contains(Scan(), f => f.Code == "secrets.key");
+    }
+
     // A P-256 point constructed to put credential-shaped text in its X coordinate; no private key is held.
     private static readonly string CredentialShapedPublicKey = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE-sk-" + new string('A', 38) + "DZrnyCellqU8jjRt1fHctacx_j8F9Xxky9PbD1b4SpNg";
     private static readonly string CredentialShapedSignature = "-sk-" + new string('A', 82);
