@@ -110,6 +110,52 @@ public class ClientCommandTests(HeadlessFixture fixture)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    [Trait("Journey", "D19-E")]
+    public async Task AFailedEstateRefreshDiscardsCompanionContentAndCatalogBasisUntilAccessIsRechecked(bool invalidStatus)
+    {
+        string root = Seed.Temp("command-companion-cache");
+        string person = Seed.Init(root);
+        using var connection = new ControlledConnection(root);
+        var shell = new ShellViewModel(_ => connection, new FakeRuntimeManager(), new Preferences(Seed.Temp("command-preferences")));
+        await fixture.UiAsync(() => shell.OpenEstateAsync(root, TestContext.Current.CancellationToken));
+        await fixture.UiAsync(() => shell.OpenCompanionCatalogAsync(TestContext.Current.CancellationToken));
+        CompanionCatalogDocument catalog = Assert.IsType<CompanionCatalogDocument>(shell.SelectedDocument);
+        await fixture.UiAsync(() => shell.OpenCompanionAsync(person, TestContext.Current.CancellationToken));
+        CompanionDocument item = Assert.IsType<CompanionDocument>(shell.SelectedDocument);
+        Assert.NotEmpty(catalog.Rows);
+        Assert.NotNull(catalog.Coverage.Snapshot);
+        Assert.NotEmpty(item.Text);
+        Assert.NotEmpty(item.SourceText);
+
+        connection.Control.InvalidStatus = invalidStatus;
+        connection.Control.Unavailable = !invalidStatus;
+        await fixture.UiAsync(() => shell.RefreshAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("unavailable", shell.RequestState);
+        Assert.Equal("unavailable", item.Currentness);
+        Assert.Empty(item.Text);
+        Assert.Empty(item.SourceText);
+        Assert.Empty(item.PreviousText);
+        Assert.Empty(item.Sources);
+        Assert.Equal("unavailable", catalog.Coverage.Status);
+        Assert.Null(catalog.Coverage.Snapshot);
+        Assert.Null(catalog.Coverage.ManifestSnapshot);
+        Assert.Empty(catalog.Coverage.Destinations);
+        Assert.Empty(catalog.Rows);
+        Assert.Null(catalog.Selected);
+
+        connection.Control.InvalidStatus = connection.Control.Unavailable = false;
+        await fixture.UiAsync(() => shell.RefreshAsync(TestContext.Current.CancellationToken));
+        Assert.Equal("current", item.Currentness);
+        Assert.Equal(person, item.Request.Revision);
+        Assert.NotEmpty(item.SourceText);
+        Assert.Equal("success", catalog.Coverage.Status);
+        Assert.NotEmpty(catalog.Rows);
+        Assert.NotNull(catalog.Coverage.Snapshot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task InterruptedEffectStaysUncertainAfterRefreshAndIsNotRetried(bool timeout)
     {
         string root = Seed.Temp("command-effect");
@@ -215,6 +261,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
         public bool StallStatus { get; set; }
         public bool StallAssign { get; set; }
         public bool Unavailable { get; set; }
+        public bool InvalidStatus { get; set; }
         public bool Refused { get; set; }
         public int AssignCalls { get; private set; }
         public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
@@ -228,6 +275,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
                 throw new ClientRefusedException("The runtime refuses this write and writes nothing.");
             if (targetMethod!.Name == nameof(IEstateApi.StatusAsync))
             {
+                if (InvalidStatus) throw new InvalidOperationException("fixture status is unavailable");
                 if (Unavailable) throw new HttpRequestException("fixture unavailable");
                 if (StallStatus) return ClientOperation.RunAsync("Status", async token =>
                 {

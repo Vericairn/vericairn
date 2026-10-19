@@ -74,7 +74,7 @@ public sealed partial class ShellViewModel
                 Status = failure.Message;
                 Freshness = "cached";
                 foreach (HandoffDocument page in Documents.OfType<HandoffDocument>()) page.Unavailable();
-                foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
+                InvalidateCompanions();
                 if (failure.OutcomeUnknown)
                 {
                     uncertainOutcomes.Add(EstateName + ": " + label + ". " + failure.Message);

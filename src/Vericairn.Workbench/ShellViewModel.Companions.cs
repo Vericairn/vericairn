@@ -7,10 +7,16 @@ namespace Vericairn.Workbench;
 
 public sealed partial class ShellViewModel
 {
+    private void InvalidateCompanions()
+    {
+        foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
+        foreach (CompanionCatalogDocument page in Documents.OfType<CompanionCatalogDocument>()) page.Unavailable();
+    }
+
     /// <summary>Open the runtime's registered collections without adopting any output.</summary>
     public Task OpenCompanionCatalogAsync(CancellationToken cancellationToken = default) => RunCommandAsync("Read companion coverage", async token =>
     {
-        if (connection?.Api is not { } api) return;
+        if (connection?.Api is not { } api) { InvalidateCompanions(); return; }
         var page = new CompanionCatalogDocument(await api.CompanionsAsync(token).ConfigureAwait(true));
         page.Selected = page.Rows.Count == 0 ? null : page.Rows[0];
         Open(page);

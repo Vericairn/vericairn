@@ -249,7 +249,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         connection?.Dispose();
-        foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
+        InvalidateCompanions();
         connection = connect(root);
         await connection.RefreshAsync(cancellationToken).ConfigureAwait(true);
         Log($"opened {root}: {connection.Mode}");
@@ -286,7 +286,7 @@ public sealed partial class ShellViewModel : Observable
             Status = $"{connection.Root}: {StateLanguage.Label("runtime", "unavailable")}; the last view is kept as cached.";
             RequestState = "unavailable";
             Freshness = "cached";
-            foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
+            InvalidateCompanions();
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
                 page.Unavailable();
@@ -315,6 +315,12 @@ public sealed partial class ShellViewModel : Observable
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
+            List<CompanionCatalogDocument> catalogs = Documents.OfType<CompanionCatalogDocument>().ToList();
+            if (catalogs.Count > 0)
+            {
+                CompanionsResponse coverage = await connection.Api.CompanionsAsync(cancellationToken).ConfigureAwait(true);
+                foreach (CompanionCatalogDocument page in catalogs) page.Fill(coverage);
+            }
             foreach (CompanionDocument page in Documents.OfType<CompanionDocument>().ToList())
                 await page.RefreshAsync(connection.Api, cancellationToken: cancellationToken).ConfigureAwait(true);
             foreach (LivingDocumentsWorkspace page in Documents.OfType<LivingDocumentsWorkspace>().ToList())
@@ -374,6 +380,7 @@ public sealed partial class ShellViewModel : Observable
             Status = "The runtime did not answer: " + exception.Message;
             RequestState = "unavailable";
             Freshness = "cached";
+            InvalidateCompanions();
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
                 page.Unavailable();

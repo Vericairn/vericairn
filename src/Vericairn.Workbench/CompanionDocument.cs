@@ -134,13 +134,31 @@ public sealed class CompanionDocument(CompanionRequest request) : Document("Read
 /// <summary>Installed record collections, without implying adoption of their possible repository destinations.</summary>
 public sealed class CompanionCatalogDocument(CompanionsResponse coverage) : Document("Readable collections", "companion-catalog")
 {
+    private CompanionGeneratorRow? selected;
+
     /// <summary>The runtime's explicit current selection basis.</summary>
-    public CompanionsResponse Coverage { get; } = coverage;
+    public CompanionsResponse Coverage { get; private set; } = coverage;
     /// <summary>Collection readers admitted by the installed runtime; local inspectors stay in their owning local surface.</summary>
-    public IReadOnlyList<CompanionGeneratorRow> Rows { get; } = coverage.Generators.Where(g => !g.LocalOnly &&
+    public IReadOnlyList<CompanionGeneratorRow> Rows => Coverage.Generators.Where(g => !g.LocalOnly &&
         (g.Pattern is not null || g.Id is "vericairn.records/items" or "vericairn.estate/manifest")).ToArray();
     /// <summary>The collection selected for opening.</summary>
-    public CompanionGeneratorRow? Selected { get; set; }
+    public CompanionGeneratorRow? Selected { get => selected; set => Set(ref selected, value); }
     /// <summary>No catalog read adopts any declaration.</summary>
     public string Note => Coverage.Status == "success" ? "Select a collection and press Enter. Item links retain exact source revisions. Possible register paths are not declarations." : Coverage.Reason ?? "Coverage is unavailable.";
+
+    /// <summary>Replaces the catalog with a fresh authorized observation while retaining only a still-admitted selection.</summary>
+    public void Fill(CompanionsResponse response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        string? previous = Selected?.Id;
+        Coverage = response;
+        Raise(nameof(Coverage));
+        Raise(nameof(Rows));
+        Raise(nameof(Note));
+        IReadOnlyList<CompanionGeneratorRow> rows = Rows;
+        Selected = rows.FirstOrDefault(row => row.Id == previous) ?? (rows.Count == 0 ? null : rows[0]);
+    }
+
+    /// <summary>Discards cached destinations, digests and selections when current access cannot be confirmed.</summary>
+    public void Unavailable() => Fill(new(1, "unavailable", null, [], [], [], "Coverage is unavailable; refresh to confirm current access and selection."));
 }
