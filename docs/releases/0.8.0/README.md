@@ -92,6 +92,14 @@ includes neither Workbench nor the macOS Secure Enclave helper.
   Windows readers coordinate with replacement, and supervision survives unavailable
   observations. SDK deadlines also check elapsed monotonic time so a late response
   cannot evade an expired deadline. Unreadable state never proves exit.
+- **FIX-30:** the release workflow's package job checks out the complete history, so its
+  documentation comparison can read the commit a set's references were generated from.
+  0.8.0's first release run stopped there, before packaging.
+- **FIX-31:** an installed policy implementation is named by its assembly and its
+  deterministic build's module version identifier, not by its file, which a single-file
+  application lacks, so the self-contained command line and Workbench evaluate policies.
+  CI now publishes both single-file applications on every change. 0.8.0's second release
+  run stopped there, before packaging.
 - **OPS-01:** `operator record` signs and commits one approved record through declared
   checked changes. It needs repository-synced format 3 and the operator's admitted
   device. Receipts remain separate records; resume preserves the original operation
@@ -127,8 +135,8 @@ Approving a key or title alone cannot satisfy an exact-definition requirement.
 ## This documentation set
 
 The references and manifest were generated on October 19, 2026 UTC from the Release
-build of `9393a977a6b7d7f2b09a93cf5c087260e22dd784`, whose implementation includes
-the twenty-two work orders through `706ab2d`. They contain 141 commands, 99 API
+build of `0d9cc5404308f4e73909074069629b05be5510f1`, whose implementation includes
+the twenty-four work orders through `0d9cc54`. They contain 141 commands, 99 API
 operations and 42 record types, with 31 required documents. That commit is reference
 generation provenance, not the later documentation or final release commit.
 The generated files retain the tool's bytes, including their retained inputs,

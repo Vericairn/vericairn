@@ -8,7 +8,7 @@ Use the 0.8.0 archives after the operator accepts and publishes the release. NuG
 
 0.8.0 follows published 0.7.3 with estate policies, recurring duties and writing exceptions;
 readable companions and retained reference provenance; cancellable client operations and shared-value
-ownership; checked repository changes and signed operator actions; and FIX-23 through FIX-28.
+ownership; checked repository changes and signed operator actions; and FIX-23 through FIX-28, FIX-30 and FIX-31.
 It reads record formats 1, 2 and 3 and writes the estate's own format, at most 3.
 The format-3 upgrade preserves historical records and requires explicit adoption afterwards.
 The earlier export-restore, certificate, attention and worker corrections remain. Earlier sets stay frozen.
