@@ -10,6 +10,60 @@ namespace Vericairn.Protocol;
 public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken cancellationToken) : IEstateApi
 {
     /// <inheritdoc />
+    public IReadOnlyList<string> PolicyAccess(string principal) => inner.PolicyAccessAsync(principal, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<string>> PolicyAccessAsync(string principal, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyAccessAsync(principal, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyDeclare(PolicyChangeRequest request) => inner.PolicyDeclareAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> PolicyDeclareAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyDeclareAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRevise(string key, PolicyChangeRequest request) => inner.PolicyReviseAsync(key, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> PolicyReviseAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyReviseAsync(key, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRetire(string key, PolicyChangeRequest request) => inner.PolicyRetireAsync(key, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> PolicyRetireAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyRetireAsync(key, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyExcept(string key, PolicyChangeRequest request) => inner.PolicyExceptAsync(key, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> PolicyExceptAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyExceptAsync(key, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRevokeException(string key, string id, PolicyChangeRequest request) => inner.PolicyRevokeExceptionAsync(key, id, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> PolicyRevokeExceptionAsync(string key, string id, PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyRevokeExceptionAsync(key, id, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome WritingExceptionAdd(PolicyChangeRequest request) => inner.WritingExceptionAddAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> WritingExceptionAddAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WritingExceptionAddAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome WritingExceptionRemove(string id, WritingExceptionRemoveRequest request) => inner.WritingExceptionRemoveAsync(id, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> WritingExceptionRemoveAsync(string id, WritingExceptionRemoveRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WritingExceptionRemoveAsync(id, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WriteOutcome WorkPlace(string key, WorkPlaceRequest request) => inner.WorkPlaceAsync(key, request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> WorkPlaceAsync(string key, WorkPlaceRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkPlaceAsync(key, request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public PolicyResponse Policies() => inner.PoliciesAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />

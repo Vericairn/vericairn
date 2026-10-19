@@ -24,6 +24,15 @@ public static class ApiRoutes
         app.MapGet($"{v}/estate-policies/{{key}}", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/writing-exceptions", () => Results.Json(service.WritingExceptions(), ProtocolJson.Options));
         app.MapGet($"{v}/writing-exceptions/{{id}}", (string id) => service.WritingException(id) is { } entry ? Results.Json(entry, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/estate-policies/access", (string principal) => Results.Json(service.PolicyAccess(principal), ProtocolJson.Options));
+        app.MapPost($"{v}/estate-policies", (PolicyChangeRequest request) => Outcome(service.PolicyDeclare(request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/revisions", (string key, PolicyChangeRequest request) => Outcome(service.PolicyRevise(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/retire", (string key, PolicyChangeRequest request) => Outcome(service.PolicyRetire(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/exceptions", (string key, PolicyChangeRequest request) => Outcome(service.PolicyExcept(key, request)));
+        app.MapPost($"{v}/estate-policies/{{key}}/exceptions/{{id}}/revoke", (string key, string id, PolicyChangeRequest request) => Outcome(service.PolicyRevokeException(key, id, request)));
+        app.MapPost($"{v}/writing-exceptions", (PolicyChangeRequest request) => Outcome(service.WritingExceptionAdd(request)));
+        app.MapPost($"{v}/writing-exceptions/{{id}}/remove", (string id, WritingExceptionRemoveRequest request) => Outcome(service.WritingExceptionRemove(id, request)));
+        app.MapPost($"{v}/work/{{key}}/placement", (string key, WorkPlaceRequest request) => Outcome(service.WorkPlace(key, request)));
         app.MapGet($"{v}/health", () => Results.Json(service.Health(), ProtocolJson.Options));
         app.MapGet($"{v}/communication", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
             Results.Json(service.Communication(recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)), ProtocolJson.Options));

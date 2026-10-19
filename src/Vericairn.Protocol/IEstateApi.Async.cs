@@ -5,6 +5,42 @@ namespace Vericairn.Protocol;
 
 public partial interface IEstateApi
 {
+    /// <summary>The cancellable PolicyAccess operation.</summary>
+    Task<IReadOnlyList<string>> PolicyAccessAsync(string principal, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyAccess), () => PolicyAccess(principal), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyDeclare operation.</summary>
+    Task<WriteOutcome> PolicyDeclareAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyDeclare), () => PolicyDeclare(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRevise operation.</summary>
+    Task<WriteOutcome> PolicyReviseAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRevise), () => PolicyRevise(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRetire operation.</summary>
+    Task<WriteOutcome> PolicyRetireAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRetire), () => PolicyRetire(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyExcept operation.</summary>
+    Task<WriteOutcome> PolicyExceptAsync(string key, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyExcept), () => PolicyExcept(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyRevokeException operation.</summary>
+    Task<WriteOutcome> PolicyRevokeExceptionAsync(string key, string id, PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyRevokeException), () => PolicyRevokeException(key, id, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionAdd operation.</summary>
+    Task<WriteOutcome> WritingExceptionAddAsync(PolicyChangeRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptionAdd), () => WritingExceptionAdd(request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptionRemove operation.</summary>
+    Task<WriteOutcome> WritingExceptionRemoveAsync(string id, WritingExceptionRemoveRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptionRemove), () => WritingExceptionRemove(id, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WorkPlace operation.</summary>
+    Task<WriteOutcome> WorkPlaceAsync(string key, WorkPlaceRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkPlace), () => WorkPlace(key, request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable Policies read.</summary>
     Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Policies), () => Policies(), false, this as IClientOperationLifetime, cancellationToken);

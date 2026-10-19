@@ -266,7 +266,20 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return Refuse("An explicit id must be a ULID.");
         }
 
-        return Write(new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id));
+        var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
+        if (IsPolicyWrite(draft))
+        {
+            lock (gate)
+            {
+                EstateModel model = session.Load();
+                if (request.At is not null || request.Id is not null) return Refuse("Policy authoring uses the runtime's fresh time and record identity.");
+                string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
+                    : request.Type == "policy-exception" ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
+                if (expected is null || request.Expected != expected) return PolicyConflict();
+                return SignedPolicyWrite(draft, model);
+            }
+        }
+        return Write(draft);
     }
 
     /// <inheritdoc />
@@ -2152,10 +2165,11 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         try
         {
             BeforeValidatingRecords?.Invoke(records);
-            FindingList relevant = Invalid(LoadWith(records), records);
+            EstateModel proposed = LoadWith(records);
+            FindingList relevant = Invalid(proposed, records);
             return relevant.HasErrors
                 ? new Problem("rejected", $"Not written: the estate would be invalid with {(records.Count == 1 ? "this record" : "these records")} ({relevant.Errors} {(relevant.Errors == 1 ? "error" : "errors")}).", ToFindings(relevant, "rejected").Findings)
-                : null;
+                : JudgePolicySources(records, proposed);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
         {

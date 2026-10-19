@@ -140,6 +140,15 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/estate-policies/{key}"] = null,
         ["GET /v1/writing-exceptions"] = null,
         ["GET /v1/writing-exceptions/{id}"] = null,
+        ["GET /v1/estate-policies/access"] = null,
+        ["POST /v1/estate-policies"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/revisions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/retire"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/exceptions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/estate-policies/{key}/exceptions/{id}/revoke"] = typeof(PolicyChangeRequest),
+        ["POST /v1/writing-exceptions"] = typeof(PolicyChangeRequest),
+        ["POST /v1/writing-exceptions/{id}/remove"] = typeof(WritingExceptionRemoveRequest),
+        ["POST /v1/work/{key}/placement"] = typeof(WorkPlaceRequest),
         ["GET /v1/health"] = null,
         ["GET /v1/communication"] = null,
         ["POST /v1/communication"] = typeof(CommunicationSetRequest),
@@ -242,6 +251,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<Type, Func<RequestScope, object, AuthenticatedDevice, string?>> Rules = new()
     {
+        [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
+        [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
+        [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),
         [typeof(HandoffPackage)] = (_, _, _) => null,
         [typeof(CommunicationSetRequest)] = (_, r, d) => Acting(((CommunicationSetRequest)r).By, d),
         [typeof(CommunicationDelegateRequest)] = (_, r, d) => Acting(((CommunicationDelegateRequest)r).By, d),

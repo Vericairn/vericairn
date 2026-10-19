@@ -23,4 +23,23 @@ Recurring-duty findings preserve the occurrence, originating policy revision, ex
 
 The writing registry reports each active token's original author, reason, scope, match count and matching locations. A count is unknown when the scan is incomplete. Removed entries remain inspectable. Excepted occurrences retain all matching entry references, line numbers and UTF-8 byte offsets. Moving a token within its admitted scope preserves the exception; changing case or matching outside that scope does not. Only warning occurrences of `writing.spacing` can be excepted.
 
-These reads expose the existing evaluator. Policy authoring, status/check integration and release enforcement are separate implementation stages; this read surface alone makes no readiness claim. The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).
+Authoring uses the same acting principal and expected hashes through every transport:
+
+| Command | API operation | SDK method | MCP tool |
+|---|---|---|---|
+| `policies declare --body <file>` | `POST /v1/estate-policies` | `PolicyDeclare` | `policy_declare` |
+| `policies revise <key> --body <file>` | `POST /v1/estate-policies/{key}/revisions` | `PolicyRevise` | `policy_revise` |
+| `policies retire <key> --body <file>` | `POST /v1/estate-policies/{key}/retire` | `PolicyRetire` | `policy_retire` |
+| `policies except <key> --body <file>` | `POST /v1/estate-policies/{key}/exceptions` | `PolicyExcept` | `policy_except` |
+| `policies revoke-exception <key> <id> --body <file>` | `POST /v1/estate-policies/{key}/exceptions/{id}/revoke` | `PolicyRevokeException` | `policy_revoke_exception` |
+| `estate writing-exceptions add --body <file>` | `POST /v1/writing-exceptions` | `WritingExceptionAdd` | `writing_exception_add` |
+| `estate writing-exceptions remove <id> --reason <text>` | `POST /v1/writing-exceptions/{id}/remove` | `WritingExceptionRemove` | `writing_exception_remove` |
+| `work place <key>` | `POST /v1/work/{key}/placement` | `WorkPlace` | Not admitted |
+
+All authoring commands take `--by`. Revisions, retirement, exception grants and removals require `--expected`; revocation expects the exception's current hash, while granting an exception expects the current policy hash. Creation sends the canonical body hash, calculated by the CLI. API and MCP callers supply this as `expected`. Generic `records new` authoring of these types follows the same expected-hash, signature and source checks. Live authoring uses fresh server time. The server requires a held, admitted signing device for the acting principal and rechecks the current authority, exact approval, parameters and exception targets before writing. An unavailable or future finding cannot be excepted.
+
+`work place` selects exactly one `--release-plan <key>` or `--backlog <key>`, with `--expected` for the work revision and `--expected-selection` for the current carrier or placement registry. The server resolves and validates that selection. Writing removal keeps the token, scope and history; `--basis <file>` can name a current delegated authority when needed.
+
+`GET /v1/estate-policies/access?principal=<id>` (`PolicyAccess`, MCP `policy_access`) reports currently admitted action names without creating a record. MCP exposes writes only for its connection principal's current authority and checks it again at the call. Exact policy, rule, token and scope bounds remain server checks on the proposed body. The authority response itself grants no permission.
+
+Status/check integration and release enforcement are separate implementation stages; these surfaces alone make no readiness claim. The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).

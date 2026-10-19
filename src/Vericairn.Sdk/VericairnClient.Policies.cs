@@ -8,6 +8,33 @@ namespace Vericairn.Sdk;
 public sealed partial class VericairnClient
 {
     /// <inheritdoc />
+    public IReadOnlyList<string> PolicyAccess(string principal) => Get<List<string>>("/v1/estate-policies/access?principal=" + Uri.EscapeDataString(principal))!;
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyDeclare(PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRevise(string key, PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/revisions", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRetire(string key, PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/retire", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyExcept(string key, PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/exceptions", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome PolicyRevokeException(string key, string id, PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/exceptions/" + Uri.EscapeDataString(id) + "/revoke", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome WritingExceptionAdd(PolicyChangeRequest request) => Post<PolicyChangeRequest, WriteOutcome>("/v1/writing-exceptions", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome WritingExceptionRemove(string id, WritingExceptionRemoveRequest request) => Post<WritingExceptionRemoveRequest, WriteOutcome>("/v1/writing-exceptions/" + Uri.EscapeDataString(id) + "/remove", request)!;
+
+    /// <inheritdoc />
+    public WriteOutcome WorkPlace(string key, WorkPlaceRequest request) => Post<WorkPlaceRequest, WriteOutcome>("/v1/work/" + Uri.EscapeDataString(key) + "/placement", request)!;
+
+    /// <inheritdoc />
     public PolicyResponse Policies() => Get<PolicyResponse>("/v1/estate-policies")!;
 
     /// <inheritdoc />

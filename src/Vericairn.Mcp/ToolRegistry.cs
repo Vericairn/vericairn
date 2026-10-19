@@ -18,6 +18,9 @@ public sealed record ToolDefinition(string Name, string Description, JsonObject 
     public Func<IEstateApi, JsonObject?, CancellationToken, Task<ToolCallResult>> InvokeAsync { get; init; } =
         (api, arguments, token) => ClientOperation.RunSynchronousAsync(Name, () => Invoke(api, arguments), Writes, token);
 
+    /// <summary>A policy action the server must admit for this acting principal.</summary>
+    public string? PolicyAction { get; init; }
+
     /// <summary>The tool as tools/list presents it.</summary>
     public JsonObject Describe() => new() { ["name"] = Name, ["description"] = Description, ["inputSchema"] = InputSchema.DeepClone() };
 }
@@ -68,15 +71,17 @@ public sealed class ToolRegistry
     /// <summary>The tools this connection may use.</summary>
     public IReadOnlyList<ToolDefinition> Visible()
     {
-        bool writes = WritesVisible();
-        return tools.Where(t => !t.Writes || writes).ToList();
+        try { return VisibleAsync().GetAwaiter().GetResult(); }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or JsonException or OperationCanceledException or TimeoutException)
+        { return tools.Where(t => !t.Writes).ToList(); }
     }
 
     /// <summary>The tools this connection may use, after a cancellable admission check.</summary>
     public async Task<IReadOnlyList<ToolDefinition>> VisibleAsync(CancellationToken cancellationToken = default)
     {
         bool writes = await WritesVisibleAsync(cancellationToken).ConfigureAwait(false);
-        return tools.Where(t => !t.Writes || writes).ToList();
+        IReadOnlyList<string> policyActions = writes ? await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false) : [];
+        return tools.Where(t => !t.Writes || writes && (t.PolicyAction is null || policyActions.Contains(t.PolicyAction, StringComparer.Ordinal))).ToList();
     }
 
     /// <summary>Calls a visible tool; an invisible or unknown tool is unknown to the caller.</summary>
@@ -89,7 +94,8 @@ public sealed class ToolRegistry
         {
             cancellationToken.ThrowIfCancellationRequested();
             ToolDefinition? tool = tools.FirstOrDefault(t => t.Name == name);
-            if (tool is null || (tool.Writes && !await WritesVisibleAsync(cancellationToken).ConfigureAwait(false)))
+            if (tool is null || (tool.Writes && (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) ||
+                tool.PolicyAction is { } action && !(await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false)).Contains(action, StringComparer.Ordinal))))
             {
                 return new ToolCallResult(string.Empty, true, Unknown: true);
             }
@@ -111,6 +117,8 @@ public sealed class ToolRegistry
                 async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
             Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),
                 async (api, a, token) => Json(await api.PolicyKindsAsync(token).ConfigureAwait(false))),
+            Read("policy_access", "Policy write actions currently admitted for the connected principal. Exact bounds are rechecked for every write.", NoArguments(),
+                async (api, a, token) => Json(await api.PolicyAccessAsync(by, token).ConfigureAwait(false))),
             Read("policy_show", "One policy by key or record id, including duty deadlines, exact evidence and exception history.", Arguments(("key", "Policy key or record id.")), "key",
                 async (api, a, token) => await api.PolicyAsync(Arg(a, "key"), token).ConfigureAwait(false) is { } policy ? Json(policy) : NotFound("policy", Arg(a, "key"))),
             Read("policy_evaluate", "Evaluate policies with a recorded-time basis or explicit preview. A preview cannot authorize submission.", Arguments(("asOf", "Optional canonical UTC preview time."), ("release", "Optional release record id selecting its exact product, version and commit.")),
@@ -167,6 +175,27 @@ public sealed class ToolRegistry
                     "json" => new ToolCallResult((await api.AsksAsync(OptionalArg(a, "to"), cancellationToken: token).ConfigureAwait(false)).Json.GetRawText(), false),
                     string other => new ToolCallResult($"form is text or json, not '{other}'.", true),
                 }),
+            Write("policy_declare", "PolicyDeclare: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["expected", "body"],
+                async (api, a, token) => Outcome(await api.PolicyDeclareAsync(new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "declare" },
+            Write("policy_revise", "PolicyRevise: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("key", "Policy key or id."), ("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["key", "expected", "body"],
+                async (api, a, token) => Outcome(await api.PolicyReviseAsync(Arg(a, "key"), new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "revise" },
+            Write("policy_retire", "PolicyRetire: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("key", "Policy key or id."), ("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["key", "expected", "body"],
+                async (api, a, token) => Outcome(await api.PolicyRetireAsync(Arg(a, "key"), new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "retire" },
+            Write("policy_except", "PolicyExcept: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("key", "Policy key or id."), ("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["key", "expected", "body"],
+                async (api, a, token) => Outcome(await api.PolicyExceptAsync(Arg(a, "key"), new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "except" },
+            Write("policy_revoke_exception", "PolicyRevokeException: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("key", "Policy key or id."), ("id", "Exception record id."), ("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["key", "id", "expected", "body"],
+                async (api, a, token) => Outcome(await api.PolicyRevokeExceptionAsync(Arg(a, "key"), Arg(a, "id"), new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "revoke-exception" },
+            Write("writing_exception_add", "WritingExceptionAdd: validate expected hashes and sources and sign as the acting principal, within the exact authority bounds.",
+                Arguments(("expected", "Expected current target hash, or canonical body hash for a creation."), ("body", "The complete prepared record body, including its exact authority basis.")), ["expected", "body"],
+                async (api, a, token) => Outcome(await api.WritingExceptionAddAsync(new PolicyChangeRequest(by, Body(a, "body"), Arg(a, "expected")), cancellationToken: token).ConfigureAwait(false)), ["body"]) with { PolicyAction = "writing-add" },
+            Write("writing_exception_remove", "Remove one writing entry with its expected hash and a reason, signed as the acting principal under current authority.",
+                Arguments(("id", "Writing-entry record id."), ("expected", "Expected current entry hash."), ("reason", "Why this entry is removed."), ("basis", "Optional exact authority basis for this removal.")), ["id", "expected", "reason"],
+                async (api, a, token) => Outcome(await api.WritingExceptionRemoveAsync(Arg(a, "id"), new WritingExceptionRemoveRequest(by, Arg(a, "expected"), Arg(a, "reason"), a?["basis"] is null ? null : Body(a, "basis")), token).ConfigureAwait(false)), ["basis"]) with { PolicyAction = "writing-remove" },
             Write("work_attempt", "Records the start of an attempt by the acting principal on an assignment it holds: where the work happens, named without machine paths, and what the contributor intends. The runtime signs the record with the acting principal's admitted device on this machine and refuses it when the estate would be invalid.",
                 Arguments(("assignment", "Assignment record id."), ("workspace", "Where the work happens: a repository and branch, a clone, a tool; never a machine path."), ("note", "What the contributor intends to do.")), ["assignment", "workspace", "note"],
                 async (api, a, token) => Outcome((await api.AttemptAsync(new AttemptRequest(Arg(a, "assignment"), by, Arg(a, "workspace"), Arg(a, "note")), cancellationToken: token).ConfigureAwait(false)))),

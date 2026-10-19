@@ -70,3 +70,12 @@ public sealed record WritingEntryDto(PolicyRecordReference Entry, string Token, 
 public sealed record WritingExceptionsResponse(string Text, PolicyBasisDto Basis, string Scanner, bool Complete,
     IReadOnlyList<RecordResponse> Records, IReadOnlyList<WritingEntryDto> Entries, IReadOnlyList<WritingOccurrenceDto> Warnings,
     IReadOnlyList<WritingOccurrenceDto> ExceptedOccurrences, IReadOnlyList<FindingDto> Diagnostics);
+
+/// <summary>A prepared body and actual author. Expected pins the current target revision, or the canonical body hash for a new declaration or writing entry.</summary>
+public sealed record PolicyChangeRequest(string By, JsonElement Body, string Expected);
+
+/// <summary>Remove one writing identity. A delegate can supply its own exact authority basis; omission retains the original basis.</summary>
+public sealed record WritingExceptionRemoveRequest(string By, string Expected, string Reason, JsonElement? Basis = null);
+
+/// <summary>Place a work revision in one release plan or backlog. ExpectedSelection pins the current carrier or placement policy.</summary>
+public sealed record WorkPlaceRequest(string By, string Expected, string ExpectedSelection, string? ReleasePlan = null, string? Backlog = null);

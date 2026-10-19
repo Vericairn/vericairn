@@ -21,6 +21,15 @@ public static class OpenApiDocument
         ("GET", "/v1/estate-policies/{key}"),
         ("GET", "/v1/writing-exceptions"),
         ("GET", "/v1/writing-exceptions/{id}"),
+        ("GET", "/v1/estate-policies/access"),
+        ("POST", "/v1/estate-policies"),
+        ("POST", "/v1/estate-policies/{key}/revisions"),
+        ("POST", "/v1/estate-policies/{key}/retire"),
+        ("POST", "/v1/estate-policies/{key}/exceptions"),
+        ("POST", "/v1/estate-policies/{key}/exceptions/{id}/revoke"),
+        ("POST", "/v1/writing-exceptions"),
+        ("POST", "/v1/writing-exceptions/{id}/remove"),
+        ("POST", "/v1/work/{key}/placement"),
         ("GET", "/v1/health"),
         ("GET", "/v1/communication"),
         ("POST", "/v1/communication"),
@@ -144,6 +153,9 @@ public static class OpenApiDocument
             {
                 operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "type", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "A record type, for example work-order." });
             }
+
+            if (method == "GET" && path == "/v1/estate-policies/access")
+                operation["parameters"] = new JsonArray(new JsonObject { ["name"] = "principal", ["in"] = "query", ["required"] = true, ["schema"] = new JsonObject { ["type"] = "string" }, ["description"] = "Acting principal whose current policy action admission is inspected; exact bounds are rechecked for every write." });
 
             if (method == "GET" && path == RuntimeIdentityScheme.Path)
             {
@@ -352,12 +364,15 @@ public static class OpenApiDocument
 
         return new JsonObject
         {
+            ["PolicyChangeRequest"] = Object(("by", "string"), ("body", "object"), ("expected", "string")),
+            ["WritingExceptionRemoveRequest"] = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("basis", "object")),
+            ["WorkPlaceRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedSelection", "string"), ("releasePlan", "string"), ("backlog", "string")),
             ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
             ["CommunicationDelegateRequest"] = Object(("by", "string"), ("recipient", "string"), ("grantee", "string"), ("scope", "string"), ("assignment", "string"), ("status", "string"), ("expected", "string"), ("expires", "string")),
             ["CommunicationProfile"] = Object(("recipient", "string"), ("assignment", "string"), ("fields", "object"), ("revisions", "array"), ("conflicts", "array"), ("observedAt", "string"), ("revisionHash", "string"), ("unavailable", "string")),
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
-            ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string")),
+            ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
@@ -411,6 +426,15 @@ public static class OpenApiDocument
 
     private static string RequestSchema(string path) => path switch
     {
+        "/v1/estate-policies" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/revisions" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/retire" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/exceptions" => "PolicyChangeRequest",
+        "/v1/estate-policies/{key}/exceptions/{id}/revoke" => "PolicyChangeRequest",
+        "/v1/writing-exceptions" => "PolicyChangeRequest",
+        "/v1/writing-exceptions/{id}/remove" => "WritingExceptionRemoveRequest",
+        "/v1/work/{key}/placement" => "WorkPlaceRequest",
+
         "/v1/communication" => "CommunicationSetRequest",
         "/v1/communication/delegations" => "CommunicationDelegateRequest",
         "/v1/status/observations" => "EstateObserveRequest",
@@ -460,6 +484,16 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/estate-policies/access") => "PolicyAccess: admitted policy actions, with exact target bounds rechecked at submission.",
+        ("POST", "/v1/estate-policies") => "PolicyDeclare: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/revisions") => "PolicyRevise: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/retire") => "PolicyRetire: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/exceptions") => "PolicyExcept: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/estate-policies/{key}/exceptions/{id}/revoke") => "PolicyRevokeException: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/writing-exceptions") => "WritingExceptionAdd: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/writing-exceptions/{id}/remove") => "WritingExceptionRemove: validate the expected hash and all source evidence, then sign as the acting principal.",
+        ("POST", "/v1/work/{key}/placement") => "WorkPlace: validate the expected hash and all source evidence, then sign as the acting principal.",
+
         ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
         ("GET", "/v1/estate-policies/{key}") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
         ("GET", "/v1/estate-policies/kinds") => "Installed kind versions, implementation hashes, supported selections, sources and bounds.",

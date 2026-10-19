@@ -103,7 +103,8 @@ public sealed record RecordResponse(string Path, string Id, string Type, string 
 /// <param name="Supersedes">Predecessor id.</param>
 /// <param name="At">Authoring time.</param>
 /// <param name="Id">Explicit id (root operator only).</param>
-public sealed record NewRecordRequest(string Type, string By, JsonElement Body, string? Subject = null, string? Supersedes = null, string? At = null, string? Id = null);
+/// <param name="Expected">Required for policy and placement authoring: the current predecessor or policy hash, or canonical body hash for a creation.</param>
+public sealed record NewRecordRequest(string Type, string By, JsonElement Body, string? Subject = null, string? Supersedes = null, string? At = null, string? Id = null, string? Expected = null);
 
 /// <summary>A brief: everything a contributor needs, from the records alone.</summary>
 /// <param name="Markdown">Human form.</param>

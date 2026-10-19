@@ -9,6 +9,33 @@ namespace Vericairn.Protocol;
 /// </summary>
 public partial interface IEstateApi
 {
+    /// <summary>List admitted policy write actions; exact bounds are checked again on submission.</summary>
+    IReadOnlyList<string> PolicyAccess(string principal) => [];
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyDeclare(PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRevise(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRetire(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyExcept(string key, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome PolicyRevokeException(string key, string id, PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WritingExceptionAdd(PolicyChangeRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WritingExceptionRemove(string id, WritingExceptionRemoveRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
+    /// <summary>Submit a prepared, expected-hash change as the acting principal.</summary>
+    WriteOutcome WorkPlace(string key, WorkPlaceRequest request) => WriteOutcome.Fail(new Problem("unsupported", "This API implementation does not support policy writes.", []));
+
     /// <summary>Read Policies; returns server-derived evidence and creates no record.</summary>
     PolicyResponse Policies() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
 
