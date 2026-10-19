@@ -121,6 +121,10 @@ public partial class MainWindow : Window
         {
             _ = OpenAndFocusAsync(shell.OpenLivingDocumentsAsync());
         }
+        else if (command && shift && e.Key == Key.V)
+        {
+            _ = OpenAndFocusAsync(shell.OpenCompanionCatalogAsync());
+        }
         else if (command && shift && e.Key == Key.P)
         {
             _ = OpenAndFocusAsync(shell.OpenProgressAsync());
@@ -218,6 +222,16 @@ public partial class MainWindow : Window
         }
 
         ListBox? list = focused as ListBox ?? focused.FindAncestorOfType<ListBox>();
+        if (list?.DataContext is CompanionDocument && list.SelectedItem is CompanionSourceRow source && source.Source.Kind == "record")
+        {
+            _ = OpenAndFocusAsync(shell.OpenCompanionAsync(source.Source.Identity));
+            return true;
+        }
+        if (list?.DataContext is CompanionCatalogDocument catalog)
+        {
+            _ = OpenAndFocusAsync(shell.OpenCompanionCollectionAsync(catalog));
+            return true;
+        }
         if (list?.DataContext is ResultInboxDocument && list.SelectedItem is InboxRow row)
         {
             _ = shell.OpenReviewAsync(row.ResultId);
@@ -432,6 +446,25 @@ public partial class MainWindow : Window
     }
 
     private async void OnRefreshCommunication(object? sender, RoutedEventArgs e) => await shell.RefreshCommunicationDocumentAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
+
+    private void OnOpenCompanionCatalog(object? sender, RoutedEventArgs e) => _ = OpenAndFocusAsync(shell.OpenCompanionCatalogAsync());
+    private void OnOpenCompanionCollection(object? sender, RoutedEventArgs e) => _ = OpenAndFocusAsync(shell.OpenCompanionCollectionAsync(DocumentOf<CompanionCatalogDocument>(sender)));
+    private void OnRefreshCompanion(object? sender, RoutedEventArgs e) => _ = shell.RefreshCompanionAsync(DocumentOf<CompanionDocument>(sender));
+    private void OnPreviousCompanionPage(object? sender, RoutedEventArgs e) => _ = shell.RefreshCompanionAsync(DocumentOf<CompanionDocument>(sender), -1);
+    private void OnNextCompanionPage(object? sender, RoutedEventArgs e) => _ = shell.RefreshCompanionAsync(DocumentOf<CompanionDocument>(sender), 1);
+    private void OnOpenDeclaredCompanion(object? sender, RoutedEventArgs e) => _ = OpenAndFocusAsync(shell.OpenDeclaredCompanionAsync(DocumentOf<LivingDocumentsWorkspace>(sender)));
+    private void OnReadExactRecord(object? sender, RoutedEventArgs e)
+    {
+        string? revision = (sender as Control)?.DataContext switch
+        {
+            WorkOrderDocument work => work.Id,
+            ReleaseRowView release => release.Id,
+            ReviewWorkspace review => review.SubjectId,
+            CompanionDocument page => page.SelectedSource?.Source.Kind == "record" ? page.SelectedSource.Source.Identity : null,
+            _ => null,
+        };
+        if (revision is not null) _ = OpenAndFocusAsync(shell.OpenCompanionAsync(revision));
+    }
     private async void OnSaveCommunication(object? sender, RoutedEventArgs e) => await shell.SaveCommunicationAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
     private async void OnResetCommunication(object? sender, RoutedEventArgs e) => await shell.ResetCommunicationAsync(DocumentOf<CommunicationDocument>(sender)).ConfigureAwait(true);
 
@@ -536,6 +569,10 @@ public partial class MainWindow : Window
         else if (DocumentOf<ReviewWorkspace>(sender) is ReviewWorkspace workspace)
         {
             _ = shell.OpenComparisonAsync(workspace.SubjectId);
+        }
+        else if (DocumentOf<CompanionDocument>(sender)?.Request.Revision is { } revision)
+        {
+            _ = shell.OpenComparisonAsync(revision);
         }
         else if (!string.IsNullOrWhiteSpace(RecordIdBox.Text))
         {

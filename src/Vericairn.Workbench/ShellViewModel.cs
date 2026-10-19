@@ -249,6 +249,7 @@ public sealed partial class ShellViewModel : Observable
         }
 
         connection?.Dispose();
+        foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
         connection = connect(root);
         await connection.RefreshAsync(cancellationToken).ConfigureAwait(true);
         Log($"opened {root}: {connection.Mode}");
@@ -285,6 +286,7 @@ public sealed partial class ShellViewModel : Observable
             Status = $"{connection.Root}: {StateLanguage.Label("runtime", "unavailable")}; the last view is kept as cached.";
             RequestState = "unavailable";
             Freshness = "cached";
+            foreach (CompanionDocument page in Documents.OfType<CompanionDocument>()) page.Unavailable();
             foreach (HandoffDocument page in Documents.OfType<HandoffDocument>())
             {
                 page.Unavailable();
@@ -313,6 +315,8 @@ public sealed partial class ShellViewModel : Observable
             Replace(WorkOrders, estate.WorkOrders);
             Replace(Assignments, estate.Assignments);
             Replace(Releases, estate.Releases);
+            foreach (CompanionDocument page in Documents.OfType<CompanionDocument>().ToList())
+                await page.RefreshAsync(connection.Api, cancellationToken: cancellationToken).ConfigureAwait(true);
             foreach (LivingDocumentsWorkspace page in Documents.OfType<LivingDocumentsWorkspace>().ToList())
             {
                 page.Fill((await TryAsync(async () => (await connection.Api.DocumentsAsync(cancellationToken: cancellationToken).ConfigureAwait(true))).ConfigureAwait(true)) ?? []);
@@ -1041,7 +1045,7 @@ public sealed partial class ShellViewModel : Observable
 
     private static string? Str(JsonElement e, string name) => e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-    /// <summary>Opens a record's envelope as a document; a work order (by key or id) opens as its page.</summary>
+    /// <summary>Opens an exact record beside its readable view; a work order (by key or id) opens as its page.</summary>
     private async Task OpenRecordCoreAsync(string id, CancellationToken cancellationToken = default)
     {
         if (connection?.Api is null)
@@ -1057,8 +1061,7 @@ public sealed partial class ShellViewModel : Observable
                 return;
             }
 
-            RecordResponse? record = (await connection.Api.RecordAsync(id, cancellationToken: cancellationToken).ConfigureAwait(true));
-            Open(record is null ? new TextDocument(id, $"No record '{id}'.", "missing") : new TextDocument($"{record.Type} {id[..Math.Min(12, id.Length)]}", JsonSerializer.Serialize(record.Envelope, Pretty), "record"));
+            await OpenCompanionCoreAsync(new("vericairn.records/items", "item", id), cancellationToken).ConfigureAwait(true);
         }
         catch (Exception exception) when ((exception is IOException or InvalidOperationException or HttpRequestException or JsonException) && ClientFailure.FromException(exception) is null)
         {
