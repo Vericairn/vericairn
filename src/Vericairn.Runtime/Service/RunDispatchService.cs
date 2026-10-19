@@ -263,7 +263,8 @@ internal sealed class RunDispatchService(
             TimeSpan wait = grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
             DateTimeOffset deadline = DateTimeOffset.UtcNow + (wait < WorkerOptions.StopWait ? wait : WorkerOptions.StopWait);
             DateTimeOffset until = deadline;
-            // A state being replaced as it is read reads as nothing for a moment, which is no news: the last state read stands.
+            // Keep the last observation if the file is absent. Sharing failures are retried by the
+            // directory and propagate if they persist; they must never become a missing observation.
             while (DateTimeOffset.UtcNow < until)
             {
                 RunObservedState? read = directory.Read();
@@ -324,8 +325,8 @@ internal sealed class RunDispatchService(
     }
 
     /// <summary>
-    /// What the worker observing a run wrote, read through a moment in which it is being replaced: a state that is there and cannot be
-    /// read yet is read again for up to a second before it counts as nothing.
+    /// What the worker observing a run wrote, retrying if its first snapshot appeared just after an absent-file read.
+    /// The directory itself retries sharing failures and throws if the snapshot remains unreadable.
     /// </summary>
     private static RunObservedState? ReadSteadily(RunDirectory directory)
     {

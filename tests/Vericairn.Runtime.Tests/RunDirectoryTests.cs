@@ -28,25 +28,70 @@ public class RunDirectoryTests
         Assert.Equal(stop, directory.Read()?.Stop);
     }
 
-    [Fact]
-    public void AnOpenStateReaderKeepsAWholeSnapshotWhileTheNextStopObservationIsPublished()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnOpenStateReaderKeepsAWholeSnapshotWhileTheNextStopObservationIsPublished(bool injectContention)
     {
         using var run = new RunEstate();
         string estate = run.Service.Session.Manifest.Estate;
         string id = Ulid.NewUlid().Value;
-        var writer = new RunDirectory(estate, id);
+        using var readerOpened = new ManualResetEventSlim();
+        using var moveAttempted = new ManualResetEventSlim();
+        using var readerClosed = new ManualResetEventSlim();
+        var clock = new WorkerClock();
+        int moves = 0;
+        var writer = new RunDirectory(estate, id)
+        {
+            BeforeMove = () =>
+            {
+                if (injectContention && readerOpened.IsSet && Interlocked.Increment(ref moves) == 1)
+                {
+                    throw new UnauthorizedAccessException("Synthetic open-reader contention.");
+                }
+            },
+            RetryClock = clock,
+            RetryWait = delay =>
+            {
+                // Windows cannot replace the open destination even with delete sharing. Let the
+                // reader finish after the failed move, then retry without racing a wall-clock budget.
+                moveAttempted.Set();
+                Assert.True(readerClosed.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+                clock.Advance(delay);
+            },
+        };
         writer.Create();
         var stop = new RunStop("2026-10-15T12:00:00Z", "worker", "stop");
         var transmitted = stop with { TransmittedAt = "2026-10-15T12:00:01Z", Transmission = "stop file" };
         writer.Write(new RunObservedState { Run = id, Stop = stop });
         var reader = new RunDirectory(estate, id)
         {
-            AfterReadOpen = () => writer.Write(new RunObservedState { Run = id, Stop = transmitted }),
+            AfterReadOpen = () =>
+            {
+                readerOpened.Set();
+                Assert.True(moveAttempted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            },
         };
 
-        Assert.Equal(stop, reader.Read()!.Stop);
+        Task publishing = Task.Run(() =>
+        {
+            Assert.True(readerOpened.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            try { writer.Write(new RunObservedState { Run = id, Stop = transmitted }); }
+            finally { moveAttempted.Set(); }
+        }, TestContext.Current.CancellationToken);
+        RunObservedState? snapshot;
+        try { snapshot = reader.Read(); }
+        finally
+        {
+            readerClosed.Set();
+            // Observe the writer's own exception; it must never be swallowed by the reader's catch.
+            await publishing.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        }
+
+        Assert.Equal(stop, snapshot!.Stop);
         Assert.Equal(transmitted, writer.Read()!.Stop);
         Assert.Empty(Directory.EnumerateFiles(writer.Path, "*.tmp"));
+        if (injectContention) Assert.Equal(2, moves);
     }
 
     [Fact]
