@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Text.Json.Nodes;
+using System.Collections.Immutable;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -41,12 +42,21 @@ public class PolicyExceptionEvaluationTests
         RecordEnvelope policy = Policy(fixture);
         RecordEnvelope order = Work(fixture);
         RecordEnvelope grant = Grant(fixture, policy, order);
+        IDocumentGenerator generator = DocumentGenerators.Find("vericairn.estate/policy-exceptions")!;
+        var inputs = new Dictionary<string, string> { ["format"] = "1", ["audience"] = "Internal", ["selection"] = "all-revisions" }.ToImmutableDictionary(StringComparer.Ordinal);
+        var context = new DocumentGenerationContext(1, generator.Descriptor!, inputs, "item", null, [DocumentSourceSnapshot.Record(grant)]);
+        DocumentRendition before = DocumentRendering.Render(generator, context);
+        Assert.Equal(DocumentGenerationStatus.Success, before.Status);
         DateTimeOffset expiry = DutyRecords.Time(EstateModel.BodyString(grant, "expiresAt"))!.Value;
         Assert.Equal("excepted", Assert.Single(Evaluate(fixture, expiry.AddSeconds(-1)).Findings).Disposition);
         Assert.Equal("none", Assert.Single(Evaluate(fixture, expiry).Findings).Disposition);
+        DocumentRendition after = DocumentRendering.Render(generator, context);
+        Assert.Equal(before.ContentHash, after.ContentHash);
+        Assert.Equal(before.Bytes, after.Bytes);
         JsonObject revoked = PolicyFixture.Body(grant); revoked["state"] = "revoked";
         fixture.Add("policy-exception", revoked, subject: policy.Reference, supersedes: grant.Id);
         Assert.Equal("none", Assert.Single(Evaluate(fixture).Findings).Disposition);
+        Assert.Equal(before.ContentHash, DocumentRendering.Render(generator, context).ContentHash);
     }
 
     [Fact]

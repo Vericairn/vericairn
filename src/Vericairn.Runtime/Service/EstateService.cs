@@ -45,6 +45,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
     private EstateService(EstateSession session)
     {
+        Reading.LocalCompanions.EnsureRegistered();
         this.session = session;
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
