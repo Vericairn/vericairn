@@ -158,6 +158,20 @@ public class ContinuousIntegrationTests
         Assert.DoesNotContain("continue-on-error", publish, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void EveryTestStepRetriesAFailedTestOnceAndReportsIt()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        Assert.True(File.Exists(Path.Combine(RepositoryRoot(), ".github", "scripts", "run-tests.py")));
+        foreach ((string file, string job) in new[] { ("ci.yml", "build-test:"), ("release.yml", "verify:") })
+        {
+            string steps = Block(Read(Path.Combine(workflows, file)), job, 2);
+            Assert.Contains("        run: python .github/scripts/run-tests.py\n", steps, StringComparison.Ordinal);
+            Assert.Contains("            python3 .github/scripts/run-tests.py'\n", steps, StringComparison.Ordinal);
+            Assert.DoesNotContain("dotnet test --no-build", steps, StringComparison.Ordinal);
+        }
+    }
+
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
 
     /// <summary>A key's block in a workflow: its own line and every following line indented deeper, blank lines included.</summary>
