@@ -95,6 +95,7 @@ class CompanionBuildTests(unittest.TestCase):
         self.generate()
         self.tool("compare", self.output)
         self.tool("generate", "--out", old, "--documents", self.declaration, expected=2)
+        self.tool("generate", "--out", self.root / "OLD", "--documents", self.declaration, expected=2)
         self.assertEqual(b"frozen bytes\r\n", (old / "reference.md").read_bytes())
         self.assertEqual(original_index, index.read_bytes())
         self.assertEqual({"reference.md"}, {p.name for p in old.iterdir()})

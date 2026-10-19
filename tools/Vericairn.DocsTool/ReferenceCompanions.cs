@@ -302,7 +302,8 @@ internal static partial class ReferenceSet
             string index = Path.Combine(parent, "frozen-sha256.json");
             if (!File.Exists(index)) continue;
             using JsonDocument frozen = JsonDocument.Parse(File.ReadAllBytes(index));
-            if (frozen.RootElement.GetProperty("sets").EnumerateObject().Any(set => Path.GetRelativePath(parent, full).Replace('\\', '/').Split('/')[0] == set.Name))
+            if (frozen.RootElement.GetProperty("sets").EnumerateObject().Any(set => string.Equals(
+                Path.GetRelativePath(parent, full).Replace('\\', '/').Split('/')[0], set.Name, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("The documentation set is frozen; generate a new set instead.");
         }
         SafeDestination(directory, "manifest.json");
