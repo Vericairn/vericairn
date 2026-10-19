@@ -428,7 +428,12 @@ internal static partial class Docs
             ? value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToList()
             : [];
 
-    private static void Write(string directory, string name, string text) => File.WriteAllText(Path.Combine(directory, name), text.EndsWith('\n') ? text : text + "\n");
+    // LF on every platform, as the build tooling writes the rest of the set: indented JSON would otherwise take the platform's newline.
+    private static void Write(string directory, string name, string text)
+    {
+        string lf = text.ReplaceLineEndings("\n");
+        File.WriteAllText(Path.Combine(directory, name), lf.EndsWith('\n') ? lf : lf + "\n");
+    }
 
     /// <summary>
     /// The end a set's notes state in their overview, as `vericairn docs notes` writes it: "up to &lt;minute&gt; UTC" before the

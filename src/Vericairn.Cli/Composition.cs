@@ -29,6 +29,7 @@ internal static class Composition
         registry.RegisterIfAbsent(new ClaudeCodeLauncher());
         registry.RegisterIfAbsent(new CodexLauncher());
         registry.RegisterIfAbsent(new GenericLauncher());
-        Records.Estate.DocumentSources.Register(new GitFileSource());
+        Records.Estate.DocumentSources.Register(new GitFileSource(SoftwareCompanionSources.Select));
+        SoftwareCompanions.Register();
     }
 }

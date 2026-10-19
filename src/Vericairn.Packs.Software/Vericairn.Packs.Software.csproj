@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Companions/*.cs" LogicalName="companion-source/%(Filename)%(Extension)" />
     <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
   </ItemGroup>

@@ -11,15 +11,23 @@ root.Options.Add(jsonOption);
 var generate = new Command("generate", "Write the command-line, API and record references and the set's manifest from this build.");
 var outOption = new Option<string>("--out") { Description = "Directory of the documentation set, for example docs/releases/0.4.0.", Required = true };
 var documentsOption = new Option<string>("--documents") { Description = "The product's declaration of the documents every set holds (a JSON array of file names).", Required = true };
+var provenanceOption = new Option<string?>("--provenance-at") { Description = "Explicit UTC provenance instant; otherwise retain the set's instant or use the exact build commit's recorded time." };
+var registerOption = new Option<string?>("--register") { Description = "An explicitly selected vocabulary register snapshot for the readable reference index." };
+var artifactsOption = new Option<string?>("--artifacts") { Description = "Retain companion reports for this serialized build's payload directory and package them there." };
 generate.Options.Add(outOption);
 generate.Options.Add(documentsOption);
-generate.SetAction(parseResult => ReferenceSet.Generate(parseResult.GetValue(outOption)!, parseResult.GetValue(documentsOption)!, parseResult.GetValue(jsonOption)));
+generate.Options.Add(provenanceOption);
+generate.Options.Add(registerOption);
+generate.Options.Add(artifactsOption);
+generate.SetAction(parseResult => ReferenceSet.Generate(parseResult.GetValue(outOption)!, parseResult.GetValue(documentsOption)!, parseResult.GetValue(jsonOption), parseResult.GetValue(provenanceOption), parseResult.GetValue(registerOption), parseResult.GetValue(artifactsOption)));
 root.Subcommands.Add(generate);
 
 var compare = new Command("compare", "Refuse a set whose manifest differs from this build: every command, operation and record type, both ways.");
 var directoryArgument = new Argument<string>("directory") { Description = "The documentation set to compare." };
+var compareArtifactsOption = new Option<string?>("--artifacts") { Description = "Also compare the retained payload observations with these exact local artifact bytes." };
 compare.Arguments.Add(directoryArgument);
-compare.SetAction(parseResult => ReferenceSet.CompareWithBuild(parseResult.GetValue(directoryArgument)!, parseResult.GetValue(jsonOption)));
+compare.Options.Add(compareArtifactsOption);
+compare.SetAction(parseResult => ReferenceSet.CompareWithBuild(parseResult.GetValue(directoryArgument)!, parseResult.GetValue(jsonOption), parseResult.GetValue(compareArtifactsOption)));
 root.Subcommands.Add(compare);
 
 return root.Parse(args).Invoke();
