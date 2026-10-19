@@ -421,6 +421,7 @@ public static class PolicyAdoptionJourney
     private static RecordWritten Ok(WriteOutcome outcome) { Assert.True(outcome.Ok, JsonSerializer.Serialize(outcome, ProtocolJson.Options)); return outcome.Written!; }
 }
 
+[Collection("policy-sources")]
 public sealed class PolicyAdoptionJourneyTests
 {
     [Fact]

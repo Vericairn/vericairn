@@ -13,6 +13,11 @@ using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
+/// <summary>Tests that replace the process-wide policy sources run alone.</summary>
+[CollectionDefinition("policy-sources", DisableParallelization = true)]
+public sealed class PolicySourcesTestGroup;
+
+[Collection("policy-sources")]
 public sealed class PolicySourceTests
 {
     [Fact]
