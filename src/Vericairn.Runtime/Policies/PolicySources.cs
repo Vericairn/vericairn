@@ -22,7 +22,13 @@ internal static class PolicySources
     internal static IPolicyRepositorySource? RepositorySource { get; set; }
     private static readonly Lazy<string> FoundationDigest = new(() => Digest(typeof(PolicySources).Assembly));
 
-    internal static string Digest(Assembly assembly) => ContentHash.Sha256(File.ReadAllBytes(assembly.Location));
+    // An installed implementation is named by its assembly and its deterministic build's module version identifier: the same in a
+    // single-file bundle as on disk, where a single-file application's assemblies have no file path to read.
+    internal static string Digest(Assembly assembly)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        return ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes("vericairn.policy-implementation/1|" + assembly.GetName().Name + "|" + assembly.ManifestModule.ModuleVersionId.ToString("N")));
+    }
 
     internal static void Register(PolicyKindRegistration kind)
     {

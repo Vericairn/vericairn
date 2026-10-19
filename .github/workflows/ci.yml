@@ -114,3 +114,17 @@ jobs:
               dotnet("add", project, "package", "Vericairn", "--version", version, "--no-restore")
               dotnet("restore", project, "--source", feed, "--configfile", config, "-p:NuGetAudit=false")
               dotnet("build", project, "--no-restore", "--configuration", "Release")
+      - name: Publish the single-file applications
+        # The release ships the command line and Workbench as self-contained single files. Publishing them here runs the
+        # single-file analyzer on every change, which an ordinary build does not; 0.8.0's release build first found it.
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -eu
+          for project in src/Vericairn.Cli/Vericairn.Cli.csproj src/Vericairn.Workbench/Vericairn.Workbench.csproj; do
+            dotnet publish "$project" --configuration Release --runtime linux-x64 --self-contained \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:RestoreLockedMode=false \
+              --output "$RUNNER_TEMP/single-file/$(basename "$project" .csproj)" --nologo --verbosity quiet
+          done
+          # Runtime-specific restores rewrite the lock files in the working tree; the repository's lock files are the truth.
+          git checkout -- $(git ls-files '*packages.lock.json')
