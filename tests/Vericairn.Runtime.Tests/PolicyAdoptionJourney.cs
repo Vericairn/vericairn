@@ -190,13 +190,15 @@ public static class PolicyAdoptionJourney
                     if (release) clause["commitSource"] = "publication";
                     clauses.Add(clause);
                 }
-                Declare(Definition(key, "vericairn.estate/recurring-duty", new()
+                JsonObject duty = Definition(key, "vericairn.estate/recurring-duty", new()
                 {
                     ["subject"] = PolicyFixture.Ref(productSubject ? product : Records.Estate.Estate, false),
                     ["schedule"] = release ? new JsonObject { ["kind"] = "release", ["product"] = product.Id } : new JsonObject { ["kind"] = "interval", ["unit"] = "months", ["every"] = 1, ["firstDueAt"] = Stamp(Start) },
                     ["graceDays"] = key is "advisory-review" or "scratch-cleanup" or "withdrawn-artifact-cleanup" ? 2 : 7,
                     ["renewal"] = "none", ["discharge"] = new JsonObject { ["checks"] = Strings(names), ["review"] = "independent", ["records"] = clauses },
-                }, key == "scratch-cleanup" ? "remind" : "warn"));
+                }, key == "scratch-cleanup" ? "remind" : "warn");
+                if (productSubject) duty["appliesTo"] = new JsonObject { ["kind"] = "product", ["product"] = product.Id };
+                Declare(duty);
             }
             Assert.Equal(19, policies.Count);
             At(Start);
