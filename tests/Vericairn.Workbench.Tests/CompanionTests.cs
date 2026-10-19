@@ -100,23 +100,22 @@ public sealed class CompanionTests(HeadlessFixture fixture)
             CompanionCatalogDocument catalog = Assert.IsType<CompanionCatalogDocument>(shell.SelectedDocument);
             Assert.Equal(6, catalog.Rows.Count(r => r.Pattern is not null));
             Assert.DoesNotContain(catalog.Rows, r => r.LocalOnly);
-            await fixture.Ui(() =>
+            // Focus, selection and Enter share one dispatch, as a person's keystrokes would: between dispatches the headless
+            // window can lose its focused element.
+            await fixture.UiAsync(async () =>
             {
                 Keys.Focus(window, "Readable collections");
                 ListBox list = window.GetVisualDescendants().OfType<ListBox>().Single(l => AutomationProperties.GetName(l) == "Readable collections");
                 list.SelectedItem = catalog.Rows.Single(r => r.Id == "vericairn.records/decisions");
-            });
-            await fixture.UiAsync(async () =>
-            {
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
                 await shell.PendingOperation;
             });
             CompanionDocument collection = Assert.IsType<CompanionDocument>(shell.SelectedDocument);
             Assert.Equal(catalog.Coverage.Snapshot, collection.Request.Snapshot);
             Assert.Contains(decision.Written!.Id, Assert.Single(collection.Sources).AccessibleName, StringComparison.Ordinal);
-            await fixture.Ui(() => Keys.Focus(window, "Companion source identities hashes and currentness"));
             await fixture.UiAsync(async () =>
             {
+                Keys.Focus(window, "Companion source identities hashes and currentness");
                 window.KeyPress(Key.Enter, RawInputModifiers.None, PhysicalKey.Enter, null);
                 await shell.PendingOperation;
             });
