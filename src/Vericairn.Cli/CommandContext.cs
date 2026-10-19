@@ -22,6 +22,7 @@ namespace Vericairn.Cli;
 internal sealed class CommandContext(TextWriter? output = null, TextWriter? error = null, CancellationToken cancellationToken = default)
 {
     private ClientBoundary? boundary;
+    internal IEstateApi? BorrowedApi { get; init; }
 
     public bool UsingDaemon { get; private set; }
 
@@ -86,6 +87,10 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             {
                 return Fail(NotAnEstate(root));
             }
+
+            // In-process journeys supply an isolated service with explicit time and fixture providers.
+            // Its owner retains its lifetime; ordinary invocations still discover their runtime below.
+            if (BorrowedApi is not null) return operation(new CancellationBoundApi(BorrowedApi, CancellationToken));
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
             if (endpoint is not null && IsAlive(endpoint))

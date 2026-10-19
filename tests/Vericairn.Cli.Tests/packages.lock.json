@@ -252,6 +252,20 @@
           "Vericairn.Records": "[0.7.3-dev, )"
         }
       },
+      "vericairn.runtime.tests": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Adapters.Git": "[0.7.3-dev, )",
+          "Vericairn.Mcp": "[0.7.3-dev, )",
+          "Vericairn.Packs.Software": "[0.7.3-dev, )",
+          "Vericairn.Providers.GitHub": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.7.3-dev, )",
+          "Vericairn.Records.Tests": "[0.7.3-dev, )",
+          "Vericairn.Runtime": "[0.7.3-dev, )",
+          "Vericairn.Sdk": "[0.7.3-dev, )",
+          "xunit.v3": "[4.0.2, )"
+        }
+      },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {

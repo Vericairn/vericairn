@@ -42,6 +42,17 @@ internal static class CliHarness
     }
 
     internal static Outcome RunWithUpdates(ReleaseUpdates? updates, params string[] args)
+        => RunCommand(updates, null, args);
+
+    internal static Outcome RunWithApi(IEstateApi api, string? input, params string[] args)
+    {
+        TextReader previous = Console.In;
+        Console.SetIn(new StringReader(input ?? ""));
+        try { return RunCommand(new(new(), new NoReleaseSource(), TimeProvider.System), api, args); }
+        finally { Console.SetIn(previous); }
+    }
+
+    private static Outcome RunCommand(ReleaseUpdates? updates, IEstateApi? api, params string[] args)
     {
         var standardOut = new StringWriter { NewLine = "\n" };
         var standardError = new StringWriter { NewLine = "\n" };
@@ -51,7 +62,7 @@ internal static class CliHarness
         Console.SetError(standardError);
         try
         {
-            int code = CliApp.Build(updates).Parse(args).Invoke();
+            int code = CliApp.Build(updates, borrowedApi: api).Parse(args).Invoke();
             return new Outcome(code, standardOut.ToString(), standardError.ToString());
         }
         finally
