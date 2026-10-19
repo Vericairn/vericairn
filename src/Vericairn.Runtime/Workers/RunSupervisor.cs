@@ -75,6 +75,7 @@ public sealed class RunSupervisor
     private readonly RunWatch watch;
     private readonly Dictionary<string, long> usageSnapshots = new(StringComparer.Ordinal);
     private readonly Func<RunSignal, string?>? signalAttention;
+    private long? failedStateWriteHeartbeat;
 
     private RunSupervisor(ContainedProcess process, IAgentLauncher launcher, RunDirectory directory, WorkerOptions options, RunObservedState state, DateTimeOffset launchedAt, long wallMinutes, long? tokenCap, RunLimits? limits, TimeSpan stallLimit, Func<RunLiveness, string?>? attention, string workspace, IReadOnlyList<string> permitted, RunWatchSettings watchSettings, decimal? historyRate, Func<RunSignal, string?>? signalAttention, JsonElement? execution, IReadOnlyDictionary<string, string> environment)
     {
@@ -103,6 +104,10 @@ public sealed class RunSupervisor
             new Thread(() => Pump(process.StandardOutput, false)) { IsBackground = true, Name = "vericairn-run-output" },
             new Thread(() => Pump(process.StandardError, true)) { IsBackground = true, Name = "vericairn-run-errors" },
         ];
+        // Publish startup before either reader can mutate state or publish a newer stop observation.
+        // Staging an initial snapshot concurrently would let it replace that newer observation later.
+        Save();
+        options.BeforeReadersStart?.Invoke(directory);
         foreach (Thread reader in readers)
         {
             reader.Start();
@@ -180,7 +185,6 @@ public sealed class RunSupervisor
         try
         {
             var supervisor = new RunSupervisor(process, launcher, directory, options, state, launchedAt, wallMinutes, tokenCap, limits, stallLimit ?? launcher.StallLimit, attention, workspace, permitted ?? [], watchSettings ?? launcher.WatchDefaults, historyRate, signalAttention, execution, environment);
-            supervisor.Save();
             return supervisor;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or Win32Exception)
@@ -266,7 +270,7 @@ public sealed class RunSupervisor
                     {
                         Begin(new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the harness exited but its containment boundary was not observed empty within the shutdown grace"));
                     }
-                    else if (directory.ReadStop() is StopRequest asked)
+                    else if (ReadStopOrContain(now) is StopRequest asked)
                     {
                         Begin(asked);
                     }
@@ -383,6 +387,21 @@ public sealed class RunSupervisor
         transmittedTick = options.Clock.GetTimestamp();
         transmitted = DateTimeOffset.UtcNow;
         state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
+    }
+
+    private StopRequest? ReadStopOrContain(DateTimeOffset now)
+    {
+        try
+        {
+            return directory.ReadStop();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            // Only an absent request means no stop was asked. An inaccessible or malformed request
+            // must not detach the supervisor or suppress containment. Keep the reason in the outcome;
+            // never overwrite the original request or retain an exception's machine-specific text.
+            return new StopRequest(RecordParser.FormatTimestamp(now), "worker", "the worker could not read the stop request; containing the run because the requested stop cannot be safely ruled out");
+        }
     }
 
     private void Escalate(DateTimeOffset now)
@@ -645,10 +664,29 @@ public sealed class RunSupervisor
         try
         {
             directory.Write(state);
+            failedStateWriteHeartbeat = null;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
-            // The next heartbeat writes it again.
+            // State remains authoritative in memory. Retrying publication must never end observation,
+            // including during startup, acknowledgment, containment and settlement. A failure that
+            // survives a heartbeat also needs attention, independently of whether this file recovers.
+            long firstFailure = failedStateWriteHeartbeat ??= state.Heartbeats;
+            if (state.Heartbeats <= firstFailure) return;
+
+            const string summary = "The worker could not persist its run observation across heartbeats; supervision continues in memory and publication will be retried.";
+            int existing = state.Signals.FindIndex(s => s.Code == "audit-unverified" && s.Severity == "warning");
+            if (existing < 0)
+            {
+                // Do not call AddSignal here: it calls Save. The next observation publishes attention.
+                state.Signals.Add(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), summary));
+            }
+            else if (!state.Signals[existing].Summary.Contains(summary, StringComparison.Ordinal))
+            {
+                RunSignal signal = state.Signals[existing];
+                int available = 2000 - summary.Length - 1; // The existing record contract bounds a signal summary.
+                state.Signals[existing] = signal with { Summary = signal.Summary[..Math.Min(signal.Summary.Length, available)] + " " + summary };
+            }
         }
     }
 

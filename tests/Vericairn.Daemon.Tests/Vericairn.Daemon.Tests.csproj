@@ -24,6 +24,7 @@
   <ItemGroup>
     <!-- The stand-in harness: started with its marker, the test executable behaves as a coding agent's harness and exits. -->
     <Compile Include="../Vericairn.Runtime.Tests/FakeHarness.cs" Link="FakeHarness.cs" />
+    <Compile Include="../TestSupport/SilentPeer.cs" Link="TestSupport/SilentPeer.cs" />
   </ItemGroup>
 
   <ItemGroup>

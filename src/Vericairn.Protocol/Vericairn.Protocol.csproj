@@ -9,6 +9,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="vericairn-workbench" />
     <InternalsVisibleTo Include="Vericairn.Runtime" />
+    <InternalsVisibleTo Include="Vericairn.Sdk" />
+    <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
     <InternalsVisibleTo Include="vericairn" />
   </ItemGroup>
 

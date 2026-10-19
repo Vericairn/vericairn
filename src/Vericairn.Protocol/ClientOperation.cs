@@ -134,8 +134,12 @@ public static class ClientOperation
         RunAsync(operation, action, () => mayHaveEffect, timeout, cancellationToken);
 
     /// <summary>Runs a staged operation whose possible effect begins only after its read-only preparation.</summary>
-    public static async Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, Func<bool> mayHaveEffect,
-        TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    public static Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, Func<bool> mayHaveEffect,
+        TimeSpan? timeout = null, CancellationToken cancellationToken = default) =>
+        RunAsync(operation, action, mayHaveEffect, timeout, TimeProvider.System, cancellationToken);
+
+    internal static async Task<T> RunAsync<T>(string operation, Func<CancellationToken, Task<T>> action, Func<bool> mayHaveEffect,
+        TimeSpan? timeout, TimeProvider clock, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(action);
         ArgumentNullException.ThrowIfNull(mayHaveEffect);
@@ -144,13 +148,21 @@ public static class ClientOperation
             throw new ClientCancelledException(false, cancellationToken);
         }
 
-        using var deadline = new CancellationTokenSource(timeout ?? Deadline(operation));
+        TimeSpan budget = timeout ?? Deadline(operation);
+        long started = clock.GetTimestamp();
+        using var deadline = new CancellationTokenSource(budget, clock);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        bool DeadlineElapsed() => budget != Timeout.InfiniteTimeSpan && clock.GetElapsedTime(started) >= budget;
         Task<T>? pending = null;
         try
         {
             pending = action(linked.Token);
-            return await pending.WaitAsync(linked.Token).ConfigureAwait(false);
+            T result = await pending.WaitAsync(linked.Token).ConfigureAwait(false);
+            // A completed task can beat an overdue timer callback (or bypass WaitAsync's cancelled token).
+            // Decide at observation using monotonic elapsed time, preserving caller cancellation's precedence.
+            cancellationToken.ThrowIfCancellationRequested();
+            if (deadline.IsCancellationRequested || DeadlineElapsed()) throw new ClientTimeoutException(mayHaveEffect());
+            return result;
         }
         catch (OperationCanceledException exception)
         {
@@ -159,7 +171,7 @@ public static class ClientOperation
                 throw new ClientCancelledException(mayHaveEffect(), cancellationToken, exception);
             }
 
-            if (deadline.IsCancellationRequested || (exception is not IClientOperationFailure && ClientFailure.TimedOut(exception)))
+            if (deadline.IsCancellationRequested || DeadlineElapsed() || (exception is not IClientOperationFailure && ClientFailure.TimedOut(exception)))
                 throw new ClientTimeoutException(mayHaveEffect(), exception);
             if (exception is ClientCancelledException) throw;
             // An unrelated transport cancellation is neither proof of a deadline nor a person's cancellation.
