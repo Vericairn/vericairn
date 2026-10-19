@@ -187,6 +187,44 @@ class CompanionBuildTests(unittest.TestCase):
         self.assertEqual(before, self.snapshot())
         self.tool("compare", self.output)
 
+    def test_workflow_refusal_keeps_bounded_stderr_without_machine_paths(self):
+        self.generate()
+        version = json.loads((self.output / "manifest.json").read_bytes())["version"]
+        artifacts = self.root / "payload"
+        artifacts.mkdir()
+        (artifacts / f"vericairn-{version}-sbom.cdx.json").write_bytes(b'{"components":[],"dependencies":[]}\n')
+        adapter = TOOL.with_name("workflow-inputs.rb")
+        original = adapter.read_bytes()
+        try:
+            # Inject an adapter failure only into the disposable build output, then restore its exact bytes.
+            adapter.write_text(r'''STDERR.binmode
+root = ARGV.fetch(0)
+drive_root = root.match?(/\A[A-Za-z]:/) ? root : 'X:' + root
+paths = [root, root.tr('/', '\\'), drive_root.tr('/', '\\'),
+         File.expand_path(__FILE__), File.join(root, 'runtime with spaces', 'ruby.rb'),
+         File.join(root, "runtime'with quotes", 'ruby.rb')]
+paths << '\\' * 2 + ['fixture-host', 'share', File.basename(root), 'ruby.rb'].join('\\')
+STDERR.write("No workflows found.\r\n")
+paths.each { |path| STDERR.write("#{path}:12:in `load': cannot load the retained parser\r\n") }
+STDERR.write('x' * 131072 + "\r\nend of diagnostic\r\n")
+exit 2
+''', encoding="utf-8")
+            output = self.tool("generate", "--out", self.output, "--documents", self.declaration,
+                               "--artifacts", artifacts, expected=2)
+        finally:
+            adapter.write_bytes(original)
+        self.assertIn("The actual workflow parser refused the retained inputs.", output)
+        self.assertIn("No workflows found.", output)
+        self.assertIn("[path]:12:in `load': cannot load the retained parser", output)
+        self.assertIn("[standard error truncated]", output)
+        self.assertNotIn("vericairn-workflow-inputs-", output)
+        self.assertNotIn("runtime with spaces", output)
+        self.assertNotIn("with quotes", output)
+        self.assertNotIn("fixture-host", output)
+        self.assertNotIn(str(adapter), output)
+        self.assertNotIn("end of diagnostic", output)
+        self.assertLess(len(output), 4300)
+
 
 if __name__ == "__main__":
     unittest.main()

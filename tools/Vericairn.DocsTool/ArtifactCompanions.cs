@@ -7,6 +7,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
@@ -142,19 +143,49 @@ internal static partial class ReferenceSet
                 WriteBytes(scratch, path[WorkflowRoot.Length..], bytes);
             string adapter = Path.Combine(AppContext.BaseDirectory, "workflow-inputs.rb");
             // The build runs its own adapter and FIX-13's exact retained implementation; no source-supplied command is accepted.
-            var start = new ProcessStartInfo("ruby") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            var start = new ProcessStartInfo("ruby")
+            {
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                StandardErrorEncoding = Encoding.UTF8,
+            };
             start.ArgumentList.Add(adapter); start.ArgumentList.Add(scratch); start.ArgumentList.Add(commit);
             using Process process = Process.Start(start) ?? throw new InvalidOperationException("The workflow source adapter is unavailable.");
             using var output = new MemoryStream();
             Task copy = CopyBounded(process.StandardOutput.BaseStream, output, 1048576);
-            Task<string> error = process.StandardError.ReadToEndAsync();
+            Task<string> error = ReadWorkflowError(process.StandardError);
             if (!process.WaitForExit(30_000)) { process.Kill(true); throw new InvalidOperationException("The workflow source adapter did not complete."); }
-            copy.GetAwaiter().GetResult(); _ = error.Result;
-            if (process.ExitCode != 0 || output.Length > 1048576) throw new InvalidOperationException("The actual workflow parser refused the retained inputs.");
+            copy.GetAwaiter().GetResult();
+            string diagnostic = error.GetAwaiter().GetResult();
+            if (process.ExitCode != 0 || output.Length > 1048576)
+                throw new InvalidOperationException("The actual workflow parser refused the retained inputs." + (diagnostic.Length == 0 ? "" : "\n" + diagnostic));
             return output.ToArray();
         }
         finally { Directory.Delete(scratch, recursive: true); }
     }
+
+    private static async Task<string> ReadWorkflowError(StreamReader reader)
+    {
+        const int limit = 4096;
+        var text = new StringBuilder();
+        char[] buffer = new char[1024];
+        bool truncated = false;
+        int count;
+        // Drain beyond the retained prefix so a verbose failure cannot block the child on a full pipe.
+        while ((count = await reader.ReadAsync(buffer).ConfigureAwait(false)) != 0)
+        {
+            int keep = Math.Min(count, limit - text.Length);
+            text.Append(buffer, 0, keep);
+            truncated |= keep < count;
+        }
+        string diagnostic = WorkflowMachinePath().Replace(text.ToString().Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n'), "[path]").Trim();
+        if (diagnostic.Length > limit) { diagnostic = diagnostic[..limit]; truncated = true; }
+        return diagnostic + (truncated ? "\n[standard error truncated]" : "");
+    }
+
+    // Ruby errors can include script, temporary and runtime paths. Include drive, UNC and Unix forms,
+    // with spaces or quotes; keep the following line number and cause, never an absolute location.
+    [GeneratedRegex("""(?<![\w./\\])(?:[A-Za-z]:[\\/]|[\\/])[^\r\n:]*""", RegexOptions.CultureInvariant)]
+    private static partial Regex WorkflowMachinePath();
 
     private static string[] GitPaths(string commit)
     {

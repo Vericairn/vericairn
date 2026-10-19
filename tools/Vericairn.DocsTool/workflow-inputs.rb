@@ -5,10 +5,13 @@ require 'digest'
 require 'json'
 
 STDOUT.binmode # Preserve LF bytes on every platform, including the Windows text-mode default.
+STDERR.set_encoding(Encoding::UTF_8)
 
 # Build adapter, not a second policy checker. Load FIX-13 unchanged and observe the visits it performs.
 root, commit = ARGV
 abort 'An exact lowercase build commit is required.' unless commit&.match?(/\A[0-9a-f]{40}(?:[0-9a-f]{24})?\z/)
+# Dir.glob treats backslashes as escapes, including on Windows. Normalize before the checker and our own glob.
+root = root.tr('\\', '/')
 parser = '.github/scripts/check-workflow-actions.rb'
 load File.join(root, parser)
 
