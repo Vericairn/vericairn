@@ -58,6 +58,14 @@ public sealed partial class EstateManifest
         }
 
         byte[] bytes = File.ReadAllBytes(path);
+        return Parse(bytes, findings);
+    }
+
+    /// <summary>Validates an exact manifest snapshot without reading a repository or machine settings.</summary>
+    public static EstateManifest? Parse(byte[] bytes, FindingList findings)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentNullException.ThrowIfNull(findings);
         JsonDocument document;
         try
         {
