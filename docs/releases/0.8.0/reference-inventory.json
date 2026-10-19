@@ -1,21 +1,21 @@
 {
   "format": "vericairn.reference-inventory/1",
-  "commit": "9393a977a6b7d7f2b09a93cf5c087260e22dd784",
+  "commit": "0d9cc5404308f4e73909074069629b05be5510f1",
   "references": [
     {
       "category": "api-operation",
       "path": "api-reference.md",
-      "hash": "sha256:21a86b5cc3d8214435ceb7e60436614408edade0399329b6cc04b2c1b78a4d95"
+      "hash": "sha256:e066d7f3acfbfb3739666d5fffb0b24a68fe3da2147ee8b3d263af7f87c09c15"
     },
     {
       "category": "command",
       "path": "cli-reference.md",
-      "hash": "sha256:805c4ec5ee1df37f6b4cc116a87dca891c7445c124df84389030c37ee110b2cb"
+      "hash": "sha256:4ea9684d29e5feecbb85c7b99660ffe7b4cd7c78542efaf09b5226a15d2678db"
     },
     {
       "category": "record-type",
       "path": "record-reference.md",
-      "hash": "sha256:6af379240ca7dabc842eb5ede65c0d476f6e3e2aeafd603d4134106f70693e2a"
+      "hash": "sha256:95ccd3ac32d0b660983daf890e8f8807bdee1f212b8e7b8f45dbf260a8fe2518"
     }
   ],
   "items": [

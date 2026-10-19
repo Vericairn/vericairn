@@ -2964,11 +2964,11 @@ The retained OpenAPI document supplies every field below. Field paths are JSON P
 
 ## Generation basis
 
-Build commit: `9393a977a6b7d7f2b09a93cf5c087260e22dd784`.
+Build commit: `0d9cc5404308f4e73909074069629b05be5510f1`.
 
 Generator: `vericairn.software/api-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:c3997f1a7bfe9d21f850d7887766cc3159a696ef78174357f71746e10a71f55e`.
 
-Input digest: `sha256:8086593d5c1fce2727213fc12eda5b0b1dc2de459f7647e243849135230dc4a3`.
+Input digest: `sha256:4a54f5c3a6e9905bc5703f012e89e86f45cae661dc74007e969119a60a3906d0`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|

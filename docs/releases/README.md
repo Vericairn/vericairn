@@ -6,7 +6,7 @@ with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
 The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
-CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, OPS-01 and
+CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, FIX-30, FIX-31, OPS-01 and
 MERGE-01 after published 0.7.3: estate policies and recurring duties, the combined
 release gate and explicit adoption proposals; cancellable clients and public API
 ownership; readable companions and retained reference provenance; worker audit,
@@ -15,7 +15,7 @@ signed operator actions and checked repository changes. It explains the upgrade
 to record format 3 and the policy definitions, writing grant and declarations that
 remain the operator's work after upgrading. The source version is `0.8.0-dev`.
 The set records no 0.8.0 publication, tag, package availability or platform qualification.
-Its references retain build commit `9393a977a6b7d7f2b09a93cf5c087260e22dd784`,
+Its references retain build commit `0d9cc5404308f4e73909074069629b05be5510f1`,
 with 141 commands, 99 API operations, 42 record types and 31 required documents.
 Its notes render the estate's records with `--from 0.7.3 --to 0.8.0`. The set is frozen for its
 release build, with every file's checksum in `frozen-sha256.json`.

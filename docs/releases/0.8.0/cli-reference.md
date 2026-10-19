@@ -1684,12 +1684,12 @@ Build version: 0&#46;8&#46;0; provenance instant: 2026&#45;10&#45;19T14&#58;18&#
 
 ## Generation basis
 
-Build commit: `9393a977a6b7d7f2b09a93cf5c087260e22dd784`.
+Build commit: `0d9cc5404308f4e73909074069629b05be5510f1`.
 
 Generator: `vericairn.software/cli-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:c3997f1a7bfe9d21f850d7887766cc3159a696ef78174357f71746e10a71f55e`.
 
-Input digest: `sha256:d2c9fc15661f5e4f0ac06245d35964822062e65fa0de17d03eeac0e42f1388a9`.
+Input digest: `sha256:8a9aaf63b55c818c9f13266485f07b8135e304d8a389020220339655b190342c`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;commands&#46;json | `sha256:9e1ca0f03bbc6b356c2871e9f692833555ec97404ebdb328328ea9d6cac4fd6b` | 87830 |
+| inputs&#47;commands&#46;json | `sha256:ce8db5a8cf0955d02e709887521c435f8b4ce587e765dfd3c11a2124b0321163` | 87830 |

@@ -32,7 +32,7 @@ records publication and the earlier 0.7.1 recovery.
 Ordinary source builds retain `0.8.0-dev`. The maintained guides and the
 [0.8.0 documentation set](docs/releases/0.8.0/README.md) describe record format 3,
 estate policies and recurring duties, readable companions, cancellable clients,
-operator actions and checked repository changes, with FIX-23 through FIX-28.
+operator actions and checked repository changes, with FIX-23 through FIX-28, FIX-30 and FIX-31.
 0.8.0 has no publication or platform qualification established by this documentation.
 Earlier release sets keep their original bytes. Release checks reach only GitHub, ignore system proxies and retain cached
 information when disabled. Command observations remain signals, not an enforcement boundary. Required
