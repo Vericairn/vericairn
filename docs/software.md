@@ -437,8 +437,8 @@ The earlier set keeps its approved Security section on F-01 and its original not
 The product's CLI test suite checks every file of each frozen set against
 `docs/releases/frozen-sha256.json`: changed bytes, missing files and added files fail the guard. Published and withdrawn
 sets stay indexed; corrections belong in the next set, never in an indexed file or its recorded hash. A new set remains
-editable until frozen and indexed. This is a test guard, not a write barrier in `docs notes` or the reference generator:
-run generation only against a set that has not been frozen.
+editable until frozen and indexed. The reference generator also refuses a destination inside an indexed set.
+`docs notes` still relies on the test guard: run it only against a set that has not been frozen.
 
 Generated API parameter rows omit the description separator when there is no description and carry no trailing
 spaces. Admission rows in the notes name a scope only when the record supplies one; format-2 admissions have no
@@ -459,6 +459,47 @@ results and attempts are reachable from the entry with `vericairn work observe <
 of other unaccepted work appear under **Work recorded, not yet accepted**. Frozen sets remain unchanged.
 Classification reads current estate state, not an acceptance snapshot at the window's end.
 The progress report uses the same classification for each published release.
+
+## Retained build companions
+
+The software pack registers its readers with READ-01's `IDocumentGenerator`, `DocumentGenerators` and
+`DocumentCoverage` contracts. They render retained command and record snapshots, OpenAPI, the frozen-set index,
+FIX-13's workflow inputs, CycloneDX and package locks, checksums, documentation manifests and export archives.
+The [reference index](reference-inventory.md) links exact public identities and explicitly selected register mappings.
+These are derived readers: edit the source and regenerate. Missing licenses, vulnerabilities, rights or acceptance
+are never supplied by inference. An export report reads its archive in memory and restores nothing.
+
+The existing build tool's `generate` operation retains its exact inputs under the destination's `inputs/` directory
+and declares their inventory in `manifest.json`. Each readable output names the build commit, generator contract
+and implementation version, implementation source digest, combined input digest and every selected input's byte
+digest. Output is UTF-8 without a BOM, LF only, with one final newline and ordinal ordering. The provenance instant
+comes from `--provenance-at`, the existing set's retained instant, or the build commit's recorded time; it never comes
+from the current clock. Regeneration preserves the release-notes window. Build sources must match the tool's
+embedded commit, and the compiled generator's source digest must match that commit.
+
+The build pin is independent of the later commit that retains the generated set. A documentation-only commit can
+retain the earlier build pin when its complete build sources agree, avoiding a commit that must name itself.
+Generated-document verification selects the candidate's manifest, inputs and exact file inventory from that Git
+commit, even when the registered clone has a different head. A missing commit, source, generator or inventory is
+unavailable; the adapter neither fetches nor substitutes the checkout. The existing build tool's `compare` operation
+checks full output bytes, selected inputs, digests and membership as well as the public reference inventory.
+Hashing a hand-edited output or keeping its headings does not make it current.
+
+For a serialized release, `generate --artifacts dist` additionally retains the SBOM, lock files, frozen index,
+documentation declarations, exact workflow originals and a capture from FIX-13's actual parser. It writes the
+readable reports outside frozen directories and packages the exact report inventory as
+`vericairn-<version>-companions.zip`. Comparison replays the build's parser over the retained originals and, with
+`--artifacts dist`, checks the payload observations and archive bytes. ZIP entries are stored in ordinal order with
+fixed metadata. The report's checksum table describes the payload before the report archive, final `SHA256SUMS`
+and release notes are added; it has no checksum cycle and claims no integrity acceptance. The release workflow
+then includes the report archive in its final checksums and retained CI artifact. Its draft-release attachment list
+is a separate publication boundary.
+
+CI and the release verification matrix run the build-tool fixtures on Linux, macOS and Windows. The fixtures check
+complete-byte comparison, retained provenance, exact membership, serial custody and frozen-set isolation. The
+unchanged FIX-13 allow-list check still enforces action policy independently. New documentation sets carry this
+contract; existing frozen bytes and checksum entries remain unchanged. There is no shared change ledger and no
+new public command, API operation or record field; READ-04 owns those reading surfaces.
 
 ## Vericairn's NuGet publication
 

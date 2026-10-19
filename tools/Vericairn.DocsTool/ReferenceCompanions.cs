@@ -22,6 +22,17 @@ internal static partial class ReferenceSet
 {
     private const string CompanionFormat = "vericairn.software-companions/1";
     private const string RegisterPath = "inputs/reference-register.md";
+    private static readonly string[] BuildPaths =
+    ["src", "tools", "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json", "Vericairn.slnx", ".gitattributes", "NuGet.Config"];
+    private static string BuildRoot
+    {
+        get
+        {
+            for (string? path = AppContext.BaseDirectory; path is not null; path = Path.GetDirectoryName(path.TrimEnd(Path.DirectorySeparatorChar)))
+                if (File.Exists(Path.Combine(path, "Vericairn.slnx"))) return path;
+            throw new InvalidOperationException("The build's source repository is unavailable.");
+        }
+    }
     private static readonly (string Name, string Source)[] Readers =
     [
         ("cli-reference", "inputs/commands.json"), ("cli-client-outcomes", "inputs/commands.json"),
@@ -160,6 +171,7 @@ internal static partial class ReferenceSet
         var findings = new List<FindingDto>();
         try
         {
+            RequireExactBuild();
             string buildCommit = Str(manifest, "commit") ?? "";
             if (!CompatibleBuild(buildCommit) || !manifest.TryGetProperty("companions", out JsonElement declaration)
                 || Str(declaration, "format") != CompanionFormat || Str(declaration, "implementation") != SoftwareCompanions.Generators[0].Descriptor!.Implementation
@@ -226,13 +238,26 @@ internal static partial class ReferenceSet
         if (!Patterns.Commit.IsMatch(retained) || !Patterns.Commit.IsMatch(Commit ?? "")) return false;
         // A later documentation-only commit can retain this independent source/build pin without self-reference.
         // Both commits must be local, and the complete build source trees must agree.
-        return GitSucceeds("cat-file", "-e", retained + "^{commit}") && GitSucceeds("diff", "--quiet", retained, Commit!, "--",
-            "src", "tools", "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json", "Vericairn.slnx", ".gitattributes", "NuGet.Config");
+        return GitSucceeds("cat-file", "-e", retained + "^{commit}") && GitSucceeds(["diff", "--quiet", retained, Commit!, "--", .. BuildPaths]);
+    }
+
+    private static void RequireExactBuild()
+    {
+        if (!Patterns.Commit.IsMatch(Commit ?? "") || !GitSucceeds("cat-file", "-e", Commit! + "^{commit}")
+            || !GitSucceeds(["diff", "--quiet", Commit!, "--", .. BuildPaths])
+            || GitRead(["ls-files", "--others", "--exclude-standard", "-z", "--", .. BuildPaths]).Length != 0)
+            throw new InvalidOperationException("The build sources differ from the tool's exact commit; commit the sources and rebuild before generating or comparing companions.");
+        const string prefix = "src/Vericairn.Packs.Software/Companions/";
+        var sources = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (string path in GitPaths(Commit!).Where(p => p.StartsWith(prefix, StringComparison.Ordinal) && p.EndsWith(".cs", StringComparison.Ordinal)))
+            sources.Add("companion-source/" + path[prefix.Length..], ContentHash.Sha256(GitBytes(Commit!, path)));
+        if (ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(sources))) != SoftwareCompanions.Generators[0].Descriptor!.ImplementationHash)
+            throw new InvalidOperationException("The compiled companion implementation differs from its exact build commit.");
     }
 
     private static bool GitSucceeds(params string[] arguments)
     {
-        var start = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = BuildRoot };
         start.ArgumentList.Add("--no-replace-objects");
         foreach (string argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["GIT_NO_LAZY_FETCH"] = "1";
@@ -259,15 +284,8 @@ internal static partial class ReferenceSet
             if (existing.RootElement.TryGetProperty("companions", out JsonElement companions) && Str(companions, "provenanceAt") is { } retained && RecordParser.IsTimestamp(retained)) return retained;
         }
         if (!Patterns.Commit.IsMatch(Commit ?? "")) throw new InvalidOperationException("The exact build commit is unavailable.");
-        var start = new ProcessStartInfo("git") { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (string argument in new[] { "show", "-s", "--format=%cI", Commit! }) start.ArgumentList.Add(argument);
-        start.Environment["GIT_NO_LAZY_FETCH"] = "1";
-        using Process process = Process.Start(start) ?? throw new InvalidOperationException("The build commit's recorded time is unavailable; supply the provenance instant.");
-        Task<string> output = process.StandardOutput.ReadToEndAsync();
-        Task<string> error = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(30_000)) { process.Kill(true); throw new InvalidOperationException("The build commit's recorded time is unavailable; supply the provenance instant."); }
-        _ = error.Result;
-        if (process.ExitCode != 0 || !DateTimeOffset.TryParse(output.Result.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset at))
+        string recorded = Encoding.UTF8.GetString(GitRead("show", "-s", "--format=%cI", Commit!));
+        if (!DateTimeOffset.TryParse(recorded.Trim(), CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTimeOffset at))
             throw new InvalidOperationException("The build commit's recorded time is unavailable; supply the provenance instant.");
         return RecordParser.FormatTimestamp(at);
     }

@@ -146,7 +146,7 @@ internal static partial class ReferenceSet
             start.ArgumentList.Add(adapter); start.ArgumentList.Add(scratch); start.ArgumentList.Add(commit);
             using Process process = Process.Start(start) ?? throw new InvalidOperationException("The workflow source adapter is unavailable.");
             using var output = new MemoryStream();
-            Task copy = process.StandardOutput.BaseStream.CopyToAsync(output);
+            Task copy = CopyBounded(process.StandardOutput.BaseStream, output, 1048576);
             Task<string> error = process.StandardError.ReadToEndAsync();
             if (!process.WaitForExit(30_000)) { process.Kill(true); throw new InvalidOperationException("The workflow source adapter did not complete."); }
             copy.GetAwaiter().GetResult(); _ = error.Result;
@@ -173,19 +173,30 @@ internal static partial class ReferenceSet
     }
     private static byte[] GitRead(params string[] arguments)
     {
-        var start = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = BuildRoot };
         start.ArgumentList.Add("--no-replace-objects");
         foreach (string argument in arguments) start.ArgumentList.Add(argument);
         start.Environment["GIT_NO_LAZY_FETCH"] = "1";
         start.Environment["GIT_OPTIONAL_LOCKS"] = "0";
         using Process process = Process.Start(start) ?? throw new InvalidOperationException("The exact build input is unavailable.");
         using var output = new MemoryStream();
-        Task copy = process.StandardOutput.BaseStream.CopyToAsync(output);
+        Task copy = CopyBounded(process.StandardOutput.BaseStream, output, 64L * 1024 * 1024);
         Task<string> error = process.StandardError.ReadToEndAsync();
         if (!process.WaitForExit(30_000)) { process.Kill(true); throw new InvalidOperationException("The exact build input could not be read."); }
         copy.GetAwaiter().GetResult(); _ = error.Result;
         if (process.ExitCode != 0 || output.Length > 64L * 1024 * 1024) throw new InvalidOperationException("An exact build commit or input is unavailable.");
         return output.ToArray();
+    }
+
+    private static async Task CopyBounded(Stream source, MemoryStream destination, long limit)
+    {
+        byte[] buffer = new byte[81920];
+        int count;
+        while ((count = await source.ReadAsync(buffer).ConfigureAwait(false)) != 0)
+        {
+            if (destination.Length + count > limit) throw new InvalidOperationException("A retained input exceeds its byte bound.");
+            destination.Write(buffer, 0, count);
+        }
     }
 
     private static void PackageCompanions(string directory, string artifacts)

@@ -64,6 +64,7 @@ internal static partial class ReferenceSet
         try
         {
             RefuseFrozen(output);
+            RequireExactBuild();
             List<string> documents;
             using (JsonDocument declared = JsonDocument.Parse(File.ReadAllBytes(declaration)))
             {

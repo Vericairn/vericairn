@@ -36,6 +36,8 @@ jobs:
         run: dotnet restore --locked-mode
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      - name: Verify retained companion inputs and bytes
+        run: python tests/companion-build.py
       - name: Build the Secure Enclave helper
         # The helper is Swift and builds on macOS only. The Apple-silicon runners expose a Secure Enclave to it, so the store's
         # test creates, signs with and removes a real enclave key there (one without presence, so nothing waits for a person).

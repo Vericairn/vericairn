@@ -31,8 +31,8 @@ class CompanionBuildTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def tool(self, *args, expected=0):
-        result = subprocess.run(["dotnet", str(TOOL), *map(str, args)], cwd=ROOT, capture_output=True, text=True, timeout=45)
+    def tool(self, *args, expected=0, cwd=ROOT):
+        result = subprocess.run(["dotnet", str(TOOL), *map(str, args)], cwd=cwd, capture_output=True, text=True, timeout=45)
         self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
@@ -50,7 +50,7 @@ class CompanionBuildTests(unittest.TestCase):
         first = self.snapshot()
         self.generate(None)
         self.assertEqual(first, self.snapshot())
-        self.tool("compare", self.output)
+        self.tool("compare", self.output, cwd=self.root)
         manifest = json.loads(first["manifest.json"])
         for output in manifest["companions"]["outputs"]:
             data = first[output["path"]]
@@ -95,6 +95,24 @@ class CompanionBuildTests(unittest.TestCase):
         self.assertEqual(b"frozen bytes\r\n", (old / "reference.md").read_bytes())
         self.assertEqual(original_index, index.read_bytes())
         self.assertEqual({"reference.md"}, {p.name for p in old.iterdir()})
+        # Freeze the new fixture set without rewriting any old entry, then refuse further generation there.
+        frozen = json.loads(original_index)
+        frozen["sets"]["set"] = {path: "sha256:" + hashlib.sha256(data).hexdigest() for path, data in self.snapshot().items()}
+        index.write_text(json.dumps(frozen), encoding="utf-8")
+        before = self.snapshot()
+        self.tool("generate", "--out", self.output, "--documents", self.declaration, expected=2)
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual({"reference.md": digest}, json.loads(index.read_bytes())["sets"]["old"])
+
+    def test_uncommitted_build_sources_and_unavailable_build_pin_are_refused(self):
+        self.generate()
+        with tempfile.NamedTemporaryFile(prefix="companion-fixture-", suffix=".cs", dir=ROOT / "tools"):
+            self.assertIn("exact commit", self.tool("generate", "--out", self.output, "--documents", self.declaration, expected=2))
+            self.assertIn("docs.companion-unavailable", self.tool("compare", self.output, expected=1))
+        manifest = json.loads((self.output / "manifest.json").read_bytes())
+        manifest["commit"] = "f" * 40
+        (self.output / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        self.assertIn("docs.companion-unavailable", self.tool("compare", self.output, expected=1))
 
     def test_explicit_new_date_changes_basis_and_notes_window_is_preserved(self):
         self.generate()
