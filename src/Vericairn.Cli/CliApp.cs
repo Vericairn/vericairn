@@ -3,6 +3,7 @@
 
 using System.CommandLine;
 using System.CommandLine.Invocation;
+using Vericairn.Protocol;
 using Vericairn.Sdk;
 
 namespace Vericairn.Cli;
@@ -11,11 +12,11 @@ namespace Vericairn.Cli;
 internal static class CliApp
 {
     /// <summary>Builds the root command with every family: records, estate, work, goal, worker, devices, connections, release, sources, check, runtime, recover, objects, docs, mcp, status, progress, ask, decisions, doctor, version, updates.</summary>
-    public static RootCommand Build(ReleaseUpdates? updates = null, CancellationToken cancellationToken = default)
+    public static RootCommand Build(ReleaseUpdates? updates = null, IEstateApi? borrowedApi = null, CancellationToken cancellationToken = default)
     {
         updates ??= new ReleaseUpdates(Vericairn.Providers.GitHub.Releases.GitHubReleaseSource.Default);
-        Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
-        var context = new CommandContext(cancellationToken: cancellationToken);
+        if (borrowedApi is null) Composition.Register(Vericairn.Runtime.Providers.ProviderRegistry.Current);
+        var context = new CommandContext(cancellationToken: cancellationToken) { BorrowedApi = borrowedApi };
         var root = new VericairnCommand(context);
         root.Subcommands.Add(new CommunicationCommand(context));
         root.Subcommands.Add(new RecordsCommand(context));
