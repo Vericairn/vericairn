@@ -16,5 +16,7 @@ internal sealed class DocsCommand : Command
         Subcommands.Add(new DocsReviewCommand(context));
         Subcommands.Add(new DocsDeclareCommand(context));
         Subcommands.Add(new DocsRegenerateCommand(context));
+        Subcommands.Add(new DocsCompanionsCommand(context));
+        Subcommands.Add(new DocsRenderCommand(context));
     }
 }

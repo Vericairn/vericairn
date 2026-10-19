@@ -45,21 +45,27 @@ public static class DocumentOnDemand
     /// <summary>Renders the supplied manifest, original and selected current charter, and exact migration history on demand.</summary>
     public static DocumentRendition Manifest(EstateModel model, byte[] manifest, string snapshot, int page = 1)
     {
+        var selected = ManifestContext(model, manifest, snapshot, page);
+        return selected.Context is { } context ? DocumentRendering.Render(DocumentGenerators.Find(ManifestCompanionGenerator.Name)!, context) : selected.Failure!;
+    }
+
+    internal static (DocumentGenerationContext? Context, DocumentRendition? Failure) ManifestContext(EstateModel model, byte[] manifest, string snapshot, int page)
+    {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(manifest);
-        if (page < 1) return Failed(DocumentGenerationStatus.Error, "The page is invalid.");
+        if (page < 1) return (null, Failed(DocumentGenerationStatus.Error, "The page is invalid."));
         if (model.Findings.HasErrors || model.Manifest is null || model.CurrentEstate is null || snapshot != ManifestSnapshot(model, manifest))
-            return Failed(DocumentGenerationStatus.Unavailable, "The exact manifest and record basis is unavailable.");
+            return (null, Failed(DocumentGenerationStatus.Unavailable, "The exact manifest and record basis is unavailable."));
         var findings = new FindingList();
         EstateManifest? parsed = EstateManifest.Parse(manifest, findings);
-        if (parsed is null || findings.HasErrors) return Failed(DocumentGenerationStatus.Error, "The selected manifest is invalid or unsupported.");
+        if (parsed is null || findings.HasErrors) return (null, Failed(DocumentGenerationStatus.Error, "The selected manifest is invalid or unsupported."));
         if (Digest(parsed) != Digest(model.Manifest) || !model.ById.TryGetValue(parsed.Estate, out RecordEnvelope? original))
-            return Failed(DocumentGenerationStatus.Unavailable, "The manifest does not match the verified estate basis.");
+            return (null, Failed(DocumentGenerationStatus.Unavailable, "The manifest does not match the verified estate basis."));
         var sources = model.OfType("migration").Append(original).Append(model.CurrentEstate).DistinctBy(r => r.Id, StringComparer.Ordinal).Select(DocumentSourceSnapshot.Record).ToList();
         sources.Add(DocumentSourceSnapshot.Content("estate-manifest", parsed.Estate, parsed.Estate, EstateLayout.ManifestPath, ContentHash.Sha256(manifest), manifest));
         IDocumentGenerator generator = DocumentGenerators.Find(ManifestCompanionGenerator.Name)!;
         var parameters = new Dictionary<string, string> { ["format"] = "1", ["audience"] = "Internal" }.ToImmutableDictionary(StringComparer.Ordinal);
-        return DocumentRendering.Render(generator, new(1, generator.Descriptor!, parameters, "item", null, [.. sources]) { SnapshotIdentity = snapshot, Page = page });
+        return (new(1, generator.Descriptor!, parameters, "item", null, [.. sources]) { SnapshotIdentity = snapshot, Page = page }, null);
     }
 
     private static string Digest<T>(T value) => ContentHash.Sha256(CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value)));
