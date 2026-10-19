@@ -5,13 +5,28 @@ with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
 (estate release record `01M56P744RYYS9XBHM4NTD0JDZ`). 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
+The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
+CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, OPS-01 and
+MERGE-01 after published 0.7.3: estate policies and recurring duties, the combined
+release gate and explicit adoption proposals; cancellable clients and public API
+ownership; readable companions and retained reference provenance; worker audit,
+cleanup and state-publication corrections; exact local context originals; and
+signed operator actions and checked repository changes. It explains the upgrade
+to record format 3 and the policy definitions, writing grant and declarations that
+remain the operator's work after upgrading. The source version is `0.8.0-dev`.
+The set records no 0.8.0 publication, tag, package availability or platform qualification.
+Its references retain build commit `9393a977a6b7d7f2b09a93cf5c087260e22dd784`,
+with 141 commands, 99 API operations, 42 record types and 31 required documents.
+The builder renders its notes from the estate's records with `--from 0.7.3 --to 0.8.0`
+and then freezes the complete set. It has no entry in `frozen-sha256.json` until that freeze.
+
 The [0.7.3 set](0.7.3/README.md) documents FIX-19, UPDATE-01, FIX-20, FIX-21 and FIX-22 after published 0.7.2:
 independent worker workspace repositories and sandboxed Codex commits; a disclosed, machine-local daily
 check for newer releases; broader credential and write recognition in the command audit; safe concurrent
 use of loaded and rotated runtime certificates with handshake diagnostics; and compact, current required
 attention across surfaces. Its notes render the estate's records with `--from 0.7.2 --to 0.7.3`. The set was frozen for its release build before publication, so its conditional publication and NuGet wording remains historical; every file's checksum is in `frozen-sha256.json`.
-The estate's release record establishes publication and platform qualification. The source build retains
-`0.7.3-dev`; the earlier sets and their checksums remain unchanged.
+The estate's release record establishes publication and platform qualification. Its source build retained
+`0.7.3-dev`; the set and its checksums remain unchanged.
 
 The [0.7.2 set](0.7.2/README.md) documents the previous published release, published on October 17, 2026 at tag `v0.7.2`, commit `d1363d92f3cc5cae84a65787326897929582fce9` (estate release record `01M55S0Q6H5ZFNA4DG3JDBCEE3`), with FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18 after published 0.7.1: ordered identifiers, exact-commit release document checks, grouped notes, settled worker attention, workflow policy checks and a bounded Workbench first screen; inventory-bound export restore (F-01); claimed release dispatch and bounded Git/gh processes; validation before record publication and visible unreadable journals; and the corrected Codex worker path at max effort. Its notes render the estate's records with `--from 0.7.1 --to 0.7.2 --since 2026-10-17T05:25:00Z`, with the operator's approved Security section on F-01 first. The estate's release record establishes publication and qualification; this set does not. Earlier sets and their checksums remain unchanged. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`.
 
@@ -71,18 +86,36 @@ the macOS Secure Enclave helper nor Workbench.
 | `record-reference.md` | the build tooling (`vericairn-docs generate`) | Every record type with its subject rule and body fields, from the record type registry |
 | `record-format.md` | a person | The index relating the frozen format documents and the release's compatibility |
 | `record-format-v1.md`, `record-format-v2.md` | a person, frozen copies | The base format and format 2's changes, both required by the declaration from 0.6.0 |
-| `api.md` | a person, frozen copy | The API document as released: transports, outcomes, problem codes |
+| `record-format-v3.md` | a person, frozen copy | From 0.8.0, policies, duties, generated collections, checked changes and the forward migration |
+| `api.md`, `api-v1.md` | a person, frozen copies | The API document as released: transports, outcomes, problem codes; both names are required from 0.8.0 |
 | `software.md` | a person, frozen copy | The software journey as released: the git adapter, checks, the release provider |
+| `changes.md`, `operator-actions.md` | a person, frozen copies | From 0.8.0, checked repository changes and the operator's signed one-record journey |
 | `workbench.md` | a person, frozen copy | Workbench as released: what exists, the keyboard, running it, the probe, limitations (declared from 0.4.0) |
 | `mcp.md` | a person, frozen copy | The MCP server as released: protocol subset, tools, running it, qualification, limitations (declared from 0.4.0) |
-| `required-attention.md` | a person, frozen copy | From 0.7.3, exact resolution rules, portable status and local worker observations, including unknown cases |
+| `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
+| `client-operations.md`, `api-compatibility-0.8.0.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes |
+| `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
+| `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
+| `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |
+| `readable-companions.md`, `reference-inventory.md` | a person, frozen copies | From 0.8.0, generator contracts, reading surfaces and the inventory/coverage contract |
+| `reference-inventory.json`, `reference-index.md`, `inputs/` | the build | From 0.8.0, exact reference membership, explicit register mappings and retained generator inputs |
 | `release-notes.md` | `vericairn docs notes` | What changed, from the estate's records since the previous set's notes ended (before 0.6.0, since the previous publication) |
-| `limitations-and-platforms.md` | a person, from the release record | Qualified platforms, signing, known limitations, every artifact by hash |
+| `limitations-and-platforms.md` | a person, from the release record | Remaining limits, signing and expected artifacts; the release record supplies authoritative hashes and platform qualification |
 | `manifest.json` | the build tooling (`vericairn-docs generate`); its `notes` by `vericairn docs notes` | The set's version, commit, generator, the documents the product declares, commands, operations and record types; from 0.6.0 also the record formats the build reads and writes (`recordFormat`) and the window of records the notes cover (`notes`) |
 
 ## How a set is produced and checked
+
+For 0.8.0, commit the version first, then reconcile and commit the maintained guides
+and required-document declaration. Generate the references from that committed
+Release build, retaining their source pin, complete inputs and generated bytes.
+Copy the maintained guides byte for byte, add the release overview, and commit the
+set before updating this index. The CLI client-outcome excerpt is generated with
+the references; its maintained copy retains those same bytes. The builder renders
+the notes from the estate's records, adds the notes window to the manifest, then
+freezes the complete set by checksum before the release build. Publication and
+qualification remain established by the release record and its evidence.
 
 The 0.6.1 and 0.7.0 preparation sequence commits the version and index first, builds that commit, and generates references with `--no-build --configuration Release`. Maintained drafts are then made current and committed, followed by their byte-for-byte copies and the authored guides. The manifest's commit is the generated references' provenance, not the later documentation or final release commit. After FIX-11, the 0.7.0 references were regenerated with the same command from the Release build of merge commit `5dbc5022ae4878bc53e7818d4d788cd1a739aeff`, which includes main at `447ddc8`; the maintained and frozen drafts and guides were then reconciled with that code. For 0.7.0 the release builder rendered the notes from the estate's main after the final documentation round, then froze the set and indexed its checksums without changing any earlier entry.
 
