@@ -10,6 +10,7 @@ using Vericairn.Packs.Software;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -131,7 +132,8 @@ public sealed class SoftwareCompanionGitTests : IDisposable
         Assert.True(process.ExitCode == 0, error.Result);
         return output.Result.Trim();
     }
-    public void Dispose() => Directory.Delete(scratch, recursive: true);
+    // Git's object files are read-only on Windows; the shared cleanup clears that before removing them.
+    public void Dispose() => WorkspaceCleanup.Delete(scratch);
 
     private sealed class NamedSource(GitFileSource source) : IDocumentSource
     {
