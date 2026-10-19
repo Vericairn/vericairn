@@ -175,6 +175,7 @@ internal static partial class ReferenceSet
         try
         {
             RequireExactBuild();
+            CompanionInput.CheckUnique(manifest);
             string buildCommit = Str(manifest, "commit") ?? "";
             if (!CompatibleBuild(buildCommit) || !manifest.TryGetProperty("companions", out JsonElement declaration)
                 || Str(declaration, "format") != CompanionFormat || Str(declaration, "implementation") != SoftwareCompanions.Generators[0].Descriptor!.Implementation
@@ -216,7 +217,7 @@ internal static partial class ReferenceSet
             string[] actual = Directory.EnumerateFiles(inputDirectory, "*", SearchOption.AllDirectories).Select(p => Path.GetRelativePath(directory, p).Replace('\\', '/')).ToArray();
             if (!actual.ToHashSet(StringComparer.Ordinal).SetEquals(expected.Keys.Concat(hasRegister ? [RegisterPath] : []).Concat(artifactPaths))) findings.Add(new("error", "docs.companion-inventory", "inputs", "The retained input directory has missing or unexpected files."));
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
+        catch (Exception error) when (error is CompanionUnavailableException or IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or KeyNotFoundException or ArgumentException)
         {
             findings.Add(new("error", "docs.companion-unavailable", "manifest.json", error is InvalidOperationException ? error.Message : "The complete retained companion inputs or outputs are unavailable."));
         }
