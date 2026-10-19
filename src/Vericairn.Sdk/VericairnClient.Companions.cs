@@ -9,13 +9,13 @@ namespace Vericairn.Sdk;
 public sealed partial class VericairnClient
 {
     /// <inheritdoc />
-    public CompanionsResponse Companions() => CompanionsAsync().GetAwaiter().GetResult();
+    public CompanionsResponse Companions() => Get<CompanionsResponse>("/v1/companions")!;
     /// <inheritdoc />
-    public CompanionResponse CompanionRender(CompanionRequest request) => CompanionRenderAsync(request).GetAwaiter().GetResult();
+    public CompanionResponse CompanionRender(CompanionRequest request) => Get<CompanionResponse>(CompanionPath("render", request))!;
     /// <inheritdoc />
-    public CompanionResponse CompanionSources(CompanionRequest request) => CompanionSourcesAsync(request).GetAwaiter().GetResult();
+    public CompanionResponse CompanionSources(CompanionRequest request) => Get<CompanionResponse>(CompanionPath("sources", request))!;
     /// <inheritdoc />
-    public CompanionComparison CompanionCompare(CompanionCompareRequest request) => CompanionCompareAsync(request).GetAwaiter().GetResult();
+    public CompanionComparison CompanionCompare(CompanionCompareRequest request) => Get<CompanionComparison>(ComparePath(request))!;
 
     /// <inheritdoc />
     public Task<CompanionsResponse> CompanionsAsync(CancellationToken cancellationToken = default) =>
@@ -34,21 +34,20 @@ public sealed partial class VericairnClient
 
     /// <inheritdoc />
     public Task<CompanionComparison> CompanionCompareAsync(CompanionCompareRequest request, CancellationToken cancellationToken = default) =>
-        RunOperationAsync(nameof(CompanionCompare), async token => (await GetAsync<CompanionComparison>("/v1/companions/compare" + CompanionQuery(new Dictionary<string, string?>
-            { ["selection"] = request.Selection, ["commit"] = request.Commit, ["audience"] = request.Audience }), cancellationToken: token).ConfigureAwait(false))!,
+        RunOperationAsync(nameof(CompanionCompare), async token => (await GetAsync<CompanionComparison>(ComparePath(request), cancellationToken: token).ConfigureAwait(false))!,
             false, OperationTimeout?.Invoke(nameof(CompanionCompare)), cancellationToken);
 
-    private static string CompanionPath(string operation, CompanionRequest request)
+    // As for every request the client sends, the runtime validates the request; a missing one reaches it as an empty query.
+    private static string ComparePath(CompanionCompareRequest? request) =>
+        "/v1/companions/compare" + CompanionQuery(new Dictionary<string, string?> { ["selection"] = request?.Selection, ["commit"] = request?.Commit, ["audience"] = request?.Audience });
+
+    private static string CompanionPath(string operation, CompanionRequest? request) => "/v1/companions/" + operation + CompanionQuery(new Dictionary<string, string?>
     {
-        ArgumentNullException.ThrowIfNull(request);
-        return "/v1/companions/" + operation + CompanionQuery(new Dictionary<string, string?>
-        {
-            ["generator"] = request.Generator, ["selection"] = request.Selection, ["revision"] = request.Revision, ["snapshot"] = request.Snapshot,
-            ["page"] = request.Page.ToString(CultureInfo.InvariantCulture), ["field"] = request.Field, ["index"] = request.Index,
-            ["audience"] = request.Audience, ["contract"] = request.Contract.ToString(CultureInfo.InvariantCulture),
-            ["declaration"] = request.Declaration, ["commit"] = request.Commit,
-        });
-    }
+        ["generator"] = request?.Generator, ["selection"] = request?.Selection, ["revision"] = request?.Revision, ["snapshot"] = request?.Snapshot,
+        ["page"] = request?.Page.ToString(CultureInfo.InvariantCulture), ["field"] = request?.Field, ["index"] = request?.Index,
+        ["audience"] = request?.Audience, ["contract"] = request?.Contract.ToString(CultureInfo.InvariantCulture),
+        ["declaration"] = request?.Declaration, ["commit"] = request?.Commit,
+    });
 
     private static string CompanionQuery(Dictionary<string, string?> values) => "?" + string.Join('&', values.Where(p => p.Value is not null)
         .Select(p => Uri.EscapeDataString(p.Key) + "=" + Uri.EscapeDataString(p.Value!)));

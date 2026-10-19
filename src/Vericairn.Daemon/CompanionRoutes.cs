@@ -12,7 +12,9 @@ internal static class CompanionRoutes
 {
     internal static void Map(IEndpointRouteBuilder app, IEstateApi service)
     {
-        app.MapGet("/v1/companions", async (HttpContext context) =>
+        // The explicit result type keeps this a route handler: an HttpContext-only lambda would bind as a RequestDelegate,
+        // which discards the result and bypasses the request scope's endpoint filter.
+        app.MapGet("/v1/companions", async Task<IResult> (HttpContext context) =>
             Results.Json(await service.CompanionsAsync(context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
         app.MapGet("/v1/companions/render", async ([AsParameters] CompanionRequest request, HttpContext context) =>
             Results.Json(await service.CompanionRenderAsync(request, context.RequestAborted).ConfigureAwait(false), ProtocolJson.Options));
