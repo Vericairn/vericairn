@@ -146,9 +146,24 @@ internal sealed class RunDispatchService(
         var rows = new List<RunRow>();
         foreach (AgentRuns.Run run in runs)
         {
-            RunDirectory? directory = includeLocalObservations ? new RunDirectory(estate, run.Id) : null;
-            RunObservedState? observed = directory?.Read();
-            RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop ?? Requested(directory?.ReadStop()) : null);
+            RunDirectory? directory = includeLocalObservations ? WorkerOptions.OpenRunDirectory(estate, run.Id) : null;
+            RunObservedState? observed = null;
+            var unavailable = new List<string>();
+            try { observed = directory?.Read(); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+            {
+                unavailable.Add("The worker's local run observation could not be read; no newer supervision or containment facts are available.");
+            }
+
+            RunStop? stop = RecordedStop(run.Latest) ?? (run.InFlight ? observed?.Stop : null);
+            if (run.InFlight && stop is null)
+            {
+                try { stop = Requested(directory?.ReadStop()); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+                {
+                    unavailable.Add("The local stop request could not be read; the supervising worker treats an unreadable request as a stop, but transmission and containment are unconfirmed.");
+                }
+            }
             IReadOnlyList<RunSignal>? signals = run.Latest.Body.TryGetProperty("signals", out JsonElement recordedSignals)
                 ? JsonSerializer.Deserialize<RunSignal[]>(recordedSignals, ProtocolJson.Options) : observed?.Signals;
             if (!run.InFlight && observed is { Settled: not null, Problem: string problem })
@@ -156,6 +171,17 @@ internal sealed class RunDispatchService(
                 // A post-settlement local transfer failure is visible without rewriting the immutable settlement or adding
                 // machine bindings to its records. The provider's refusal is path-free.
                 signals = [.. signals ?? [], new RunSignal("audit-unverified", "warning", observed.ExitedAt ?? run.Latest.At, problem)];
+            }
+            if (unavailable.Count > 0)
+            {
+                // An unreadable local row must not hide other runs or discard recorded facts. Use
+                // the existing signal contract, without inventing a heartbeat or a contained stop.
+                List<RunSignal> local = [.. signals ?? []];
+                int existing = local.FindIndex(s => s.Code == "audit-unverified" && s.Severity == "warning");
+                string summary = string.Join(" ", unavailable);
+                if (existing < 0) local.Add(new RunSignal("audit-unverified", "warning", run.Latest.At, summary));
+                else local[existing] = local[existing] with { Summary = local[existing].Summary + " " + summary };
+                signals = local;
             }
             rows.Add(new RunRow(
                 run.Id,
@@ -242,7 +268,7 @@ internal sealed class RunDispatchService(
             return new RunStopResponse(found.Id, found.Status, $"Run {found.Id} ended as {found.Status}; there is nothing to stop.", false, RecordedStop(found.Latest), new Problem("refused", $"Run {found.Id} ended as {found.Status}; there is nothing to stop.", []));
         }
 
-        var directory = new RunDirectory(estate, found.Id);
+        RunDirectory directory = WorkerOptions.OpenRunDirectory(estate, found.Id);
         StopRequest asked;
         lock (gate)
         {
@@ -251,39 +277,57 @@ internal sealed class RunDispatchService(
                 return StopProblem(run, denied.Code, denied.Message);
             }
 
-            asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
-        }
-        RunObservedState? observed = ReadSteadily(directory);
-        bool supervised = Fresh(observed);
-        if (supervised)
-        {
-            // The supervising worker transmits the stop at its next heartbeat and escalates it after the grace period; this waits for
-            // what it observes, never longer than the stop wait, whatever grace the stop names.
-            TimeSpan grace = asked.GraceSeconds is int seconds ? TimeSpan.FromSeconds(seconds) : WorkerOptions.Grace;
-            TimeSpan wait = grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
-            DateTimeOffset deadline = DateTimeOffset.UtcNow + (wait < WorkerOptions.StopWait ? wait : WorkerOptions.StopWait);
-            DateTimeOffset until = deadline;
-            // A state being replaced as it is read reads as nothing for a moment, which is no news: the last state read stands.
-            while (DateTimeOffset.UtcNow < until)
+            try
             {
-                RunObservedState? read = directory.Read();
-                observed = read ?? observed;
-                if (observed?.Stop?.ContainedAt is not null || observed?.ExitedAt is not null || (read is not null && !Fresh(read)))
+                asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+            {
+                return StopProblem(found.Id, "unavailable", "The stop request could not be published or read. Any previously published request remains in force; transmission and containment are unconfirmed.");
+            }
+        }
+        RunObservedState? observed = null;
+        bool supervised = false;
+        bool observationUnavailable = false;
+        try
+        {
+            observed = ReadSteadily(directory);
+            supervised = Fresh(observed);
+            if (supervised)
+            {
+                // The supervising worker transmits the stop at its next heartbeat and escalates it after the grace period; this waits for
+                // what it observes, never longer than the stop wait, whatever grace the stop names.
+                TimeSpan grace = asked.GraceSeconds is int seconds ? TimeSpan.FromSeconds(seconds) : WorkerOptions.Grace;
+                TimeSpan wait = grace + (WorkerOptions.Heartbeat * 4) + TimeSpan.FromSeconds(10);
+                DateTimeOffset deadline = DateTimeOffset.UtcNow + (wait < WorkerOptions.StopWait ? wait : WorkerOptions.StopWait);
+                DateTimeOffset until = deadline;
+                // Keep the last observation if the file is absent. An unreadable file ends only this
+                // confirmation wait; the published request and independent supervision remain in force.
+                while (DateTimeOffset.UtcNow < until)
                 {
-                    break;
+                    RunObservedState? read = directory.Read();
+                    observed = read ?? observed;
+                    if (observed?.Stop?.ContainedAt is not null || observed?.ExitedAt is not null || (read is not null && !Fresh(read)))
+                    {
+                        break;
+                    }
+
+                    Thread.Sleep(100);
                 }
 
-                Thread.Sleep(100);
+                // Once the exit is observed, the settlement follows; it records the stop's facts as observed. Within the same deadline.
+                DateTimeOffset settling = DateTimeOffset.UtcNow + (WorkerOptions.Heartbeat * 2) + TimeSpan.FromSeconds(10);
+                settling = settling < deadline + (WorkerOptions.Heartbeat * 2) ? settling : deadline + (WorkerOptions.Heartbeat * 2);
+                while (observed?.ExitedAt is not null && observed.Settled is null && observed.Problem is null && DateTimeOffset.UtcNow < settling)
+                {
+                    Thread.Sleep(100);
+                    observed = directory.Read() ?? observed;
+                }
             }
-
-            // Once the exit is observed, the settlement follows; it records the stop's facts as observed. Within the same deadline.
-            DateTimeOffset settling = DateTimeOffset.UtcNow + (WorkerOptions.Heartbeat * 2) + TimeSpan.FromSeconds(10);
-            settling = settling < deadline + (WorkerOptions.Heartbeat * 2) ? settling : deadline + (WorkerOptions.Heartbeat * 2);
-            while (observed?.ExitedAt is not null && observed.Settled is null && observed.Problem is null && DateTimeOffset.UtcNow < settling)
-            {
-                Thread.Sleep(100);
-                observed = directory.Read() ?? observed;
-            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            observationUnavailable = true;
         }
 
         RunStop stop = observed?.Stop is { } seen && seen.RequestedAt == asked.RequestedAt ? seen : new RunStop(asked.RequestedAt, asked.RequestedBy, asked.Reason);
@@ -301,6 +345,10 @@ internal sealed class RunDispatchService(
             "requested" => $"Run {found.Id}: the stop is requested at {stop.RequestedAt}, and no worker on this machine transmitted it: {(supervised ? "the worker that observed the run stopped observing it" : "none observes the run")}{(observed?.Heartbeat is string beat ? $", its last heartbeat at {beat}" : string.Empty)}. A stop that is not observed stays requested, and the run stays in flight, charged at its cap.",
             _ => $"Run {found.Id}: the stop requested at {stop.RequestedAt} is {stop.State}{(stop.TransmittedAt is null ? string.Empty : $" (transmitted at {stop.TransmittedAt}: {stop.Transmission})")}; its containment was not observed in time, so it is reported as {stop.State}, never as stopped.",
         };
+        if (observationUnavailable)
+        {
+            message = $"Run {found.Id}: the stop request is kept; the worker's observation could not be read. The last confirmed stop state is {stop.State}; no additional transmission or containment is inferred.";
+        }
         return new RunStopResponse(found.Id, stop.State, message, true, stop);
     }
 
@@ -324,8 +372,8 @@ internal sealed class RunDispatchService(
     }
 
     /// <summary>
-    /// What the worker observing a run wrote, read through a moment in which it is being replaced: a state that is there and cannot be
-    /// read yet is read again for up to a second before it counts as nothing.
+    /// What the worker observing a run wrote, retrying if its first snapshot appeared just after an absent-file read.
+    /// The directory itself retries sharing failures and throws if the snapshot remains unreadable.
     /// </summary>
     private static RunObservedState? ReadSteadily(RunDirectory directory)
     {
