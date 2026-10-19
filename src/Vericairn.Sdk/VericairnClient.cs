@@ -566,5 +566,5 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         }
     }
     /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
-    public ReleaseBasisResponse? ReleaseBasis(string hash) => Get<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash));
+    public ReleaseBasisResponse? ReleaseBasis(string hash) => Get<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true);
 }

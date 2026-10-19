@@ -48,5 +48,6 @@ public sealed class DutyTransportApiTests
         Assert.Equal(policy.ComputedHash, model.ById[reviewed.Written.Id].Body.GetProperty("read")[0].GetProperty("hash").GetString());
         Assert.True(Assert.Single(client.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!.Completed);
         Assert.Null(await client.ReleaseBasisAsync("missing", TestContext.Current.CancellationToken));
+        Assert.Null(client.ReleaseBasis("missing"));
     }
 }

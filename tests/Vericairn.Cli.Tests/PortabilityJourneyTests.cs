@@ -111,7 +111,16 @@ public class PortabilityJourneyTests
             CliHarness.Ok("--json", "estate", "restore", "--from", zip, "--to", d);
             Assert.True(Directory.Exists(Path.Combine(d, "records")));
             Assert.Equal(0, CliHarness.Run("--estate", d, "estate", "check").Code);
-            Assert.Equal(statusC, CliHarness.Ok("--estate", d, "--json", "status").Out);
+            string statusD = CliHarness.Ok("--estate", d, "--json", "status").Out;
+            // Restore deliberately changes the manifest's storage profile. The policy basis pins
+            // that manifest, so only its digest changes; records, inventories and findings stay exact.
+            using JsonDocument source = JsonDocument.Parse(statusC), restored = JsonDocument.Parse(statusD);
+            JsonElement sourceBasis = source.RootElement.GetProperty("policies").GetProperty("basis");
+            JsonElement restoredBasis = restored.RootElement.GetProperty("policies").GetProperty("basis");
+            Assert.Equal(sourceBasis.GetProperty("recordDigest").GetString(), restoredBasis.GetProperty("recordDigest").GetString());
+            string sourceDigest = sourceBasis.GetProperty("digest").GetString()!, restoredDigest = restoredBasis.GetProperty("digest").GetString()!;
+            Assert.NotEqual(sourceDigest, restoredDigest);
+            Assert.Equal(statusC.Replace(sourceDigest, restoredDigest, StringComparison.Ordinal), statusD);
         }
         finally
         {

@@ -21,6 +21,9 @@ public sealed record ToolDefinition(string Name, string Description, JsonObject 
     /// <summary>A policy action the server must admit for this acting principal.</summary>
     public string? PolicyAction { get; init; }
 
+    /// <summary>A judgment tool visible only to the current operator, never to a worker principal.</summary>
+    public bool OperatorOnly { get; init; }
+
     /// <summary>The tool as tools/list presents it.</summary>
     public JsonObject Describe() => new() { ["name"] = Name, ["description"] = Description, ["inputSchema"] = InputSchema.DeepClone() };
 }
@@ -81,7 +84,8 @@ public sealed class ToolRegistry
     {
         bool writes = await WritesVisibleAsync(cancellationToken).ConfigureAwait(false);
         IReadOnlyList<string> policyActions = writes ? await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false) : [];
-        return tools.Where(t => !t.Writes || writes && (t.PolicyAction is null || policyActions.Contains(t.PolicyAction, StringComparer.Ordinal))).ToList();
+        bool isOperator = writes && await IsOperatorAsync(cancellationToken).ConfigureAwait(false);
+        return tools.Where(t => !t.Writes || writes && (!t.OperatorOnly || isOperator) && (t.PolicyAction is null || policyActions.Contains(t.PolicyAction, StringComparer.Ordinal))).ToList();
     }
 
     /// <summary>Calls a visible tool; an invisible or unknown tool is unknown to the caller.</summary>
@@ -95,6 +99,7 @@ public sealed class ToolRegistry
             cancellationToken.ThrowIfCancellationRequested();
             ToolDefinition? tool = tools.FirstOrDefault(t => t.Name == name);
             if (tool is null || (tool.Writes && (!await WritesVisibleAsync(cancellationToken).ConfigureAwait(false) ||
+                tool.OperatorOnly && !await IsOperatorAsync(cancellationToken).ConfigureAwait(false) ||
                 tool.PolicyAction is { } action && !(await api.PolicyAccessAsync(actingPrincipal!, cancellationToken).ConfigureAwait(false)).Contains(action, StringComparer.Ordinal))))
             {
                 return new ToolCallResult(string.Empty, true, Unknown: true);
@@ -106,6 +111,26 @@ public sealed class ToolRegistry
         {
             return new ToolCallResult(ClientFailure.FromException(exception)?.Message ?? exception.Message, true);
         }
+    }
+
+    private async Task<bool> IsOperatorAsync(CancellationToken cancellationToken)
+    {
+        // Principals are named by their first revision. Follow retained lineage rather than
+        // trusting the roles on that old record or a role supplied by the caller.
+        List<RecordResponse> matching = [];
+        foreach (RecordResponse current in await api.RecordsAsync("principal", cancellationToken).ConfigureAwait(false))
+        {
+            RecordResponse? revision = current;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            while (revision is { Type: "principal" } && seen.Add(revision.Id))
+            {
+                if (revision.Id == actingPrincipal) { matching.Add(current); break; }
+                revision = revision.Envelope.TryGetProperty("supersedes", out JsonElement prior) && prior.ValueKind == JsonValueKind.String
+                    ? await api.RecordAsync(prior.GetString()!, cancellationToken).ConfigureAwait(false) : null;
+            }
+        }
+        return matching.Count == 1 && matching[0].Envelope.GetProperty("body").TryGetProperty("roles", out JsonElement roles) &&
+            roles.ValueKind == JsonValueKind.Array && roles.EnumerateArray().Any(r => r.ValueKind == JsonValueKind.String && r.GetString() == "operator");
     }
 
     private List<ToolDefinition> Define()
@@ -212,9 +237,9 @@ public sealed class ToolRegistry
             Write("work_result", "Submits the result of an attempt: outcome (completed, partial, blocked, abandoned), summary, outputs by hash, evidence, checks, limitations, unresolved effects and the next step. A claim to inspect; acceptance is a separate record by someone with that authority.",
                 Arguments(("attempt", "Attempt record id."), ("expected", "Expected current attempt hash; required when duties are supplied."), ("body", "The complete result body: outcome, summary, outputs, evidence, checks, limitations, unresolvedEffects, nextStep and optional exact duties with scope and proof bindings.")), ["attempt", "body"],
                 async (api, a, token) => Outcome((await api.ResultAsync(new ResultRequest(Arg(a, "attempt"), by, Body(a, "body"), OptionalArg(a, "expected")), cancellationToken: token).ConfigureAwait(false))), ["body"]),
-            Write("work_review", "Review an exact result and its evidence read, signed as the acting principal. Independence and current evidence are validated; a review accepts neither work nor a release.",
+            Write("work_review", "Record the operator's review of an exact result and its evidence read, signed as the acting principal. Not offered to worker principals. Independence and current evidence are validated; a review accepts neither work nor a release.",
                 Arguments(("result", "Exact current result id."), ("expected", "Expected current result hash."), ("body", "The ordinary review body: independence, outcome, summary, findings and exact read references.")), ["result", "expected", "body"],
-                async (api, a, token) => Outcome(await api.ReviewResultAsync(new ResultReviewRequest(Arg(a, "result"), by, Body(a, "body"), Arg(a, "expected")), token).ConfigureAwait(false)), ["body"]),
+                async (api, a, token) => Outcome(await api.ReviewResultAsync(new ResultReviewRequest(Arg(a, "result"), by, Body(a, "body"), Arg(a, "expected")), token).ConfigureAwait(false)), ["body"]) with { OperatorOnly = true },
             Write("document_review", "Records the acting principal's review of a living document of the estate, by its path: current (it holds), revised (it was changed for the trigger) or needs-change (it is stale and stays due). The runtime reads the content, records the covered paths' identity and the triggers answered, runs the declared checks, and refuses a clearance that a failed check or the declaration's clearedBy forbids, such as an agent clearing what it revised where independence is asked.",
                 Arguments(("path", "The document's repository-relative path."), ("outcome", "current, revised or needs-change."), ("summary", "What was checked.")), ["path", "outcome", "summary"],
                 async (api, a, token) => (await api.DocumentsAsync(cancellationToken: token).ConfigureAwait(false)).FirstOrDefault(d => d.Path == Arg(a, "path") && d.Repository is null) is DocumentRow row

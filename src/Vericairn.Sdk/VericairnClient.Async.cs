@@ -52,7 +52,7 @@ public sealed partial class VericairnClient
 
     /// <summary>The cancellable Policy read, with a response deadline.</summary>
     public Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
+        ClientOperation.RunAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key) + "/view", allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
 
     /// <summary>The cancellable PolicyKinds read, with a response deadline.</summary>
     public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
@@ -575,5 +575,5 @@ public sealed partial class VericairnClient
     }
     /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
     public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
-        ClientOperation.RunAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
+        ClientOperation.RunAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true, cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
 }

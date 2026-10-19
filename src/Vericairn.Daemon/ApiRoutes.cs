@@ -21,7 +21,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/evaluate", (string? asOf, string? release) => Results.Json(service.PolicyEvaluate(asOf, release), ProtocolJson.Options));
-        app.MapGet($"{v}/estate-policies/{{key}}", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
+        app.MapGet($"{v}/estate-policies/{{key}}/view", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/writing-exceptions", () => Results.Json(service.WritingExceptions(), ProtocolJson.Options));
         app.MapGet($"{v}/writing-exceptions/{{id}}", (string id) => service.WritingException(id) is { } entry ? Results.Json(entry, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/estate-policies/access", (string principal) => Results.Json(service.PolicyAccess(principal), ProtocolJson.Options));

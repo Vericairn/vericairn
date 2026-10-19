@@ -763,7 +763,7 @@ public sealed partial class ShellViewModel : Observable
                     : new Dictionary<string, string>(StringComparer.Ordinal);
             }
 
-            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces"), releaseProvider, releaseSettings));
+            rows.Add(new ProductRow(product.Id, Str(body, "name") ?? "?", Str(body, "slug") ?? string.Empty, Str(body, "summary") ?? string.Empty, Names(body, "editions"), Names(body, "surfaces"), releaseProvider, releaseSettings, product.Hash));
         }
 
         return rows;

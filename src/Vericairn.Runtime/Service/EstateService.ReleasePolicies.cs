@@ -4,11 +4,9 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
-using Vericairn.Records.Authoring;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Runtime.Policies;
-using Vericairn.Runtime.Release;
 
 namespace Vericairn.Runtime.Service;
 
@@ -34,20 +32,6 @@ public sealed partial class EstateService
 
     // Tests can change the clock or sources at an actual boundary; no production caller supplies an evaluation verdict.
     internal Action<string>? ReleaseBoundary { get; set; }
-
-    private static bool IsReleaseSubmission(RecordDraft draft) => draft.Type == "release" && PolicyInputs.Text(draft.Body, "status") == "published" ||
-        draft.Type == "operation" && PolicyInputs.Text(draft.Body, "action") == ReleaseFlow.DispatchAction && PolicyInputs.Text(draft.Body, "status") == "not-started";
-
-    private Problem? JudgeReleaseSubmissions(IReadOnlyList<AuthoredRecord> records)
-    {
-        List<FindingDto> objections = [];
-        foreach (AuthoredRecord record in records.Where(r => IsReleaseSubmission(new(r.Envelope.Type, r.Envelope.By, r.Envelope.Body))))
-        {
-            EstateModel before = LoadWith(records.Where(r => r != record).ToArray());
-            objections.AddRange(releaseCoordination.RecordSubmissionObjections(before, record.Envelope));
-        }
-        return objections.Count == 0 ? null : new("refused", "Release admission refused: " + string.Join(" | ", objections.Select(f => f.Code + ": " + f.Message)), objections.Distinct().ToArray());
-    }
 
     private static PolicySubmission SelectRelease(EstateModel model, string product, string version, string? commit, IReadOnlySet<string> repositories, RecordReference? release = null)
     {

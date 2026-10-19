@@ -12,6 +12,25 @@ public sealed class PolicyApiTests
 {
     public PolicyApiTests() => DaemonTestHome.Ensure();
 
+    [Theory]
+    [InlineData("kinds")]
+    [InlineData("evaluate")]
+    [InlineData("access")]
+    public async Task PolicyKeysMayEqualNamedReadEndpoints(string key)
+    {
+        using var fixture = new PolicyFixture();
+        var policy = fixture.Policy(fixture.PolicyBody(key));
+        int before = fixture.Estate.Load().Records.Count;
+        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
+        Assert.Equal(policy.Id, Assert.Single(client.Policy(key)!.Policies).Id);
+        Assert.Equal(policy.Id, Assert.Single((await client.PolicyAsync(key, TestContext.Current.CancellationToken))!.Policies).Id);
+        Assert.Contains(client.PolicyKinds(), kind => kind.Kind == "vericairn.estate/recurring-duty");
+        Assert.Contains("declare", client.PolicyAccess(fixture.Estate.OperatorId));
+        Assert.Single(client.PolicyEvaluate().Policies);
+        Assert.Equal(before, fixture.Estate.Load().Records.Count);
+    }
+
     [Fact]
     public async Task TheReadRoutesCarryPolicyDutyAndWritingEvidenceWithoutAuthoring()
     {

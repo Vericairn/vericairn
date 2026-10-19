@@ -5,6 +5,7 @@ using Vericairn.Records.Tests;
 
 namespace Vericairn.Cli.Tests;
 
+[Collection("cli")]
 public sealed class PolicyCommandsTests
 {
     [Fact]

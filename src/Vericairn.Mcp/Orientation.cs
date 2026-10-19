@@ -76,7 +76,7 @@ public static class Orientation
         };
         foreach (ToolDefinition tool in tools.All)
         {
-            lines.Add($"| `{tool.Name}` | {(tool.Writes ? "write, signed by the acting principal's device" : "read")} | {tool.Description} |");
+            lines.Add($"| `{tool.Name}` | {(tool.OperatorOnly ? "operator write, signed by the acting principal's device" : tool.Writes ? "write, signed by the acting principal's device" : "read")} | {tool.Description} |");
         }
 
         lines.Add(string.Empty);

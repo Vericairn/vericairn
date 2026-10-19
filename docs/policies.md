@@ -1,19 +1,21 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 3, October 19, 2026. Describe reads, signed authoring, shared views, release admission and exact duty evidence in the development build for 0.8.0.
+Revision 5, October 19, 2026. Keep valid policy keys distinct from named read endpoints, preserve generic history authoring, and describe on-demand views, operator-only MCP review and prepared Workbench submission.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
 | CLI command | API route | SDK method | MCP tool |
 |---|---|---|---|
 | `policies list` | `GET /v1/estate-policies` | `Policies` | `policies_list` |
-| `policies show <key>` | `GET /v1/estate-policies/{key}` | `Policy` | `policy_show` |
+| `policies show <key>` | `GET /v1/estate-policies/{key}/view` | `Policy` | `policy_show` |
 | `policies kinds` | `GET /v1/estate-policies/kinds` | `PolicyKinds` | `policy_kinds` |
 | `policies check` | `GET /v1/estate-policies/evaluate` | `PolicyEvaluate` | `policy_evaluate` |
 | `estate writing-exceptions list` | `GET /v1/writing-exceptions` | `WritingExceptions` | `writing_exceptions_list` |
 | `estate writing-exceptions show <id>` | `GET /v1/writing-exceptions/{id}` | `WritingException` | `writing_exception_show` |
 
 Each SDK method has an `Async` counterpart with cancellation and a response deadline. The CLI uses the same operations through the embedded runtime or daemon. `--json` returns the complete typed response; the human view always names the basis. A policy key or any revision id selects its current declaration. Exception records and writing removals remain visible as history.
+
+The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate` and `access` remain distinct from the named collection operations.
 
 `policies check --as-of 2026-11-01T00:00:00Z` previews an explicit canonical UTC instant. `--release <release-id>` selects a recorded release's product, version and exact commit; both options may be combined. The API and MCP arguments are `asOf` and `release`. A missing target is reported as a problem. An instant before a record in the snapshot is unavailable; historical replay requires the historical snapshot. Preview output grants no release authority.
 
@@ -48,13 +50,21 @@ All authoring commands take `--by`. Revisions, retirement, exception grants and 
 
 Progress and status group unfinished operator-owned duties under **What waits on the operator**, including exact subject, occurrence, deadline, required action and current evidence, even without an ask. An actual ask addressed to an operator can link an occurrence by pinning a result with the exact `duties` binding as its subject. The view groups that ask with the duty, preserving the duty's owner. A builder's linked reserved-action ask therefore does not transfer ownership. Only real asks enter the ask queue; a completed duty does not answer or withdraw an ask. Reads create no asks or other records. These views authorize no effects.
 
+The Policies, Recurring duties and Writing exceptions views are computed on demand. The `vericairn.records/progress` generated region remains the records-only report: putting repository inventories and their basis digest into that region would make its own bytes an input to its next generation. The interactive report adds those sections and labels their basis. Check prints each built-in diagnostic once; the complete JSON retains the diagnostics within the typed policy and writing responses too. Its existing finding members remain `severity`, `Code`, `Location` and `Message`.
+
+An export preserves the records and source bytes. Restoring a local-only estate deliberately selects the repository-synced storage profile. Because the policy basis includes the manifest, that migration changes the basis digest even when the record digest, inventories and findings remain identical. Repeated reads of either unchanged copy are deterministic.
+
 `release submit --product <id> --version <version> --commit <exact-commit> --expected <product-hash> --by <principal>` admits the conjunction of built-in conditions, living-document gates and applicable policy holds. It reports every known objection with its mechanism. Format 3 requires the exact commit, expected current product hash and an admitted held signing device. An older-format submission also needs the exact commit when its release repository has a document comparison. Supplying a commit replaces the earlier provider-resolution step: admission reads local exact source bytes and makes no provider call on refusal. An unrelated clone HEAD cannot stand in for the commit.
 
 Estate-wide policies apply to every product release. Product and repository policies apply to the declared product or release repository. Explicit-work policies apply to work carried by typed release plans and placements for that product and version. Other findings remain visible with enforcement disabled. A missing selected policy source at refuse level holds the release even without a registered clone. A prepared candidate of the same product, version and commit supplies the exact release identity for a submission-bound exception; a general preview exception cannot authorize a build.
 
 The runtime supplies fresh time at preparation, intent and before dispatch, sampling policy time after acquiring the sources so a deadline crossed during that read is enforced. It reads the sources again and rechecks authority, record revisions, exceptions, deadlines and document evidence. A refused initial admission writes no intent and starts no build. If admission changes after intent, the runtime records cancellation when it can; if authority or storage prevents that record, the retained intent requires reconciliation. An unresolved identity is never retried automatically.
 
-Admitted operation evidence retains `vericairn.release-basis/1` objects with the complete policy and duty findings, source bytes and hashes, record digest, exact target and submission time. Preparation remains retained if a later evaluation differs. Pre-dispatch evaluation excludes only that submission's own new operation revisions and pins those exclusions separately, avoiding a circular hash while retaining unrelated changes. API and SDK release responses expose `policies` and `basisEvidence`; CLI JSON preserves them on refusal too. These are ordinary evidence objects, without new record fields. Generic release-intent and publication authoring also passes the shared gate.
+Admitted operation evidence retains `vericairn.release-basis/1` objects with the complete policy and duty findings, source bytes and hashes, record digest, exact target and submission time. Preparation remains retained if a later evaluation differs. Pre-dispatch evaluation excludes only that submission's own new operation revisions and pins those exclusions separately, avoiding a circular hash while retaining unrelated changes. API and SDK release responses expose `policies` and `basisEvidence`; CLI JSON preserves the complete release response on refusal too. A refused request exits 2; a structurally rejected record exits 1. These are ordinary evidence objects, without new record fields.
+
+Generic `records new release` and operation authoring preserve their historical-record contract, including explicit time, supersession and the existing built-in authority and acceptance checks. They create records without dispatching a build or publishing. The combined live gate belongs to `ReleaseSubmit`, reached through the CLI, API, SDK and Workbench, and rechecks at intent and before dispatch. Recording an observed publication does not retroactively submit it again. An old recorded intent cannot authorize a new dispatch.
+
+Workbench's release form carries the exact commit and the product hash captured when the product was loaded. Its response shows policy findings and retained-basis inspection commands. A changed product revision refuses and requires fresh preparation; the form does not silently replace the expected hash at submission. The acting principal needs an admitted held signer in format 3.
 
 Providers receive the prepared commit as `DispatchRequest.ExpectedCommit` and must refuse a moved ref before starting a build. GitHub checks that ref at dispatch; observation checks the commit actually built again before admitting a candidate. A remote branch can still move after dispatch, so an observed effect remains under its original identity and is never represented as undone by a later policy refusal. Publication remains the operator's separate action. MCP exposes no release-admission or acceptance shortcut.
 
@@ -63,7 +73,7 @@ Duty completion uses the ordinary result and review records supplied by record f
 | Command | API operation | SDK method | MCP tool |
 |---|---|---|---|
 | `work result <attempt> --body <file> --expected <attempt-hash> --by <principal>` | `POST /v1/work/result` | `Result`, `ResultAsync` | `work_result` |
-| `work review <result> --body <file> --expected <result-hash> --by <principal>` | `POST /v1/work/review` | `ReviewResult`, `ReviewResultAsync` | `work_review` |
+| `work review <result> --body <file> --expected <result-hash> --by <principal>` | `POST /v1/work/review` | `ReviewResult`, `ReviewResultAsync` | `work_review` (operator only) |
 | `release basis <hash>` | `GET /v1/release-bases/{hash}` | `ReleaseBasis`, `ReleaseBasisAsync` | `release_basis_get` |
 
 The complete result body carries `duties`. Each binding pins the originating policy revision, rule, tagged occurrence and examined subject revision. It includes `scope.repositories` with exact resource revisions and commits, `scope.objects`, `scope.records`, a coverage statement and each declared proof clause's ordered exact records. A clause checking the result itself uses `{clause, kind: "result-verification"}`: submit the result, record the verification about its exact hash, then review that result with the verification's exact reference in `read`. A passing review without the required exact verification in `read` leaves the duty incomplete. A later adverse or superseding proof can reopen it. No command marks a duty done or records acceptance.
@@ -72,8 +82,10 @@ Protocol clients can serialize `ResultDutyDto`, `DutyOccurrenceDto`, `DutyScopeD
 
 A duty result requires the expected current attempt hash; every `work review` requires the expected current result hash. The server signs as the acting principal with fresh time, validates the full proposed records and re-evaluates the policy sources. Generic authoring of duty results and reviews applies the same checks and refuses supplied historical authoring times. Ordinary results without duties retain their existing submission contract; supplying `expected` opts into the signed current-attempt check. MCP binds authorship to its admitted connection principal and rechecks that admission at the call.
 
+MCP offers `work_review` only to an admitted operator principal and rechecks the current principal lineage on every call. A worker cannot list or call that judgment tool. Authorized reviewers use the CLI or API under their existing authority; neither a result claim nor a policy exception becomes a review or acceptance.
+
 The evaluator loads each declared historical repository commit separately from the current source inventory. A later HEAD or working-tree edit does not replace completion evidence; missing exact history remains unavailable. Historical proof bytes are labelled `evidence` in the basis and do not add obsolete prose to current writing counts.
 
-`release basis` reads an existing evidence object without writing a record. Its typed `ReleaseBasisResponse` contains the original record set, source and proof bytes, policy and duty findings, document comparisons and excluded operation revisions. The CLI's human view names the evidence hash, basis and findings; `--json`, API, SDK and MCP preserve the complete snapshot. Missing or unsupported objects are unavailable. This historical read does not re-authorize submission: every new submission still re-evaluates live sources and time.
+`release basis` reads an existing evidence object without writing a record. Its typed `ReleaseBasisResponse` contains the original record set, source and proof bytes, policy and duty findings, document comparisons and excluded operation revisions. The CLI's human view names the evidence hash, basis and findings; `--json`, API, SDK and MCP preserve the complete snapshot. Missing or unsupported objects return HTTP 404 and null through both SDK methods; the CLI and MCP report them as unavailable. This historical read does not re-authorize submission: every new submission still re-evaluates live sources and time.
 
 The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).
