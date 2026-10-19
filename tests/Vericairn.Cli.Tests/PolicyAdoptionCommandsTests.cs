@@ -30,9 +30,15 @@ public sealed class PolicyAdoptionCommandsTests
         }
         private WriteOutcome Write(string body, params string[] arguments)
         {
-            CliHarness.Outcome result = Invoke(body, [.. arguments, "--body", "-"]);
-            Assert.True(result.Code == 0, result.Err + result.Out);
-            return new(JsonSerializer.Deserialize<RecordWritten>(result.Out, ProtocolJson.Options), null);
+            // The CLI reads --body - from the raw standard-input stream, which Console.SetIn cannot feed, so the body goes in a file.
+            string directory = CliHarness.TempDirectory("policy-adoption-body");
+            try
+            {
+                CliHarness.Outcome result = Invoke(null, [.. arguments, "--body", CliHarness.WriteJson(directory, "body.json", body)]);
+                Assert.True(result.Code == 0, result.Err + result.Out);
+                return new(JsonSerializer.Deserialize<RecordWritten>(result.Out, ProtocolJson.Options), null);
+            }
+            finally { Directory.Delete(directory, recursive: true); }
         }
         public override WriteOutcome DeclarePolicy(PolicyChangeRequest request) => Write(request.Body.GetRawText(), "policies", "declare", "--by", request.By);
         public override WriteOutcome Except(string key, PolicyChangeRequest request) => Write(request.Body.GetRawText(), "policies", "except", key, "--by", request.By, "--expected", request.Expected);
