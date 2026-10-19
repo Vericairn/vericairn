@@ -134,6 +134,12 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     /// </summary>
     private static readonly Dictionary<string, Type?> Operations = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["GET /v1/estate-policies"] = null,
+        ["GET /v1/estate-policies/kinds"] = null,
+        ["GET /v1/estate-policies/evaluate"] = null,
+        ["GET /v1/estate-policies/{key}"] = null,
+        ["GET /v1/writing-exceptions"] = null,
+        ["GET /v1/writing-exceptions/{id}"] = null,
         ["GET /v1/health"] = null,
         ["GET /v1/communication"] = null,
         ["POST /v1/communication"] = typeof(CommunicationSetRequest),

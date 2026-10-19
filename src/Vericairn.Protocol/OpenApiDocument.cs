@@ -10,10 +10,17 @@ namespace Vericairn.Protocol;
 public static class OpenApiDocument
 {
     private static readonly string[] CommunicationParameterNames = ["recipient", "assignment", "progress", "status", "decision", "result", "handoff"];
+    private static readonly string[] PolicyParameterNames = ["asOf", "release"];
 
     /// <summary>Every route of version 1 with its method; the contract tests assert the daemon maps exactly these.</summary>
     public static IReadOnlyList<(string Method, string Path)> Routes { get; } =
     [
+        ("GET", "/v1/estate-policies"),
+        ("GET", "/v1/estate-policies/kinds"),
+        ("GET", "/v1/estate-policies/evaluate"),
+        ("GET", "/v1/estate-policies/{key}"),
+        ("GET", "/v1/writing-exceptions"),
+        ("GET", "/v1/writing-exceptions/{id}"),
         ("GET", "/v1/health"),
         ("GET", "/v1/communication"),
         ("POST", "/v1/communication"),
@@ -122,6 +129,15 @@ public static class OpenApiDocument
             {
                 operation["parameters"] = new JsonArray(CommunicationParameterNames
                     .Select(name => (JsonNode)new JsonObject { ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" } }).ToArray());
+            }
+
+            if (method == "GET" && path == "/v1/estate-policies/evaluate")
+            {
+                operation["parameters"] = new JsonArray(PolicyParameterNames.Select(name => (JsonNode)new JsonObject
+                {
+                    ["name"] = name, ["in"] = "query", ["required"] = false, ["schema"] = new JsonObject { ["type"] = "string" },
+                    ["description"] = name == "asOf" ? "Explicit canonical UTC preview time. Never authorizes submission." : "Exact release record id selecting its product, version and commit.",
+                }).ToArray());
             }
 
             if (method == "GET" && path == "/v1/records")
@@ -444,6 +460,12 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
+        ("GET", "/v1/estate-policies/{key}") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
+        ("GET", "/v1/estate-policies/kinds") => "Installed kind versions, implementation hashes, supported selections, sources and bounds.",
+        ("GET", "/v1/estate-policies/evaluate") => "PolicyResponse evaluated from server sources, with optional canonical UTC asOf and exact release record preview; never authorizes submission.",
+        ("GET", "/v1/writing-exceptions") => "WritingExceptionsResponse: registry history, authors, reasons, scopes, counts and exact warning and excepted locations with the basis.",
+        ("GET", "/v1/writing-exceptions/{id}") => "WritingExceptionsResponse for one entry identity, including removal history and current matches; creates no record.",
         ("GET", "/v1/communication") => "The effective recipient profile with every contributing revision, conflicts and freshness. Query values override this view only. No record is authored.",
         ("POST", "/v1/communication") => "Replace or reset one scoped communication profile with its expected prior hash. Only its owner or an explicit delegate may change it; stale edits return conflict.",
         ("POST", "/v1/communication/delegations") => "A person grants or revokes permission to change one scope of their communication setting, with the expected prior hash.",

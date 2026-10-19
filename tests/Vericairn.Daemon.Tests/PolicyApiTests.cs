@@ -1,0 +1,36 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Jason Furr
+
+using Vericairn.Protocol;
+using Vericairn.Records.Tests;
+using Vericairn.Sdk;
+
+namespace Vericairn.Daemon.Tests;
+
+[Collection("daemon")]
+public sealed class PolicyApiTests
+{
+    public PolicyApiTests() => DaemonTestHome.Ensure();
+
+    [Fact]
+    public async Task TheReadRoutesCarryPolicyDutyAndWritingEvidenceWithoutAuthoring()
+    {
+        using var fixture = new PolicyFixture();
+        fixture.Policy();
+        var entry = fixture.Add("writing-exception", PolicyFixture.WritingBody());
+        int before = fixture.Estate.Load().Records.Count;
+        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
+        PolicyResponse response = await client.PolicyEvaluateAsync("2026-10-16T13:00:00Z", cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(1, response.Holds);
+        Assert.NotNull(Assert.Single(response.Findings, f => f.ReleaseHold).Duty);
+        Assert.Equal("recorded", client.Policies().Basis.Origin);
+        Assert.Single(client.Policy("maintenance")!.Policies);
+        Assert.Null(client.Policy("absent"));
+        Assert.Contains(client.PolicyKinds(), k => k.Kind == "vericairn.estate/recurring-duty");
+        Assert.Single(client.WritingExceptions().Entries);
+        Assert.Single(client.WritingException(entry.Id)!.Records);
+        Assert.Null(client.WritingException("absent"));
+        Assert.Equal(before, fixture.Estate.Load().Records.Count);
+    }
+}

@@ -9,6 +9,24 @@ namespace Vericairn.Protocol;
 /// </summary>
 public partial interface IEstateApi
 {
+    /// <summary>Read Policies; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse Policies() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read Policy; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse? Policy(string key) => null;
+
+    /// <summary>Read PolicyKinds; returns server-derived evidence and creates no record.</summary>
+    IReadOnlyList<PolicyKindDto> PolicyKinds() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read PolicyEvaluate; returns server-derived evidence and creates no record.</summary>
+    PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read WritingExceptions; returns server-derived evidence and creates no record.</summary>
+    WritingExceptionsResponse WritingExceptions() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
+
+    /// <summary>Read WritingException; returns server-derived evidence and creates no record.</summary>
+    WritingExceptionsResponse? WritingException(string id) => null;
+
     /// <summary>The daemon's or embedded runtime's identity and what it serves.</summary>
     HealthResponse Health();
 

@@ -5,6 +5,30 @@ namespace Vericairn.Protocol;
 
 public partial interface IEstateApi
 {
+    /// <summary>The cancellable Policies read.</summary>
+    Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(Policies), () => Policies(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable Policy read.</summary>
+    Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(Policy), () => Policy(key), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyKinds read.</summary>
+    Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyKinds), () => PolicyKinds(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable PolicyEvaluate read.</summary>
+    Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyEvaluate), () => PolicyEvaluate(asOf, release), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingExceptions read.</summary>
+    Task<WritingExceptionsResponse> WritingExceptionsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingExceptions), () => WritingExceptions(), false, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable WritingException read.</summary>
+    Task<WritingExceptionsResponse?> WritingExceptionAsync(string id, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WritingException), () => WritingException(id), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Health"/>; a stopped observation does not undo an effect.</summary>
     Task<HealthResponse> HealthAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Health), () => Health(), false, this as IClientOperationLifetime, cancellationToken);

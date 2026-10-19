@@ -107,6 +107,18 @@ public sealed class ToolRegistry
         string by = actingPrincipal ?? string.Empty;
         return
         [
+            Read("policies_list", "Policy declarations, exception history and findings at recorded time, with the explicit basis; reads create no record.", NoArguments(),
+                async (api, a, token) => Json(await api.PoliciesAsync(token).ConfigureAwait(false))),
+            Read("policy_kinds", "Installed policy kind versions, implementation hashes, selections, sources and bounds.", NoArguments(),
+                async (api, a, token) => Json(await api.PolicyKindsAsync(token).ConfigureAwait(false))),
+            Read("policy_show", "One policy by key or record id, including duty deadlines, exact evidence and exception history.", Arguments(("key", "Policy key or record id.")), "key",
+                async (api, a, token) => await api.PolicyAsync(Arg(a, "key"), token).ConfigureAwait(false) is { } policy ? Json(policy) : NotFound("policy", Arg(a, "key"))),
+            Read("policy_evaluate", "Evaluate policies with a recorded-time basis or explicit preview. A preview cannot authorize submission.", Arguments(("asOf", "Optional canonical UTC preview time."), ("release", "Optional release record id selecting its exact product, version and commit.")),
+                async (api, a, token) => { PolicyResponse result = await api.PolicyEvaluateAsync(OptionalArg(a, "asOf"), OptionalArg(a, "release"), token).ConfigureAwait(false); return new ToolCallResult(JsonSerializer.Serialize(result, ProtocolJson.Options), result.Problem is not null); }),
+            Read("writing_exceptions_list", "Writing entries, removal history, match counts and exact excepted occurrences, with their basis. Reads create no record.", NoArguments(),
+                async (api, a, token) => Json(await api.WritingExceptionsAsync(token).ConfigureAwait(false))),
+            Read("writing_exception_show", "One writing entry by id, its removal history and current match evidence.", Arguments(("id", "Writing-exception record id.")), "id",
+                async (api, a, token) => await api.WritingExceptionAsync(Arg(a, "id"), token).ConfigureAwait(false) is { } entry ? Json(entry) : NotFound("writing exception", Arg(a, "id"))),
             Read("estate_health", "The runtime's identity and what it serves: API version, Vericairn version, estate, profile and record format.", NoArguments(),
                 async (api, _, token) => Json((await api.HealthAsync(cancellationToken: token).ConfigureAwait(false)))),
             Read("communication_get", "The recipient's effective communication values, every contributing revision, conflicts and freshness; shipped and estate defaults when no recipient is named. Read-only; no permission or preference is inferred.", Arguments(("recipient", "Recipient principal id; omit for estate defaults."), ("assignment", "Exact assignment id for a personal override.")),

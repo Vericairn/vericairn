@@ -10,6 +10,30 @@ namespace Vericairn.Sdk;
 
 public sealed partial class VericairnClient
 {
+    /// <summary>The cancellable Policies read, with a response deadline.</summary>
+    public Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<PolicyResponse>(nameof(Policies), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Policies)), cancellationToken);
+
+    /// <summary>The cancellable Policy read, with a response deadline.</summary>
+    public Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<PolicyResponse?>(nameof(Policy), async token => (await GetAsync<PolicyResponse>("/v1/estate-policies/" + Uri.EscapeDataString(key), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Policy)), cancellationToken);
+
+    /// <summary>The cancellable PolicyKinds read, with a response deadline.</summary>
+    public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<IReadOnlyList<PolicyKindDto>>(nameof(PolicyKinds), async token => (await GetAsync<List<PolicyKindDto>>("/v1/estate-policies/kinds", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyKinds)), cancellationToken);
+
+    /// <summary>The cancellable PolicyEvaluate read, with a response deadline.</summary>
+    public Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<PolicyResponse>(nameof(PolicyEvaluate), async token => (await GetAsync<PolicyResponse>(PolicyEvaluationPath(asOf, release), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyEvaluate)), cancellationToken);
+
+    /// <summary>The cancellable WritingExceptions read, with a response deadline.</summary>
+    public Task<WritingExceptionsResponse> WritingExceptionsAsync(CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<WritingExceptionsResponse>(nameof(WritingExceptions), async token => (await GetAsync<WritingExceptionsResponse>("/v1/writing-exceptions", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(WritingExceptions)), cancellationToken);
+
+    /// <summary>The cancellable WritingException read, with a response deadline.</summary>
+    public Task<WritingExceptionsResponse?> WritingExceptionAsync(string id, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<WritingExceptionsResponse?>(nameof(WritingException), async token => (await GetAsync<WritingExceptionsResponse>("/v1/writing-exceptions/" + Uri.EscapeDataString(id), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(WritingException)), cancellationToken);
+
     /// <summary>Uses and owns the supplied HTTP transport. Operation deadlines replace its global timeout.</summary>
     public VericairnClient(HttpClient http)
     {

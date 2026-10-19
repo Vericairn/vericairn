@@ -30,5 +30,7 @@ internal static class Composition
         registry.RegisterIfAbsent(new CodexLauncher());
         registry.RegisterIfAbsent(new GenericLauncher());
         Records.Estate.DocumentSources.Register(new GitFileSource());
+        Runtime.Policies.PolicySources.RepositorySource ??= new GitPolicySource();
+        Runtime.Policies.PolicySources.Register(ReferenceCoverage.Registration(Runtime.Policies.PolicySources.Digest(typeof(ReferenceInventory).Assembly)));
     }
 }

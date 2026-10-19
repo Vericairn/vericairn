@@ -11,6 +11,7 @@ internal sealed class EstateCommand : Command
         : base("estate", "Create and check estates.")
     {
         Subcommands.Add(new EstateInitCommand(context));
+        Subcommands.Add(new EstateWritingExceptionsCommand(context));
         Subcommands.Add(new EstateCheckCommand(context));
         Subcommands.Add(new EstateExportCommand(context));
         Subcommands.Add(new EstateRestoreCommand(context));

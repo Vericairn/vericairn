@@ -1,6 +1,8 @@
 # Policy evaluator
 
-Revision 3, October 18, 2026. Add the software pack's reference-coverage kind and pin the retained source selection in the basis.
+Revision 4, October 19, 2026. Connect the evaluator to policy and writing-registry reads with explicit source inventories.
+
+The runtime service collects the basis for the [policy read surfaces](policies.md). Application composition installs the foundation kinds, the software pack's reference-coverage kind and the local Git source. A named release preview carries the candidate's exact product, version and commit with preview origin; it cannot authorize dispatch. Source collection reads retained objects and local bytes without fetching or building.
 
 The runtime's internal `Policies` library implements `vericairn.estate-policy/1`. It evaluates supplied snapshots and returns findings. Record validation, source collection, implementation admission and release submission remain responsibilities of its caller. The library adds no command, transport operation or persisted record shape.
 

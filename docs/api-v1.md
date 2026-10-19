@@ -1,5 +1,10 @@
 # API version 1
 
+The development build for 0.8.0 adds policy and writing-exception reads under
+`/v1/estate-policies` and `/v1/writing-exceptions`. [Inspecting estate policies](policies.md)
+lists every route and SDK method, their asynchronous counterparts, explicit preview inputs,
+typed duty evidence and read-only behavior. These additions do not change a frozen release set.
+
 This maintained document describes 0.7.3: independent worker repositories (FIX-19), machine-local
 release notices (UPDATE-01), command-audit corrections (FIX-20), safe concurrent use of loaded and
 rotated TLS certificates (FIX-21), and compact current attention (FIX-22). Release checks add no estate

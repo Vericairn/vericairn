@@ -9,6 +9,42 @@ namespace Vericairn.Protocol;
 /// </summary>
 public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken cancellationToken) : IEstateApi
 {
+    /// <inheritdoc />
+    public PolicyResponse Policies() => inner.PoliciesAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<PolicyResponse> PoliciesAsync(CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PoliciesAsync(cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public PolicyResponse? Policy(string key) => inner.PolicyAsync(key, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<PolicyResponse?> PolicyAsync(string key, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyAsync(key, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public IReadOnlyList<PolicyKindDto> PolicyKinds() => inner.PolicyKindsAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyKindsAsync(cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => inner.PolicyEvaluateAsync(asOf, release, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.PolicyEvaluateAsync(asOf, release, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WritingExceptionsResponse WritingExceptions() => inner.WritingExceptionsAsync(cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WritingExceptionsResponse> WritingExceptionsAsync(CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WritingExceptionsAsync(cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
+    public WritingExceptionsResponse? WritingException(string id) => inner.WritingExceptionAsync(id, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WritingExceptionsResponse?> WritingExceptionAsync(string id, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WritingExceptionAsync(id, cancellationToken: token), cancellationToken);
+
     private readonly IEstateApi inner = inner ?? throw new ArgumentNullException(nameof(inner));
 
     /// <inheritdoc />

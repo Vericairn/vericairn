@@ -98,7 +98,8 @@ internal sealed class PolicyBasis
         if (Time is null || Records.Length == 0) return "The evaluation needs a valid explicit UTC time and recorded basis.";
         if (Records.Any(r => !RecordParser.IsTimestamp(r.At) || string.CompareOrdinal(r.At, AsOf) > 0)) return "The evaluation time precedes an included record or its time is invalid; supply a historical snapshot for replay.";
         if (Origin == PolicyTimeOrigin.Recorded && AsOf != Records[^1].At) return "Recorded time must be the greatest record time.";
-        if ((Origin == PolicyTimeOrigin.Submission) != (Submission is not null)) return "Submission evaluation requires the exact proposed release, product, version and commit.";
+        if (Origin == PolicyTimeOrigin.Submission && Submission is null || Origin == PolicyTimeOrigin.Recorded && Submission is not null)
+            return "Submission evaluation requires the exact proposed release, product, version and commit; a recorded-time view cannot select a candidate.";
         if (Findings.Any(f => f.Severity == Severity.Error) || Records.GroupBy(r => r.Id, StringComparer.Ordinal).Any(g => g.Count() != 1)) return "Invalid or conflicting record prerequisites remain in the basis.";
         return null;
     }

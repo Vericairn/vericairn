@@ -1,5 +1,9 @@
 # Operator guide: 0.7.3 changes
 
+For the development build's 0.8.0 additions, [Inspecting estate policies](policies.md)
+describes the policy commands, recurring-duty evidence, explicit-time previews and
+writing-exception registry reads.
+
 This maintained guide describes the five changes in 0.7.3. The complete estate workflows are in the
 [0.7.3 operator guide](releases/0.7.3/operator-guide.md); earlier releases keep their own frozen guides
 in the [release index](releases/README.md).
