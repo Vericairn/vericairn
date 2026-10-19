@@ -30,9 +30,20 @@ Units, missing values, unreported usage and exact reference hashes remain visibl
 Long values continue across explicitly labeled pages without splitting Unicode
 scalars or escaped markup. Full detail is available at the same immutable basis.
 
-The implementation digest covers retained embedded renderer and schema sources,
-ordered by resource identity, independently of the enclosing output commit.
-Canonical output and ordinary content checks remain owned by `DocumentRendering`.
+Each generator has its own explicit versioned implementation identity. Its
+implementation digest is SHA-256 of that identity's UTF-8 bytes alone; it does not
+hash source files, assembly resources, build metadata or the enclosing output
+commit. Comment-only edits and changes to unrelated record types therefore leave
+existing members unchanged. The estate and installed package pins identify the
+implementation that supplies the version.
+
+Bump the affected generator's implementation version whenever its emitted bytes
+or meaning change, including changes in shared rendering code that affect it.
+Golden-byte fixtures under `tests/fixtures/readable-companions` are keyed by that
+identity and compare exact bytes, including the input digest. A byte change under
+the same version fails; a version bump requires new fixtures. Retain earlier
+versions and regenerate into a new version directory. Canonical output and
+ordinary content checks remain owned by `DocumentRendering`.
 
 ## Revision registers
 

@@ -11,21 +11,29 @@ namespace Vericairn.Records.Estate;
 /// <summary>First-party immutable revision files. Adoption belongs to an estate, never to registration.</summary>
 internal sealed class RevisionCompanionGenerator : IDocumentGenerator
 {
-    internal static readonly ImmutableArray<(string Id, string Type, string Directory)> Registers =
+    // Bump only the affected identities when emitted bytes or meaning change; retain their golden fixtures.
+    private const string DecisionsImplementation = "vericairn.records/decisions/1";
+    private const string WorkOrdersImplementation = "vericairn.records/work-orders/1";
+    private const string ReleasesImplementation = "vericairn.records/releases/1";
+    private const string PoliciesImplementation = "vericairn.estate/policies/1";
+    private const string PolicyExceptionsImplementation = "vericairn.estate/policy-exceptions/1";
+    private const string WritingExceptionsImplementation = "vericairn.estate/writing-exceptions/1";
+
+    internal static readonly ImmutableArray<(string Id, string Type, string Directory, string Implementation)> Registers =
     [
-        ("vericairn.records/decisions", "decision", "decisions"),
-        ("vericairn.records/work-orders", "work-order", "work"),
-        ("vericairn.records/releases", "release", "releases"),
-        ("vericairn.estate/policies", "estate-policy", "policies"),
-        ("vericairn.estate/policy-exceptions", "policy-exception", "policy-exceptions"),
-        ("vericairn.estate/writing-exceptions", "writing-exception", "writing-exceptions"),
+        ("vericairn.records/decisions", "decision", "decisions", DecisionsImplementation),
+        ("vericairn.records/work-orders", "work-order", "work", WorkOrdersImplementation),
+        ("vericairn.records/releases", "release", "releases", ReleasesImplementation),
+        ("vericairn.estate/policies", "estate-policy", "policies", PoliciesImplementation),
+        ("vericairn.estate/policy-exceptions", "policy-exception", "policy-exceptions", PolicyExceptionsImplementation),
+        ("vericairn.estate/writing-exceptions", "writing-exception", "writing-exceptions", WritingExceptionsImplementation),
     ];
 
     internal RevisionCompanionGenerator(string id)
     {
         var register = Registers.Single(r => r.Id == id);
         Id = id;
-        Descriptor = new(id, 1, "vericairn.records/companions/1", CompanionImplementation.Hash,
+        Descriptor = new(id, 1, register.Implementation, CompanionImplementation.Hash(register.Implementation),
             new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"], ["selection"] = ["all-revisions", "current"] }.ToImmutableDictionary(StringComparer.Ordinal),
             [register.Type], ["record"], ["item", "list", "all-revisions", "current"], "text/markdown", "Source UTC time then ordinal revision identity; nested arrays retain recorded order", "Internal", "record-revision")
         {

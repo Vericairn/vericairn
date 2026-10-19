@@ -12,9 +12,10 @@ namespace Vericairn.Records.Estate;
 internal sealed class RecordCompanionGenerator : IDocumentGenerator
 {
     internal const string Name = "vericairn.records/items";
+    private const string Implementation = "vericairn.records/readers/2";
     public string Id => Name;
-    public DocumentGeneratorDescriptor Descriptor { get; } = new(Name, 1, "vericairn.records/readers/1",
-        CompanionImplementation.Hash,
+    public DocumentGeneratorDescriptor Descriptor { get; } = new(Name, 1, Implementation,
+        CompanionImplementation.Hash(Implementation),
         new Dictionary<string, ImmutableArray<string>>
         {
             ["audience"] = ["Internal"], ["selection"] = ["item", "list"], ["field"] = ["@text"], ["index"] = ["all", "@text"], ["page"] = ["@text"],

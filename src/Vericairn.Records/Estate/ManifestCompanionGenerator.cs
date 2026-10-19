@@ -13,13 +13,14 @@ namespace Vericairn.Records.Estate;
 internal sealed class ManifestCompanionGenerator : IDocumentGenerator
 {
     internal const string Name = "vericairn.estate/manifest";
+    private const string Implementation = "vericairn.estate/manifest/1";
     internal static readonly ImmutableArray<DocumentManagedKind> Inventory =
     [new("estate/manifest", "vericairn.estate-manifest/1"), new("estate/manifest#vericairn.artifacts", "vericairn.estate-manifest/1#vericairn.artifacts")];
     internal static IEnumerable<DocumentCoverageDescriptor> Coverage => Inventory.Select(k => new DocumentCoverageDescriptor(1, k.Id,
         "Read the exact runtime pin, storage profile, charter and artifact hashes, retaining original and current record formats.", new(Name, 1), new(Name, 1), k.InputSchema, "Internal", "on-demand"));
 
     public string Id => Name;
-    public DocumentGeneratorDescriptor Descriptor { get; } = new(Name, 1, "vericairn.records/companions/1", CompanionImplementation.Hash,
+    public DocumentGeneratorDescriptor Descriptor { get; } = new(Name, 1, Implementation, CompanionImplementation.Hash(Implementation),
         new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"] }.ToImmutableDictionary(StringComparer.Ordinal),
         ["estate", "migration"], ["estate-manifest", "record"], ["item", "list"], "text/markdown",
         "Manifest fields then charter basis and UTC migration history; artifact platforms ordinal", "Internal", "single") { AllowsRepositoryOutput = false };

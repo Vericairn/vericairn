@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Reading/*.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <!-- The CLI consumes restore findings from the same archive used for extraction. -->
     <InternalsVisibleTo Include="vericairn" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />

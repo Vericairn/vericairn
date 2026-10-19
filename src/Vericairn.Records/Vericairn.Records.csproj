@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Estate/*Companion*.cs;Estate/RecordCollections.cs;Estate/Document*.cs;Types/*.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="Vericairn.Records.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
     <InternalsVisibleTo Include="Vericairn.Runtime" />

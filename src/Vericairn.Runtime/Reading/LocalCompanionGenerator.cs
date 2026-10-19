@@ -3,12 +3,10 @@
 
 using System.Collections.Immutable;
 using System.Globalization;
-using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
-using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Runtime.Reading;
@@ -16,8 +14,9 @@ namespace Vericairn.Runtime.Reading;
 /// <summary>The shared local metadata renderer accepts only an already projected, canonical snapshot.</summary>
 internal sealed class LocalCompanionGenerator : IDocumentGenerator
 {
+    private const string Implementation = "vericairn.runtime/local-readers/2";
     public string Id => "vericairn.local/inspectors";
-    public DocumentGeneratorDescriptor Descriptor { get; } = new("vericairn.local/inspectors", 1, "vericairn.runtime/local-readers/1", ImplementationHash(),
+    public DocumentGeneratorDescriptor Descriptor { get; } = new("vericairn.local/inspectors", 1, Implementation, CompanionImplementation.Hash(Implementation),
         new Dictionary<string, ImmutableArray<string>> { ["audience"] = ["Internal"], ["selection"] = ["item", "list"], ["field"] = ["@text"], ["index"] = ["all", "@text"], ["page"] = ["@text"] }.ToImmutableDictionary(StringComparer.Ordinal),
         [], ["local-inspection"], ["item", "list"], "text/markdown", "Canonical redacted metadata order; nested observations retain source order", "Internal", "single") { AllowsRepositoryOutput = false };
 
@@ -64,19 +63,5 @@ internal sealed class LocalCompanionGenerator : IDocumentGenerator
         if (unknown) header += "Some selected collection metadata is unknown or withheld; this is not a complete collection claim.\n\n";
         return RecordCompanionGenerator.Pages(header, items.Length == 0 ? [unknown ? "Collection unknown or withheld.\n\n" : "None (complete selected metadata list).\n\n"]
             : items.SelectMany((item, index) => RecordCompanionText.Value(item, "Item " + (index + 1).ToString(CultureInfo.InvariantCulture))), page);
-    }
-
-    private static string ImplementationHash()
-    {
-        var assembly = typeof(LocalCompanionGenerator).Assembly;
-        var basis = new StringBuilder(CompanionImplementation.Hash);
-        basis.Append(CanonicalJson.Serialize(JsonSerializer.SerializeToElement(Vericairn.Protocol.OpenApiDocument.Routes.Select(r => new { method = r.Method, path = r.Path }).OrderBy(r => r.method, StringComparer.Ordinal).ThenBy(r => r.path, StringComparer.Ordinal))));
-        foreach (string name in assembly.GetManifestResourceNames().Where(n => n.EndsWith(".cs", StringComparison.Ordinal)).Order(StringComparer.Ordinal))
-        {
-            using Stream stream = assembly.GetManifestResourceStream(name)!;
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            basis.Append(name).Append('\n').Append(reader.ReadToEnd().Replace("\r\n", "\n", StringComparison.Ordinal)).Append('\0');
-        }
-        return ContentHash.Sha256(Encoding.UTF8.GetBytes(basis.ToString()));
     }
 }
