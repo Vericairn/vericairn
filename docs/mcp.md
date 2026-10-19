@@ -3,6 +3,13 @@
 The development build for 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
 `policy_evaluate`, `writing_exceptions_list` and `writing_exception_show`.
 They return the same basis, findings, duty evidence and writing locations as the API.
+`release_basis_get` reads a retained release-admission evidence hash, including the original
+source bytes, duty findings and exact proof references. It creates no record and grants no authority.
+`work_result` preserves optional `duties` with their exact scope and proof bindings; those submissions
+require `expected`, the current attempt hash. The admitted `work_review` tool takes `result`,
+`expected` (the current result hash) and the ordinary review `body`, including exact `read` references.
+The runtime signs as the connection principal and validates the evidence and review independence.
+Neither tool accepts work or a release. See [duty evidence transport](policies.md).
 `policy_evaluate` accepts optional `asOf` and `release` preview inputs. Reads create no record
 and offer no release acceptance operation. See [Inspecting estate policies](policies.md).
 

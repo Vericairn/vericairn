@@ -13,7 +13,7 @@ using Vericairn.Records.Types;
 namespace Vericairn.Runtime.Policies;
 
 internal sealed record PolicyFile(string Path, string Hash, ImmutableArray<byte> Bytes, bool Available = true, bool IsLink = false);
-internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files);
+internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files, bool Evidence = false);
 internal sealed record PolicyObject(string Hash, ImmutableArray<byte> Bytes, bool Available = true);
 internal sealed record PolicyImplementation(string Kind, int Version, string Digest);
 internal sealed record PolicySubmission(RecordReference? Release, string Product, string Version, string Commit,
@@ -52,7 +52,7 @@ internal sealed class PolicyBasis
         Repositories = (repositories ?? []).Select(r => r with { Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
                 .ThenBy(f => f.Available).ThenBy(f => f.IsLink).ThenBy(f => ContentHash.Sha256(f.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray() })
             .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ThenBy(r => r.Contract, StringComparer.Ordinal).ThenBy(r => r.Complete)
-            .ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ToImmutableArray();
+            .ThenBy(r => r.Evidence).ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ToImmutableArray();
         Objects = (objects ?? []).OrderBy(o => o.Hash, StringComparer.Ordinal).ThenBy(o => o.Available).ThenBy(o => ContentHash.Sha256(o.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray();
         Implementations = (implementations ?? []).OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Version).ThenBy(i => i.Digest, StringComparer.Ordinal).ToImmutableArray();
         AsOf = asOf;
@@ -64,7 +64,7 @@ internal sealed class PolicyBasis
         {
             contract = Contract, scanner = WritingScanner.Contract, RecordDigest, Findings, complete, asOf, origin, submission,
             successors = Model.SupersededBy.OrderBy(p => p.Key, StringComparer.Ordinal),
-            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
+            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, r.Evidence, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
         });

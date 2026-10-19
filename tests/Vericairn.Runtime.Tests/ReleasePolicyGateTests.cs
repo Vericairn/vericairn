@@ -3,6 +3,9 @@
 
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Net;
+using System.Net.Http.Json;
+using Vericairn.Mcp;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
@@ -11,6 +14,7 @@ using Vericairn.Runtime.Policies;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Release;
 using Vericairn.Runtime.Service;
+using Vericairn.Sdk;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -115,10 +119,12 @@ public sealed class ReleasePolicyGateTests
     }
 
     [Fact]
-    public void APassingSubmissionRetainsExactInputsAndRechecksWithoutHashingItsOwnIntent()
+    public async Task APassingSubmissionRetainsExactInputsAndRechecksWithoutHashingItsOwnIntent()
     {
         using var f = new Fixture();
         f.Duty();
+        Directory.CreateDirectory(Path.Combine(f.Records.Estate.Root, "docs"));
+        File.WriteAllText(Path.Combine(f.Records.Estate.Root, "docs", "evidence.md"), "Retained admission source.\n");
         f.Api.ReleaseBoundary = stage => { if (stage == "before-dispatch") f.Clock.Now = f.Clock.Now.AddSeconds(1); };
         ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
         Assert.True(response.Ok, response.Message);
@@ -139,8 +145,31 @@ public sealed class ReleasePolicyGateTests
             string digest = basis.GetProperty("recordDigest").GetString()!;
             Assert.True(recordDigest is null || recordDigest == digest);
             recordDigest = digest;
+            int before = f.Api.Session.Load().Records.Count;
+            ReleaseBasisResponse retained = f.Api.ReleaseBasis(hash)!;
+            Assert.NotNull(retained);
+            Assert.Equal(digest, retained.Evidence.Basis.RecordDigest);
+            Assert.Equal(Fixture.Commit, retained.Evidence.Basis.Submission!.Commit);
+            Assert.Equal("Retained admission source.\n", System.Text.Encoding.UTF8.GetString(Assert.Single(retained.Evidence.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray()));
+            using var client = new VericairnClient(new HttpClient(new BasisHandler(retained)) { BaseAddress = new Uri("http://fixture.invalid") });
+            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(client.ReleaseBasis(hash), ProtocolJson.Options));
+            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(await client.ReleaseBasisAsync(hash, TestContext.Current.CancellationToken), ProtocolJson.Options));
+            ToolCallResult read = await new ToolRegistry(f.Api, null).CallAsync("release_basis_get", new() { ["hash"] = hash }, TestContext.Current.CancellationToken);
+            Assert.False(read.IsError, read.Text);
+            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), read.Text);
+            Assert.Equal(before, f.Api.Session.Load().Records.Count);
         }
+        Assert.Null(f.Api.ReleaseBasis("unavailable"));
         Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    private sealed class BasisHandler(ReleaseBasisResponse basis) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal("/v1/release-bases/" + Uri.EscapeDataString(basis.Hash), request.RequestUri!.AbsolutePath);
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent.Create(basis, options: ProtocolJson.Options) });
+        }
     }
 
     [Fact]

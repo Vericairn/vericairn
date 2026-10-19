@@ -169,8 +169,9 @@ public sealed record WorkProgressResponse(WorkProgressClaim? Claim, RecordWritte
 /// <summary>Submit the result of an attempt.</summary>
 /// <param name="Attempt">Attempt id.</param>
 /// <param name="By">The contributor.</param>
-/// <param name="Body">Result body.</param>
-public sealed record ResultRequest(string Attempt, string By, JsonElement Body);
+/// <param name="Body">Result body, including exact duty bindings when supplied.</param>
+/// <param name="Expected">Expected current attempt hash; required for a duty result.</param>
+public sealed record ResultRequest(string Attempt, string By, JsonElement Body, string? Expected = null);
 
 /// <summary>Request an amendment of an assignment.</summary>
 /// <param name="Assignment">Assignment id.</param>

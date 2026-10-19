@@ -260,8 +260,14 @@ public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken can
     /// <inheritdoc />
     public WriteOutcome Result(ResultRequest request) => inner.ResultAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    public WriteOutcome ReviewResult(ResultReviewRequest request) => inner.ReviewResultAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
     /// <inheritdoc />
     public Task<WriteOutcome> ResultAsync(ResultRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ResultAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    public Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ReviewResultAsync(request, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
     public WriteOutcome Amend(AmendRequest request) => inner.AmendAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
@@ -544,4 +550,9 @@ public sealed class CancellationBoundApi(IEstateApi inner, CancellationToken can
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, requestCancellation);
         return await call(linked.Token).ConfigureAwait(false);
     }
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    public ReleaseBasisResponse? ReleaseBasis(string hash) => inner.ReleaseBasisAsync(hash, cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ReleaseBasisAsync(hash, token), cancellationToken);
 }

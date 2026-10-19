@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 2, October 19, 2026. Describe reads, signed authoring, shared views and release admission in the development build for 0.8.0.
+Revision 3, October 19, 2026. Describe reads, signed authoring, shared views, release admission and exact duty evidence in the development build for 0.8.0.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -55,5 +55,23 @@ The runtime supplies fresh time at preparation, intent and before dispatch. It r
 Admitted operation evidence retains `vericairn.release-basis/1` objects with the complete policy and duty findings, source bytes and hashes, record digest, exact target and submission time. Preparation remains retained if a later evaluation differs. Pre-dispatch evaluation excludes only that submission's own new operation revisions and pins those exclusions separately, avoiding a circular hash while retaining unrelated changes. API and SDK release responses expose `policies` and `basisEvidence`; CLI JSON preserves them on refusal too. These are ordinary evidence objects, without new record fields. Generic release-intent and publication authoring also passes the shared gate.
 
 Providers receive the prepared commit as `DispatchRequest.ExpectedCommit` and must refuse a moved ref before starting a build. GitHub checks that ref at dispatch; observation checks the commit actually built again before admitting a candidate. A remote branch can still move after dispatch, so an observed effect remains under its original identity and is never represented as undone by a later policy refusal. Publication remains the operator's separate action. MCP exposes no release-admission or acceptance shortcut.
+
+Duty completion uses the ordinary result and review records supplied by record format 3:
+
+| Command | API operation | SDK method | MCP tool |
+|---|---|---|---|
+| `work result <attempt> --body <file> --expected <attempt-hash> --by <principal>` | `POST /v1/work/result` | `Result`, `ResultAsync` | `work_result` |
+| `work review <result> --body <file> --expected <result-hash> --by <principal>` | `POST /v1/work/review` | `ReviewResult`, `ReviewResultAsync` | `work_review` |
+| `release basis <hash>` | `GET /v1/release-bases/{hash}` | `ReleaseBasis`, `ReleaseBasisAsync` | `release_basis_get` |
+
+The complete result body carries `duties`. Each binding pins the originating policy revision, rule, tagged occurrence and examined subject revision. It includes `scope.repositories` with exact resource revisions and commits, `scope.objects`, `scope.records`, a coverage statement and each declared proof clause's ordered exact records. A clause checking the result itself uses `{clause, kind: "result-verification"}`: submit the result, record the verification about its exact hash, then review that result with the verification's exact reference in `read`. A passing review without the required exact verification in `read` leaves the duty incomplete. A later adverse or superseding proof can reopen it. No command marks a duty done or records acceptance.
+
+Protocol clients can serialize `ResultDutyDto`, `DutyOccurrenceDto`, `DutyScopeDto`, `DutyRepositoryDto` and `DutyProofDto` into the existing result body's `duties` array. `ResultReviewBody` contains ordinary review fields and typed exact `read` references. Optional fields in the tagged occurrence and proof types are omitted when absent, preserving the strict record shape. Request bodies remain complete JSON objects so unknown or malformed fields reach server validation instead of being silently discarded.
+
+A duty result requires the expected current attempt hash; every `work review` requires the expected current result hash. The server signs as the acting principal with fresh time, validates the full proposed records and re-evaluates the policy sources. Generic authoring of duty results and reviews applies the same checks and refuses supplied historical authoring times. Ordinary results without duties retain their existing submission contract; supplying `expected` opts into the signed current-attempt check. MCP binds authorship to its admitted connection principal and rechecks that admission at the call.
+
+The evaluator loads each declared historical repository commit separately from the current source inventory. A later HEAD or working-tree edit does not replace completion evidence; missing exact history remains unavailable. Historical proof bytes are labelled `evidence` in the basis and do not add obsolete prose to current writing counts.
+
+`release basis` reads an existing evidence object without writing a record. Its typed `ReleaseBasisResponse` contains the original record set, source and proof bytes, policy and duty findings, document comparisons and excluded operation revisions. The CLI's human view names the evidence hash, basis and findings; `--json`, API, SDK and MCP preserve the complete snapshot. Missing or unsupported objects are unavailable. This historical read does not re-authorize submission: every new submission still re-evaluates live sources and time.
 
 The record schemas and authority rules are described in [record format 3](record-format-v3.md), and the evaluation contract in [Policy evaluator](policy-evaluator.md).

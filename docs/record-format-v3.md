@@ -10,8 +10,8 @@ exceptions, completed duties or renewal dates. The upgrade appends its migration
 manifest after all migration steps succeed. Reapplying an already installed target is a no-op. A failed step
 or refused migration record restores the previous repository files. Tests exercise disposable fixtures only.
 
-Policy evaluation, finding projections and policy-specific CLI, API and Workbench flows belong to POLICY-02
-and POLICY-03. An unrecognized rule contribution is retained as data; the record schema does not certify
+Policy evaluation and the CLI, API, SDK and MCP policy flows are described in [Estate policies](policies.md).
+Workbench's policy inspector remains separate work. An unrecognized rule contribution is retained as data; the record schema does not certify
 that the rule ran or passed. This change does not declare any policy in an existing estate.
 
 ## Definitions and authority

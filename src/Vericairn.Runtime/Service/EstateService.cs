@@ -274,14 +274,18 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         }
 
         var draft = new RecordDraft(request.Type, request.By, request.Body, subject, request.Supersedes, at, request.Id);
-        if (IsPolicyWrite(draft) || IsReleaseSubmission(draft) && session.Manifest.RecordFormat >= 3)
+        if (IsPolicyWrite(draft) || IsReleaseSubmission(draft) && session.Manifest.RecordFormat >= 3 || request.Type is "result" or "review")
         {
             lock (gate)
             {
                 EstateModel model = session.Load();
-                if (request.At is not null || request.Id is not null) return Refuse("Policy and release submission authoring uses the runtime's fresh time and record identity.");
+                bool dutyEvidence = IsDutyEvidence(draft, model);
+                if (request.Type is "result" or "review" && !dutyEvidence) return WriteLocked(draft, model);
+                if (request.At is not null || request.Id is not null) return Refuse("Policy, duty evidence and release submission authoring uses the runtime's fresh time and record identity.");
+                if (dutyEvidence && (subject is null || !model.ById.TryGetValue(subject.Id, out RecordEnvelope? evidenceSubject) ||
+                    !model.IsCurrent(evidenceSubject) || subject != evidenceSubject.Reference)) return PolicyConflict();
                 string? expected = request.Supersedes is { } prior ? model.ById.GetValueOrDefault(prior)?.ComputedHash
-                    : request.Type == "policy-exception" ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
+                    : request.Type == "policy-exception" || dutyEvidence ? subject?.Hash : Vericairn.Runtime.Policies.PolicyBasis.Hash(request.Body);
                 if (expected is null || request.Expected != expected) return PolicyConflict();
                 return SignedPolicyWrite(draft, model);
             }
@@ -411,7 +415,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public WriteOutcome Result(ResultRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return About("result", "attempt", request.Attempt, request.By, request.Body);
+        return HasDuties(request.Body) || request.Expected is not null
+            ? SignedEvidenceAbout("result", "attempt", request.Attempt, request.By, request.Body, request.Expected)
+            : About("result", "attempt", request.Attempt, request.By, request.Body);
     }
 
     /// <inheritdoc />

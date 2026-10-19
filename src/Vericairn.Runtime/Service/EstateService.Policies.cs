@@ -124,9 +124,36 @@ public sealed partial class EstateService
                 ?? new(identity, commit ?? "unavailable", PolicyBasis.RepositoryContract, false, []);
             repositories.Add(inventory);
         }
+        // Completion evidence keeps its own exact historical commits, independently of live release inputs.
+        foreach (JsonElement source in model.OfType("result").SelectMany(r => PolicyInputs.Items(PolicyInputs.Get(r.Body, "duties")))
+            .SelectMany(d => PolicyInputs.Items(PolicyInputs.Get(PolicyInputs.Get(d, "scope"), "repositories"))))
+        {
+            JsonElement reference = PolicyInputs.Get(source, "record");
+            string? id = PolicyInputs.Text(reference, "id"), commit = PolicyInputs.Text(source, "commit");
+            if (id is null || commit is null || !model.ById.TryGetValue(id, out RecordEnvelope? resource) || resource.Type != "resource" ||
+                resource.ComputedHash != PolicyInputs.Text(reference, "hash")) continue;
+            string identity = PolicyWork.Identity(model, resource);
+            if (repositories.Any(r => r.Identity == identity && r.Revision == commit)) continue;
+            PolicyRepository inventory = PolicySources.RepositorySource?.Read(model, resource, commit)
+                ?? new(identity, commit, PolicyBasis.RepositoryContract, false, []);
+            repositories.Add(inventory with { Evidence = true });
+        }
         List<PolicyObject> objects = [];
         HashSet<string> hashes = [];
-        foreach (RecordEnvelope record in model.Records) FindObjects(record.Body);
+        HashSet<string> proofs = model.OfType("result").SelectMany(r => PolicyInputs.Items(PolicyInputs.Get(r.Body, "duties")))
+            .SelectMany(d => PolicyInputs.Items(PolicyInputs.Get(d, "proofs"))).SelectMany(p => PolicyInputs.Items(PolicyInputs.Get(p, "records")))
+            .Select(r => PolicyInputs.Text(r, "id")).OfType<string>().ToHashSet(StringComparer.Ordinal);
+        foreach (RecordEnvelope record in model.Records)
+        {
+            if (record.Type == "result")
+            {
+                FindObjects(PolicyInputs.Get(record.Body, "outputs"));
+                foreach (JsonElement duty in PolicyInputs.Items(PolicyInputs.Get(record.Body, "duties")))
+                foreach (JsonElement hash in PolicyInputs.Items(PolicyInputs.Get(PolicyInputs.Get(duty, "scope"), "objects")))
+                    if (hash.ValueKind == JsonValueKind.String && ContentHash.IsValid(hash.GetString())) hashes.Add(hash.GetString()!);
+            }
+            if (record.Type is "result" or "verification" || proofs.Contains(record.Id)) FindObjects(PolicyInputs.Get(record.Body, "evidence"));
+        }
         foreach (string hash in hashes.Order(StringComparer.Ordinal))
         {
             try
@@ -154,9 +181,8 @@ public sealed partial class EstateService
         }
         void FindObjects(JsonElement value)
         {
-            if (value.ValueKind == JsonValueKind.String && ContentHash.IsValid(value.GetString())) hashes.Add(value.GetString()!);
-            else if (value.ValueKind == JsonValueKind.Object) foreach (JsonProperty property in value.EnumerateObject()) FindObjects(property.Value);
-            else if (value.ValueKind == JsonValueKind.Array) foreach (JsonElement item in value.EnumerateArray()) FindObjects(item);
+            foreach (JsonElement item in PolicyInputs.Items(value))
+                if (PolicyInputs.Text(item, "hash") is { } hash && ContentHash.IsValid(hash)) hashes.Add(hash);
         }
     }
 
@@ -187,5 +213,5 @@ public sealed partial class EstateService
     private static FindingDto PolicyDiagnostic(Finding finding) => new(finding.Severity.ToString().ToLowerInvariant(), finding.Code, finding.Location, finding.Message);
     private static PolicyBasisDto BasisView(PolicyBasis basis) => new(basis.Digest, basis.RecordDigest, basis.AsOf, basis.Origin.ToString().ToLowerInvariant(),
         basis.Submission is null ? null : ConvertPolicy<PolicySubmissionDto>(basis.Submission), basis.Repositories.Select(r => new PolicyRepositoryDto(r.Identity, r.Revision, r.Contract, r.Complete,
-            r.Files.Select(f => new PolicyFileDto(f.Path, f.Hash, f.Available, f.IsLink)).ToArray())).ToArray(), basis.Objects.Select(o => o.Hash).ToArray(), basis.Implementations.Select(ConvertPolicy<PolicyImplementationDto>).ToArray());
+            r.Files.Select(f => new PolicyFileDto(f.Path, f.Hash, f.Available, f.IsLink)).ToArray(), r.Evidence)).ToArray(), basis.Objects.Select(o => o.Hash).ToArray(), basis.Implementations.Select(ConvertPolicy<PolicyImplementationDto>).ToArray());
 }

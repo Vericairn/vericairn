@@ -34,7 +34,7 @@ public sealed record PolicySubmissionDto(PolicyRecordReference? Release, string 
     IReadOnlyList<string>? Repositories = null, IReadOnlyList<string>? WorkOrders = null);
 
 /// <summary>A repository inventory identity without machine paths or source bytes.</summary>
-public sealed record PolicyRepositoryDto(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<PolicyFileDto> Files);
+public sealed record PolicyRepositoryDto(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<PolicyFileDto> Files, bool Evidence = false);
 
 /// <summary>Exact source content identity and availability.</summary>
 public sealed record PolicyFileDto(string Path, string Hash, bool Available, bool IsLink);

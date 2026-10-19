@@ -176,7 +176,7 @@ internal sealed partial class DutyProofEvaluation
         {
             RecordEnvelope repository = Exact(Model, Get(source, "record"));
             references.Add(repository.Reference);
-            PolicyRepository inventory = Repository(context.Basis, PolicyWork.Identity(Model, repository));
+            PolicyRepository inventory = Repository(context.Basis, PolicyWork.Identity(Model, repository), Text(source, "commit"));
             if (inventory.Revision != Text(source, "commit") || inventory.Files.Any(f => !f.Available || ContentHash.Sha256(f.Bytes.AsSpan()) != f.Hash))
                 throw new PolicyInputException("The result's exact repository commit or retained source bytes are unavailable.");
         }

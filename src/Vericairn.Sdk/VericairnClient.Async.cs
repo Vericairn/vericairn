@@ -232,6 +232,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> ResultAsync(ResultRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<WriteOutcome>(nameof(Result), async token => (await PostAsync<ResultRequest, WriteOutcome>("/v1/work/result", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Result)), cancellationToken);
 
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    public Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<WriteOutcome>(nameof(ReviewResult), async token => (await PostAsync<ResultReviewRequest, WriteOutcome>("/v1/work/review", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(ReviewResult)), cancellationToken);
+
     /// <summary>The cancellable Amend operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunAsync<WriteOutcome>(nameof(Amend), async token => (await PostAsync<AmendRequest, WriteOutcome>("/v1/work/amend", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Amend)), cancellationToken);
@@ -569,4 +573,7 @@ public sealed partial class VericairnClient
             throw UnreadableRefusal(response, exception);
         }
     }
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
 }

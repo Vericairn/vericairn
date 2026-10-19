@@ -13,6 +13,7 @@ internal sealed class ReleaseCommand : Command
         Subcommands.Add(new ReleaseListCommand(context));
         Subcommands.Add(new ReleaseProvidersCommand(context));
         Subcommands.Add(new ReleaseSubmitCommand(context));
+        Subcommands.Add(new ReleaseBasisCommand(context));
         Subcommands.Add(new ReleaseObserveCommand(context));
     }
 }

@@ -41,7 +41,7 @@ public class PolicyCanonicalVectorTests
         PolicyEvaluation evaluation = PolicyEvaluator.Evaluate(basis, Kinds);
         Assert.Equal(10, evaluation.Findings.Length);
         Assert.Equal(2, WritingEvaluation.Evaluate(basis).WarningCount);
-        Check(basis, "sha256:bf686c9b10a2c1ec27bdf0152f58f9a577d26c7b0f83a51d6f89fabc714aa358", writing: true);
+        Check(basis, "sha256:b2f2e081f4f83c50e17b7814e78e5a0411f1f6cf3e7e38e402cb680e934d0985", writing: true);
     }
 
     [Fact]
@@ -74,7 +74,7 @@ public class PolicyCanonicalVectorTests
                     basis.Repositories.Reverse().Select(r => r with { Files = [.. r.Files.Reverse()] }), implementations: basis.Implementations.Reverse());
                 PolicyEvaluation policy = PolicyEvaluator.Evaluate(reversed, Kinds);
                 string actual = writing ? PolicyBasis.Hash(new { policy, writing = WritingEvaluation.Evaluate(reversed) }) : PolicyBasis.Hash(policy);
-                Assert.Equal(expected, actual);
+                Assert.True(expected == actual, $"Expected {expected}; actual {actual} in {name}.");
             }
         }
         finally { CultureInfo.CurrentCulture = saved; CultureInfo.CurrentUICulture = savedUi; }

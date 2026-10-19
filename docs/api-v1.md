@@ -5,6 +5,14 @@ The development build for 0.8.0 adds policy and writing-exception reads under
 lists every route and SDK method, their asynchronous counterparts, explicit preview inputs,
 typed duty evidence and read-only behavior. These additions do not change a frozen release set.
 
+Duty result submission preserves the complete `body.duties` array and requires `expected`, the current
+attempt hash, at `POST /v1/work/result`. `POST /v1/work/review` takes `ResultReviewRequest`: `result`,
+`by`, `body` and `expected`, the current result hash. It signs an ordinary result review with its exact
+`read` evidence; it records no acceptance. `GET /v1/release-bases/{hash}` returns `ReleaseBasisResponse`
+with the retained original basis, bytes and findings, or 404 for a missing or unsupported object.
+The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
+and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
+
 This maintained document describes 0.7.3: independent worker repositories (FIX-19), machine-local
 release notices (UPDATE-01), command-audit corrections (FIX-20), safe concurrent use of loaded and
 rotated TLS certificates (FIX-21), and compact current attention (FIX-22). Release checks add no estate

@@ -60,6 +60,8 @@ public static class ApiRoutes
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
         app.MapPost($"{v}/work/progress", (WorkProgressRequest request) => Results.Json(service.WorkProgress(request), ProtocolJson.Options));
         app.MapPost($"{v}/work/result", (ResultRequest request) => Outcome(service.Result(request)));
+        app.MapGet($"{v}/release-bases/{{hash}}", (string hash) => service.ReleaseBasis(hash) is { } basis ? Results.Ok(basis) : Results.NotFound());
+        app.MapPost($"{v}/work/review", (ResultReviewRequest request) => Outcome(service.ReviewResult(request)));
         app.MapPost($"{v}/work/amend", (AmendRequest request) => Outcome(service.Amend(request)));
         app.MapPost($"{v}/work/takeover", (TakeoverRequest request) => Results.Json(service.WorkTakeover(request), ProtocolJson.Options));
         app.MapGet($"{v}/devices", () => Results.Json(service.Devices(), ProtocolJson.Options));

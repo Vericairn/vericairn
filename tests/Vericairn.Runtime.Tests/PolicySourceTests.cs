@@ -9,11 +9,59 @@ using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Policies;
+using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
 
 public sealed class PolicySourceTests
 {
+    [Fact]
+    public void HistoricalDutyEvidenceKeepsItsCommitWhenTheWorkingRepositoryChanges()
+    {
+        using var fixture = new PolicyFixture();
+        string clone = Path.Combine(fixture.Estate.Root, "fixture-repository");
+        Directory.CreateDirectory(clone);
+        Git(clone, "init", "--quiet");
+        string file = Path.Combine(clone, "guide.md");
+        File.WriteAllText(file, "Open311\n");
+        Git(clone, "add", "guide.md");
+        Git(clone, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--no-gpg-sign", "-m", "Prior evidence");
+        string commit = Git(clone, "rev-parse", "HEAD").Trim();
+        var repository = fixture.Add("resource", new JsonObject
+        {
+            ["kind"] = "repository", ["name"] = "Evidence repository", ["role"] = "Retain exact proof sources.",
+            ["location"] = new JsonObject { ["rootCommit"] = commit }, ["visibility"] = "private",
+        });
+        RepositoryClones.Register(fixture.Estate.Estate.Id, repository.Id, clone);
+        var policy = fixture.Policy();
+        fixture.Estate.SetClock(DateTimeOffset.Parse("2026-10-17T13:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
+        JsonObject link = fixture.DutyLink(policy);
+        link["scope"]!["repositories"] = new JsonArray(new JsonObject { ["record"] = PolicyFixture.Ref(repository), ["commit"] = commit });
+        var result = fixture.Result(link);
+        fixture.Review(result);
+        File.WriteAllText(file, "Current prose.\n");
+        Git(clone, "add", "guide.md");
+        Git(clone, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--no-gpg-sign", "-m", "Later source");
+        IPolicyRepositorySource? previous = PolicySources.RepositorySource;
+        try
+        {
+            PolicySources.RepositorySource = new GitPolicySource();
+            using var api = EstateService.Open(fixture.Estate.Root);
+            var evidence = api.Policy("maintenance")!;
+            Assert.True(Assert.Single(evidence.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!.Completed);
+            Assert.Equal(commit, Assert.Single(evidence.Basis.Repositories, r => r.Evidence && r.Identity == repository.Id).Revision);
+            Assert.DoesNotContain(api.WritingExceptions().Warnings, w => w.Location.Identity == repository.Id);
+            string basis = evidence.Basis.Digest;
+            File.WriteAllText(file, "Another current revision.\n");
+            Assert.NotEqual(basis, api.Policy("maintenance")!.Basis.Digest);
+            Assert.True(Assert.Single(api.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!.Completed);
+            // Missing exact history is unavailable, never inferred from today's bytes.
+            Directory.Move(clone, clone + "-unavailable");
+            Assert.Contains(api.Policy("maintenance")!.Findings, f => f.Verdict == "unavailable" && f.ReleaseHold);
+        }
+        finally { PolicySources.RepositorySource = previous; }
+    }
+
     [Fact]
     public void ExactCommitSourcesIgnoreWorkingTreeChangesAndNeverFetchMissingCommits()
     {

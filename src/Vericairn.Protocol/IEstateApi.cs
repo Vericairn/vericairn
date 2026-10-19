@@ -142,6 +142,9 @@ public partial interface IEstateApi
     /// <summary>Submit a result.</summary>
     WriteOutcome Result(ResultRequest request);
 
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    WriteOutcome ReviewResult(ResultReviewRequest request);
+
     /// <summary>Request an amendment.</summary>
     WriteOutcome Amend(AmendRequest request);
 
@@ -300,4 +303,6 @@ public partial interface IEstateApi
 
     /// <summary>Verify every object.</summary>
     FindingsResponse ObjectsVerify();
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    ReleaseBasisResponse? ReleaseBasis(string hash);
 }

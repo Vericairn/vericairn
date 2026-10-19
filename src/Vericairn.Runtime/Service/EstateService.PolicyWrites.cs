@@ -143,7 +143,7 @@ public sealed partial class EstateService
     // Called from the common authoring boundary, so generic record authoring receives the same evaluation.
     private Problem? JudgePolicySources(IReadOnlyList<AuthoredRecord> records, EstateModel proposed)
     {
-        if (!records.Any(r => r.Envelope.Type is "estate-policy" or "policy-exception" or "writing-exception" ||
+        if (!records.Any(r => r.Envelope.Type is "estate-policy" or "policy-exception" or "writing-exception" or "review" || r.Envelope.Type == "result" && HasDuties(r.Envelope.Body) ||
             r.Envelope.Type == "work-order" && PolicyInputs.Get(r.Envelope.Body, "placement").ValueKind != JsonValueKind.Undefined)) return null;
         PolicyKindRegistry registry = PolicySources.Registry();
         PolicyBasis basis = PolicySnapshot(proposed, registry);

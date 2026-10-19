@@ -28,8 +28,11 @@ internal sealed class WorkOperations(CommandContext context)
     public int WorkAttempt(string root, string assignmentId, string by, string workspace, string note, string? at, bool json) =>
         context.WithApi(root, api => context.ReportOutcome(api.Attempt(new AttemptRequest(assignmentId, by, workspace, note, at)), json));
 
-    public int WorkResult(string root, string attemptId, string by, string bodyPath, bool json) =>
-        context.WithBody(bodyPath, body => context.WithApi(root, api => context.ReportOutcome(api.Result(new ResultRequest(attemptId, by, body)), json)));
+    public int WorkResult(string root, string attemptId, string by, string bodyPath, string? expected, bool json) =>
+        context.WithBody(bodyPath, body => context.WithApi(root, api => context.ReportOutcome(api.Result(new ResultRequest(attemptId, by, body, expected)), json)));
+
+    public int WorkReview(string root, string resultId, string by, string bodyPath, string expected, bool json) =>
+        context.WithBody(bodyPath, body => context.WithApi(root, api => context.ReportOutcome(api.ReviewResult(new ResultReviewRequest(resultId, by, body, expected)), json)));
 
     public int WorkAmend(string root, string assignmentId, string by, string bodyPath, bool json) =>
         context.WithBody(bodyPath, body => context.WithApi(root, api => context.ReportOutcome(api.Amend(new AmendRequest(assignmentId, by, body)), json)));

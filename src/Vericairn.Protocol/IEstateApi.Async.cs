@@ -173,6 +173,10 @@ public partial interface IEstateApi
     Task<WriteOutcome> ResultAsync(ResultRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Result), () => Result(request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>Review an exact result revision, including the evidence read; this records no acceptance.</summary>
+    Task<WriteOutcome> ReviewResultAsync(ResultReviewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ReviewResult), () => ReviewResult(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Amend"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> AmendAsync(AmendRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Amend), () => Amend(request), true, this as IClientOperationLifetime, cancellationToken);
@@ -357,4 +361,7 @@ public partial interface IEstateApi
     Task<FindingsResponse> ObjectsVerifyAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(ObjectsVerify), () => ObjectsVerify(), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(ReleaseBasis), () => ReleaseBasis(hash), false, this as IClientOperationLifetime, cancellationToken);
 }

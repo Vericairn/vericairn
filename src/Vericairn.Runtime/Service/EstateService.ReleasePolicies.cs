@@ -16,6 +16,22 @@ internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluati
 
 public sealed partial class EstateService
 {
+    /// <inheritdoc />
+    public ReleaseBasisResponse? ReleaseBasis(string hash)
+    {
+        if (!Vericairn.Records.Hashing.ContentHash.IsValid(hash)) return null;
+        byte[]? bytes = ObjectGet(hash);
+        if (bytes is null) return null;
+        try
+        {
+            ReleaseBasisEvidence? evidence = JsonSerializer.Deserialize<ReleaseBasisEvidence>(bytes, ProtocolJson.Options);
+            return evidence is { Format: "vericairn.release-basis/1", Basis: not null, Policies: not null,
+                Records: not null, Repositories: not null, Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }
+                ? new(hash, evidence) : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
     // Tests can change the clock or sources at an actual boundary; no production caller supplies an evaluation verdict.
     internal Action<string>? ReleaseBoundary { get; set; }
 
