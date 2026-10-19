@@ -2,7 +2,7 @@
 
 Revision 2, October 18, 2026. Define the retained reference inventory used by document checks, readable companions and reference-coverage policies.
 
-The development build for 0.8.0 adds `vericairn docs companions` and
+Vericairn 0.8.0 adds `vericairn docs companions` and
 `vericairn docs render` to the command inventory, and `GET /v1/companions`,
 `GET /v1/companions/render`, `GET /v1/companions/sources` and
 `GET /v1/companions/compare` to the operation inventory. The compare-only flag

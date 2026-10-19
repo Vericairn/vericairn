@@ -1,6 +1,6 @@
 # Operator actions
 
-The next release adds `vericairn operator list`. It shows the complete queue of what the records say
+Vericairn 0.8.0 adds `vericairn operator list`. It shows the complete queue of what the records say
 waits on the estate's operators:
 
 ```sh

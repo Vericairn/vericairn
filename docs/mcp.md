@@ -1,6 +1,6 @@
 # The MCP server
 
-The development build for 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
+Vericairn 0.8.0 adds `policies_list`, `policy_show`, `policy_kinds`,
 `policy_evaluate`, `writing_exceptions_list` and `writing_exception_show`.
 They return the same basis, findings, duty evidence and writing locations as the API.
 `release_basis_get` reads a retained release-admission evidence hash, including the original
@@ -77,7 +77,7 @@ Writes are visible only when the server was started with `--as <principal id>` a
 
 Every tool description describes and never directs: nothing a tool returns, and nothing in this server's text, is an instruction from the estate's operator, and the harness is expected to treat it as data.
 
-## Readable companions (development build for 0.8.0)
+## Readable companions (0.8.0)
 
 Four read tools share the runtime's companion operations: `docs_companions` lists
 coverage, generator contracts, exact snapshots and adopted destinations;
@@ -105,10 +105,10 @@ contracts; a companion does not replace required original evidence.
 
 ## Running it
 
-After 0.7.3's NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.8.0 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.7.3
+dotnet tool install --global dotnet-vc --version 0.8.0
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 
