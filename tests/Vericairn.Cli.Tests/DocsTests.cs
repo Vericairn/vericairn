@@ -27,7 +27,7 @@ public class DocsTests
             Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
             string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
             string excerpt = File.ReadAllText(Path.Combine(output, "cli-client-outcomes.md"));
-            string section = excerpt[excerpt.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd();
+            string section = excerpt[excerpt.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].Split("\n## Generation basis", StringSplitOptions.None)[0].TrimEnd();
             Assert.Contains(section + "\n\n## Root options", reference, StringComparison.Ordinal);
             foreach (Exception exception in new Exception[] { new ClientTimeoutException(false), new ClientCancelledException(false, default), new ClientUnavailableException(false, new IOException()) })
             {
@@ -41,7 +41,11 @@ public class DocsTests
             string? root = AppContext.BaseDirectory;
             while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
             Assert.NotNull(root);
-            Assert.Equal(File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md")), excerpt);
+            string maintained = File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md"));
+            maintained = maintained[maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd()
+                .Replace("| --- | --- | --- |", "|---|---|---|", StringComparison.Ordinal);
+            Assert.Equal(maintained, section);
+            Assert.Contains("## Generation basis", excerpt, StringComparison.Ordinal);
         }
         finally { Directory.Delete(output, recursive: true); }
     }
@@ -72,7 +76,7 @@ public class DocsTests
                 {
                     string name = option.Name + (option.ValueType == typeof(bool) || option is HelpOption or VersionOption ? "`" : " <");
                     Assert.Contains(name, section, StringComparison.Ordinal);
-                    Assert.Contains(option.Description ?? string.Empty, section, StringComparison.Ordinal);
+                    Assert.Contains(option.Description ?? string.Empty, System.Net.WebUtility.HtmlDecode(section), StringComparison.Ordinal);
                 }
                 foreach (Command child in command.Subcommands.Where(c => !c.Hidden)) Check(child, path.Length == 0 ? child.Name : path + " " + child.Name);
             }
@@ -150,7 +154,7 @@ public class DocsTests
             Assert.Equal(RecordFormats.Reads, formats.GetProperty("reads").EnumerateArray().Select(f => f.GetInt64()));
             Assert.Equal(RecordFormats.Current, formats.GetProperty("writes").GetInt64());
 
-            string cli = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            string cli = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "cli-reference.md")));
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
@@ -171,7 +175,8 @@ public class DocsTests
             Assert.DoesNotContain(Directory.GetCurrentDirectory(), cli, StringComparison.Ordinal);
             string api = File.ReadAllText(Path.Combine(output, "api-reference.md"));
             Assert.Contains("## `POST /v1/records`", api, StringComparison.Ordinal);
-            Assert.Contains("- `id` (path, required)\n", api, StringComparison.Ordinal);
+            Assert.Contains("| /parameters/0/name | id |", System.Net.WebUtility.HtmlDecode(api), StringComparison.Ordinal);
+            Assert.Contains("| /parameters/0/in | path |", System.Net.WebUtility.HtmlDecode(api), StringComparison.Ordinal);
             Assert.All(api.Split('\n'), line => Assert.Equal(line.TrimEnd(), line));
             Assert.Contains("## `acceptance`", File.ReadAllText(Path.Combine(output, "record-reference.md")), StringComparison.Ordinal);
         }

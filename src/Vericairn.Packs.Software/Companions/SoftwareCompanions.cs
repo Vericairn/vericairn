@@ -21,7 +21,7 @@ public static class SoftwareCompanions
     /// <summary>The installed output contracts; source acquisition and publication are separate operations.</summary>
     public static ImmutableArray<IDocumentGenerator> Generators { get; } =
     [
-        new BuildReferenceCompanion("cli-reference"), new BuildReferenceCompanion("record-reference"),
+        new BuildReferenceCompanion("cli-reference"), new BuildReferenceCompanion("cli-client-outcomes"), new BuildReferenceCompanion("record-reference"),
         new BuildReferenceCompanion("api-reference"), new FrozenIndexCompanion(), new WorkflowCompanion(),
         new ComponentsCompanion(), new ChecksumsCompanion(), new ExportCompanion(), new ReferenceIndexCompanion(),
     ];

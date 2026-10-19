@@ -19,7 +19,7 @@ namespace Vericairn.DocsTool;
 /// and record references written from the build they document, the manifest listing the documents the product declares, and the
 /// comparison of a set with the build of its version.
 /// </summary>
-internal static class ReferenceSet
+internal static partial class ReferenceSet
 {
     /// <summary>The manifest format a set declares.</summary>
     public const string ManifestFormat = "vericairn.docs/1";
@@ -59,10 +59,11 @@ internal static class ReferenceSet
     }
 
     /// <summary>Writes the command-line, API and record references and the manifest of this build into a directory; the manifest lists the documents the product declares.</summary>
-    public static int Generate(string output, string declaration, bool json)
+    public static int Generate(string output, string declaration, bool json, string? provenanceAt = null)
     {
         try
         {
+            RefuseFrozen(output);
             List<string> documents;
             using (JsonDocument declared = JsonDocument.Parse(File.ReadAllBytes(declaration)))
             {
@@ -74,14 +75,7 @@ internal static class ReferenceSet
             string manifestPath = Path.Combine(output, "manifest.json");
             if (File.Exists(manifestPath))
             {
-                try
-                {
-                    notes = (JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject)?["notes"]?.DeepClone();
-                }
-                catch (JsonException)
-                {
-                    notes = null;
-                }
+                notes = (JsonNode.Parse(File.ReadAllText(manifestPath)) as JsonObject)?["notes"]?.DeepClone();
             }
 
             Directory.CreateDirectory(output);
@@ -90,12 +84,12 @@ internal static class ReferenceSet
             using JsonDocument api = JsonDocument.Parse(OpenApiDocument.Json);
             List<string> operations = Operations(api.RootElement);
             List<string> types = RecordTypeRegistry.All.Select(t => t.Name).ToList();
-            string date = DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            string at = ProvenanceAt(output, provenanceAt);
+            string date = at[..10];
+            Dictionary<string, byte[]> retained = BuildInputs(at);
+            JsonObject companions = WriteCompanions(output, retained, at);
 
-            Write(output, "cli-reference.md", CliReference(root, commands, date));
-            Write(output, "cli-client-outcomes.md", "# Generated CLI reference: client outcomes\n\nGenerated from `ClientFailure` by `vericairn-docs generate`.\n\n" + InterruptedClientRequests());
-            Write(output, "api-reference.md", ApiReference(api.RootElement, date));
-            Write(output, "record-reference.md", RecordReference(date));
+            SafeDestination(output, ReferenceInventoryFiles.Name);
             ReferenceInventoryFiles.Generate(output, Commit, commands.Select(c => "vericairn " + c.Path), operations, types);
             var manifest = new JsonObject
             {
@@ -106,6 +100,7 @@ internal static class ReferenceSet
                 ["generator"] = "vericairn-docs generate " + InformationalVersion,
                 ["recordFormat"] = BuildRecordFormat(),
                 ["referenceInventory"] = ReferenceInventoryFiles.Name,
+                ["companions"] = companions,
                 ["documents"] = new JsonArray(documents.Select(d => (JsonNode)d).ToArray()),
                 ["commands"] = new JsonArray(commands.Select(c => (JsonNode)c.Path).ToArray()),
                 ["operations"] = new JsonArray(operations.Select(o => (JsonNode)o).ToArray()),
@@ -116,6 +111,7 @@ internal static class ReferenceSet
                 manifest["notes"] = notes;
             }
 
+            WriteReferenceIndex(output, companions);
             Write(output, "manifest.json", manifest.ToJsonString(Indented));
 
             if (json)
@@ -163,6 +159,8 @@ internal static class ReferenceSet
                 findings.Add(new("error", "docs.reference-inventory", "manifest.json", "The set must name reference-inventory.json."));
             findings.AddRange(ReferenceInventoryFiles.Check(directory, Commit,
                 Walk(CliApp.Build(), string.Empty).Select(c => "vericairn " + c.Path), Operations(api.RootElement), RecordTypeRegistry.All.Select(t => t.Name)));
+
+            findings.AddRange(CompareCompanions(directory, manifest));
 
             // The release observer records the record formats the set states as the release's own, so they must be this build's.
             string built = DescribeFormats(BuildRecordFormat());
@@ -235,7 +233,7 @@ internal static class ReferenceSet
 
     private static string Display(Option option)
     {
-        IEnumerable<string> names = option.Aliases.OrderBy(a => a.Length).Append(option.Name);
+        IEnumerable<string> names = option.Aliases.OrderBy(a => a.Length).ThenBy(a => a, StringComparer.Ordinal).Append(option.Name);
         string text = string.Join(", ", names);
         if (option.ValueType != typeof(bool) && option is not HelpOption && option is not VersionOption)
         {
@@ -284,78 +282,6 @@ internal static class ReferenceSet
         return trimmed.Length == 0 || trimmed[^1] is '.' or '!' or '?' ? trimmed : trimmed + ".";
     }
 
-    private static string CliReference(RootCommand root, List<CommandDoc> commands, string date)
-    {
-        var lines = new List<string>
-        {
-            $"# Command-line reference, Vericairn {ReleaseVersion}",
-            string.Empty,
-            $"Generated by the build tooling (`vericairn-docs generate`) from the command tree of build {InformationalVersion} on {date}. Every command, verb and visible option is listed; nothing here is written by hand.",
-            string.Empty,
-            InterruptedClientRequests(),
-            string.Empty,
-            "## Root options",
-            string.Empty,
-            "Options declared on the root command. Those marked as applying to subcommands are also available under every command below.",
-            string.Empty,
-        };
-        lines.AddRange(root.Options.Where(o => !o.Hidden).Select(o => "- `" + Display(o) + "`: " + Describe(o)));
-        lines.Add(string.Empty);
-        foreach (CommandDoc command in commands)
-        {
-            int depth = command.Path.Count(c => c == ' ') + 2;
-            lines.Add(new string('#', Math.Min(depth, 4)) + " `vericairn " + command.Path + "`");
-            lines.Add(string.Empty);
-            lines.Add(command.Description);
-            lines.Add(string.Empty);
-            lines.Add("Usage: `" + command.Usage + "`");
-            if (command.Arguments.Count > 0)
-            {
-                lines.Add(string.Empty);
-                lines.Add("Arguments:");
-                lines.AddRange(command.Arguments.Select(a => "- `" + a.Name + "`: " + a.Description));
-            }
-
-            if (command.Options.Count > 0)
-            {
-                lines.Add(string.Empty);
-                lines.Add("Options:");
-                lines.AddRange(command.Options.Select(o => "- `" + o.Name + "`: " + o.Description));
-            }
-
-            if (command.Verbs.Count > 0)
-            {
-                lines.Add(string.Empty);
-                lines.Add("Verbs: " + string.Join(", ", command.Verbs.Select(v => "`" + v + "`")));
-            }
-
-            lines.Add(string.Empty);
-        }
-
-        return string.Join("\n", lines.Select(line => line.TrimEnd()));
-    }
-
-    private static string InterruptedClientRequests()
-    {
-        string[] rows = new Exception[] { new ClientTimeoutException(false), new ClientCancelledException(false, default), new ClientUnavailableException(false, new IOException()) }
-            .Select(exception => ClientFailure.FromException(exception)!)
-            .Select(failure => $"| `{failure.Code}` | `{failure.ExitCode}` | `error: {failure.Message}` |")
-            .ToArray();
-        string uncertain = ClientFailure.FromException(new ClientTimeoutException(true))!.Message;
-        string plain = ClientFailure.FromException(new ClientTimeoutException(false))!.Message;
-        return """
-            ## Interrupted client requests
-
-            An interrupted client request writes its diagnostic to standard error. It does not emit a replacement JSON result on standard output. Existing command names, options, help and successful JSON responses are unchanged.
-
-            | Outcome | Exit code | Diagnostic |
-            | --- | --- | --- |
-            """ + "\n" + string.Join('\n', rows) + "\n\n" +
-            "When an effect may have happened, the diagnostic also says: `" + uncertain[plain.Length..].Trim() + "`\n\n" +
-            "A definite refusal keeps its diagnostic and exit code `2`; it is never called unavailable or of unknown outcome. Existing structured refusal responses keep their representation.\n\n" +
-            "Caller cancellation (including Ctrl+C for ordinary requests) and a per-operation deadline are separate outcomes. Cancellation does not undo an effect, and these clients do not retry it. Foreground worker following still interprets Ctrl+C as a request to stop the original run; runtime serving still interprets it as a request to stop the service. Their requests remain subject to deadlines.\n";
-    }
-
     private static List<string> Operations(JsonElement api)
     {
         var operations = new List<string>();
@@ -365,188 +291,13 @@ internal static class ReferenceSet
             {
                 foreach (JsonProperty method in path.Value.EnumerateObject())
                 {
-                    operations.Add(method.Name.ToUpperInvariant() + " " + path.Name);
+                    if (method.Name is "get" or "head" or "post" or "put" or "delete" or "options" or "trace" or "patch")
+                        operations.Add(method.Name.ToUpperInvariant() + " " + path.Name);
                 }
             }
         }
 
-        return operations;
-    }
-
-    private static string ApiReference(JsonElement api, string date)
-    {
-        string openapi = Str(api, "openapi") ?? string.Empty;
-        string apiVersion = api.TryGetProperty("info", out JsonElement info) ? Str(info, "version") ?? string.Empty : string.Empty;
-        var lines = new List<string>
-        {
-            $"# API reference, Vericairn {ReleaseVersion}",
-            string.Empty,
-            $"Generated by the build tooling (`vericairn-docs generate`) from the OpenAPI document the daemon of build {InformationalVersion} serves at `{OpenApiDocument.Path}` (OpenAPI {openapi}, API version {apiVersion}) on {date}. The daemon is the one owner of an estate's live state on a machine and every surface is its client; how to reach it and what the outcomes mean are in the API document (api.md). This reference lists every operation.",
-            string.Empty,
-        };
-        if (api.TryGetProperty("paths", out JsonElement paths))
-        {
-            foreach (JsonProperty path in paths.EnumerateObject())
-            {
-                foreach (JsonProperty method in path.Value.EnumerateObject())
-                {
-                    JsonElement operation = method.Value;
-                    lines.Add("## `" + method.Name.ToUpperInvariant() + " " + path.Name + "`");
-                    lines.Add(string.Empty);
-                    lines.Add(Str(operation, "summary") ?? string.Empty);
-                    string? description = Str(operation, "description");
-                    if (!string.IsNullOrEmpty(description))
-                    {
-                        lines.Add(string.Empty);
-                        lines.Add(description);
-                    }
-
-                    lines.Add(string.Empty);
-                    if (operation.TryGetProperty("parameters", out JsonElement parameters) && parameters.ValueKind == JsonValueKind.Array && parameters.GetArrayLength() > 0)
-                    {
-                        lines.Add("Parameters:");
-                        foreach (JsonElement parameter in parameters.EnumerateArray())
-                        {
-                            bool required = parameter.TryGetProperty("required", out JsonElement r) && r.ValueKind == JsonValueKind.True;
-                            string? parameterDescription = Str(parameter, "description");
-                            string detail = string.IsNullOrWhiteSpace(parameterDescription) ? string.Empty : ": " + parameterDescription.TrimEnd();
-                            lines.Add("- `" + Str(parameter, "name") + "` (" + Str(parameter, "in") + (required ? ", required" : string.Empty) + ")" + detail);
-                        }
-
-                        lines.Add(string.Empty);
-                    }
-
-                    if (operation.TryGetProperty("requestBody", out JsonElement body) && body.TryGetProperty("content", out JsonElement content))
-                    {
-                        foreach (JsonProperty mediaType in content.EnumerateObject())
-                        {
-                            lines.Add("Request body (`" + mediaType.Name + "`): `" + SchemaName(mediaType.Value.TryGetProperty("schema", out JsonElement schema) ? schema : default) + "`");
-                        }
-
-                        lines.Add(string.Empty);
-                    }
-
-                    if (operation.TryGetProperty("responses", out JsonElement responses))
-                    {
-                        lines.Add("Responses:");
-                        foreach (JsonProperty response in responses.EnumerateObject())
-                        {
-                            string shape = string.Empty;
-                            if (response.Value.TryGetProperty("content", out JsonElement responseContent))
-                            {
-                                foreach (JsonProperty mediaType in responseContent.EnumerateObject())
-                                {
-                                    shape = " (`" + SchemaName(mediaType.Value.TryGetProperty("schema", out JsonElement schema) ? schema : default) + "`)";
-                                }
-                            }
-
-                            lines.Add("- `" + response.Name + "`: " + Str(response.Value, "description") + shape);
-                        }
-
-                        lines.Add(string.Empty);
-                    }
-                }
-            }
-        }
-
-        if (api.TryGetProperty("components", out JsonElement components) && components.TryGetProperty("schemas", out JsonElement schemas))
-        {
-            lines.Add("## Schemas");
-            lines.Add(string.Empty);
-            lines.Add("The request and response types named above, as the document defines them.");
-            lines.Add(string.Empty);
-            foreach (JsonProperty schema in schemas.EnumerateObject())
-            {
-                lines.Add("### `" + schema.Name + "`");
-                lines.Add(string.Empty);
-                string? description = Str(schema.Value, "description");
-                if (!string.IsNullOrEmpty(description))
-                {
-                    lines.Add(description);
-                    lines.Add(string.Empty);
-                }
-
-                if (schema.Value.TryGetProperty("properties", out JsonElement properties))
-                {
-                    HashSet<string> required = Strings(schema.Value, "required").ToHashSet(StringComparer.Ordinal);
-                    lines.Add("| Property | Type | Required | Meaning |");
-                    lines.Add("|---|---|---|---|");
-                    foreach (JsonProperty property in properties.EnumerateObject())
-                    {
-                        lines.Add("| `" + property.Name + "` | `" + SchemaName(property.Value) + "` | " + (required.Contains(property.Name) ? "yes" : "no") + " | " + (Str(property.Value, "description") ?? string.Empty) + " |");
-                    }
-
-                    lines.Add(string.Empty);
-                }
-                else if (schema.Value.TryGetProperty("enum", out JsonElement values))
-                {
-                    lines.Add("One of: " + string.Join(", ", values.EnumerateArray().Select(v => "`" + v.GetString() + "`")));
-                    lines.Add(string.Empty);
-                }
-            }
-        }
-
-        return string.Join("\n", lines);
-    }
-
-    private static string SchemaName(JsonElement schema)
-    {
-        if (schema.ValueKind != JsonValueKind.Object)
-        {
-            return string.Empty;
-        }
-
-        if (schema.TryGetProperty("$ref", out JsonElement reference))
-        {
-            string text = reference.GetString() ?? string.Empty;
-            return text[(text.LastIndexOf('/') + 1)..];
-        }
-
-        string type = Str(schema, "type") ?? string.Empty;
-        if (type == "array" && schema.TryGetProperty("items", out JsonElement items))
-        {
-            return "array of " + SchemaName(items);
-        }
-
-        return type;
-    }
-
-    private static string RecordReference(string date)
-    {
-        var lines = new List<string>
-        {
-            $"# Record reference, Vericairn {ReleaseVersion}",
-            string.Empty,
-            $"Generated by the build tooling (`vericairn-docs generate`) from the record type registry of build {InformationalVersion} on {date}. Each type lists its subject rule and its body fields with the field's kind, whether it is required, the record format that introduced it when that is later than format 1, and what it means. The envelope every record shares (format, type, id, at, by, body, hash and optionally subject, supersedes and signatures) is described in the record format document (record-format.md).",
-            string.Empty,
-        };
-        foreach (IRecordType type in RecordTypeRegistry.All)
-        {
-            lines.Add("## `" + type.Name + "`");
-            lines.Add(string.Empty);
-            lines.Add(type.Summary);
-            lines.Add(string.Empty);
-            lines.Add(type.SubjectType is null ? (type.SubjectHashRequired ? "Subject: required, pinned to an exact hash." : "Subject: none.") : "Subject: " + type.SubjectType + (type.SubjectHashRequired ? ", pinned to an exact hash." : "."));
-            if (type.SinceFormat > RecordFormats.First)
-            {
-                lines.Add(string.Empty);
-                lines.Add("Record format " + type.SinceFormat.ToString(System.Globalization.CultureInfo.InvariantCulture) + " and later.");
-            }
-
-            lines.Add(string.Empty);
-            lines.Add("| Field | Kind | Required | Meaning |");
-            lines.Add("|---|---|---|---|");
-            foreach (FieldDescription field in type.Fields)
-            {
-                string since = field.SinceFormat > RecordFormats.First ? " (record format " + field.SinceFormat.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")" : string.Empty;
-                lines.Add("| `" + field.Name + "` | `" + field.Kind + "` | " + (field.Required ? "required" : "optional") + since + " | " + field.Description + " |");
-            }
-
-            lines.Add(string.Empty);
-        }
-
-        lines.Add("Reserved for later releases: " + string.Join(", ", RecordTypeRegistry.Reserved) + ".");
-        return string.Join("\n", lines);
+        return operations.Order(StringComparer.Ordinal).ToList();
     }
 
     private static string? Str(JsonElement element, string name) =>
@@ -557,5 +308,5 @@ internal static class ReferenceSet
             ? value.EnumerateArray().Where(v => v.ValueKind == JsonValueKind.String).Select(v => v.GetString()!).ToList()
             : [];
 
-    private static void Write(string directory, string name, string text) => File.WriteAllText(Path.Combine(directory, name), text.EndsWith('\n') ? text : text + "\n");
+    private static void Write(string directory, string name, string text) => WriteBytes(directory, name, Vericairn.Records.Estate.DocumentMarkdown.Bytes(text));
 }
