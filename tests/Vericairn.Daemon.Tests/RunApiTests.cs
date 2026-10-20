@@ -76,6 +76,16 @@ public class RunApiTests
             clock = new ClientClock(DateTimeOffset.UtcNow);
             host.Service.WorkerOptions = host.Service.WorkerOptions with { Clock = clock };
 
+            // The daemon stamps each record on the wall clock, and a settlement cannot record a containment after its own time,
+            // so the controlled clock never runs ahead of the wall clock: an advance first waits until the wall clock has passed it.
+            async Task AdvanceAsync(TimeSpan by)
+            {
+                DateTimeOffset target = clock.GetUtcNow() + by;
+                TimeSpan ahead = target - DateTimeOffset.UtcNow;
+                if (ahead > TimeSpan.Zero) await Task.Delay(ahead, TestContext.Current.CancellationToken);
+                clock.Elapse(target - clock.GetUtcNow());
+            }
+
             ProviderRow launcher = Assert.Single(api.Launchers());
             Assert.Equal(("stand-in", "launcher", IAgentLauncher.Contract), (launcher.Provider, launcher.Kind, launcher.Contract));
             Assert.Contains(api.Providers(), p => p.Kind == "workspace");
@@ -96,7 +106,7 @@ public class RunApiTests
 
             Task<RunStopResponse> stopping = Task.Run(() => api.RunStop(started.Run, new RunStopRequest(op, "Through the API.", 1)), TestContext.Current.CancellationToken);
             await Until(host, scratch, api, started.Run, r => r.Stop?.TransmittedAt is not null);
-            clock.Elapse(TimeSpan.FromSeconds(1));
+            await AdvanceAsync(TimeSpan.FromSeconds(1));
             RunStopResponse stopped = await stopping.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.True(stopped.Ok, stopped.Message);
             row = await Until(host, scratch, api, started.Run, r => r.Status == "known-failure");
@@ -116,7 +126,7 @@ public class RunApiTests
                 new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("watch-codex-audit", Path.Combine(scratch, "audit.jsonl")) }));
             Assert.True(audited.Ok, audited.Message);
             await Until(host, scratch, api, audited.Run, r => r.Stop?.TransmittedAt is not null);
-            clock.Elapse(TimeSpan.FromSeconds(1));
+            await AdvanceAsync(TimeSpan.FromSeconds(1));
             RunRow watched = await Until(host, scratch, api, audited.Run, r => r.Status == "known-failure");
             Assert.Contains(watched.Signals!, s => s.Code == "credentials" && s.Severity == "critical" && s.Attention is not null);
             Assert.NotNull(watched.Stop!.ContainedAt);
