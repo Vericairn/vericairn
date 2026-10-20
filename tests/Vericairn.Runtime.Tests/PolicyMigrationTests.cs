@@ -127,6 +127,66 @@ public class PolicyMigrationTests
         }
     }
 
+    [Theory]
+    [InlineData("staged")]
+    [InlineData("recorded")]
+    [InlineData("manifest-temporary")]
+    public void AnUpgradeStoppedAfterAnyStepFinishesOnItsRerunWithOneMigrationRecord(string stage)
+    {
+        using var f = new PolicyFixture(format: 2);
+        Publish(f, "0.8.0", 3);
+        using var migrations = EstateUpgrade.UseMigrations([new StagedStep()]);
+        using (var service = EstateService.Open(f.Estate.Root))
+        {
+            EstateService.UpgradeStage = s => { if (s == stage) throw new StoppedRun(s); };
+            try
+            {
+                Assert.Throws<StoppedRun>(() => service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false)));
+            }
+            finally
+            {
+                EstateService.UpgradeStage = null;
+            }
+        }
+
+        // The manifest moves last, so a stopped run never leaves a moved manifest without the record of the move.
+        EstateModel stopped = EstateLoader.Load(f.Estate.Root);
+        Assert.False(stopped.Findings.HasErrors, string.Join('\n', stopped.Findings));
+        Assert.Equal(2, stopped.Manifest!.RecordFormat);
+        Assert.Equal(stage == "staged" ? 0 : 1, stopped.OfType("migration").Count());
+        Assert.Equal(stage != "staged", stopped.Findings.Any(x => x.Code == "upgrade.incomplete"));
+
+        using (var service = EstateService.Open(f.Estate.Root))
+        {
+            (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+            Assert.Null(problem);
+            Assert.True(applied!.Applied);
+            EstateModel moved = service.Session.Load();
+            Assert.Equal(3, moved.Manifest!.RecordFormat);
+            Assert.Equal(applied.Migration!.Id, Assert.Single(moved.OfType("migration")).Id);
+            Assert.DoesNotContain(moved.Findings, x => x.Code is "upgrade.incomplete" or "record.format-ahead");
+            Assert.False(moved.Findings.HasErrors, string.Join('\n', moved.Findings));
+            Assert.False(File.Exists(Path.Combine(f.Estate.Root, EstateLayout.ManifestPath + ".upgrading")));
+            Assert.Equal("rolled back", File.ReadAllText(Path.Combine(f.Estate.Root, "docs", "new-directory", "staged.txt")));
+        }
+    }
+
+    [Fact]
+    public void AReleasePinThatNoMigrationRecordNamesIsRefusedWithWhatToReconcile()
+    {
+        using var f = new PolicyFixture(format: 2);
+        Publish(f, "0.8.0", 3);
+        // The order before FIX-38: the manifest moved, and the run stopped before its migration record.
+        EstateModel model = f.Estate.Load();
+        File.WriteAllBytes(Path.Combine(f.Estate.Root, EstateLayout.ManifestPath), EstateUpgrade.ManifestAfter(model.Manifest!, EstateUpgrade.Plan(model, "0.8.0")));
+        Dictionary<string, byte[]> before = Snapshot(f.Estate.Root);
+        using var service = EstateService.Open(f.Estate.Root);
+        (UpgradeResponse? applied, Problem? problem) = service.Upgrade(new UpgradeRequest("0.8.0", f.Estate.OperatorId, false));
+        Assert.Null(applied);
+        Assert.Contains("no migration record names that pin", problem!.Message, StringComparison.Ordinal);
+        AssertSnapshot(before, f.Estate.Root);
+    }
+
     private static void Publish(PolicyFixture f, string version, long format)
     {
         RecordEnvelope product = f.Add("product", new JsonObject { ["name"] = "Example", ["slug"] = "example-" + format, ["summary"] = "Test migration product.", ["editions"] = new JsonArray(new JsonObject { ["name"] = "Community", ["slug"] = "community", ["summary"] = "Test edition." }), ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Test surface." }) });
@@ -151,6 +211,8 @@ public class PolicyMigrationTests
         Assert.Equal(expected.Keys.Order(StringComparer.Ordinal), actual.Keys.Order(StringComparer.Ordinal));
         Assert.All(expected, p => Assert.Equal(p.Value, actual[p.Key]));
     }
+
+    private sealed class StoppedRun(string stage) : Exception("The run stopped after " + stage + ".");
 
     private sealed class FailedStep : IRecordFormatMigration
     {

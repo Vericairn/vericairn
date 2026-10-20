@@ -6,9 +6,14 @@ format-2 reader refuse the estate before opening a writable runtime. Each older 
 format, bytes, hash, signatures and validation rules.
 
 The `record-format-3` migration moves format 2 forward without inferring policies, authority, placement,
-exceptions, completed duties or renewal dates. The upgrade appends its migration record and changes the
-manifest after all migration steps succeed. Reapplying an already installed target is a no-op. A failed step
-or refused migration record restores the previous repository files. Tests exercise disposable fixtures only.
+exceptions, completed duties or renewal dates. Once every migration step succeeds, the upgrade writes the
+steps' files, then appends its migration record, then replaces the manifest by writing a temporary file
+beside it and renaming it over the manifest. A failed step or a refused migration record restores the
+previous repository files. A run that stops after its migration record leaves the manifest at the earlier
+pin: the estate check warns `upgrade.incomplete`, and rerunning the upgrade to the same release replaces
+the manifest without a second record. Reapplying an already installed target is a no-op, except that a
+manifest pinned to a release no migration record names is refused with what to reconcile, because only an
+upgrade that stopped before recording its move leaves one. Tests exercise disposable fixtures only.
 
 Policy evaluation and the CLI, API, SDK and MCP policy flows are described in [Estate policies](policies.md).
 Workbench's policy inspector remains separate work. An unrecognized rule contribution is retained as data; the record schema does not certify
