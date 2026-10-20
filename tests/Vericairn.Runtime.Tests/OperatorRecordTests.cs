@@ -402,13 +402,15 @@ public sealed class OperatorRecordTests
         internal string? CommittedPath { get; private set; }
         private string branch = "main";
         public RecordCommitBasis Prepare(string directory) { Clean(); return new(branch, Head); }
-        public void Branch(string directory, RecordCommitBasis basis, string next)
+        public void Branch(string directory, RecordCommitBasis basis, string next, IReadOnlyDictionary<string, string> files)
         { if (branch != next) { fixture.Step("branch"); branch = next; } }
-        public string Commit(string directory, string name, string basis, string path, string byteHash, IReadOnlySet<string> receipts)
+        public string Commit(string directory, string name, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
         {
             Clean();
             Assert.Equal(branch, name);
-            Assert.Equal(byteHash, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
+            KeyValuePair<string, string> file = Assert.Single(files);
+            string path = file.Key;
+            Assert.Equal(file.Value, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
             if (CommittedPath is not null)
             {
                 if (Head != OperatorRecordTests.Head) throw new ProviderRefusedException("The commit moved.");
@@ -429,13 +431,15 @@ public sealed class OperatorRecordTests
             // Every generated receipt is accounted for on recovery, including failed merge intents and target asks.
             Assert.All(fixture.Service.Session.Load().Records.Where(r => r.Type is "operation" or "ask"), r => Assert.Contains(r.ExpectedPath, receipts));
         }
-        public void Verify(string directory, string head, string basis, string path, string byteHash)
+        public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files)
         {
             if (!CommitAvailable) throw new ProviderRefusedException("The original commit is unavailable.");
             Assert.Equal(OperatorRecordTests.Head, head);
             Assert.Equal(Basis, basis);
-            Assert.Equal(CommittedPath, path);
-            Assert.Equal(byteHash, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
+            KeyValuePair<string, string> file = Assert.Single(files);
+            Assert.Equal(CommittedPath, file.Key);
+            string path = file.Key;
+            Assert.Equal(file.Value, ContentHash.Sha256(File.ReadAllBytes(Path.Combine(directory, path))));
         }
         private void Clean() { if (Dirty) throw new ProviderRefusedException("Other changes remain."); }
     }

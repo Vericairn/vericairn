@@ -108,16 +108,12 @@ public sealed partial class EstateService
                 {
                     if (written is null || !OperatorCompletionRecorded(checkpoint, completed, configuration))
                         throw new ProviderRefusedException("The completed action's recorded evidence is unavailable; restore it before resuming.");
-                    adapter.Verify(Root, checkpoint.Head!, checkpoint.Basis.Head, written.Path,
-                        ContentHash.Sha256(session.Files().Single(f => f.Path == written.Path).Bytes));
+                    adapter.Verify(Root, checkpoint.Head!, checkpoint.Basis.Head, OperatorRecordFiles(written));
                     if (active == identity) session.Live.SetMeta("operator-record:active", string.Empty);
                     return Answer("completed", completed.Message, true, "The signed record and checked merge are complete.", completed);
                 }
             }
 
-            stage = "branch";
-            cancellationToken.ThrowIfCancellationRequested();
-            adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch);
             stage = "record";
             lock (gate)
             {
@@ -125,7 +121,7 @@ public sealed partial class EstateService
                 RequireOperatorRecord(request.By);
                 if (written is null)
                 {
-                    adapter.Check(Root, checkpoint.Branch, checkpoint.Basis.Head, new HashSet<string>(StringComparer.Ordinal));
+                    adapter.Check(Root, checkpoint.Basis.Branch, checkpoint.Basis.Head, new HashSet<string>(StringComparer.Ordinal));
                     // A crash before publication can require presence again, but never creates a second record identity.
                     if (authored is null)
                     {
@@ -137,17 +133,23 @@ public sealed partial class EstateService
                         if (authored is null) throw new ProviderRefusedException(refusal!);
                     }
                     if (authored.Envelope.ComputedHash != checkpoint.Hash) throw new ProviderRefusedException("The resumed record differs from the original intent.");
-                    if (JudgeProposedLocked([authored]) is Problem rejected)
-                        return Answer("refused", "The record no longer passes validation; the branch is retained.", false, "Resolve the validation findings and " + resume) with { Problem = rejected };
-                    session.Write(authored);
-                    written = new(authored.RelativePath, authored.Envelope.Id, authored.Envelope.ComputedHash);
+                    (IReadOnlyList<RecordWritten> stored, Problem? problem) = StoreTogetherLocked([authored],
+                        "Store the operator record and its generated register members.", null);
+                    written = stored.SingleOrDefault();
+                    if (problem is not null)
+                        return Answer("refused", problem.Message, false, "Resolve the record or generated output findings and " + resume) with { Problem = problem };
                 }
             }
 
+            IReadOnlyDictionary<string, string> files;
+            lock (gate) files = OperatorRecordFiles(written!);
+            // Retain the signed bytes and journaled members before a fallible branch step.
+            // A branch failure can then resume from those bytes without another signing prompt.
+            stage = "branch";
+            cancellationToken.ThrowIfCancellationRequested();
+            adapter.Branch(Root, checkpoint.Basis, checkpoint.Branch, files);
             stage = "commit";
-            string byteHash;
-            lock (gate) byteHash = ContentHash.Sha256(session.Files().Single(f => f.Path == written.Path).Bytes);
-            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, written.Path, byteHash, Receipts());
+            string head = adapter.Commit(Root, checkpoint.Branch, checkpoint.Basis.Head, files, Receipts());
             if (checkpoint.Head is not null && checkpoint.Head != head) throw new ProviderRefusedException("The recorded commit changed; reconcile it before continuing.");
             checkpoint = checkpoint with { Head = head };
             lock (gate) SaveOperatorCheckpoint(identity, checkpoint);
@@ -159,7 +161,7 @@ public sealed partial class EstateService
             stage = "open";
             Guard();
             change = Step("change-open", checkpoint.Branch, reconciliation => ChangesOpen(new(checkpoint.Product, checkpoint.Branch, head,
-                "Record operator " + request.Type, "Signed record " + written.Id + " at " + written.Hash + ".", request.By, reconciliation)));
+                "Record operator " + request.Type, "Signed record " + written!.Id + " at " + written.Hash + ".", request.By, reconciliation)));
             if (!change.Ok || change.PullRequest is null) return Stopped(change);
             string pullRequest = change.PullRequest;
             RecordWritten opening = change.Operation!;
@@ -299,6 +301,35 @@ public sealed partial class EstateService
                 return model.Records.Where(r => owned.Contains(r.Id)).Select(r => r.ExpectedPath).ToHashSet(StringComparer.Ordinal);
             }
         }
+    }
+
+    // Derive membership and bytes from the same versioned generators used by record writes and estate checks.
+    // A resumed action reads its stored signed record; neither missing output nor a changed member permits signing again.
+    private Dictionary<string, string> OperatorRecordFiles(RecordWritten written)
+    {
+        EstateModel model = session.Load();
+        RecordEnvelope record = model.ById[written.Id];
+        if (record.ComputedHash != written.Hash || record.ExpectedPath != written.Path)
+            throw new ProviderRefusedException("The stored record differs from the original action; inspect it before resuming.");
+        var files = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [written.Path] = ContentHash.Sha256(session.Files().Single(f => f.Path == written.Path).Bytes),
+        };
+        foreach (RecordEnvelope declaration in model.Current("living-document").Where(d => EstateModel.BodyString(d, "repository") is null
+            && EstateModel.BodyString(d, "pathPattern") is not null && GeneratedDocumentContract.IsStrict(model, d)
+            && !GeneratedDocumentContract.IsRetired(model, d)))
+        {
+            if (DocumentChecks.Generator(declaration) is not (string id, _) || DocumentGenerators.Find(id)?.Descriptor is not { } descriptor)
+                throw new ProviderRefusedException("A declared register generator is unavailable; restore it before resuming.");
+            if (!descriptor.RecordTypes.Contains(record.Type)) continue;
+            DocumentMemberSelection members = DocumentGeneration.Members(declaration, DocumentSourceSelection.Records(model, descriptor));
+            GeneratedDocumentPlan plan = GeneratedDocumentVerification.Plan(model, declaration);
+            if (members.Status != DocumentGenerationStatus.Success || !plan.Current)
+                throw new ProviderRefusedException("The declared register members are incomplete or changed; recover their original generated bytes before resuming.");
+            foreach (DocumentMember member in members.Members.Where(m => m.Context.Sources[0].Identity == record.Id))
+                files.Add(member.Path, plan.Expected.Single(f => f.Path == member.Path).Hash);
+        }
+        return files;
     }
 
     private void RequireOperatorRecord(string by)

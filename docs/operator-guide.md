@@ -1007,10 +1007,16 @@ pagination, source bounds and the difference between inspection and acceptance.
 `operator list` shows the complete recorded operator queue, including asks beyond
 one notification delivery, exact commands, required input and holds. It answers
 nothing. With the operator's own admitted device, `operator record` signs one
-record, commits only it on an isolated branch, and uses the recorded checked push,
-opening, merge and target-check flow. Repository-synced format 3 and a product's
-exact `changes` declaration are required. The queue and one-step command are not
-MCP tools. [Operator actions](operator-actions.md) explains recovery with the same
+record, commits it together with its required generated register members on an
+isolated branch, and uses the recorded checked push, opening, merge and target-check
+flow. Repository-synced format 3 and a product's
+exact `changes` declaration are required. Declared decisions and releases registers
+use the same generators as `records new` and the estate check. The commit check
+accepts exactly the record and its members with their expected bytes. Resuming
+reuses the stored signed record and members without signing again; interrupted
+member publication recovers from its original journal when the estate reopens.
+The queue and one-step command are not MCP tools.
+[Operator actions](operator-actions.md) explains recovery with the same
 body and identity, presence, authority and the separate uncommitted receipts.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
