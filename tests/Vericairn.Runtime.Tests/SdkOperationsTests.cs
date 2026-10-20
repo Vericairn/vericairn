@@ -473,6 +473,43 @@ public sealed class SdkOperationsTests
         Assert.True(ClientOperation.Deadline("Health") < TimeSpan.FromMinutes(5));
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.OK)]
+    [InlineData(HttpStatusCode.UnprocessableEntity)]
+    public async Task AStoredRecordRetainsItsCompanionRecoveryProblemIncludingFromAnOlderDaemon(HttpStatusCode status)
+    {
+        var expected = new WriteOutcome(new("records/attempt/record.json", "record", "sha256:" + new string('a', 64)),
+            new("reconcile-required", "Record record was stored. Recover its pending companion outputs; never repeat the record write.", []));
+        using var client = Client((_, _) => Task.FromResult(Json(expected, status)));
+        var request = new AttemptRequest("assignment", "contributor", "workspace", "note");
+        WriteOutcome legacy = client.Attempt(request);
+        WriteOutcome asynchronous = await client.AttemptAsync(request, TestContext.Current.CancellationToken);
+        WriteOutcome bound = new CancellationBoundApi(client, TestContext.Current.CancellationToken).Attempt(request);
+        foreach (WriteOutcome actual in new[] { legacy, asynchronous, bound })
+        {
+            Assert.False(actual.Ok);
+            Assert.Equal(expected.Written, actual.Written);
+            Assert.Equal(JsonSerializer.Serialize(expected.Problem), JsonSerializer.Serialize(actual.Problem));
+        }
+    }
+
+    [Theory]
+    [InlineData("refused", HttpStatusCode.UnprocessableEntity)]
+    [InlineData("rejected", HttpStatusCode.UnprocessableEntity)]
+    [InlineData("generated-refused", HttpStatusCode.UnprocessableEntity)]
+    [InlineData("reconcile-required", HttpStatusCode.UnprocessableEntity)]
+    [InlineData("not-found", HttpStatusCode.NotFound)]
+    [InlineData("conflict", HttpStatusCode.Conflict)]
+    public async Task AStructuredRefusalStillHasNoWrittenReceipt(string code, HttpStatusCode status)
+    {
+        var expected = WriteOutcome.Fail(new(code, "Nothing was written.", []));
+        using var client = Client((_, _) => Task.FromResult(Json(expected, status)));
+        WriteOutcome actual = await client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), TestContext.Current.CancellationToken);
+        Assert.False(actual.Ok);
+        Assert.Null(actual.Written);
+        Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(actual));
+    }
+
     [Fact]
     public async Task EmbeddedEffectMayFinishAfterCancellationWithoutBeingCalledAgain()
     {
