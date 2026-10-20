@@ -16,6 +16,7 @@ public sealed class PolicyApiTests
     [InlineData("kinds")]
     [InlineData("evaluate")]
     [InlineData("access")]
+    [InlineData("hash")]
     public async Task PolicyKeysMayEqualNamedReadEndpoints(string key)
     {
         using var fixture = new PolicyFixture();
