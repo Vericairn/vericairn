@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 6, October 19, 2026. Link the operating guide and exact first-party adoption proposals alongside the implemented surfaces.
+Revision 7, October 20, 2026. State which authored text the writing scan checks.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -28,6 +28,8 @@ Recurring-duty findings preserve the occurrence, originating policy revision, ex
 The policy section also lists current decisions' exact policy requirements as pending, recorded or unavailable. A requirement stays pending until an authorized declaration or revision cites that exact decision and requirement, matches its definition hash and uses the named prior revision. Matching a policy key alone does not satisfy it. A requirement without an approved definition remains pending design work. Recording the change clears neither a separate obligation nor a review requirement, and a pending requirement creates no release hold by itself. Duty findings are grouped by owner and subject in the human view, retaining every occurrence and proof.
 
 The writing registry reports each active token's original author, reason, scope, match count and matching locations. A count is unknown when the scan is incomplete. Removed entries remain inspectable. Excepted occurrences retain all matching entry references, line numbers and UTF-8 byte offsets. Moving a token within its admitted scope preserves the exception; changing case or matching outside that scope does not. Only warning occurrences of `writing.spacing` can be excepted.
+
+The spacing scan skips text owned by a current, unretired generated declaration: a whole `path` or the files owned by its `pathPattern` in the declared repository. Only `kind: generated` exempts a whole file. In an authored document, only the content between valid markers for its declared generated regions is skipped. Authored lines around those regions and record prose fields keep their usual scan. Generated copies contribute neither spacing warnings nor writing-entry matches; `matches-generator` still checks them against their sources, and other content checks still apply. Check, status, progress and the policy writing evaluation share this rule.
 
 Authoring uses the same acting principal and expected hashes through every transport:
 

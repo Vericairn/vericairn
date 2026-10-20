@@ -13,6 +13,26 @@ namespace Vericairn.Runtime.Tests;
 public sealed class PolicySectionTests
 {
     [Fact]
+    public void GeneratedCopiesAreExcludedFromCheckStatusProgressAndWritingEvaluation()
+    {
+        using var fixture = new GeneratedWritingFixture();
+        using var api = EstateService.Open(fixture.Estate.Root);
+        int before = api.Session.Load().Records.Count;
+        FindingsResponse check = api.Check();
+        WritingExceptionsResponse writing = api.WritingExceptions();
+        Assert.True(writing.Complete);
+        Assert.Equal(fixture.ExpectedLocations, check.Findings.Where(f => f.Code == "writing.spacing").Select(f => f.Location).Order(StringComparer.Ordinal));
+        Assert.Equal(fixture.ExpectedLocations.Count, writing.Warnings.Count);
+        Assert.Equal(fixture.ExpectedLocations, writing.Warnings.Select(w => w.Occurrence.Diagnostic.Location).Order(StringComparer.Ordinal));
+        Assert.Empty(writing.ExceptedOccurrences);
+        string expected = JsonSerializer.Serialize(writing, ProtocolJson.Options);
+        Assert.Equal(expected, JsonSerializer.Serialize(check.WritingExceptions, ProtocolJson.Options));
+        Assert.Equal(expected, api.Status().Json.GetProperty("writingExceptions").GetRawText());
+        Assert.Equal(expected, api.Progress().Json.GetProperty("writingExceptions").GetRawText());
+        Assert.Equal(before, api.Session.Load().Records.Count);
+    }
+
+    [Fact]
     public void CheckStatusAndProgressShareFindingsCountsAndOperatorDutiesWithoutRecords()
     {
         using var fixture = new PolicyFixture();

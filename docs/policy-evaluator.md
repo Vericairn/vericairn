@@ -1,6 +1,6 @@
 # Policy evaluator
 
-Revision 6, October 20, 2026. State how policies match releases across product record revisions.
+Revision 7, October 20, 2026. State the writing scan's generated ownership rule.
 
 The runtime service collects the basis for the [policy read surfaces](policies.md). Application composition installs the foundation kinds, the software pack's reference-coverage kind and the local Git source. A named release preview carries the candidate's exact product, version and commit with preview origin; it cannot authorize dispatch. Source collection reads retained objects and local bytes without fetching or building.
 
@@ -35,6 +35,8 @@ To qualify, first and current bytes must preserve the stable entry id and releas
 Each publication has one `entry` finding. Exactly one qualifying identity and path satisfies it; missing entries and duplicates remain named. Copies of an old identity cannot acquire new authorship through a new path or pin. At refuse, unresolved publications hold later submissions for that product, while a candidate owes no account of its own future publication. The runtime's policy surfaces and release gate use this evaluator; first-party declarations remain subject to POLICY-04's exact adoption approval.
 
 `WritingEvaluation` shares the finite spacing scanner with the existing repository check. It scans supplied Markdown and the record format's prose fields. Exact, case-sensitive tokens and union scopes select occurrences; no diagnostic prose is parsed to obtain a token. Matched occurrences remain listed with every matching entry and leave the warning count once. Unused active entries warn only after the entire scan completes. A missing source leaves match counts unknown. Inline code is blanked without shifting offsets; fenced blocks use the scanner's explicit opening and closing grammar. Locations include original UTF-8 byte offsets and one-based lines.
+
+Scanner contract `vericairn.writing-spacing/3` uses the same current declaration, repository and path ownership lookup as generator verification. An unretired `kind: generated` declaration excludes its whole path or bounded pattern members from spacing scans. An authored declaration excludes only the content of its declared generated regions with valid, unique, closed and unnested markers. Undeclared or malformed markers grant no exclusion. Generated region fences do not change parsing of the surrounding authored lines, whose locations retain their original bytes and line numbers. Record prose fields remain scanned even when their text also appears in a generated copy. These exclusions do not count as writing exceptions or weaken generator verification and other content checks.
 
 Recurring duties reconstruct occurrences from all retained policy revisions. Day intervals use 86,400 seconds; months use the original UTC Gregorian anchor with month-end clamping. Publication schedules use the first observed publication of each release identity. Dated duties retain their exact adopted date evidence, including an already-due date at adoption. A changed behavioral definition replaces only unopened future occurrences. Old debt retains its original subject, dates, grace and proof requirements, while the current owner and level apply.
 

@@ -13,16 +13,33 @@ internal sealed record SpacingOccurrence(string Token, int Line, int ByteOffset,
 // environment, clock or source access occurs here. Offsets always refer to the original UTF-8 text.
 internal static partial class WritingScanner
 {
-    internal const string Contract = "vericairn.writing-spacing/2";
+    internal const string Contract = "vericairn.writing-spacing/3";
     private static readonly HashSet<string> Allowlist = new(StringComparer.OrdinalIgnoreCase)
     {
         "base", "http", "https", "html", "python", "sqlite", "float", "uint", "utf", "unicode", "windows", "macos", "ipv", "mp", "ecdsa", "sha",
     };
 
-    internal static IReadOnlyList<SpacingOccurrence> Scan(string text, string location)
+    // Ownership comes from the same current declarations, repository identities and bounded paths
+    // as generator verification. A generated file's other content checks still apply.
+    internal static IReadOnlyList<SpacingOccurrence> ScanFile(EstateModel model, string? repository, string text, string path)
+    {
+        RecordEnvelope[] owners = model.Current("living-document").Where(d => DocumentSourceGraph.Repository(model, d) == repository
+            && GeneratedDocumentContract.Owns(d, path) && !GeneratedDocumentContract.IsRetired(model, d)).ToArray();
+        if (owners.Any(d => EstateModel.BodyString(d, "kind") == "generated")) return [];
+        List<(int From, int To)> regions = [];
+        foreach (RecordEnvelope owner in owners.Where(d => EstateModel.BodyString(d, "kind") == "authored"))
+        foreach (var region in DocumentChecks.Regions(owner))
+            if (GeneratedRegions.Find(text, region.Id) is { } bounds) regions.Add(bounds);
+        return Scan(text, path, regions);
+    }
+
+    // Record fields have no file ownership exclusions.
+    internal static IReadOnlyList<SpacingOccurrence> Scan(string text, string location) => Scan(text, location, []);
+
+    private static List<SpacingOccurrence> Scan(string text, string location, IReadOnlyList<(int From, int To)> regions)
     {
         List<SpacingOccurrence> occurrences = [];
-        foreach ((string rawLine, int lineNumber, int byteOffset) in LinesOutsideFences(text))
+        foreach ((string rawLine, int lineNumber, int byteOffset) in LinesOutsideFences(text, regions))
         {
             string line = CodeSpan().Replace(rawLine, m => new string(' ', m.Length));
             foreach (Match match in WordRunIntoNumber().Matches(line))
@@ -37,13 +54,24 @@ internal static partial class WritingScanner
         return occurrences;
     }
 
-    internal static IEnumerable<(string Text, int Line, int ByteOffset)> LinesOutsideFences(string text)
+    internal static IEnumerable<(string Text, int Line, int ByteOffset)> LinesOutsideFences(string text) => LinesOutsideFences(text, []);
+
+    private static IEnumerable<(string Text, int Line, int ByteOffset)> LinesOutsideFences(string text, IReadOnlyList<(int From, int To)> regions)
     {
-        int lineNumber = 0, byteOffset = 0, fenceLength = 0;
+        int lineNumber = 0, byteOffset = 0, characterOffset = 0, fenceLength = 0;
         char fence = '\0';
         foreach (string rawLine in text.Split('\n'))
         {
             lineNumber++;
+            bool generated = regions.Any(r => characterOffset >= r.From && characterOffset < r.To);
+            characterOffset += rawLine.Length + 1;
+            // Generated fences cannot change how the surrounding authored lines are parsed.
+            // Advance offsets through the original bytes even when a line is excluded.
+            if (generated)
+            {
+                byteOffset += Encoding.UTF8.GetByteCount(rawLine) + 1;
+                continue;
+            }
             ReadOnlySpan<char> fenceLine = rawLine.AsSpan().TrimEnd('\r');
             int spaces = 0;
             while (spaces < fenceLine.Length && fenceLine[spaces] == ' ') spaces++;
