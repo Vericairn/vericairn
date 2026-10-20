@@ -11,6 +11,7 @@ namespace Vericairn.Runtime.Tests;
 
 // Fixed records, source bytes and expected hashes make these complete-output vectors portable between
 // test processes and platforms. Signed proof journeys are covered separately with isolated test keys.
+// The basis includes scanner contract vericairn.writing-spacing/3, including vectors without prose.
 public class PolicyCanonicalVectorTests
 {
     private static readonly string[] Paths = ["docs/*.md"];
@@ -41,7 +42,7 @@ public class PolicyCanonicalVectorTests
         PolicyEvaluation evaluation = PolicyEvaluator.Evaluate(basis, Kinds);
         Assert.Equal(10, evaluation.Findings.Length);
         Assert.Equal(2, WritingEvaluation.Evaluate(basis).WarningCount);
-        Check(basis, "sha256:b2f2e081f4f83c50e17b7814e78e5a0411f1f6cf3e7e38e402cb680e934d0985", writing: true);
+        Check(basis, "sha256:ca4bc01212dcb61cb79ad57d2c53ec1907bd703538d05d888a7f4044c0986b48", writing: true);
     }
 
     [Fact]
@@ -59,7 +60,7 @@ public class PolicyCanonicalVectorTests
         Assert.True(evaluation.Complete);
         Assert.Equal(4, evaluation.Findings.Length);
         Assert.Equal(2, evaluation.Holds);
-        Check(basis, "sha256:ca5ad8607175ab605ae0a67fc55eb4bc34bc77e9e7ae15c69e2461031bf1e1ed", writing: false);
+        Check(basis, "sha256:95b4524bd70c4c602c5bf337b3b154c9f98f6c80923afd702486e5aabb998c63", writing: false);
     }
 
     private static void Check(PolicyBasis basis, string expected, bool writing)

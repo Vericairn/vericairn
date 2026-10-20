@@ -12,6 +12,59 @@ namespace Vericairn.Runtime.Tests;
 
 public class WritingEvaluationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void GeneratedOwnershipUsesTheDeclarationRepositoryAndBoundedPath(bool pattern)
+    {
+        using var fixture = new PolicyFixture();
+        RecordEnvelope repository = fixture.Add("resource", new JsonObject
+        {
+            ["kind"] = "repository", ["name"] = "Writing source", ["role"] = "Supply test Markdown.",
+            ["location"] = new JsonObject { ["rootCommit"] = new string('1', 40) }, ["visibility"] = "private",
+        });
+        const string Path = "docs/registers/decisions/member.md";
+        JsonObject body = GeneratedWritingFixture.Declaration(Path, "generated");
+        if (pattern)
+        {
+            body.Remove("path");
+            body["pathPattern"] = "docs/registers/decisions/{month}/{date}-{slug}-{id}.md";
+        }
+        body["repository"] = repository.Id;
+        body["source"] = "example.documents/source";
+        body["generator"] = GeneratedWritingFixture.Generator();
+        fixture.Add("living-document", body);
+        fixture.AssertValid();
+        PolicyBasis basis = PolicyBasis.Recorded(fixture.Estate.Load(),
+        [
+            new(fixture.Estate.Estate.Id, "working-tree", PolicyBasis.RepositoryContract, true, [PolicyBasisTests.File(Path, "Open311")]),
+            new(repository.Id, "working-tree", PolicyBasis.RepositoryContract, true,
+                [PolicyBasisTests.File(Path, "Open311"), PolicyBasisTests.File("docs/registers/decisions-nearby/authored.md", "Open311")]),
+        ]);
+        WritingEvaluation result = WritingEvaluation.Evaluate(basis);
+        Assert.True(result.Complete);
+        Assert.Equal(2, result.WarningCount);
+        Assert.Contains(result.Warnings, w => w.Location.Identity == fixture.Estate.Estate.Id && w.Location.Member == Path);
+        Assert.Contains(result.Warnings, w => w.Location.Identity == repository.Id && w.Location.Member == "docs/registers/decisions-nearby/authored.md");
+        Assert.DoesNotContain(result.Warnings, w => w.Location.Identity == repository.Id && w.Location.Member == Path);
+    }
+
+    [Fact]
+    public void GeneratedCopiesDoNotCountAsWritingExceptionMatches()
+    {
+        using var fixture = new PolicyFixture();
+        JsonObject declaration = GeneratedWritingFixture.Declaration("docs/test.md", "generated");
+        declaration["generator"] = GeneratedWritingFixture.Generator();
+        fixture.Add("living-document", declaration);
+        fixture.Add("writing-exception", PolicyFixture.WritingBody());
+        WritingEvaluation result = Evaluate(fixture, "Open311");
+        Assert.True(result.Complete);
+        Assert.Empty(result.Warnings);
+        Assert.Empty(result.ExceptedOccurrences);
+        Assert.Equal(0, Assert.Single(result.Entries).Matches);
+        Assert.Equal("writing.exception-unused", Assert.Single(result.Diagnostics).Code);
+    }
+
     [Fact]
     public void WholeExactTokensAreExceptedOnceWithEveryMatchingEntryRetained()
     {
