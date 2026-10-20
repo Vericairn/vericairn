@@ -300,7 +300,7 @@ public class DaemonTests
         await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("pipe", host.Endpoint.Kind);
         using var client = new NamedPipeClientStream(".", host.Endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous);
-        await client.ConnectAsync(5000, TestContext.Current.CancellationToken);
+        await client.ConnectAsync(TestTiming.HangTimeoutMilliseconds, TestContext.Current.CancellationToken);
 
         // Kestrel's named-pipe transport creates the pipe with CurrentUserOnly, its default: the access list allows the owner of the
         // daemon's process token, the user's own account, or for an elevated process the owner Windows gives it (the Administrators

@@ -1060,8 +1060,10 @@ internal static class Raw
     public static async Task<(bool Refused, bool Sent, string Answer)> PresentAsync(string address, X509Certificate2 held, byte[]? sent, string runtimeCertificate)
     {
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(TestTiming.HangTimeout);
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        await socket.ConnectAsync(host, port);
+        await socket.ConnectAsync(host, port, timeout.Token);
         var stream = new NetworkStream(socket, ownsSocket: false);
         CertificateSwap? swap = sent is null ? null : new CertificateSwap(stream, sent);
         await using var tls = new SslStream(swap ?? (Stream)stream);
@@ -1074,23 +1076,22 @@ internal static class Raw
                 ClientCertificateContext = SslStreamCertificateContext.Create(held, null, offline: true),
                 CertificateChainPolicy = new X509ChainPolicy { DisableCertificateDownloads = true, RevocationMode = X509RevocationMode.NoCheck },
                 RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == runtimeCertificate,
-            });
+            }, timeout.Token);
         }
         catch (Exception exception) when (exception is IOException or System.Security.Authentication.AuthenticationException)
         {
             return (true, swap?.Swapped ?? true, exception.Message);
         }
 
-        await tls.WriteAsync(Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
-        await tls.FlushAsync();
+        await tls.WriteAsync(Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"), timeout.Token);
+        await tls.FlushAsync(timeout.Token);
         using var reader = new StreamReader(tls, Encoding.UTF8);
-        using var timeout = new CancellationTokenSource(TestTiming.HangTimeout);
         string answer;
         try
         {
             answer = await reader.ReadToEndAsync(timeout.Token);
         }
-        catch (Exception exception) when (exception is IOException or OperationCanceledException)
+        catch (IOException exception)
         {
             answer = exception.Message;
         }
@@ -1105,8 +1106,10 @@ internal static class Raw
     public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait, byte[]? trickle = null, int chunkSize = 0, Func<Task>? meanwhile = null)
     {
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(wait);
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
-        await socket.ConnectAsync(host, port);
+        await socket.ConnectAsync(host, port, timeout.Token);
         await using var tls = new SslStream(new NetworkStream(socket, ownsSocket: false));
         await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
         {
@@ -1114,12 +1117,12 @@ internal static class Raw
             AllowTlsResume = false,
             LocalCertificateSelectionCallback = (_, _, _, _, _) => certificate!,
             RemoteCertificateValidationCallback = (_, presented, _, _) => presented is not null && RuntimeIdentityScheme.CertificateFingerprint(presented.GetRawCertData()) == runtimeCertificate,
-        });
-        await tls.WriteAsync(payload);
-        await tls.FlushAsync();
+        }, timeout.Token);
+        await tls.WriteAsync(payload, timeout.Token);
+        await tls.FlushAsync(timeout.Token);
         if (meanwhile is not null)
         {
-            await meanwhile();
+            await meanwhile().WaitAsync(timeout.Token);
         }
 
         if (trickle is not null)
@@ -1130,8 +1133,8 @@ internal static class Raw
             {
                 for (int sent = 0; sent < trickle.Length; sent += size)
                 {
-                    await tls.WriteAsync(trickle.AsMemory(sent, Math.Min(size, trickle.Length - sent)));
-                    await tls.FlushAsync();
+                    await tls.WriteAsync(trickle.AsMemory(sent, Math.Min(size, trickle.Length - sent)), timeout.Token);
+                    await tls.FlushAsync(timeout.Token);
                 }
             }
             catch (IOException)
@@ -1141,7 +1144,6 @@ internal static class Raw
 
         using var buffer = new MemoryStream();
         byte[] chunk = new byte[8192];
-        using var timeout = new CancellationTokenSource(wait);
         try
         {
             while (true)
@@ -1154,10 +1156,6 @@ internal static class Raw
 
                 buffer.Write(chunk, 0, read);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            buffer.Write("\n<<timeout: the connection stayed open>>"u8);
         }
         catch (IOException)
         {
