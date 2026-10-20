@@ -3,6 +3,7 @@
 
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -10,6 +11,33 @@ namespace Vericairn.Runtime.Tests;
 [Collection("home")]
 public class ContainedProcessTests
 {
+    [Fact]
+    public void ObservationPipesAreNotInheritedByUnrelatedChildren()
+    {
+        using var run = new RunEstate();
+        ContainedProcess process = Start(run, "generic");
+        try
+        {
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
+            foreach (StreamReader stream in new[] { process.StandardOutput, process.StandardError })
+            {
+                SafeFileHandle handle = Assert.IsType<FileStream>(stream.BaseStream).SafeFileHandle;
+                if (OperatingSystem.IsWindows())
+                {
+                    Assert.True(GetHandleInformation(handle, out uint flags));
+                    Assert.Equal(0u, flags & 1u); // HANDLE_FLAG_INHERIT
+                }
+                else
+                {
+                    int flags = GetDescriptorFlags(checked((int)handle.DangerousGetHandle()), 1); // F_GETFD has no variadic argument.
+                    Assert.NotEqual(-1, flags);
+                    Assert.Equal(1, flags & 1); // FD_CLOEXEC
+                }
+            }
+        }
+        finally { process.Close(); }
+    }
+
     [Fact]
     public void WindowsAccountingRequiresAnEmptySuccessfulInventoryEvenAfterItsLeaderExits()
     {
@@ -219,5 +247,7 @@ public class ContainedProcessTests
 #pragma warning disable SYSLIB1054
     [DllImport("libc", SetLastError = true)] private static extern int kill(int pid, int signal);
     [DllImport("libc", SetLastError = true)] private static extern int waitpid(int pid, out int status, int options);
+    [DllImport("libc", EntryPoint = "fcntl", SetLastError = true)] private static extern int GetDescriptorFlags(int descriptor, int command);
+    [DllImport("kernel32.dll", SetLastError = true)] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetHandleInformation(SafeFileHandle handle, out uint flags);
 #pragma warning restore SYSLIB1054
 }
