@@ -70,11 +70,25 @@ internal sealed class FileSignal : IDisposable
         guard.CancelAfter(TestTiming.HangTimeout);
         try
         {
-            while (!condition()) await changes.Reader.ReadAsync(guard.Token).ConfigureAwait(false);
+            while (!Holds()) await changes.Reader.ReadAsync(guard.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             Assert.Fail("Timed out waiting for " + because);
+        }
+
+        // Windows refuses a read while another process replaces the file; that moment means not yet, so check again.
+        bool Holds()
+        {
+            try
+            {
+                return condition();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                changes.Writer.TryWrite(true);
+                return false;
+            }
         }
     }
 
