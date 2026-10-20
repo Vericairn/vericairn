@@ -43,8 +43,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             }
         }
 
-        // Resume carries its retained baseline in a POST body but is a read, with no signing key or write ledger needed.
-        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) && !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase);
+        // These reads carry their input in a POST body, with no signing key or write ledger needed.
+        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+            !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
             using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
@@ -140,6 +142,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/companions/compare"] = typeof(CompanionCompareRequest),
         ["GET /v1/estate-policies"] = null,
         ["GET /v1/estate-policies/kinds"] = null,
+        ["POST /v1/estate-policies/hash"] = typeof(PolicyHashRequest),
         ["GET /v1/estate-policies/evaluate"] = null,
         ["GET /v1/estate-policies/{key}/view"] = null,
         ["GET /v1/writing-exceptions"] = null,
@@ -259,6 +262,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     {
         [typeof(CompanionRequest)] = (_, _, _) => null,
         [typeof(CompanionCompareRequest)] = (_, _, _) => null,
+        [typeof(PolicyHashRequest)] = (_, _, _) => null,
         [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
         [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),

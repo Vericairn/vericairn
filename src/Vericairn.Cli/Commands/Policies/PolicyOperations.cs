@@ -3,12 +3,21 @@
 
 using System.Text.Json;
 using Vericairn.Protocol;
+using Vericairn.Runtime.Policies;
 using static Vericairn.Cli.CommandContext;
 
 namespace Vericairn.Cli;
 
 internal sealed class PolicyOperations(CommandContext context)
 {
+    internal int Hash(string path, bool json) => context.WithBody(path, body =>
+    {
+        PolicyHashResponse response = PolicyPreparation.Hash(new(body));
+        if (response.Problem is { } problem) return context.Fail(problem.Message);
+        context.Output.WriteLine(json ? JsonSerializer.Serialize(response, ProtocolJson.Options) : response.DefinitionHash);
+        return Clean;
+    });
+
     internal int List(string root, bool json) => context.WithApi(root, api => Report(api.Policies(), json));
     internal int Show(string root, string key, bool json) => context.WithApi(root, api =>
         api.Policy(key) is { } policy ? Report(policy, json) : context.Fail("No policy has that key or id."));

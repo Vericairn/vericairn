@@ -58,6 +58,10 @@ public sealed partial class VericairnClient
     public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<IReadOnlyList<PolicyKindDto>>(nameof(PolicyKinds), async token => (await GetAsync<List<PolicyKindDto>>("/v1/estate-policies/kinds", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyKinds)), cancellationToken);
 
+    /// <summary>The cancellable PolicyHash read, with a response deadline.</summary>
+    public Task<PolicyHashResponse> PolicyHashAsync(PolicyHashRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<PolicyHashResponse>(nameof(PolicyHash), async token => (await PostAsync<PolicyHashRequest, PolicyHashResponse>("/v1/estate-policies/hash", request, cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyHash)), cancellationToken);
+
     /// <summary>The cancellable PolicyEvaluate read, with a response deadline.</summary>
     public Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
         RunOperationAsync<PolicyResponse>(nameof(PolicyEvaluate), async token => (await GetAsync<PolicyResponse>(PolicyEvaluationPath(asOf, release), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyEvaluate)), cancellationToken);
@@ -507,7 +511,10 @@ public sealed partial class VericairnClient
         {
             TResponse result = await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
                 ?? throw new JsonException("The runtime returned no result.");
-            if (result is WriteOutcome { Written: null, Problem: null } or WriteOutcome { Written: not null, Problem: not null })
+            // Companion recovery can remain after the record was stored. A receipt paired with a
+            // refusal is still contradictory; only the recovery problem is a valid combined outcome.
+            if (result is WriteOutcome { Written: null, Problem: null }
+                or WriteOutcome { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
                 throw new JsonException("The runtime returned no definite write outcome.");
             return result;
         }

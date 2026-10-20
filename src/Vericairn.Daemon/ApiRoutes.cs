@@ -21,6 +21,11 @@ public static class ApiRoutes
         CompanionRoutes.Map(app, service);
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
+        app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>
+        {
+            PolicyHashResponse response = service.PolicyHash(request);
+            return Results.Json(response, ProtocolJson.Options, statusCode: response.Problem is null ? 200 : 422);
+        });
         app.MapGet($"{v}/estate-policies/evaluate", (string? asOf, string? release) => Results.Json(service.PolicyEvaluate(asOf, release), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/{{key}}/view", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/writing-exceptions", () => Results.Json(service.WritingExceptions(), ProtocolJson.Options));
@@ -134,7 +139,7 @@ public static class ApiRoutes
     }
 
     private static IResult Outcome(WriteOutcome outcome) =>
-        outcome.Ok
+        outcome.Written is not null
             ? Results.Json(outcome, ProtocolJson.Options)
             : Results.Json(outcome, ProtocolJson.Options, statusCode: outcome.Problem?.Code == "not-found" ? StatusCodes.Status404NotFound : outcome.Problem?.Code == "conflict" ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity);
 }
