@@ -69,9 +69,15 @@ internal sealed class PolicyBasis
         {
             contract = Contract, scanner = WritingScanner.Contract, RecordDigest, Findings, complete, asOf, origin, submission,
             successors = Model.SupersededBy.OrderBy(p => p.Key, StringComparer.Ordinal),
-            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, r.Evidence, r.TreeComparisons, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
+            repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, r.Evidence, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
+        });
+        // Preserve the existing basis for sources without tree observations; retained build bindings extend only their own snapshots.
+        if (Repositories.Any(r => !r.TreeComparisons.IsEmpty)) Digest = Hash(new
+        {
+            snapshot = Digest,
+            repositoryTrees = Repositories.Where(r => !r.TreeComparisons.IsEmpty).Select(r => new { r.Identity, r.Revision, r.TreeComparisons }),
         });
         if (Model.Manifest is not null) Digest = Hash(new { snapshot = Digest, manifest = Model.Manifest });
         unavailable = CheckUnavailable();
