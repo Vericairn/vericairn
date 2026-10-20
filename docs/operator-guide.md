@@ -715,6 +715,11 @@ itself; copies inside a workspace under an estate's `workspaces` directory are n
 script file runs, earlier shell functions and aliases, programs reached through a changed `PATH`, and
 unclassified programs whose operands look like workspace paths still give no signal.
 
+FIX-35 makes settlement exclude only what the run's starting ignore rules exclude: the base commit's
+committed `.gitignore` files and the `info/exclude` captured before launch. An ignore file the run
+changed or added, or a changed `info/exclude`, is never applied and counts as a change outside the brief.
+A nested repository anywhere in the workspace, even under an excluded directory, marks the audit incomplete.
+
 FIX-25 removes a newly prepared, unused workspace after pre-dispatch refusal only when its complete
 inventory still matches preparation. Reused, changed, concurrently used or incompletely inspected
 workspaces are preserved with a warning. Windows opens use extended paths for the longer staging

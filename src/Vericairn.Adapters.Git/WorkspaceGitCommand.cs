@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Text;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Workers;
 
@@ -15,6 +16,10 @@ internal static class WorkspaceGitCommand
         => Run(directory, out output, TimeSpan.FromMinutes(2), arguments);
 
     internal static int Run(string directory, out string output, TimeSpan deadline, params string[] arguments)
+        => RunWithInput(directory, out output, deadline, null, arguments);
+
+    /// <summary>Runs Git with isolated configuration, writing <paramref name="input"/> to its standard input when given.</summary>
+    internal static int RunWithInput(string directory, out string output, TimeSpan deadline, string? input, params string[] arguments)
     {
         if (deadline <= TimeSpan.Zero) throw new ProviderRefusedException("Git's observation deadline expired.");
         string control = Path.Combine(Path.GetTempPath(), "vericairn-git-" + Guid.NewGuid().ToString("N"));
@@ -24,7 +29,7 @@ internal static class WorkspaceGitCommand
             File.WriteAllText(Path.Combine(control, "config"), string.Empty);
             var info = new ProcessStartInfo("git")
             {
-                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = input is not null,
                 CreateNoWindow = true, WorkingDirectory = directory,
             };
             info.ArgumentList.Add("--no-pager");
@@ -43,6 +48,7 @@ internal static class WorkspaceGitCommand
                 info.ArgumentList.Add(setting);
             }
             foreach (string argument in arguments) info.ArgumentList.Add(argument);
+            if (input is not null) info.StandardInputEncoding = new UTF8Encoding(false);
             info.Environment.Clear();
             foreach ((string name, string value) in WorkerEnvironment.Build(WorkerEnvironment.Current(), []))
                 info.Environment[name] = value;
@@ -56,6 +62,22 @@ internal static class WorkspaceGitCommand
             using Process process = Process.Start(info) ?? throw new ProviderRefusedException("Git did not start.");
             Task<string> standardOutput = WorkspaceGitScope.ReadAsync(process.StandardOutput);
             Task<string> standardError = WorkspaceGitScope.ReadAsync(process.StandardError);
+            if (input is not null)
+            {
+                // Both outputs are already draining, so a large input cannot block on a full output pipe.
+                Task writing = process.StandardInput.WriteAsync(input).ContinueWith(_ =>
+                {
+                    // Git may exit before reading everything; its exit code then reports the failure.
+                    try { process.StandardInput.Close(); }
+                    catch (IOException) { }
+                }, TaskScheduler.Default);
+                if (!writing.Wait(deadline))
+                {
+                    process.Kill(entireProcessTree: true);
+                    _ = process.WaitForExit(1000);
+                    throw new ProviderRefusedException("Git did not read its input within its deadline.");
+                }
+            }
             if (!process.WaitForExit(deadline))
             {
                 process.Kill(entireProcessTree: true);

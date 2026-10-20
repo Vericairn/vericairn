@@ -945,7 +945,14 @@ workspace after the whole process boundary exits. It enumerates the workspace it
 must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
 are compared, including deletions, renames and untracked files. FIX-26 excludes untracked ignored output before
 opening it, using repository ignore rules and a copied index through isolated Git configuration. Tracked files
-still count even when they match an ignore rule. The worker's untracked `.vericairn/brief.md` and
+still count even when they match an ignore rule. From 0.8.1 (FIX-35) settlement applies only the run's starting
+rules, which the run could not change: the prepared base commit's committed `.gitignore` files and the
+repository's `info/exclude` as captured before launch, never the user's global ignore file. The ignore files,
+`info/exclude` and index the agent left are never applied, and files the base commit tracks stay tracked even when
+the agent untracks them. Every ignore file that differs from the starting rules, including a new one anywhere and a
+changed `info/exclude` (reported as `.git/info/exclude`), counts as a change outside the brief whatever the brief
+permits. A nested repository or submodule anywhere in the workspace, including under an excluded directory, marks the
+audit incomplete. The worker's untracked `.vericairn/brief.md` and
 `.vericairn/.gitignore` are excluded from comparison; their fingerprints remain available for refusal cleanup.
 Other non-ignored files there still count. Refusal cleanup separately inventories
 everything, including ignored files, before deciding whether an unused workspace can be removed.

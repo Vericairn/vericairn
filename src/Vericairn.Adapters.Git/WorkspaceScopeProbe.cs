@@ -17,20 +17,21 @@ public static class WorkspaceScopeProbe
     public static int? TryRun(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        if (arguments.Count is not (2 or 3 or 5) || arguments[0] != Marker
+        if (arguments.Count is not (2 or 3 or 6) || arguments[0] != Marker
             || arguments.Count == 3 && arguments[2] != "--include-git")
         {
             return null;
         }
 
-        Console.Out.Write(JsonSerializer.Serialize(arguments.Count != 5
+        Console.Out.Write(JsonSerializer.Serialize(arguments.Count != 6
             ? WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, includeGit: arguments.Count == 3)
-            : WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, arguments[2], arguments[3], arguments[4])));
+            : WorkspaceScopeAudit.CaptureLocal(arguments[1], WorkspaceScopeAudit.Deadline, arguments[2], arguments[3], arguments[4],
+                startExclude: arguments[5].Length == 0 ? null : arguments[5])));
         return 0;
     }
 
     internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false,
-        TimeProvider? clock = null, Action? launched = null)
+        TimeProvider? clock = null, Action? launched = null, string? startExclude = null)
     {
         if (deadline <= TimeSpan.Zero)
         {
@@ -52,7 +53,7 @@ public static class WorkspaceScopeProbe
 
         if (branch is not null)
         {
-            foreach (string argument in new[] { branch, baseline ?? string.Empty, gitDirectory ?? string.Empty })
+            foreach (string argument in new[] { branch, baseline ?? string.Empty, gitDirectory ?? string.Empty, startExclude ?? string.Empty })
             {
                 info.ArgumentList.Add(argument);
             }
