@@ -142,7 +142,7 @@ public sealed class ChangesFlowTests
     {
         using var f = new Fixture();
         if (action == "open") Assert.True(f.Service.ChangesPush(f.Push).Ok);
-        f.SeedPull();
+        f.SeedPull(pushed: action != "push");
         if (action == "push") f.Adapter.Uncertain = true;
         else f.Provider.Uncertain = true;
         ChangeResponse Run() => action switch { "push" => f.Service.ChangesPush(f.Push), "open" => f.Service.ChangesOpen(f.Open), _ => f.Service.ChangesMerge(f.Merge) };
@@ -478,6 +478,17 @@ public sealed class ChangesFlowTests
 
     internal static IReadOnlyList<ChangeCheck> Checks(string head) => Required.Select(n => new ChangeCheck(n, head, "completed", "success")).ToArray();
 
+    [Fact]
+    public void AMergeOfAHeadNoScannedPushRecordsIsRefusedBeforeTheMerge()
+    {
+        using var f = new Fixture();
+        f.SeedPull(pushed: false);
+        ChangeResponse result = f.Service.ChangesMerge(f.Merge);
+        Assert.False(result.Ok);
+        Assert.Contains("No successful scanned push of this exact head", result.Message, StringComparison.Ordinal);
+        Assert.Null(f.Provider.MergedHead);
+    }
+
     internal sealed class Fixture : IDisposable
     {
         internal TestEstate Estate { get; } = new(recordFormat: 3);
@@ -508,7 +519,13 @@ public sealed class ChangesFlowTests
             RecordEnvelope decision = Estate.Add("decision", Estate.OperatorId, $$"""{"title":"Repository access","statement":"Grant repository writes.","summary":"Test grant.","synthesis":"A bounded grant.","effects":["Grant checked repository writes."],"affects":[],"decidedBy":"{{Estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["publication"]}""");
             return Estate.Add("authority", Estate.OperatorId, $$"""{"grantee":"{{Estate.BuilderId}}","scope":["repository-write"],"reserved":["publication"],"conditions":[],"basis":"{{decision.Id}}"}""");
         }
-        internal void SeedPull() => Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "open", null, Checks(Head)));
+        // A merge rests on a recorded scanned push of its exact head, so the seeded pull request's head is pushed first unless a test says not.
+        internal void SeedPull(bool pushed = true)
+        {
+            if (pushed && !ScannedPush()) Assert.True(Service.ChangesPush(Push).Ok);
+            Provider.Memory.Set("Example/widget", new("1", "work/change", "main", Head, "open", null, Checks(Head)));
+        }
+        private bool ScannedPush() => Service.Session.Load().Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-push" && EstateModel.BodyString(o, "status") == "observed-success");
         internal RecordEnvelope Current(string action) => Service.Session.Load().Current("operation").Last(o => EstateModel.BodyString(o, "action") == action);
         internal void IntentExists(string action) => Assert.Contains(Service.Session.Load().OfType("operation"), o => o.Supersedes is null && EstateModel.BodyString(o, "action") == action && EstateModel.BodyString(o, "status") == "not-started");
         internal void Reopen() { Service.Dispose(); Service = OpenService(); }

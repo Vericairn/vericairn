@@ -56,6 +56,11 @@ public sealed class ResourceType : IRecordType
             }
         }
 
+        // A repository's location is where checked changes push and merge; only the operator or an administer grant moves it.
+        if (context.Record.Format >= 3 && context.Record.Supersedes is not null && Estate.EstateModel.BodyString(context.Record, "kind") == "repository"
+            && ProductType.Changed(context, "location") && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
+            context.Error("resource.location-author", "A repository resource's location is changed only by the operator or a principal with the 'administer' scope.");
+
         body.Enum("visibility", true, "public", "private", "n/a");
         body.Text("notes", false, 4000);
         body.NoOtherKeys();

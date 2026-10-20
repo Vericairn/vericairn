@@ -155,7 +155,9 @@ These fields organize work under its existing authority and do not create depend
 A product's optional `changes` object has `provider`, a repository resource id in
 `repository`, the target branch in `target`, and exact host check names in
 `requiredChecks`. An absent or empty required-check declaration authorizes no merge.
-`product.changes` is a format-3 field. Repository-change operations retain their
+`product.changes` is a format-3 field. Only the operator or a principal with the `administer` scope declares,
+changes or removes it (`product.changes-author`), and only they move a format-3 repository resource's
+`location` in a revision (`resource.location-author`); other fields stay open to their usual authors. Repository-change operations retain their
 existing identity and intent/effect lifecycle and add `checks`, `requiredChecks`
 and `scan`, also gated at format 3. Checks bind each reported name, head, status
 and optional conclusion. A push scan retains only the tool, version, range,

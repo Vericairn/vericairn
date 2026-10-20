@@ -10,6 +10,9 @@ when the estate requires signatures, and record format 3 for the product's
 Add a `changes` declaration to the product record, retaining the product's other
 fields. The repository is an estate resource of kind `repository`; its `location.github`
 names the GitHub destination. Register its local clone through `sources clone`.
+The declaration and the repository's location decide where merges land, so only
+the operator or a principal with the `administer` scope declares, changes or removes
+the declaration or moves the location.
 
 ```json
 {
@@ -90,6 +93,9 @@ Every required check must be present and every reported check must have complete
 successfully at the expected head. Missing, pending, failed, skipped, unknown or
 stale-head checks refuse the merge, as do incomplete pagination, a changed head,
 a different target, a closed pull request and an absent requirement declaration.
+The merge also needs a successful scanned push of that exact head to the pull
+request's branch, so a pull request opened elsewhere is pushed with `changes push`
+first.
 Fork pull requests are not supported by this provider.
 
 The successful check inventory is recorded before the merge request. GitHub's
