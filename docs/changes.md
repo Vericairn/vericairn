@@ -149,17 +149,3 @@ Their SDK methods are `ChangesPush`, `ChangesOpen`, `ChangesMerge` and
 Each has a cancellable `Async` counterpart. An interrupted observation does not
 undo an effect; reconcile the original operation before considering a retry.
 The generated API description and CLI reference include this additive surface.
-
-## Policy implementation identity: correction for 0.8.1
-
-The documentation correction for 0.8.1 brings the maintained [policy guide](policies.md),
-[evaluator guide](policy-evaluator.md) and registry comment into agreement with FIX-31.
-A policy implementation digest identifies a compilation through the assembly's
-simple name and deterministic module version identifier. Together with the
-registered kind and version, it binds the compiled kind, version and module identity
-admitted by application composition. It is not a hash of installed bytes and does
-not detect a modified installation. This correction changes no behavior.
-
-0.8.0's frozen policy guides retain the earlier description, and the frozen set
-remains unchanged. The compilation identity described here is the correct account
-of the behavior introduced by FIX-31; see the [limitations](limitations-and-platforms.md#policy-implementation-identity-correction-for-081).
