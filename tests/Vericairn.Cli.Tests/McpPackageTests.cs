@@ -43,6 +43,8 @@ public class McpPackageTests
             Assert.Equal(expected, manifest["version"]!.GetValue<string>());
             Assert.Equal("io.github.vericairn/vericairn", manifest["name"]!.GetValue<string>());
             Assert.Equal("https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json", manifest["$schema"]!.GetValue<string>());
+            // The registry's schema bounds a server's description to between 1 and 100 characters.
+            Assert.InRange(manifest["description"]!.GetValue<string>().Length, 1, 100);
             JsonNode server = Assert.Single(manifest["packages"]!.AsArray())!;
             Assert.Equal("nuget", server["registryType"]!.GetValue<string>());
             Assert.Equal("dotnet-vc", server["identifier"]!.GetValue<string>());
