@@ -1,11 +1,62 @@
 # Vericairn
 
-Vericairn is a local-first creation and operations platform: it helps a person or organization turn an
-intention into an understood, authorized, produced, reviewed, delivered and maintained result, with its
-decisions, sources, relationships and history intact.
+Vericairn helps a person or a small team build and ship software with coding agents while keeping the
+final say. Work orders, agent attempts, reviews, decisions and releases are records in your own git
+repository, each with a content hash and, from an admitted device, a signature. Agents work from exact
+briefs, their results are checked and reviewed, and a release is published only after you accept it.
 
+Vericairn's own development runs this way. Its work orders, reviews, decisions and releases are records in a
+Vericairn estate, and every release ships only after its operator accepts it.
+
+Vericairn is a local-first creation and operations platform, and software is the first journey it supports.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
-`vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
+`vericairn` command line, the SDK, the MCP server and the Workbench desktop. The Remote client is not
+implemented here.
+
+**Status:** pre-1.0. The current published release is [0.8.0](https://github.com/Vericairn/vericairn/releases/tag/v0.8.0),
+published on October 20, 2026. The [public roadmap](ROADMAP.md) lists what comes next, with no dates.
+
+## Try it
+
+With the .NET 10 SDK on Linux, macOS or Windows:
+
+```sh
+dotnet tool install --global dotnet-vc
+mkdir my-venture && cd my-venture && git init
+dotnet vc estate init --name "My Venture" --slug my-venture \
+  --purpose "Build and ship one product with coding agents." \
+  --operator-name "Your Name" --organization "Your Organization" \
+  --commit cd508425339415944411cf71cce9ad20f46ff41f
+dotnet vc status
+```
+
+`estate init` writes two records, you as the operator and the estate's charter, and a manifest that pins the
+Vericairn source it names, here 0.8.0's commit. `status` shows the new, empty estate. The
+[operator's guide](docs/operator-guide.md) continues from there: your device and its key, a builder agent,
+decisions, a work order, an agent's run, its review and acceptance, and a release.
+
+## What works today
+
+- **Records in git.** Canonical, content-addressed JSON records, one file each, checked by
+  `vericairn estate check`, with export and verified restore.
+- **Work with agents.** Work orders with exit questions, exact briefs, assignments, attempts, results, reviews
+  and acceptance pinned to exact hashes. The worker runs Codex on an assignment within a recorded cap, with a
+  command audit and a scope check; live runs qualify one Codex version. The MCP server gives a coding agent,
+  such as Claude Code, an estate's reads and the narrow writes an agent is meant to have.
+- **Releases.** Candidates, a release gate that needs the operator's acceptance, intent recorded before every
+  external effect, and publication through GitHub Releases.
+- **Estate policies.** Policies, recurring duties and writing exceptions, evaluated from the records.
+- **Platforms.** The command line is qualified on Linux x64, macOS on Apple silicon and Windows x64. Workbench
+  is included but not yet qualified on any platform.
+
+## Planned
+
+- Remote, the phone client for accepting releases and steering work, in 0.9.0.
+- Separately installed extensions and the package registry, at milestone M4.
+- The [roadmap](ROADMAP.md) gives the order, and [the limitations](docs/limitations-and-platforms.md) give
+  the current limits.
+
+## The current release
 
 The current published release is [0.8.0](https://github.com/Vericairn/vericairn/releases/tag/v0.8.0),
 published on October 20, 2026 at 11:28:45 UTC, tag `v0.8.0`, commit `cd50842`.

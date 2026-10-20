@@ -1,8 +1,13 @@
 # Vericairn Community
 
+Vericairn helps a person or a small team build and ship software with coding agents while keeping the
+final say. Work orders, agent attempts, reviews, decisions and releases are records in your own git
+repository, and a release is published only after you accept it.
+
 Vericairn is a local-first creation and operations platform. Its Community edition keeps work, decisions,
 evidence and history as append-only, content-addressed, signed records. These packages contain Community
-code only, under Apache-2.0, authored by Jason Furr.
+code only, under Apache-2.0, authored by Jason Furr. The source, releases and guides are at
+https://github.com/Vericairn/vericairn.
 
 ## Command line
 
