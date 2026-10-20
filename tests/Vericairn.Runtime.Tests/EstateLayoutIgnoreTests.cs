@@ -149,6 +149,8 @@ public sealed class EstateLayoutIgnoreTests
         using var estate = new TestEstate();
         using var storage = new TestEstate();
         RunEstate.Git(estate.Root, "init", "-q");
+        // The worktree is checked out from the commit, so keep its line endings as committed on every platform.
+        RunEstate.Git(estate.Root, "config", "core.autocrlf", "false");
         estate.WriteFile(".gitignore", ".DS_Store\n");
         RunEstate.Git(estate.Root, "add", ".");
         RunEstate.Git(estate.Root, "commit", "-qm", "Create the fixture");
