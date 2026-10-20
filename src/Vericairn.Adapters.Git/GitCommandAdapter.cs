@@ -10,7 +10,7 @@ using Vericairn.Runtime.Workers;
 namespace Vericairn.Adapters.Git;
 
 /// <summary>The git adapter over the git command on the PATH, with read-only observations and isolated worker workspaces.</summary>
-public sealed class GitCommandAdapter : ISourceAdapter
+public sealed partial class GitCommandAdapter : ISourceAdapter
 {
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 

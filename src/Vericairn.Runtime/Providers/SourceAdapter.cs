@@ -53,6 +53,13 @@ public interface ISourceAdapter
     byte[]? ReadFileAtHash(string root, string relativePath, string hash) => null;
 
     /// <summary>
+    /// Unexpected top-level estate entries that repository-owned ignore rules exclude and the index does not track,
+    /// including descendants. Never uses machine-wide ignore rules or changes the repository.
+    /// Null means unavailable or unsupported; without an observation the estate checks every entry.
+    /// </summary>
+    IReadOnlySet<string>? IgnoredEstateEntries(string root) => null;
+
+    /// <summary>
     /// The adapter's isolated workspace operations, including recovery, scope observation and local retention after settlement.
     /// Null means workspace preparation is unsupported. The implementation must preserve the workspace contract's isolation
     /// and never load agent-controlled configuration while observing or retaining work.
