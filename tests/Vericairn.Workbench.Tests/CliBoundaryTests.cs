@@ -42,14 +42,16 @@ public sealed class CliBoundaryTests
     {
         using var stop = new CancellationTokenSource();
         int calls = 0;
+        var clock = new ClientClock();
         using var http = new HttpClient(new Handler(async (_, token) =>
         {
             calls++;
             if (cancel) stop.Cancel();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            else clock.Elapse(TimeSpan.FromSeconds(30));
+            await TestTiming.UntilCancelled(token);
             return new HttpResponseMessage(HttpStatusCode.OK);
         })) { BaseAddress = new Uri("http://localhost") };
-        using var client = new VericairnClient(http) { OperationTimeout = _ => TimeSpan.FromMilliseconds(30) };
+        using var client = new VericairnClient(http) { OperationTimeout = _ => TimeSpan.FromSeconds(30), OperationClock = clock };
         var output = new StringWriter();
         var error = new StringWriter();
         var context = new CommandContext(output, error, stop.Token);

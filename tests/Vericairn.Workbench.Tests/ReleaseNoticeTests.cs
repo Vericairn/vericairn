@@ -17,14 +17,14 @@ public sealed class ReleaseNoticeTests(HeadlessFixture fixture)
         {
             var store = new ReleaseUpdateStore(home);
             var source = new Source();
-            var updates = new ReleaseUpdates(store, source, TimeProvider.System);
+            var updates = new ReleaseUpdates(store, source, new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero)));
             // An earlier CLI client using this home has already learned the release.
             await updates.CheckAsync(TestContext.Current.CancellationToken);
             await fixture.UiAsync(async () =>
             {
                 var runtime = new FakeRuntimeManager();
                 var shell = new ShellViewModel(_ => throw new InvalidOperationException("No estate needed"), runtime,
-                    new Preferences(Path.Combine(home, "workbench")), new ReleaseUpdates(new(home), source, TimeProvider.System));
+                    new Preferences(Path.Combine(home, "workbench")), new ReleaseUpdates(new(home), source, new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero))));
                 var window = new MainWindow(shell);
                 window.Show();
                 await shell.RefreshUpdatesAsync();
@@ -59,7 +59,7 @@ public sealed class ReleaseNoticeTests(HeadlessFixture fixture)
             await fixture.UiAsync(async () =>
             {
                 var shell = new ShellViewModel(_ => throw new InvalidOperationException("No estate needed"), new FakeRuntimeManager(),
-                    new Preferences(Path.Combine(home, "workbench")), new ReleaseUpdates(store, source, TimeProvider.System));
+                    new Preferences(Path.Combine(home, "workbench")), new ReleaseUpdates(store, source, new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero))));
                 await shell.RefreshUpdatesAsync();
                 Assert.Empty(shell.UpdateNotice);
                 Assert.Equal("No estate open.", shell.Status);

@@ -53,7 +53,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
             {
                 Task request = shell.RefreshAsync(TestContext.Current.CancellationToken);
                 Assert.False(request.IsCompleted, shell.Status + "/" + shell.RequestState);
-                await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await connection.Control.Entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.False(request.IsCompleted);
                 await Dispatcher.UIThread.InvokeAsync(() =>
                 {
@@ -65,8 +65,9 @@ public class ClientCommandTests(HeadlessFixture fixture)
                     window.KeyPress(Key.L, RawInputModifiers.Control | RawInputModifiers.Shift, PhysicalKey.L, null);
                     Assert.False(shell.LeftVisible);
                     if (!timeout) shell.CancelCurrentRequest();
+                    else connection.Control.Clock.Elapse(connection.Control.Timeout);
                 });
-                await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await request.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.Equal(timeout ? "timed-out" : "cancelled", shell.RequestState);
                 Assert.Equal(timeout ? "The request timed out." : "The request was cancelled.", shell.Status);
                 Assert.False(shell.IsBusy);
@@ -74,7 +75,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
                 Assert.Equal("cached", shell.Freshness);
                 string interrupted = shell.Status;
                 connection.Control.Release.TrySetResult();
-                await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await connection.Control.Finished.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.Equal(interrupted, shell.Status);
                 connection.Control.StallStatus = false;
                 await shell.RefreshAsync(TestContext.Current.CancellationToken);
@@ -171,9 +172,10 @@ public class ClientCommandTests(HeadlessFixture fixture)
             Assert.False(request.IsCompleted, page.Status + "/" + shell.Status);
             try
             {
-                await connection.Control.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await connection.Control.Entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 if (!timeout) shell.CancelCurrentRequest();
-                await request.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                else connection.Control.Clock.Elapse(connection.Control.Timeout);
+                await request.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.True(shell.LastFailure?.OutcomeUnknown);
                 Assert.True(shell.HasUncertainOutcomes);
                 Assert.Null(page.WrittenId);
@@ -181,7 +183,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
                 Assert.Contains("outcome is unknown", page.Status, StringComparison.Ordinal);
                 Assert.Contains("outcome is unknown", shell.UncertaintyNotice, StringComparison.Ordinal);
                 connection.Control.Release.TrySetResult();
-                await connection.Control.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+                await connection.Control.Finished.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 await shell.RefreshAsync(TestContext.Current.CancellationToken);
                 Assert.True(shell.HasUncertainOutcomes);
                 await shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
@@ -203,7 +205,15 @@ public class ClientCommandTests(HeadlessFixture fixture)
         connection.Control.Timeout = TimeSpan.FromMilliseconds(100);
         try
         {
-            await fixture.UiAsync(() => shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken));
+            await fixture.UiAsync(async () =>
+            {
+                Task request = shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
+                await connection.Control.Entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+                Assert.False(request.IsCompleted);
+                Assert.NotNull(page.WrittenId);
+                connection.Control.Clock.Elapse(connection.Control.Timeout);
+                await request.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            });
             Assert.Equal("timed-out", shell.RequestState);
             Assert.False(shell.LastFailure?.OutcomeUnknown);
             Assert.False(shell.HasUncertainOutcomes);
@@ -264,7 +274,8 @@ public class ClientCommandTests(HeadlessFixture fixture)
         public bool InvalidStatus { get; set; }
         public bool Refused { get; set; }
         public int AssignCalls { get; private set; }
-        public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(10);
+        public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+        internal ClientClock Clock { get; } = new();
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -284,7 +295,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
                     await Release.Task; // Deliberately non-cooperative: a late result must never mutate the shell.
                     Finished.TrySetResult();
                     return response;
-                }, false, Timeout, (CancellationToken)args![^1]!);
+                }, () => false, Timeout, Clock, (CancellationToken)args![^1]!);
             }
             if (targetMethod.Name == nameof(IEstateApi.AssignAsync) && StallAssign)
             {
@@ -297,7 +308,7 @@ public class ClientCommandTests(HeadlessFixture fixture)
                     await Release.Task;
                     Finished.TrySetResult();
                     return result;
-                }, true, Timeout, (CancellationToken)args![^1]!);
+                }, () => true, Timeout, Clock, (CancellationToken)args![^1]!);
             }
             try { return targetMethod.Invoke(Target, args); }
             catch (TargetInvocationException exception) when (exception.InnerException is not null)
