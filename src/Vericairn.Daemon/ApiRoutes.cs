@@ -139,7 +139,7 @@ public static class ApiRoutes
     }
 
     private static IResult Outcome(WriteOutcome outcome) =>
-        outcome.Ok
+        outcome.Written is not null
             ? Results.Json(outcome, ProtocolJson.Options)
             : Results.Json(outcome, ProtocolJson.Options, statusCode: outcome.Problem?.Code == "not-found" ? StatusCodes.Status404NotFound : outcome.Problem?.Code == "conflict" ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity);
 }

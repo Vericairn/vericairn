@@ -238,7 +238,7 @@ public static class OpenApiDocument
                 ["title"] = "Vericairn API",
                 ["version"] = ApiVersion.Current,
                 ["description"] = "One versioned API that every client uses. Authority is evaluated by the runtime behind it; a client presents, requests and observes. "
-                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict), "
+                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict, reconcile-required), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
                     + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1). "
@@ -339,8 +339,13 @@ public static class OpenApiDocument
         }
         else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
         {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "WriteOutcome with written (path, id, hash): the record was stored. An interrupted companion publication also carries a reconcile-required problem with its recovery action; retain both and never resubmit the stored record.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/WriteOutcome" } } },
+            };
             responses["404"] = new JsonObject { ["description"] = "The subject named does not exist (WriteOutcome with a not-found problem)." };
-            responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with a problem; a rejection carries findings)." };
+            responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with written null and a problem; a rejection carries findings). A reconcile-required problem without written holds further writes until recovery." };
         }
 
         if (path is "/v1/estate/upgrade" or "/v1/estate/export")

@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 8, October 20, 2026. Describe policy definition hashing across the CLI, API and SDK, and state which authored text the writing scan checks.
+Revision 9, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, and which authored text the writing scan checks.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -24,7 +24,9 @@ The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate
 
 `policies check --as-of 2026-11-01T00:00:00Z` previews an explicit canonical UTC instant. `--release <release-id>` selects a recorded release's product, version and exact commit; both options may be combined. The API and MCP arguments are `asOf` and `release`. A missing target is reported as a problem. An instant before a record in the snapshot is unavailable; historical replay requires the historical snapshot. Preview output grants no release authority.
 
-Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and installed kind implementation hashes. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
+Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and registered kind/version compilation identities. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
+
+Each implementation digest is computed from the assembly's simple name and deterministic module version identifier, as specified in [Policy evaluator](policy-evaluator.md). Together with the registered kind and version, it binds the compiled kind, version and module identity that application composition admitted. It is not a hash of installed bytes and does not detect a modified installation; declarations cannot load code or choose an ambient assembly.
 
 Recurring-duty findings preserve the occurrence, originating policy revision, examined subject revision, due time, grace deadline, completion flag and time, missed history, late duration and exact result, review and proof references. A scheduled or within-grace occurrence has not been completed. An excepted occurrence retains its unmet verdict and its debt. Exception history includes expiry, revocations and the exact submission restrictions.
 
