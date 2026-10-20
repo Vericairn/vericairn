@@ -1,10 +1,16 @@
 # Policy evaluator
 
-Revision 8, October 20, 2026. Describe policy implementations by their compilation identity.
+Revision 9, October 20, 2026. Describe policy implementations by their compilation identity, result selection per assignment and the boundary for prospective work-state consistency.
 
 The runtime service collects the basis for the [policy read surfaces](policies.md). Application composition installs the foundation kinds, the software pack's reference-coverage kind and the local Git source. A named release preview carries the candidate's exact product, version and commit with preview origin; it cannot authorize dispatch. Source collection reads retained objects and local bytes without fetching or building.
 
 The runtime's internal `Policies` library implements `vericairn.estate-policy/1`. It evaluates supplied snapshots and returns findings. Record validation, source collection, implementation admission and release submission remain responsibilities of its caller. The library adds no command, transport operation or persisted record shape.
+
+`PolicyWork.Results` selects at most one current result from each current assignment's latest attempt at the basis time, following the work-order lineage. Parallel assignments do not compete for one result slot. Equal-time latest attempts within an assignment and multiple current results of its selected attempt remain ambiguous inputs. `PolicyWork.Acceptance` recognizes an exact acceptance of the current order or of any selected result whose assignment pins that exact order revision. Acceptance of an earlier work-order revision remains historical. A newer attempt, superseded assignment or replaced result removes the earlier result from that selection.
+
+The staleness class `result-awaiting-review` excludes accepted work orders before selecting waiting results, just as assignment-start excludes accepted work. All of an accepted order's parallel results are settled for review-wait. Remaining results keep their exact-result review requirement and elapsed-time anchor; acceptance supplies no review evidence.
+
+Work-state consistency warns prospectively from `context.Model.ById[context.Identity].AtTime`, the first declaration of that policy identity. The closed version-1 parameters remain `cases`; no new parameter or status is needed. For an explicit open status and its exact acceptance or publication, the contradiction begins at the later record time. If both records precede the boundary, the case contributes no subject or finding. Equality is included. A new open status can therefore contradict an older acceptance or publication, and a new acceptance or publication can contradict an older open status. `startsAt` still controls activation; edits to it or to the policy do not restart the boundary. Other cases retain their existing satisfied findings, and an empty selection retains the ordinary zero-subject summary.
 
 `PolicyBasis` copies the validated record view, including retained revisions, signatures, diagnostics and supersession links. It discards the loader's filesystem root. Repository inputs name an identity, revision, source contract, completeness and files with normalized relative paths, content hashes and bytes. Retained proof objects carry their hashes and bytes. The basis digest covers these inputs, their availability, the implementation pins and the explicit clock. Canonical output includes diagnostics, evidence, dispositions, counts and ordering.
 

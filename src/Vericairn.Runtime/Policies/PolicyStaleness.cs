@@ -51,7 +51,7 @@ internal static partial class FoundationPolicyKinds
                 break;
             case "result-awaiting-review":
                 string requirement = Choice(context.Parameters, "reviewRequirement", "any", "independent", "operator");
-                foreach (RecordEnvelope order in orders.Where(o => EstateModel.BodyString(PolicyWork.Status(model, o, at)!, "status") != "retired"))
+                foreach (RecordEnvelope order in orders.Where(o => !PolicyWork.Accepted(model, o, at) && EstateModel.BodyString(PolicyWork.Status(model, o, at)!, "status") != "retired"))
                 foreach (RecordEnvelope result in PolicyWork.Results(model, order, at))
                     if (!model.Current("review").Any(r => PolicyWork.ReviewQualifies(model, r, result, requirement))) yield return Age(context, result, @class, days, result.AtTime, result);
                 break;

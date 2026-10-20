@@ -15,6 +15,12 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class PolicyReadTests
 {
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void ParallelWorkAndProspectiveConsistencyUseTheRecordedPolicyBasis(int assignments) =>
+        PolicyWorkJourney.Run(api => api.PolicyEvaluate("2026-11-01T00:00:00Z"), assignments);
+
     [Fact]
     public void ReadsKeepRecordedTimeAndExposeCrossedDeadlinesWithoutWriting()
     {

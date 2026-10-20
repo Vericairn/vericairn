@@ -122,9 +122,10 @@ internal static class PolicyWork
             if (attempts.Length == 0) continue;
             RecordEnvelope attempt = attempts[^1];
             if (attempts.Count(a => a.At == attempt.At) > 1) throw new PolicyInputException("The latest attempt is ambiguous.");
-            results.AddRange(model.OfType("result").Where(r => r.Subject == attempt.Reference && CurrentAt(model, r, at)));
+            RecordEnvelope[] current = model.OfType("result").Where(r => r.Subject == attempt.Reference && CurrentAt(model, r, at)).ToArray();
+            if (current.Length > 1) throw new PolicyInputException("The current submitted result is ambiguous.");
+            results.AddRange(current);
         }
-        if (results.Count > 1) throw new PolicyInputException("The current submitted result is ambiguous.");
         return results;
     }
 

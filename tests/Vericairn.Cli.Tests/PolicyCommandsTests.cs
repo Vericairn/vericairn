@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
 
@@ -36,6 +37,21 @@ public sealed class PolicyCommandsTests
             Assert.Equal(expected, JsonSerializer.Serialize(JsonSerializer.Deserialize<WritingExceptionsResponse>(section, ProtocolJson.Options), ProtocolJson.Options));
         }
         Assert.Equal(before, fixture.Estate.Load().Records.Count);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void CheckShowsUnsettledParallelWorkAndProspectiveConsistency(int assignments)
+    {
+        CliHarness.Ok("policies", "--help");
+        PolicyWorkJourney.Run(api =>
+        {
+            CliHarness.Outcome response = CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "--json",
+                "policies", "check", "--as-of", "2026-11-01T00:00:00Z");
+            Assert.Equal(0, response.Code);
+            return JsonSerializer.Deserialize<PolicyResponse>(response.Out, ProtocolJson.Options)!;
+        }, assignments);
     }
 
     [Theory]

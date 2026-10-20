@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 9, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, and which authored text the writing scan checks.
+Revision 10, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, which authored text the writing scan checks, parallel results, settled review waits and prospective work-state consistency.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -27,6 +27,12 @@ The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate
 Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and registered kind/version compilation identities. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
 
 Each implementation digest is computed from the assembly's simple name and deterministic module version identifier, as specified in [Policy evaluator](policy-evaluator.md). Together with the registered kind and version, it binds the compiled kind, version and module identity that application composition admitted. It is not a hash of installed bytes and does not detect a modified installation; declarations cannot load code or choose an ambient assembly.
+
+Work policies resolve the latest attempt and its current result separately for each current assignment. Parallel assignments can each submit a result. Two latest attempts at the same recorded time within one assignment, or two current results of one attempt, remain unavailable. Exact acceptance of the current work order or of any current assignment's current result settles the work order. Acceptance of a replaced result or an earlier attempt does not settle its successor.
+
+`review-wait` checks unreviewed results only while their work order remains unaccepted and unretired. Acceptance settles every parallel result's wait; it does not create a review or change the brief's review obligations. Unaccepted results still age from their submission time under the declared review requirement.
+
+Work-state consistency warns prospectively. Its boundary is the policy identity's first declaration time, preserved across policy revisions and independent of `startsAt`. An explicit open status contradicting exact acceptance or publication is selected when either that status or that fact was recorded at or after the boundary. Contradictions whose two records precede the boundary raise no finding. This uses the existing version-1 `cases` parameter and work-status vocabulary; acceptance remains derived from its own records.
 
 Recurring-duty findings preserve the occurrence, originating policy revision, examined subject revision, due time, grace deadline, completion flag and time, missed history, late duration and exact result, review and proof references. A scheduled or within-grace occurrence has not been completed. An excepted occurrence retains its unmet verdict and its debt. Exception history includes expiry, revocations and the exact submission restrictions.
 
