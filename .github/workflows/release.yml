@@ -216,10 +216,12 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ inputs.version }}
+        # The tool is pinned, and asked for a CycloneDX specification the components report reads (1.2 to 1.6): CycloneDX 6.3
+        # writes 1.7 by default, which stopped 0.8.0's third release run before any asset or draft.
         run: |
           set -eu
-          dotnet tool install --global CycloneDX
-          dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects
+          dotnet tool install --global CycloneDX --version 6.3.1
+          dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects --spec-version 1.6
           cp sbom/bom.json "dist/vericairn-$VERSION-sbom.cdx.json"
           cp THIRD-PARTY-NOTICES.md "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md"
       - name: Documentation set
