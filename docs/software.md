@@ -400,8 +400,11 @@ The release as intent, then observed effect:
    follows resource revisions and the provider's location keys at the effective release destination,
    including a request override. A missing clearing review,
    unknown required commit, missing contribution or absent local Git object refuses the applicable
-   gate. A document with no registered clone is reported as not compared; the independent review
-   reads it at a commit of its own repository. The runtime neither fetches nor checks out anything,
+   gate. A refuse-level document with no registered clone refuses too, naming `vericairn sources clone`,
+   unless the operator's signed, expiring grant of scope `release-document-uncompared:<declaration>@<version>`
+   to the submitting principal excepts it; the intent names that grant, and the independent review reads
+   the document at a commit of its own repository. A warn-level document with no registered clone is
+   reported as not compared. The runtime neither fetches nor checks out anything,
    and the intent records the comparisons. Estate-file checks still read the estate's working tree.
    [Estate policies](policies.md) add their applicable refuse holds to this same conjunction, including
    unavailable sources and overdue duties. Format 3 requires the exact commit, expected product hash and

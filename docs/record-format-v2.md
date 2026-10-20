@@ -348,8 +348,9 @@ effective destination; an unresolved commit refuses submission, and the clone's 
 repository it is that repository's registered HEAD, or the reviewed commit when HEAD is its ancestor. A newer or
 divergent HEAD with changed content still refuses. Resource revisions retain the repository's identity. The comparison
 runs where a clone is registered; if that clone lacks the required commit,
-the refusal names the repository to fetch. An unregistered clone is reported as not compared, for the independent
-review to read at a commit of that document's repository. Observation checks again before recording a candidate,
+the refusal names the repository to fetch. A refuse-level document whose repository has no registered clone refuses too,
+naming how to register it, unless the operator's signed, expiring grant for that document and version excepts it; the
+release evidence names the grant, and the independent review reads the document at a commit of its repository. Observation checks again before recording a candidate,
 using the actual built commit for the release repository and the same ancestry rule in each other repository.
 A declaration that names a source, trigger, check or generator no installed pack provides is shown as
 unavailable (`document.unavailable`) and, when it declares a `refuse` trigger, closes its product's release gate until

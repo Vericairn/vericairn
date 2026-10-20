@@ -53,7 +53,7 @@ internal sealed class ReleaseCoordinationService(
     private (ReleasePolicyAssessment Assessment, List<FindingDto> Objections, List<string> Compared) Admission(EstateModel model,
         ReleaseSubmitRequest request, string? commit, ProviderDescriptor provider, string destination, JsonObject body, string? previous, bool probe = true)
     {
-        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, commit, provider, destination);
+        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, request.Product, request.Version, request.By, now(), commit, provider, destination);
         ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, commit, ReleaseRepositories(model, provider, destination));
         List<FindingDto> objections = [.. assessment.Objections];
         if (recordAccess.RequestDeviceRefusal(model) is { } denied) objections.AddRange(denied.Findings.Count > 0 ? denied.Findings : [new("error", "release.device", "release", denied.Message)]);
@@ -100,7 +100,7 @@ internal sealed class ReleaseCoordinationService(
                 location.TryGetProperty("github", out JsonElement github) && string.Equals(github.GetString(), request.Repository, StringComparison.OrdinalIgnoreCase)).SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
             ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, request.Commit, repositories);
             IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, request.Product, request.Commit, repositories);
-            var compared = CompareLivingDocuments(model, documents, repositories);
+            var compared = CompareLivingDocuments(model, documents, repositories, request.Version, request.By, now());
             List<FindingDto> objections = [new("error", "release.setup", "release", message), .. assessment.Objections,
                 .. compared.Changed.Concat(documents.Where(d => d.Closes).Select(d => d.Describe())).Select(m => new FindingDto("warning", "document.release-hold", "release-documents", m))];
             return GateRefusal("release " + request.Version, "not-started", assessment, objections);
@@ -108,10 +108,12 @@ internal sealed class ReleaseCoordinationService(
     }
 
     /// <summary>
-    /// Reads each refuse-level repository document at its selected commit, where a clone is registered here: those whose bytes
-    /// differ from their latest review, and what was compared or could not be. Covered paths use the same selected commit.
+    /// Reads each refuse-level repository document at its selected commit: those whose bytes differ from their latest review,
+    /// and what was compared. A refuse-level document whose repository has no clone registered here holds the release unless a
+    /// signed, expiring grant excepts that document for this version. Covered paths use the same selected commit.
     /// </summary>
-    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, IReadOnlySet<string> releaseRepositories)
+    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, IReadOnlySet<string> releaseRepositories,
+        string version, string? by, DateTimeOffset evaluatedAt)
     {
         var changed = new List<string>();
         var compared = new List<string>();
@@ -161,7 +163,14 @@ internal sealed class ReleaseCoordinationService(
                 {
                     string where = releaseRepositories.Contains(document.Repository!) ? $"release commit {commit}"
                         : $"a commit of its own repository (latest review: {clearedAt})";
-                    compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at {where}");
+                    string name = repository is null ? document.Repository! : EstateModel.BodyString(repository, "name") ?? document.Repository!;
+                    // Whether a refuse-level comparison runs never depends on unsigned machine-local configuration alone.
+                    if (!document.DeclaresRefuse)
+                        compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at {where}");
+                    else if (UncomparedException(model, document.Declaration, version, by, evaluatedAt) is { } grant)
+                        compared.Add($"{document.Path} not compared, since no clone of {name} ({document.Repository}) is registered here, under signed grant {grant.Id} {grant.ComputedHash}, which expires {EstateModel.BodyString(grant, "expires")}; the independent review reads it at {where}");
+                    else
+                        changed.Add($"{document.Path}: no clone of {name} ({document.Repository}) is registered on this machine, so its refuse-level comparison cannot run; register one with `vericairn sources clone <path> --resource {document.Repository}`, or record the operator's signed, expiring grant of scope {UncomparedScope(model, document.Declaration, version)} to {by ?? "the submitting principal"}");
                 }
 
                 continue;
@@ -184,6 +193,21 @@ internal sealed class ReleaseCoordinationService(
         return (changed, compared);
     }
 
+    /// <summary>The scope of a grant that excepts one refuse-level document's comparison for one release version.</summary>
+    internal static string UncomparedScope(EstateModel model, RecordEnvelope declaration, string version) =>
+        "release-document-uncompared:" + model.Chain(declaration)[0] + "@" + version;
+
+    // The exception is the operator's current grant of exactly that scope to the submitting principal, signed and stating its expiry, in force now.
+    private static RecordEnvelope? UncomparedException(EstateModel model, RecordEnvelope declaration, string version, string? by, DateTimeOffset at)
+    {
+        if (by is null) return null;
+        string scope = UncomparedScope(model, declaration, version);
+        return model.Current("authority").FirstOrDefault(a => EstateModel.BodyString(a, "grantee") == by && a.Signatures.Count > 0 && model.HasRole(a.By, Roles.Operator) &&
+            EstateModel.BodyString(a, "expires") is not null && !EstateModel.Expired(a, at) &&
+            a.Body.TryGetProperty("scope", out JsonElement scopes) && scopes.ValueKind == JsonValueKind.Array &&
+            scopes.EnumerateArray().Any(s => s.ValueKind == JsonValueKind.String && s.GetString() == scope));
+    }
+
     private static IReadOnlyList<string> CompareRegionsAtCommit(EstateModel model, RecordEnvelope declaration, string? commit)
     {
         try
@@ -197,12 +221,12 @@ internal sealed class ReleaseCoordinationService(
         { return ["The exact generated-region comparison could not complete safely."]; }
     }
 
-    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string? commit, ProviderDescriptor provider, string destination)
+    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string version, string? by, DateTimeOffset at, string? commit, ProviderDescriptor provider, string destination)
     {
         IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
         // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
         IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
-        (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories);
+        (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories, version, by, at);
         if (commit is null && NeedsReleaseCommit(model, product, repositories))
             changed.Add("The exact release commit is unavailable for the product's living documents; prepare its exact commit and submit it explicitly");
         foreach (LivingDocuments.State document in documents.Where(d => d.Repository is null && d.Generation is null && GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration)))
@@ -551,7 +575,7 @@ internal sealed class ReleaseCoordinationService(
                     lock (gate)
                     {
                         EstateModel model = session.Load();
-                        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, product, built, provider.Descriptor, destination);
+                        (List<string> changed, List<string> compared) = ReleaseDocumentChecks(model, product, request.Version, request.By, now(), built, provider.Descriptor, destination);
                         observedPolicies = assessPolicies(model, product, request.Version, built, ReleaseRepositories(model, provider.Descriptor, destination));
                         List<FindingDto> objections = [.. observedPolicies.Objections, .. changed.Select(message => new FindingDto("warning", "document.release-hold", "release-documents", message))];
                         if (objections.Count > 0)

@@ -234,7 +234,10 @@ use the explicitly prepared release commit at submission and the actual build co
 For another registered repository, the gate uses its HEAD, or the latest clearing review's commit
 when Git proves that HEAD is its ancestor. Covered paths and cleared bytes use the same selection.
 Changed bytes, covered paths, absent reviews and unreadable registered clones refuse the applicable
-gate. An unregistered clone is explicitly not compared by that document gate; a refuse-level policy
+gate. A refuse-level document whose repository has no clone registered here also refuses, naming the repository and
+`vericairn sources clone <path> --resource <id>`; only the operator's signed, expiring grant of scope
+`release-document-uncompared:<declaration>@<version>` to the submitting principal excepts it, and the release evidence
+names that grant. A warn-level document without a registered clone is reported as not compared. A refuse-level policy
 with unavailable required source bytes still holds the release. No gate fetches or checks out sources.
 Normal `docs living` uses clone HEAD, and estate files use the estate's working tree. Current estate
 records supply triggers and reviews; they are not a historical estate snapshot at the release commit.
