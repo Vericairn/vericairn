@@ -191,7 +191,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(98, synchronous.Length);
+        Assert.Equal(99, synchronous.Length);
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];
@@ -526,6 +526,50 @@ public sealed class SdkOperationsTests
         Assert.False(actual.Ok);
         Assert.Null(actual.Written);
         Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(actual));
+    }
+
+    [Fact]
+    public async Task AStoredDocumentPinRetainsItsRevisionAndCompanionRecoveryProblem()
+    {
+        var expected = new DocumentPinResponse(new("records/document-revision/pin.json", "pin", "sha256:" + new string('a', 64)), 2,
+            new("reconcile-required", "The pin was stored; recover its pending companions before retrying.", []));
+        using var client = Client((_, _) => Task.FromResult(Json(expected)));
+        var request = new DocumentPinRequest("docs/guide.md", "author", "Next revision.");
+        DocumentPinResponse synchronous = client.DocumentPin(request);
+        DocumentPinResponse asynchronous = await client.DocumentPinAsync(request, TestContext.Current.CancellationToken);
+        DocumentPinResponse bound = new CancellationBoundApi(client, TestContext.Current.CancellationToken).DocumentPin(request);
+        foreach (DocumentPinResponse actual in new[] { synchronous, asynchronous, bound })
+        {
+            Assert.False(actual.Ok);
+            Assert.Equal(expected.Written, actual.Written);
+            Assert.Equal(expected.Revision, actual.Revision);
+            Assert.Equal(JsonSerializer.Serialize(expected.Problem), JsonSerializer.Serialize(actual.Problem));
+        }
+    }
+
+    [Theory]
+    [InlineData("empty")]
+    [InlineData("missing-revision")]
+    [InlineData("invalid-revision")]
+    [InlineData("missing-receipt")]
+    [InlineData("contradictory")]
+    public async Task AnIncompleteDocumentPinResponseIsUncertainAndNeverRetried(string shape)
+    {
+        RecordWritten receipt = new("records/document-revision/pin.json", "pin", "sha256:" + new string('a', 64));
+        DocumentPinResponse response = shape switch
+        {
+            "empty" => new(null, null, null),
+            "missing-revision" => new(receipt, null, null),
+            "invalid-revision" => new(receipt, 0, null),
+            "missing-receipt" => new(null, 2, new("refused", "Nothing written.", [])),
+            _ => new(receipt, 2, new("refused", "Nothing written.", [])),
+        };
+        int calls = 0;
+        using var client = Client((_, _) => { calls++; return Task.FromResult(Json(response)); });
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
+            client.DocumentPinAsync(new("docs/guide.md", "author", "Next revision."), TestContext.Current.CancellationToken));
+        Assert.True(failure.OutcomeUnknown);
+        Assert.Equal(1, calls);
     }
 
     [Fact]

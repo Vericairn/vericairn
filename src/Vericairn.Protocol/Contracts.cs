@@ -256,6 +256,24 @@ public sealed record DocumentReason(string On, string Level, string Summary, str
 /// <param name="Independence">For a document of another repository, whose author the estate's records do not show, the reviewer's independence of its content: self, independent-agent or operator; without it, self for a principal that holds the builder role, else judged from the estate's records. An estate file's revisions decide its reviewer's independence, and a statement that differs is refused. From 0.6.0.</param>
 public sealed record DocumentReviewRequest(string By, string Outcome, string Summary, IReadOnlyList<DocumentFinding>? Findings = null, string? Commit = null, string? Independence = null);
 
+/// <summary>Pin the exact bytes of an authored document in the estate repository as its next revision.</summary>
+/// <param name="Path">Normalized repository-relative file path under design/ or docs/.</param>
+/// <param name="By">The authoring principal.</param>
+/// <param name="Summary">What this revision is or changes.</param>
+/// <param name="Title">The title; otherwise the current pin's title or the first pin's file name without its extension.</param>
+/// <param name="Expected">Expected current pin record id; a mismatch refuses without writing.</param>
+public sealed record DocumentPinRequest(string Path, string By, string Summary, string? Title = null, string? Expected = null);
+
+/// <summary>The exact document pin receipt and its revision, or a refusal. A stored receipt with a problem requires reconciliation.</summary>
+/// <param name="Written">The recorded revision's receipt, when stored.</param>
+/// <param name="Revision">The recorded document revision number, when stored.</param>
+/// <param name="Problem">Why the pin was refused, or why its stored companions need reconciliation.</param>
+public sealed record DocumentPinResponse(RecordWritten? Written, long? Revision, Problem? Problem)
+{
+    /// <summary>Whether the pin was recorded without a problem.</summary>
+    public bool Ok => Written is not null && Problem is null;
+}
+
 /// <summary>A finding of a document review.</summary>
 /// <param name="Severity">error, warning or info.</param>
 /// <param name="Summary">What was found.</param>

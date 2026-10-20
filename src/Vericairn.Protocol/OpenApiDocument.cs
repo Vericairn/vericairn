@@ -74,6 +74,7 @@ public static class OpenApiDocument
         ("POST", "/v1/devices/recovery"),
         ("GET", "/v1/releases"),
         ("GET", "/v1/documents"),
+        ("POST", "/v1/documents/pin"),
         ("POST", "/v1/documents/{id}/reviews"),
         ("GET", "/v1/asks"),
         ("GET", "/v1/operator/actions"),
@@ -304,6 +305,17 @@ public static class OpenApiDocument
             };
             responses["400"] = new JsonObject { ["description"] = "The request is not valid JSON or cannot bind to PolicyHashRequest." };
         }
+        else if (path == "/v1/documents/pin")
+        {
+            foreach (string code in new[] { "200", "422" })
+                responses[code] = new JsonObject
+                {
+                    ["description"] = code == "200" ? "DocumentPinResponse: the stored record receipt and revision. A problem with a receipt requires reconciliation before retrying."
+                        : "DocumentPinResponse: no record or revision, with the refusal and findings.",
+                    ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/DocumentPinResponse" } } },
+                };
+            responses["400"] = new JsonObject { ["description"] = "The request cannot bind to DocumentPinRequest." };
+        }
         else if (path == "/v1/operator/actions")
         {
             responses["200"] = new JsonObject { ["description"] = "OperatorActionsResponse: text in the selected communication settings, complete canonical JSON (vericairn.operator-actions/1), and hasErrors. Items retain their sources, reasons, waitsOn, inspection command and record-authoring commands with argument arrays and required JSON bodies; null body fields require operator input. No signing or provider access occurs." };
@@ -463,6 +475,32 @@ public static class OpenApiDocument
             ["DeviceRotateRequest"] = Object(("device", "string"), ("custody", "string"), ("presence", "boolean")),
             ["RevokeRequest"] = Object(("device", "string"), ("by", "string"), ("reason", "string"), ("recovery", "string"), ("passphrase", "string")),
             ["DocumentReviewRequest"] = Object(("by", "string"), ("outcome", "string"), ("summary", "string"), ("findings", "array"), ("commit", "string"), ("independence", "string")),
+            ["DocumentPinRequest"] = new JsonObject
+            {
+                ["type"] = "object", ["required"] = new JsonArray("path", "by", "summary"),
+                ["properties"] = new JsonObject
+                {
+                    ["path"] = new JsonObject { ["type"] = "string", ["description"] = "Normalized file path under design/ or docs/ in the runtime's estate repository." },
+                    ["by"] = new JsonObject { ["type"] = "string", ["description"] = "Authoring principal id." },
+                    ["summary"] = new JsonObject { ["type"] = "string" },
+                    ["title"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Defaults to the current title or the first pin's file name without extension." },
+                    ["expected"] = new JsonObject { ["type"] = "string", ["nullable"] = true, ["description"] = "Expected current pin record id; a mismatch writes nothing." },
+                },
+            },
+            ["DocumentPinResponse"] = new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["written"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["properties"] = new JsonObject
+                    {
+                        ["path"] = new JsonObject { ["type"] = "string" }, ["id"] = new JsonObject { ["type"] = "string" }, ["hash"] = new JsonObject { ["type"] = "string" },
+                    } },
+                    ["revision"] = new JsonObject { ["type"] = "integer", ["format"] = "int64", ["nullable"] = true },
+                    ["problem"] = new JsonObject { ["type"] = "object", ["nullable"] = true, ["allOf"] = new JsonArray(new JsonObject { ["$ref"] = "#/components/schemas/Problem" }) },
+                    ["ok"] = new JsonObject { ["type"] = "boolean" },
+                },
+            },
             ["GoalProposeRequest"] = Object(("by", "string"), ("body", "object"), ("supersedes", "string")),
             ["GoalActionRequest"] = Object(("by", "string"), ("note", "string")),
             ["GoalEvaluateRequest"] = Object(("by", "string"), ("summary", "string"), ("verdicts", "array")),
@@ -538,6 +576,7 @@ public static class OpenApiDocument
         "/v1/devices/rotate" => "DeviceRotateRequest",
         "/v1/devices/recovery" => "DeviceRecoveryRequest",
         "/v1/documents/{id}/reviews" => "DocumentReviewRequest",
+        "/v1/documents/pin" => "DocumentPinRequest",
         "/v1/goals" => "GoalProposeRequest",
         "/v1/goals/{id}/activate" or "/v1/goals/{id}/pause" or "/v1/goals/{id}/resume" or "/v1/goals/{id}/stop" => "GoalActionRequest",
         "/v1/goals/{id}/evaluate" => "GoalEvaluateRequest",
@@ -572,6 +611,7 @@ public static class OpenApiDocument
 
     private static string Summary(string method, string path) => (method, path) switch
     {
+        ("POST", "/v1/documents/pin") => "Pin exact estate document bytes as the next revision, superseding the current pin. Unchanged bytes, generated documents, stale expected record ids and forked current pins refuse without writing. Does not edit the document.",
         ("GET", "/v1/companions") => "Installed readable coverage, exact collection snapshots and declared destinations; no adoption is inferred.",
         ("GET", "/v1/companions/render") => "Render one explicitly selected authorized item or collection; currentness describes its exact basis, not acceptance.",
         ("GET", "/v1/companions/sources") => "Read the exact permitted source basis without invoking a generator; local inspectors stay local.",

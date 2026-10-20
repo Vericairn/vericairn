@@ -44,6 +44,10 @@ def verify_mcp_package(path, allow_legacy=False):
                 raise ValueError("server version must equal the package version")
             if manifest["$schema"] != MCP_SCHEMA or manifest["name"] != MCP_NAME:
                 raise ValueError("unexpected registry schema or server name")
+            # The registry's schema bounds a server's description to between 1 and 100 characters.
+            description = manifest.get("description")
+            if not isinstance(description, str) or not 1 <= len(description) <= 100:
+                raise ValueError("server description must have 1 to 100 characters")
             [server] = manifest["packages"]
             if (server["registryType"], server["identifier"], server["version"], server["transport"]) != (
                     "nuget", "dotnet-vc", version, {"type": "stdio"}):

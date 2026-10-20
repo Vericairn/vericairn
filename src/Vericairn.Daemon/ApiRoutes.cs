@@ -79,6 +79,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/devices/revoke", (RevokeRequest request) => Outcome(service.DeviceRevoke(request)));
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
+        app.MapPost($"{v}/documents/pin", (DocumentPinRequest request) =>
+        {
+            DocumentPinResponse response = service.DocumentPin(request);
+            return Results.Json(response, ProtocolJson.Options, statusCode: response.Written is not null ? 200 : 422);
+        });
         app.MapPost($"{v}/documents/{{id}}/reviews", (string id, DocumentReviewRequest request) => Outcome(service.DocumentReview(id, request)));
         app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
         app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>

@@ -179,6 +179,16 @@ public class DocsTests
                 Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.Contains("docs check", commands);
+            Assert.Contains("docs pin", commands);
+            Assert.Contains("POST /v1/documents/pin", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            string pinReference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            int pinStart = pinReference.IndexOf(" `vericairn docs pin`\n", StringComparison.Ordinal);
+            Assert.True(pinStart >= 0);
+            int pinEnd = pinReference.IndexOf("\n#", pinStart + 1, StringComparison.Ordinal);
+            string pinSection = System.Net.WebUtility.HtmlDecode(pinEnd < 0 ? pinReference[pinStart..] : pinReference[pinStart..pinEnd]);
+            foreach (string option in new[] { "--by", "--summary", "--title", "--expected" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
+            Assert.Contains("exact estate file bytes", pinSection, StringComparison.Ordinal);
+            Assert.Contains("forks", pinSection, StringComparison.Ordinal);
             Assert.Contains("docs companions", commands);
             Assert.Contains("docs render", commands);
             foreach (string route in new[] { "/v1/companions", "/v1/companions/render", "/v1/companions/sources", "/v1/companions/compare" })
