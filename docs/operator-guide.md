@@ -452,6 +452,17 @@ Documents that follow changing facts remain living documents (section 16).
 
 ## 16. Living documents
 
+In the development build for 0.8.1, pin an authored estate document after editing it with one command:
+
+```sh
+vericairn docs pin docs/guide.md --by <principal id> --summary "Describe the revised workflow."
+vericairn docs pin docs/guide.md --by <principal id> --summary "Update the examples." --expected <current pin id>
+```
+
+`docs pin` reads the file's exact bytes under `docs/` or `design/`, computes its SHA-256 and byte count, and records a `document-revision`. A first pin is revision 1; each later pin supersedes the current pin and increments its revision. `--title` overrides the title; otherwise it carries forward, or defaults to the file name without its extension on the first pin. Media type follows the file extension. The command prints the revision, record id and record hash; `--json` prints the record receipt. It leaves the document and its hand-written revision line untouched.
+
+Unchanged bytes, a stale `--expected` record id, a whole generated document or generated register member, and a fork of current pins are refused with nothing recorded. A path outside the document directories or an unavailable or aliased file is also refused. Use `--expected` when acting on a pin read earlier. Two branches pinning the same predecessor leave a fork after their records merge; `estate check` and `docs pin` name both pins and the predecessor. Reconcile by recording which successor is kept and which are withdrawn, settle the text, then pin the combined bytes against the kept id. Nothing is deleted and no branch is chosen automatically. The [CLI reference](cli.md#vericairn-docs-pin) describes options, receipts and the matching `POST /v1/documents/pin`, `DocumentPin` and `DocumentPinAsync` operations.
+
 A living document is one whose claims follow facts that change: a README that names what is released, a guide that describes a command, a table generated from records. Declare it with the triggers that make it due:
 
 ```sh
