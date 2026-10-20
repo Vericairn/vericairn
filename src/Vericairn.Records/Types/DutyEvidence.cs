@@ -178,7 +178,7 @@ internal static partial class DutyRecords
                 if (DateDue(schedule) is { } date && date <= until) yield return (JsonSerializer.SerializeToElement(new { kind = "date", at = PolicyRecords.Text(schedule, "at") }), date);
                 break;
             case "release":
-                foreach (RecordEnvelope release in model.OfType("release").Where(r => r.AtTime >= activation && r.AtTime <= until && r.Subject?.Id == PolicyRecords.Text(schedule, "product") && EstateModel.BodyString(r, "status") == "published" && !model.Chain(r).SkipLast(1).Any(id => EstateModel.BodyString(model.ById[id], "status") == "published")))
+                foreach (RecordEnvelope release in model.OfType("release").Where(r => r.AtTime >= activation && r.AtTime <= until && PolicyRecords.ReleaseMatchesProduct(model, r, PolicyRecords.Text(schedule, "product")) && EstateModel.BodyString(r, "status") == "published" && !model.Chain(r).SkipLast(1).Any(id => EstateModel.BodyString(model.ById[id], "status") == "published")))
                     yield return (JsonSerializer.SerializeToElement(new { kind = "release", publication = new { type = release.Type, id = release.Id, hash = release.ComputedHash } }), release.AtTime);
                 break;
         }

@@ -178,7 +178,7 @@ internal static partial class DutyRecords
                 RecordEnvelope? release = PolicyRecords.Reference(context, occurrence.Nested("publication", true), true, "release");
                 if (release is not null)
                 {
-                    if (EstateModel.BodyString(release, "status") != "published" || release.Subject?.Id != PolicyRecords.Text(schedule, "product") || context.Model.Chain(release).SkipLast(1).Select(id => context.Model.ById[id]).Any(r => EstateModel.BodyString(r, "status") == "published")) occurrence.Error("duty.publication", "publication", "Use the first observed publication of the declared product.");
+                    if (EstateModel.BodyString(release, "status") != "published" || !PolicyRecords.ReleaseMatchesProduct(context.Model, release, PolicyRecords.Text(schedule, "product")) || context.Model.Chain(release).SkipLast(1).Select(id => context.Model.ById[id]).Any(r => EstateModel.BodyString(r, "status") == "published")) occurrence.Error("duty.publication", "publication", "Use the first observed publication of the declared product.");
                     due = release.AtTime;
                 }
                 break;

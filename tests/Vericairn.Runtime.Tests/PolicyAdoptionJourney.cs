@@ -36,9 +36,9 @@ public static class PolicyAdoptionJourney
         public virtual void Dispose() { GC.SuppressFinalize(this); }
     }
 
-    public static void Run(Func<EstateService, Surface> connect, int recheckSeconds = 0)
+    public static void Run(Func<EstateService, Surface> connect, int recheckSeconds = 0, bool reviseProduct = false)
     {
-        using var f = new Fixture();
+        using var f = new Fixture(reviseProduct);
         using Surface surface = connect(f.Api);
         f.Surface = surface;
         f.Adopt();
@@ -76,6 +76,7 @@ public static class PolicyAdoptionJourney
             ["withdrawn-artifact-cleanup"] = ["withdrawals-covered", "removals-confirmed"],
         };
         private readonly RecordEnvelope product;
+        private readonly RecordEnvelope publicationProduct;
         private readonly RecordEnvelope repository;
         private readonly RecordEnvelope reviewer;
         private readonly RecordEnvelope independent;
@@ -84,7 +85,7 @@ public static class PolicyAdoptionJourney
         private string Operator => Records.Estate.OperatorId;
         private EstateModel Model => Api.Session.Load();
 
-        internal Fixture()
+        internal Fixture(bool reviseProduct)
         {
             product = Records.Add("product", new()
             {
@@ -93,6 +94,7 @@ public static class PolicyAdoptionJourney
                 ["surfaces"] = new JsonArray(new JsonObject { ["name"] = "CLI", ["slug"] = "cli", ["summary"] = "Fixture interface." }),
                 ["release"] = new JsonObject { ["destination"] = new JsonObject { ["provider"] = "github-releases", ["settings"] = new JsonObject { ["repository"] = "Example/fixture" } } },
             });
+            publicationProduct = reviseProduct ? Records.Add("product", PolicyFixture.Body(product), supersedes: product.Id) : product;
             repository = Records.Add("resource", new() { ["kind"] = "repository", ["name"] = "Fixture product source", ["role"] = "Retain exact inventory bytes.", ["location"] = new JsonObject { ["github"] = "Example/fixture" }, ["visibility"] = "public" }, subject: product.Reference);
             reviewer = Agent("Security reviewer");
             independent = Agent("Independent reviewer");
@@ -244,13 +246,15 @@ public static class PolicyAdoptionJourney
         internal RecordEnvelope PublicationAndDevlog(int recheckSeconds)
         {
             At(Start.AddHours(1));
-            RecordEnvelope candidate = Candidate("0.8.0");
+            RecordEnvelope candidate = Candidate("0.8.0", publicationProduct);
             Records.Add("acceptance", new() { ["statement"] = "Accept only this fixture candidate.", ["basis"] = new JsonArray(), ["self"] = true }, subject: candidate.Reference);
             JsonObject published = PolicyFixture.Body(candidate); published["status"] = "published"; published["publishedAt"] = Stamp(Records.Estate.Clock); published["url"] = "https://example.invalid/fixture";
             RecordEnvelope publication = Records.Add("release", published, subject: candidate.Subject, supersedes: candidate.Id);
+            Assert.Equal(publicationProduct.Reference, publication.Subject);
+            Assert.Equal(product.Id, Model.Chain(publicationProduct)[0]);
             RecordEnvelope next = Candidate("0.8.1");
             Advance();
-            ReleaseSubmitRequest request = new(product.Id, "0.8.1", "Example/fixture", Operator, Commit: Commit, Expected: Model.Current("product").Single().ComputedHash);
+            ReleaseSubmitRequest request = new(publicationProduct.Id, "0.8.1", "Example/fixture", Operator, Commit: Commit, Expected: Model.Current("product").Single().ComputedHash);
             ReleaseResponse held = Surface.Submit(request);
             Assert.False(held.Ok);
             Assert.True(held.Policies is not null, JsonSerializer.Serialize(held, ProtocolJson.Options));
@@ -276,7 +280,7 @@ public static class PolicyAdoptionJourney
                 summary: The fixture build was observed.
                 audience: internal
                 applicability: {versions: "0.8.0"}
-                release: {product: {{{product.Id}}}, version: "0.8.0", publication: {id: {{{publication.Id}}}, hash: {{{publication.ComputedHash}}} } }
+                release: {product: {{{publication.Subject!.Id}}}, version: "0.8.0", publication: {id: {{{publication.Id}}}, hash: {{{publication.ComputedHash}}} } }
                 sources: [{type: release, id: {{{publication.Id}}}, hash: {{{publication.ComputedHash}}} }]
                 status: draft
                 ---
@@ -314,10 +318,10 @@ public static class PolicyAdoptionJourney
             Assert.Equal(recheckSeconds == 0, retained.Basis.Digest == admitted.Policies.Basis.Digest);
             return publication;
         }
-        private RecordEnvelope Candidate(string version)
+        private RecordEnvelope Candidate(string version, RecordEnvelope? subject = null)
         {
             JsonObject body = new() { ["version"] = version, ["repository"] = "Example/fixture", ["commit"] = Commit, ["status"] = "candidate", ["artifacts"] = new JsonArray(new JsonObject { ["name"] = "fixture.zip", ["hash"] = PolicyBasis.Hash("fixture"), ["bytes"] = 7, ["platform"] = "any" }), ["recordFormat"] = new JsonObject { ["reads"] = new JsonArray(1, 2, 3), ["writes"] = 3 }, ["evidence"] = new JsonArray(), ["qualified"] = new JsonArray(), ["signing"] = "fixture", ["limitations"] = new JsonArray() };
-            return Records.Add("release", body, subject: product.Reference);
+            return Records.Add("release", body, subject: (subject ?? product).Reference);
         }
 
         internal void CompleteInitialDuties(RecordEnvelope publication)
@@ -445,7 +449,10 @@ public static class PolicyAdoptionJourney
 public sealed class PolicyAdoptionJourneyTests
 {
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void InitialAdoptionRetainsEveryWarningReviewAndMissedOccurrence(int recheckSeconds) => PolicyAdoptionJourney.Run(api => new(api), recheckSeconds);
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    public void InitialAdoptionRetainsEveryWarningReviewAndMissedOccurrence(int recheckSeconds, bool reviseProduct) =>
+        PolicyAdoptionJourney.Run(api => new(api), recheckSeconds, reviseProduct);
 }

@@ -157,7 +157,7 @@ internal static partial class FoundationPolicyKinds
             {
                 RecordEnvelope? fact = item == "accepted-still-open"
                     ? PolicyWork.Acceptance(context.Model, order, context.Basis.Time!.Value)
-                    : context.Model.OfType("release").FirstOrDefault(r => r.Subject?.Id == Text(Get(order.Body, "releasePlan"), "product") && EstateModel.BodyString(r, "version") == Text(Get(order.Body, "releasePlan"), "version") && EstateModel.BodyString(r, "status") == "published");
+                    : context.Model.OfType("release").FirstOrDefault(r => ReleaseMatchesProduct(context.Model, r, Text(Get(order.Body, "releasePlan"), "product")) && EstateModel.BodyString(r, "version") == Text(Get(order.Body, "releasePlan"), "version") && EstateModel.BodyString(r, "status") == "published");
                 bool inconsistent = status is not null && EstateModel.BodyString(status, "status") is "planned" or "active" or "paused" or "submitted" && fact is not null;
                 yield return context.Finding(PolicyWork.Target(context.Model, order), item, inconsistent ? "unmet" : "satisfied",
                     inconsistent ? "An explicit open status contradicts the exact acceptance or publication." : "No contradictory explicit status.", "An explicit status consistent with the exact accepted work or published plan.", "Record the appropriate status disposition or correct the subject relation.", status, fact is null ? [] : [fact.Reference]);

@@ -26,6 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        share: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -37,6 +38,7 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Verify retained companion inputs and bytes
+        if: matrix.share == 1
         run: python tests/companion-build.py
       - name: Build the Secure Enclave helper
         # The helper is Swift and builds on macOS only. The Apple-silicon runners expose a Secure Enclave to it, so the store's
@@ -58,7 +60,7 @@ jobs:
       - name: Test
         if: runner.os != 'Linux'
         # Each failed test is retried once and reported in the run's summary; a second failure fails the job.
-        run: python .github/scripts/run-tests.py
+        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}
       - name: Test, with a secret service
         if: runner.os == 'Linux'
         env:
@@ -69,12 +71,15 @@ jobs:
             printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
             printf probe | secret-tool store --label "Vericairn CI probe" application vericairn-ci probe 1
             test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
-            python3 .github/scripts/run-tests.py'
+            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'
       - name: Smoke the CLI
+        if: matrix.share == 1
         run: dotnet run --no-build --configuration Release --project src/Vericairn.Cli -- records describe
       - name: Pack the Community packages
+        if: matrix.share == 1
         run: dotnet pack --no-build --configuration Release --output "${{ runner.temp }}/nuget"
       - name: Install the tool and SDK from the local feed
+        if: matrix.share == 1
         shell: python
         # The same check runs on every platform. An empty source list and a fresh cache make the local
         # packages the only possible source; no published package can hide a missing dependency.
@@ -118,7 +123,7 @@ jobs:
       - name: Publish the single-file applications
         # The release ships the command line and Workbench as self-contained single files. Publishing them here runs the
         # single-file analyzer on every change, which an ordinary build does not; 0.8.0's release build first found it.
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && matrix.share == 1
         shell: bash
         run: |
           set -eu
