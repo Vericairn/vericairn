@@ -19,9 +19,8 @@ describe what shipped and its limits.
 ## 0.8.1 — planned
 
 Commands record exact document revisions and observe NuGet publication, listing and deprecation, and the
-packages carry the cairn mark as their icon. An optional efficiency adapter helps reduce eligible agent
-context. Every client reports a record as stored, not refused, when publishing its readable companions was
-interrupted; the policy guides describe policy implementation identity accurately; and the estate check
+packages carry the cairn mark as their icon. Every client reports a record as stored, not refused, when
+publishing its readable companions was interrupted; the policy guides describe policy implementation identity accurately; and the estate check
 ignores top-level files the repository's own ignore rules exclude. The test suites run split across
 parallel jobs and no longer depend on real time, and CI runs the release's packaging steps on every change.
 Vericairn's MCP server is listed in the official MCP Registry and among nuget.org's MCP servers, where
@@ -35,7 +34,9 @@ it suits, can be shared across an estate, kept as personal favorites, and used w
 assignments and answers to an agent's questions, from the command line or as prompts in coding agents that
 support them. Vericairn and its packs include built-in prompts, which anyone can hide from their own lists
 and an estate can disable or copy into its own library. A first estate needs no hand-written JSON:
-`estate init` pins the build you run, and a new command creates a work order from its options.
+`estate init` pins the build you run, and a new command creates a work order from its options. An optional
+efficiency adapter helps reduce eligible agent context, once the agent hook it uses is designed and
+qualified.
 
 ## 0.9.0 — planned
 

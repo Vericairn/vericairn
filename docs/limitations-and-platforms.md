@@ -489,6 +489,21 @@ future grant basis. A policy's independence check does not select the required
 security reviewer by name. [The proposals](policy-adoption-proposals.md) retain
 these unresolved inputs and the operator work; no live adoption is established here.
 
+## Policy implementation identity: correction for 0.8.1
+
+Since FIX-31, policy kind implementation digests identify a compilation through
+the assembly's simple name and deterministic module version identifier. Together
+with the registered kind and version, this binds the compiled kind, version and
+module identity admitted by application composition. It is not a hash of installed
+bytes and does not detect a modified installation. [Policy evaluator](policy-evaluator.md)
+specifies the digest calculation.
+
+The documentation correction for 0.8.1 brings the maintained policy guides and
+registry comment into agreement with that implementation; it changes no behavior.
+0.8.0's frozen policy guides retain the earlier description, and the frozen set
+remains unchanged. The compilation identity described here is the correct account
+of the behavior introduced by FIX-31.
+
 ## Readable companions and build provenance
 
 The generators cover admitted record items and collections, six revision registers,

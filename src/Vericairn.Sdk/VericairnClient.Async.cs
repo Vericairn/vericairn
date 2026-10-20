@@ -511,7 +511,10 @@ public sealed partial class VericairnClient
         {
             TResponse result = await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
                 ?? throw new JsonException("The runtime returned no result.");
-            if (result is WriteOutcome { Written: null, Problem: null } or WriteOutcome { Written: not null, Problem: not null })
+            // Companion recovery can remain after the record was stored. A receipt paired with a
+            // refusal is still contradictory; only the recovery problem is a valid combined outcome.
+            if (result is WriteOutcome { Written: null, Problem: null }
+                or WriteOutcome { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
                 throw new JsonException("The runtime returned no definite write outcome.");
             return result;
         }

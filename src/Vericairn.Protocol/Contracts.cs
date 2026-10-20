@@ -23,8 +23,8 @@ public static class ApiVersion
 /// <param name="Message">Explanation.</param>
 public sealed record FindingDto(string Severity, string Code, string Location, string Message);
 
-/// <summary>Why a request was not carried out: a reason and, for rejected records, the findings.</summary>
-/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict (a stale or divergent communication revision); reconcile-required (unreadable local recovery journals hold record writes).</param>
+/// <summary>Why a request was not completed, including recovery after storage: a reason and, for rejected records, the findings.</summary>
+/// <param name="Code">Stable code: refused, rejected, not-found, invalid, denied (a loopback or local-network request not signed by a device admitted now and permitted there, or a pairing code that is unknown, expired, used, exhausted or does not match) or provider (a release provider's refusal, inside a release response); conflict (a stale or divergent communication revision); reconcile-required (companion publication needs recovery after storage, or unresolved local recovery journals hold record writes).</param>
 /// <param name="Message">Explanation with the permitted next action.</param>
 /// <param name="Findings">Findings behind a rejection; may be empty.</param>
 public sealed record Problem(string Code, string Message, IReadOnlyList<FindingDto> Findings);
@@ -35,7 +35,7 @@ public sealed record Problem(string Code, string Message, IReadOnlyList<FindingD
 /// <param name="Hash">Content hash.</param>
 public sealed record RecordWritten(string Path, string Id, string Hash);
 
-/// <summary>The outcome of a write. An interrupted companion batch carries both the stored record and its recovery problem.</summary>
+/// <summary>The outcome of a write. An interrupted companion batch carries both the stored record and its recovery problem, with HTTP 200 over the daemon. A refusal has no stored record.</summary>
 /// <param name="Written">The record, when written.</param>
 /// <param name="Problem">A refusal, or a recovery problem after the named record was already stored; never retry that record as new work.</param>
 public sealed record WriteOutcome(RecordWritten? Written, Problem? Problem)

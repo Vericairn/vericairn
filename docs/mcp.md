@@ -16,6 +16,37 @@ and offer no release acceptance operation. See [Inspecting estate policies](poli
 
 `vericairn mcp serve` exposes an estate to a coding agent over the Model Context Protocol: newline-delimited JSON-RPC 2.0 on standard input and output, the stdio transport used by compatible agent harnesses. The server is a client adapter over the estate API: the adapter itself opens no live store, holds no key of its own and adds no permission; every tool is a call through the daemon when one serves the estate, or through the embedded runtime otherwise, and the runtime evaluates authority behind each call exactly as it does for the command line. When a daemon serves the estate, the server stays its client and never a second owner of the estate's live state. Without one, `mcp serve` holds the embedded runtime, and with it the live state, for its whole session, and a daemon started meanwhile does not detect it, so start the daemon first (`vericairn runtime start`) when other clients use the estate at the same time.
 
+## Discovery and dnx
+
+The 0.8.1 `dotnet-vc` package includes the `McpServer` package type alongside `DotnetTool`,
+and an embedded `.mcp/server.json` for the official MCP Registry name
+`io.github.vericairn/vericairn`. The manifest's server and NuGet package versions are generated
+from the package version when packing. The package README carries the registry's `mcp-name`
+verification line.
+
+After package publication and indexing, find `dotnet-vc` through
+[nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
+The [official MCP Registry](https://registry.modelcontextprotocol.io/) listing also requires
+the operator's [separate publication](operator-actions.md#mcp-registry-publication).
+Preparing these files does not establish that either public listing exists.
+
+With the .NET 10 SDK and published package version, the client's stdio command is:
+
+```sh
+dnx dotnet-vc@0.8.1 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+```
+
+The registry manifest requires `estate_root` (the existing estate's root directory) and
+`acting_principal` (a principal id in that estate). It maps them to `--estate` and `--as`
+before `mcp serve`. The existing `dotnet vc --estate <estate-root> mcp serve --as <principal-id>`
+form also works. The root `--as` form applies only to `mcp serve`; other commands retain
+their own identity options. Required registry inputs grant no authority: write tools still
+require that principal's admitted device on the machine running the server. A connection
+without that device has the read-only tools.
+
+The manifest also sets the dnx runtime's `--verbosity quiet` so package installation messages
+do not enter the JSON-RPC output stream. Keep that option when configuring a client by hand.
+
 ## Protocol subset
 
 `initialize` (the server speaks the protocol revisions 2025-06-18, 2025-03-26 and 2024-11-05. It proposes the newest, accepts an older one of these that the client names, and answers with the newest otherwise; the `instructions` field is a description of what the server is, not a directive), `notifications/initialized`, `ping`, `tools/list` and `tools/call`. Unknown methods answer with the JSON-RPC "method not found" error; an unparsable line answers with "parse error"; a call to a tool the connection cannot see answers with "invalid params" and names no hidden tool. Resources, prompts, sampling and the HTTP transport are not implemented. A client must support this subset; the server supplies no fallback for an unsupported method or transport.

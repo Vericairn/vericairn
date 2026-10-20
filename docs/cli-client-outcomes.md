@@ -1,6 +1,14 @@
-# Generated CLI reference: client outcomes
+# CLI client outcomes
 
-Generated from `ClientFailure` by `vericairn-docs generate`.
+The interrupted-request reference below is generated from `ClientFailure` by `vericairn-docs generate`.
+
+## Stored records awaiting companion recovery
+
+When a record was stored but its companion publication was interrupted, the daemon answers HTTP `200` with both `written` (path, id, hash) and a `reconcile-required` problem. The SDK preserves the receipt and recovery problem. `WriteOutcome.Ok` is false because companion publication remains incomplete; the record is already stored.
+
+The CLI reports the same outcome through the embedded runtime and the daemon: the receipt on standard output, the recovery diagnostic on standard error, and exit code `2`. With `--json`, standard output remains the existing object with `path`, `id` and `hash`; the diagnostic is not added to that object. Workbench shows the written identity and the recovery action. MCP retains both `written` and `problem` in its JSON text, with `isError: true` to signal incomplete recovery, never a refusal of the stored record.
+
+The batch journal retains the pending companion outputs. Reopen the estate or run `docs regenerate` to recover them under the original identity; never resubmit the stored record. A genuine refusal still has no written receipt and keeps its existing status and diagnostic. See [API outcomes](api-v1.md#outcomes-and-problems).
 
 ## Interrupted client requests
 

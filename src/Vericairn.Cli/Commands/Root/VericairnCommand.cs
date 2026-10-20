@@ -12,6 +12,7 @@ internal sealed class VericairnCommand : RootCommand
     {
         Options.Add(context.EstateOption);
         Options.Add(context.JsonOption);
+        Options.Add(context.McpPrincipalOption);
         Options.Add(context.Presentation.Recipient);
         Options.Add(context.Presentation.Assignment);
         Options.Add(context.Presentation.Depth);
