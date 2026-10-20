@@ -29,8 +29,12 @@ public sealed class PolicyCommandsTests
         Assert.Empty(writing.ExceptedOccurrences);
         string expected = JsonSerializer.Serialize(writing, ProtocolJson.Options);
         Assert.Equal(expected, JsonSerializer.Serialize(check.WritingExceptions, ProtocolJson.Options));
-        Assert.Equal(expected, CliHarness.Ok("--estate", root, "status", "--json").Json.GetProperty("writingExceptions").GetRawText());
-        Assert.Equal(expected, CliHarness.Ok("--estate", root, "progress", "--json").Json.GetProperty("writingExceptions").GetRawText());
+        // status and progress print canonical JSON, so compare the section as the same response, not its raw text.
+        foreach (string view in new[] { "status", "progress" })
+        {
+            string section = CliHarness.Ok("--estate", root, view, "--json").Json.GetProperty("writingExceptions").GetRawText();
+            Assert.Equal(expected, JsonSerializer.Serialize(JsonSerializer.Deserialize<WritingExceptionsResponse>(section, ProtocolJson.Options), ProtocolJson.Options));
+        }
         Assert.Equal(before, fixture.Estate.Load().Records.Count);
     }
 
