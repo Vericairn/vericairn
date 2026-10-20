@@ -53,6 +53,16 @@ internal static class CliApp
 
         void Bind(Command command)
         {
+            // System.CommandLine validates the selected command, not its ancestors. Check the
+            // root MCP input there so another command can never silently ignore that identity.
+            if (command is not McpServeCommand)
+            {
+                command.Validators.Add(result =>
+                {
+                    if (result.GetResult(context.McpPrincipalOption) is not null)
+                        result.AddError("The root --as option applies only to mcp serve. Use other commands' own identity options.");
+                });
+            }
             if (command.Action is SynchronousCommandLineAction action)
             {
                 command.SetAction(parseResult => context.Invoke(() => action.Invoke(parseResult)));
