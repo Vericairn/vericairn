@@ -145,7 +145,7 @@ internal static class ReleaseEntry
 
     private static RecordEnvelope[] Publications(PolicyRuleContext context, string product)
     {
-        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => r.Subject is { Type: "product" } subject && subject.Id == product &&
+        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => ReleaseMatchesProduct(context.Model, r, product) &&
             EstateModel.BodyString(r, "status") == "published" && !context.Model.Chain(r).SkipLast(1).Any(id => EstateModel.BodyString(context.Model.ById[id], "status") == "published"))
             .OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).ToArray();
         if (publications.GroupBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).Any(g => g.Count() != 1))

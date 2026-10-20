@@ -1,14 +1,21 @@
 # Vericairn
 
-Vericairn helps a person or a small team build and ship software with coding agents while keeping the
-final say. Work orders, agent attempts, reviews, decisions and releases are records in your own git
-repository, each with a content hash and, from an admitted device, a signature. Agents work from exact
-briefs, their results are checked and reviewed, and a release is published only after you accept it.
+Vericairn is a local-first creation and operations platform. It helps you, alone or as an organization,
+carry work from an intention to a reviewed, delivered and maintained result, with its decisions, sources
+and history kept as records in your own git repository. People and agents do the work, and nothing is
+released until you accept it.
+
+Software is its first domain. Today Vericairn helps you build and ship software with coding agents: agents
+work from exact briefs, their results are checked and reviewed, and each work order, attempt, review,
+decision and release is a record with a content hash and, from an admitted device, a signature. Beyond
+software, Vericairn's catalog plans more than 3,000 entries across creative and technical work and 27
+industries: domain packs that describe a field's work, foundries that start or reshape a project, adapters
+for the formats and tools you use, and providers for the services you deliver through. None of them ships
+yet; books, Unity projects and courses come first.
 
 Vericairn's own development runs this way. Its work orders, reviews, decisions and releases are records in a
 Vericairn estate, and every release ships only after its operator accepts it.
 
-Vericairn is a local-first creation and operations platform, and software is the first journey it supports.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command line, the SDK, the MCP server and the Workbench desktop. The Remote client is not
 implemented here.
@@ -53,6 +60,21 @@ decisions, a work order, an agent's run, its review and acceptance, and a releas
 
 - Remote, the phone client for accepting releases and steering work, in 0.9.0.
 - Separately installed extensions and the package registry, at milestone M4.
+- Vericairn's catalog, at later milestones: more than 3,000 planned entries, including 1,289 domain packs,
+  989 foundries, 291 adapters and 566 providers. Books, Unity projects and courses come first. Every entry is
+  planned; a name in the catalog is scope, not availability. The catalog covers:
+  - Creative and technical work: the web, games and Unity, books and book series, courses and course series,
+    video and video series, worldbuilding, media, documentation, marketing, canon, adaptation, continuity,
+    franchises, rights, localization, release readiness, analytics, crowdfunding and extension ecosystems.
+  - 27 industries: aerospace and defense; chemicals; construction; e-commerce and online retail; education
+    institutions; environmental consulting; finance, accounting and audit; food and agriculture; governance,
+    risk and compliance; information technology services and operations; insurance; land management; legal
+    practice operations; life sciences quality and regulatory; manufacturing quality and operations; marine;
+    marketing and advertising; medical; mining and minerals; nonprofits and grants; oil field; public sector;
+    real estate and property management; refinery; telecommunications; transportation and logistics; and
+    utilities and power.
+  - In regulated fields, agents prepare and check the work, and licensed or authorized people make the
+    decisions and perform the acts reserved to them.
 - The [roadmap](ROADMAP.md) gives the order, and [the limitations](docs/limitations-and-platforms.md) give
   the current limits.
 

@@ -97,7 +97,7 @@ internal static class ReferenceCoverage
         string? location = Text(Get(resource.Body, "location"), "github");
         if (pin is null || pin.Mode != "release" || pin.Repository != location || pin.Version is null)
             throw new PolicyInputException("Recorded-time reference coverage requires the estate's pinned product release.");
-        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => r.Subject is { Type: "product" } subject && subject.Id == product &&
+        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => ReleaseMatchesProduct(context.Model, r, product) &&
             EstateModel.BodyString(r, "status") == "published" && EstateModel.BodyString(r, "version") == pin.Version && EstateModel.BodyString(r, "repository") == pin.Repository).ToArray();
         string[] commits = publications.Select(r => EstateModel.BodyString(r, "commit") ?? "").Distinct(StringComparer.Ordinal).ToArray();
         if (commits.Length != 1) throw new PolicyInputException("The pinned release commit is missing or ambiguous.");

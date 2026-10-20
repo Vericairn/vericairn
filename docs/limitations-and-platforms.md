@@ -518,9 +518,11 @@ use the runtime user's existing configuration and login. No permission, credenti
 or publication authority is inferred from a check result.
 
 `operator record` requires repository-synced format 3, the operator's own admitted
-device and a matching changes declaration. It commits only the signed record;
+device and a matching changes declaration. It commits exactly the signed record
+and its required generated register members, verifying their paths and bytes;
 operation receipts remain separate, uncommitted estate records. Resume keeps the
-original input, record and operation identity. Known failures need reconciliation;
+original input, stored signed record, generated members and operation identity
+without signing again. Known failures need reconciliation;
 uncertain effects need observation before retrying. Local checkpoints belong to that
 clone, and independently running services are not coordinated by one service's gate.
 The queue and one-step action are absent from MCP. See [operator actions](operator-actions.md)

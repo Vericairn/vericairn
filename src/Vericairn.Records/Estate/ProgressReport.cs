@@ -34,7 +34,7 @@ public static class ProgressReport
     public const string RecordsOnly = "records";
 
     /// <summary>
-    /// The report as text. <paramref name="repository"/> holds the repository checks (<see cref="EstateChecks.Run"/>) when they ran;
+    /// The report as text. <paramref name="repository"/> holds the repository checks (<see cref="EstateChecks.Run(EstateModel)"/>) when they ran;
     /// null leaves them out and says so, as a generated region must, since those checks read the document that carries it.
     /// </summary>
     public static string Render(EstateModel model, FindingList? repository)

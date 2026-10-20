@@ -22,6 +22,288 @@ namespace Vericairn.Runtime.Tests;
 public sealed class ReleasePolicyGateTests
 {
     [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
+    public void ElapsedTimeAloneKeepsTheSameOperationHistory(int preparationSeconds, int dispatchSeconds)
+    {
+        using var f = new Fixture();
+        f.Duty();
+        string preparedAt = RecordParser.FormatTimestamp(f.Clock.Now);
+        f.Api.ReleaseBoundary = stage =>
+        {
+            f.Clock.Now = f.Clock.Now.AddSeconds(stage == "prepared" ? preparationSeconds : dispatchSeconds);
+        };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            RecordEnvelope intent = Assert.Single(f.Api.Session.Load().OfType("operation"));
+            Assert.Equal("not-started", EstateModel.BodyString(intent, "status"));
+            Assert.Single(intent.Body.GetProperty("evidence").EnumerateArray());
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Provider.Calls);
+        string hash = Assert.Single(response.BasisEvidence!);
+        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(hash)!.Evidence;
+        Assert.Equal(preparedAt, retained.Basis.AsOf);
+        Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies!.Basis.AsOf);
+        Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
+        if (preparationSeconds + dispatchSeconds > 0)
+            Assert.NotEqual(retained.Basis.Digest, response.Policies.Basis.Digest);
+        RecordEnvelope receipt = Assert.Single(f.Api.Session.Load().Current("operation"));
+        Assert.Equal("dispatched", EstateModel.BodyString(receipt, "status"));
+        Assert.Equal(2, f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("prepared", false)]
+    [InlineData("before-dispatch", false)]
+    [InlineData("prepared", true)]
+    [InlineData("before-dispatch", true)]
+    public void StalenessAgeAloneKeepsTheSameOperationHistory(string boundary, bool overdue)
+    {
+        using var f = new Fixture();
+        RecordEnvelope anchor = f.Staleness(overdue ? "warn" : "refuse");
+        f.Clock.Now = anchor.AtTime.AddDays(1).AddSeconds(overdue ? 1 : -2);
+        string preparedAt = RecordParser.FormatTimestamp(f.Clock.Now);
+        f.Api.ReleaseBoundary = stage => { if (stage == boundary) f.Clock.Now = f.Clock.Now.AddSeconds(1); };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            RecordEnvelope intent = Assert.Single(f.Api.Session.Load().OfType("operation"));
+            Assert.Equal("not-started", EstateModel.BodyString(intent, "status"));
+            Assert.Single(intent.Body.GetProperty("evidence").EnumerateArray());
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Provider.Calls);
+        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        PolicyFindingDto original = Assert.Single(retained.Policies.Findings);
+        PolicyFindingDto fresh = Assert.Single(response.Policies!.Findings);
+        Assert.Equal(overdue ? "86401 elapsed seconds." : "86398 elapsed seconds.", original.Actual);
+        Assert.Equal(overdue ? "86402 elapsed seconds." : "86399 elapsed seconds.", fresh.Actual);
+        Assert.Equal(overdue ? "unmet" : "satisfied", fresh.Verdict);
+        Assert.Equal(original.Verdict, fresh.Verdict);
+        Assert.Equal(original.Anchor, fresh.Anchor);
+        Assert.Equal(original.AnchorAt, fresh.AnchorAt);
+        Assert.False(fresh.ReleaseHold);
+        Assert.Equal(preparedAt, retained.Basis.AsOf);
+        Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies.Basis.AsOf);
+        Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
+        Assert.NotEqual(retained.Basis.Digest, response.Policies.Basis.Digest);
+        Assert.Equal(2, f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal("dispatched", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("prepared", "warn")]
+    [InlineData("before-dispatch", "warn")]
+    [InlineData("prepared", "refuse")]
+    [InlineData("before-dispatch", "refuse")]
+    public void CrossedStalenessThresholdIsCaughtBeforeAnyProviderCall(string boundary, string level)
+    {
+        using var f = new Fixture();
+        RecordEnvelope anchor = f.Staleness(level);
+        DateTimeOffset threshold = anchor.AtTime.AddDays(1);
+        f.Clock.Now = threshold.AddSeconds(-1);
+        f.Api.ReleaseBoundary = stage => { if (stage == boundary) f.Clock.Now = threshold; };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal("warn", level);
+            Assert.Equal(0, f.Provider.Calls);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope current = Assert.Single(model.Current("operation"));
+            Assert.Equal(boundary == "before-dispatch" ? 2 : 1, model.OfType("operation").Count());
+            Assert.Equal(boundary == "before-dispatch" ? "uncertain" : "not-started", EstateModel.BodyString(current, "status"));
+            AssertChangedEvidence(current);
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        if (level == "warn") Assert.True(response.Ok, response.Message);
+        else Assert.False(response.Ok);
+        Assert.Equal(level == "warn" ? 1 : 0, f.Provider.Calls);
+        PolicyFindingDto fresh = Assert.Single(response.Policies!.Findings);
+        Assert.Equal("unmet", fresh.Verdict);
+        Assert.Equal("86400 elapsed seconds.", fresh.Actual);
+        Assert.Equal(level == "refuse", fresh.ReleaseHold);
+        EstateModel final = f.Api.Session.Load();
+        if (level == "warn")
+        {
+            Assert.Equal(boundary == "before-dispatch" ? 3 : 2, final.OfType("operation").Count());
+            Assert.Equal(2, response.BasisEvidence!.Count);
+        }
+        else if (boundary == "before-dispatch")
+        {
+            Assert.Equal("canceled", response.Status);
+            Assert.Equal(2, final.OfType("operation").Count());
+            RecordEnvelope canceled = Assert.Single(final.Current("operation"));
+            Assert.Equal("canceled", EstateModel.BodyString(canceled, "status"));
+            AssertChangedEvidence(canceled);
+        }
+        else Assert.Empty(final.OfType("operation"));
+        Assert.Equal(0, f.Api.Validate().Errors);
+
+        void AssertChangedEvidence(RecordEnvelope operation)
+        {
+            ReleaseBasisEvidence[] retained = operation.Body.GetProperty("evidence").EnumerateArray()
+                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+            Assert.Equal(2, retained.Length);
+            PolicyFindingDto original = Assert.Single(retained[0].Policies.Findings);
+            PolicyFindingDto updated = Assert.Single(retained[1].Policies.Findings);
+            Assert.Equal("satisfied", original.Verdict);
+            Assert.Equal("86399 elapsed seconds.", original.Actual);
+            Assert.Equal("unmet", updated.Verdict);
+            Assert.Equal("86400 elapsed seconds.", updated.Actual);
+            Assert.Equal(original.Anchor, updated.Anchor);
+            Assert.Equal(level == "refuse", updated.ReleaseHold);
+            Assert.Equal(retained[0].Basis.RecordDigest, retained[1].Basis.RecordDigest);
+            Assert.Equal(RecordParser.FormatTimestamp(threshold), retained[1].Basis.AsOf);
+            if (boundary == "before-dispatch")
+                Assert.Equal(operation.Supersedes, Assert.Single(retained[1].ExcludedOperationRevisions).Id);
+        }
+    }
+
+    [Theory]
+    [InlineData("prepared")]
+    [InlineData("before-dispatch")]
+    public void AnAlreadyMissedDutyKeepsTheSameOperationHistoryAsTimePasses(string boundary)
+    {
+        using var f = new Fixture();
+        f.Duty(level: "warn");
+        f.Clock.Now = f.Due.AddSeconds(1);
+        f.Api.ReleaseBoundary = stage => { if (stage == boundary) f.Clock.Now = f.Clock.Now.AddSeconds(1); };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            RecordEnvelope intent = Assert.Single(f.Api.Session.Load().OfType("operation"));
+            Assert.Equal("not-started", EstateModel.BodyString(intent, "status"));
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.True(response.Ok, response.Message);
+        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        PolicyFindingDto original = Assert.Single(retained.Policies.Findings, finding => finding.Duty!.Missed);
+        PolicyFindingDto fresh = Assert.Single(response.Policies!.Findings, finding => finding.Duty!.Missed);
+        Assert.Equal("unmet", fresh.Verdict);
+        Assert.False(fresh.ReleaseHold);
+        Assert.False(fresh.Duty!.Completed);
+        Assert.Equal(original.Duty!.DueAt, fresh.Duty.DueAt);
+        Assert.Equal(original.Duty.Deadline, fresh.Duty.Deadline);
+        Assert.Equal(original.Duty.Occurrence.GetRawText(), fresh.Duty.Occurrence.GetRawText());
+        Assert.Equal(1, f.Provider.Calls);
+        Assert.Equal(2, f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("record", "prepared")]
+    [InlineData("record", "before-dispatch")]
+    [InlineData("source", "prepared")]
+    [InlineData("source", "before-dispatch")]
+    [InlineData("verdict", "prepared")]
+    [InlineData("verdict", "before-dispatch")]
+    [InlineData("finding", "prepared")]
+    [InlineData("finding", "before-dispatch")]
+    public void RealChangesAreRetainedBeforeAnyProviderCall(string change, string boundary)
+    {
+        using var f = new Fixture();
+        f.Duty(level: "warn", graceDays: change == "finding" ? 1 : 0);
+        f.Records.Estate.WriteFile("docs/evidence.md", "Original source.\n");
+        RecordEnvelope? changedRecord = null;
+        f.Api.ReleaseBoundary = stage =>
+        {
+            if (stage != boundary) return;
+            Assert.Equal(0, f.Provider.Calls);
+            switch (change)
+            {
+                case "record":
+                    JsonObject revised = PolicyFixture.Body(f.Records.Decision);
+                    revised["summary"] = "A revised fixture decision.";
+                    changedRecord = f.Records.Add("decision", revised, supersedes: f.Records.Decision.Id);
+                    break;
+                case "source":
+                    f.Records.Estate.WriteFile("docs/evidence.md", "Changed source.\n");
+                    break;
+                default:
+                    f.Clock.Now = f.Due;
+                    break;
+            }
+        };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope current = Assert.Single(model.Current("operation"));
+            Assert.Equal(boundary == "before-dispatch" ? 2 : 1, model.OfType("operation").Count());
+            Assert.Equal(boundary == "before-dispatch" ? "uncertain" : "not-started", EstateModel.BodyString(current, "status"));
+            ReleaseBasisEvidence[] retained = current.Body.GetProperty("evidence").EnumerateArray()
+                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+            Assert.Equal(2, retained.Length);
+            ReleaseBasisEvidence first = retained[0], fresh = retained[1];
+            Assert.NotEqual(first.Basis.Digest, fresh.Basis.Digest);
+            if (boundary == "before-dispatch")
+            {
+                RecordEnvelope intent = model.ById[current.Supersedes!];
+                PolicyRecordReference excluded = Assert.Single(fresh.ExcludedOperationRevisions);
+                Assert.Equal(intent.Id, excluded.Id);
+                Assert.Equal(intent.ComputedHash, excluded.Hash);
+                Assert.DoesNotContain(fresh.Records, record => record.GetProperty("type").GetString() == "operation");
+            }
+            else Assert.Empty(fresh.ExcludedOperationRevisions);
+
+            if (change == "record")
+            {
+                Assert.NotEqual(first.Basis.RecordDigest, fresh.Basis.RecordDigest);
+                Assert.DoesNotContain(first.Records, record => record.GetProperty("id").GetString() == changedRecord!.Id);
+                Assert.Contains(fresh.Records, record => record.GetProperty("id").GetString() == changedRecord!.Id &&
+                    record.GetProperty("body").GetProperty("summary").GetString() == "A revised fixture decision.");
+            }
+            else
+            {
+                Assert.Equal(first.Basis.RecordDigest, fresh.Basis.RecordDigest);
+                if (change == "source")
+                {
+                    Assert.Equal("Original source.\n", SourceText(first));
+                    Assert.Equal("Changed source.\n", SourceText(fresh));
+                }
+                else
+                {
+                    Assert.Equal(JsonSerializer.Serialize(first.Repositories), JsonSerializer.Serialize(fresh.Repositories));
+                    PolicyFindingDto original = Assert.Single(first.Policies.Findings);
+                    PolicyFindingDto updated = Assert.Single(fresh.Policies.Findings, finding => finding.Duty!.DueAt == RecordParser.FormatTimestamp(f.Due));
+                    Assert.Equal("satisfied", original.Verdict);
+                    Assert.Equal("scheduled", original.Disposition);
+                    Assert.Equal(change == "verdict" ? "unmet" : "satisfied", updated.Verdict);
+                    Assert.Equal(change == "verdict" ? "none" : "due-within-grace", updated.Disposition);
+                    Assert.False(updated.ReleaseHold);
+                    Assert.Equal(RecordParser.FormatTimestamp(f.Due), fresh.Basis.AsOf);
+                }
+            }
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Provider.Calls);
+        Assert.Equal(2, response.BasisEvidence!.Count);
+        Assert.Equal(boundary == "before-dispatch" ? 3 : 2, f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal(0, f.Api.Validate().Errors);
+
+        static string SourceText(ReleaseBasisEvidence evidence) => System.Text.Encoding.UTF8.GetString(
+            Assert.Single(evidence.Repositories.SelectMany(repository => repository.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray());
+    }
+
+    [Theory]
     [InlineData("prepared")]
     [InlineData("before-dispatch")]
     public void RevokedSigningAuthorityIsRecheckedBeforeIntentAndDispatch(string boundary)
@@ -109,8 +391,20 @@ public sealed class ReleasePolicyGateTests
         if (boundary == "before-dispatch")
         {
             Assert.Equal("canceled", response.Status);
-            Assert.Equal("canceled", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
-            Assert.True(response.BasisEvidence!.Count >= 2);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope canceled = Assert.Single(model.Current("operation"));
+            Assert.Equal("canceled", EstateModel.BodyString(canceled, "status"));
+            Assert.Equal(2, model.OfType("operation").Count());
+            Assert.Equal(2, response.BasisEvidence!.Count);
+            ReleaseBasisEvidence original = f.Api.ReleaseBasis(response.BasisEvidence[0])!.Evidence;
+            ReleaseBasisEvidence rechecked = f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence;
+            Assert.Equal(original.Basis.RecordDigest, rechecked.Basis.RecordDigest);
+            Assert.Equal("satisfied", Assert.Single(original.Policies.Findings).Verdict);
+            Assert.Contains(rechecked.Policies.Findings, finding => finding.Verdict == "unmet" && finding.ReleaseHold);
+            Assert.Equal(RecordParser.FormatTimestamp(f.Due), rechecked.Basis.AsOf);
+            Assert.Equal(canceled.Supersedes, Assert.Single(rechecked.ExcludedOperationRevisions).Id);
+            Assert.Contains(canceled.Body.GetProperty("evidence").EnumerateArray(),
+                evidence => evidence.GetProperty("hash").GetString() == response.BasisEvidence[1]);
         }
         else Assert.Empty(f.Api.Records("operation"));
     }
@@ -199,35 +493,30 @@ public sealed class ReleasePolicyGateTests
         Assert.True(response.Ok, response.Message);
         Assert.Equal(1, f.Provider.Calls);
         Assert.Equal(Fixture.Commit, f.Provider.Dispatched!.ExpectedCommit);
-        Assert.Equal(2, response.BasisEvidence!.Count);
+        string hash = Assert.Single(response.BasisEvidence!);
         RecordEnvelope intent = f.Api.Session.Load().OfType("operation").Single(o => EstateModel.BodyString(o, "status") == "not-started");
-        string? recordDigest = null;
-        foreach (string hash in response.BasisEvidence)
-        {
-            using JsonDocument evidence = JsonDocument.Parse(f.Api.Session.Objects.Read(hash)!);
-            JsonElement root = evidence.RootElement;
-            Assert.Equal("vericairn.release-basis/1", root.GetProperty("format").GetString());
-            JsonElement basis = root.GetProperty("basis");
-            Assert.Equal(Fixture.Commit, basis.GetProperty("submission").GetProperty("commit").GetString());
-            Assert.Equal("submission", basis.GetProperty("origin").GetString());
-            Assert.DoesNotContain(root.GetProperty("records").EnumerateArray(), r => r.GetProperty("id").GetString() == intent.Id);
-            string digest = basis.GetProperty("recordDigest").GetString()!;
-            Assert.True(recordDigest is null || recordDigest == digest);
-            recordDigest = digest;
-            int before = f.Api.Session.Load().Records.Count;
-            ReleaseBasisResponse retained = f.Api.ReleaseBasis(hash)!;
-            Assert.NotNull(retained);
-            Assert.Equal(digest, retained.Evidence.Basis.RecordDigest);
-            Assert.Equal(Fixture.Commit, retained.Evidence.Basis.Submission!.Commit);
-            Assert.Equal("Retained admission source.\n", System.Text.Encoding.UTF8.GetString(Assert.Single(retained.Evidence.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray()));
-            using var client = new VericairnClient(new HttpClient(new BasisHandler(retained)) { BaseAddress = new Uri("http://fixture.invalid") });
-            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(client.ReleaseBasis(hash), ProtocolJson.Options));
-            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(await client.ReleaseBasisAsync(hash, TestContext.Current.CancellationToken), ProtocolJson.Options));
-            ToolCallResult read = await new ToolRegistry(f.Api, null).CallAsync("release_basis_get", new() { ["hash"] = hash }, TestContext.Current.CancellationToken);
-            Assert.False(read.IsError, read.Text);
-            Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), read.Text);
-            Assert.Equal(before, f.Api.Session.Load().Records.Count);
-        }
+        using JsonDocument evidence = JsonDocument.Parse(f.Api.Session.Objects.Read(hash)!);
+        JsonElement root = evidence.RootElement;
+        Assert.Equal("vericairn.release-basis/1", root.GetProperty("format").GetString());
+        JsonElement basis = root.GetProperty("basis");
+        Assert.Equal(Fixture.Commit, basis.GetProperty("submission").GetProperty("commit").GetString());
+        Assert.Equal("submission", basis.GetProperty("origin").GetString());
+        Assert.DoesNotContain(root.GetProperty("records").EnumerateArray(), r => r.GetProperty("id").GetString() == intent.Id);
+        string digest = basis.GetProperty("recordDigest").GetString()!;
+        Assert.Equal(response.Policies!.Basis.RecordDigest, digest);
+        int before = f.Api.Session.Load().Records.Count;
+        ReleaseBasisResponse retained = f.Api.ReleaseBasis(hash)!;
+        Assert.NotNull(retained);
+        Assert.Equal(digest, retained.Evidence.Basis.RecordDigest);
+        Assert.Equal(Fixture.Commit, retained.Evidence.Basis.Submission!.Commit);
+        Assert.Equal("Retained admission source.\n", System.Text.Encoding.UTF8.GetString(Assert.Single(retained.Evidence.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray()));
+        using var client = new VericairnClient(new HttpClient(new BasisHandler(retained)) { BaseAddress = new Uri("http://fixture.invalid") });
+        Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(client.ReleaseBasis(hash), ProtocolJson.Options));
+        Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), JsonSerializer.Serialize(await client.ReleaseBasisAsync(hash, TestContext.Current.CancellationToken), ProtocolJson.Options));
+        ToolCallResult read = await new ToolRegistry(f.Api, null).CallAsync("release_basis_get", new() { ["hash"] = hash }, TestContext.Current.CancellationToken);
+        Assert.False(read.IsError, read.Text);
+        Assert.Equal(JsonSerializer.Serialize(retained, ProtocolJson.Options), read.Text);
+        Assert.Equal(before, f.Api.Session.Load().Records.Count);
         Assert.Null(f.Api.ReleaseBasis("unavailable"));
         Assert.Equal(0, f.Api.Validate().Errors);
     }
@@ -348,7 +637,7 @@ public sealed class ReleasePolicyGateTests
         internal const string Commit = "0123456789abcdef0123456789abcdef01234567";
         internal PolicyFixture Records { get; } = new();
         internal EstateService Api { get; }
-        internal CountingProvider Provider { get; } = new();
+        internal CountingProvider Provider { get; }
         internal RecordEnvelope Product { get; }
         internal Clock Clock { get; }
         internal DateTimeOffset Due { get; }
@@ -365,18 +654,41 @@ public sealed class ReleasePolicyGateTests
             Clock = new(Records.Estate.Clock.AddMinutes(1));
             Due = Clock.Now.AddSeconds(30);
             Api.PolicyClock = Clock;
+            Provider = new(() => Clock.Now);
             var registry = new ProviderRegistry();
             registry.Register(Provider);
             Api.Providers = registry;
         }
 
-        internal RecordEnvelope Duty()
+        internal RecordEnvelope Duty(string level = "refuse", int graceDays = 0)
         {
             JsonObject policy = Records.PolicyBody();
+            policy["level"] = level;
             policy["startsAt"] = RecordParser.FormatTimestamp(Clock.Now.AddSeconds(-10));
             policy["rules"]![0]!["parameters"]!["schedule"]!["firstDueAt"] = RecordParser.FormatTimestamp(Due);
-            policy["rules"]![0]!["parameters"]!["graceDays"] = 0;
+            policy["rules"]![0]!["parameters"]!["graceDays"] = graceDays;
             return Records.Policy(policy);
+        }
+
+        internal RecordEnvelope Staleness(string level)
+        {
+            RecordEnvelope order = Records.Add("work-order", new JsonObject
+            {
+                ["key"] = "WAIT-1", ["kind"] = "ordinary", ["title"] = "Waiting work", ["intent"] = "Await release placement.",
+                ["scope"] = new JsonArray("fixture"), ["exitQuestion"] = "Is the work placed?",
+                ["inputs"] = new JsonArray(), ["deliverables"] = new JsonArray("placement"),
+            });
+            JsonObject policy = Records.PolicyBody("planned-age", duty: false);
+            policy["level"] = level;
+            policy["startsAt"] = RecordParser.FormatTimestamp(Clock.Now.AddSeconds(-10));
+            policy["rules"] = new JsonArray(new JsonObject
+            {
+                ["key"] = "age", ["kind"] = "vericairn.estate/staleness", ["version"] = 1,
+                ["parameters"] = new JsonObject { ["class"] = "planned-without-release", ["maxAgeDays"] = 1 },
+            });
+            Records.Policy(policy);
+            Records.AssertValid();
+            return order;
         }
 
         internal RecordEnvelope Candidate(bool withArtifact = false) => Records.Add("release", new JsonObject
@@ -398,18 +710,20 @@ public sealed class ReleasePolicyGateTests
         public void Dispose() { Api.Dispose(); Records.Dispose(); }
     }
 
-    private sealed class CountingProvider : IReleaseProvider
+    private sealed class CountingProvider(Func<DateTimeOffset> now) : IReleaseProvider
     {
         internal int Calls { get; private set; }
         internal DispatchRequest? Dispatched { get; private set; }
+        internal Action? OnDispatch { get; set; }
         public string Provider => "github-releases";
         public ProviderDescriptor Descriptor { get; } = new FakeReleaseProvider().Descriptor;
         public string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) { Calls++; throw new InvalidOperationException("Admission must not resolve through the provider."); }
         public DispatchReceipt Dispatch(DispatchRequest request)
         {
+            OnDispatch?.Invoke();
             Calls++;
             Dispatched = request;
-            return new("fixture-run", "https://example.invalid/fixture-run", "Fixture dispatch.", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow.AddHours(1)));
+            return new("fixture-run", "https://example.invalid/fixture-run", "Fixture dispatch.", RecordParser.FormatTimestamp(now()));
         }
         public RunObservation? ObserveRun(string destination, string runId) { Calls++; return null; }
         public ReleaseObservation? ObserveRelease(string destination, string tag, IReadOnlyDictionary<string, string> settings) { Calls++; return null; }

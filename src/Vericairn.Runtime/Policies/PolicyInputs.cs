@@ -22,6 +22,7 @@ internal static class PolicyInputs
     internal static string Number(long value) => value.ToString(CultureInfo.InvariantCulture);
     internal static string Time(DateTimeOffset value) => RecordParser.FormatTimestamp(value);
     internal static string RecordPath(RecordEnvelope record) => "records/" + record.Type + "/" + (record.At.Length >= 7 ? record.At[..7] : "invalid-time") + "/" + record.Id + ".json";
+    internal static bool ReleaseMatchesProduct(EstateModel model, RecordEnvelope release, string? product) => PolicyRecords.ReleaseMatchesProduct(model, release, product);
 
     internal static void Shape(JsonElement value, string[] required, params string[] optional)
     {

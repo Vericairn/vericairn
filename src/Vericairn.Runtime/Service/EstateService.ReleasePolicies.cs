@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Collections.Immutable;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vericairn.Protocol;
@@ -10,7 +11,35 @@ using Vericairn.Runtime.Policies;
 
 namespace Vericairn.Runtime.Service;
 
-internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluation Evaluation, PolicyResponse View, IReadOnlyList<FindingDto> Objections);
+internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluation Evaluation, PolicyResponse View, IReadOnlyList<FindingDto> Objections)
+{
+    internal bool HasSameInputsAndFindings(ReleasePolicyAssessment other)
+    {
+        // Reuse the full basis digest contract at one instant for comparison only. Retained evidence
+        // keeps its actual timestamp and digest; neither evaluation is rerun at an earlier time.
+        var comparable = new PolicyBasis(other.Basis.Model, Basis.AsOf, other.Basis.Origin,
+            other.Basis.Repositories, other.Basis.Objects, other.Basis.Implementations, other.Basis.Submission, other.Basis.Complete);
+        return Basis.Digest == comparable.Digest && AdmissionState(Evaluation).Canonical() == AdmissionState(other.Evaluation).Canonical();
+    }
+
+    // Finding prose and elapsed counters describe an evaluation; they do not decide admission.
+    // Keep identities, verdicts, enforcement, anchors, exact evidence and duty state, including
+    // occurrence, due time, deadline, completion and missed state. Retained evaluations stay intact.
+    private static PolicyEvaluation AdmissionState(PolicyEvaluation evaluation) => evaluation with
+    {
+        Basis = "",
+        AsOf = null,
+        Findings = evaluation.Findings.Select(finding => finding with
+        {
+            Basis = "",
+            AsOf = null,
+            Actual = "",
+            Required = "",
+            NextAction = "",
+            Duty = finding.Duty is { } duty ? duty with { LateSeconds = 0 } : null,
+        }).ToImmutableArray(),
+    };
+}
 
 public sealed partial class EstateService
 {

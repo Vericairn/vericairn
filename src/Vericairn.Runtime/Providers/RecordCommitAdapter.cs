@@ -12,14 +12,14 @@ public interface IRecordCommitAdapter
     /// <summary>Require the estate itself to be a clean repository root with a named branch and complete history.</summary>
     RecordCommitBasis Prepare(string directory);
 
-    /// <summary>Create the branch at the pinned base, or recognize that exact branch after interruption; never switch away from unrelated work.</summary>
-    void Branch(string directory, RecordCommitBasis basis, string branch);
+    /// <summary>Create the branch at the pinned base with only the prepared record and members present, or recognize that branch after interruption; never switch away from unrelated work.</summary>
+    void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files);
 
-    /// <summary>Commit only the specified record, or recognize its exact existing commit after a lost receipt. Other changes refuse.</summary>
-    string Commit(string directory, string branch, string basis, string path, string byteHash, IReadOnlySet<string> receipts);
+    /// <summary>Commit exactly the record and generated members named by path and byte hash, or recognize their existing commit after a lost receipt. Other changes refuse.</summary>
+    string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts);
 
-    /// <summary>Verify the retained commit contains exactly the original record on its pinned base, without changing the working tree.</summary>
-    void Verify(string directory, string head, string basis, string path, string byteHash);
+    /// <summary>Verify the retained commit contains exactly the original record and members on its pinned base, without changing the working tree.</summary>
+    void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files);
 
     /// <summary>Require the exact branch and head with no changes except untracked, recorded receipts belonging to this action.</summary>
     void Check(string directory, string branch, string head, IReadOnlySet<string> receipts);

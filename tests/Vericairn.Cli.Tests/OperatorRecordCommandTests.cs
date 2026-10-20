@@ -17,6 +17,7 @@ public sealed class OperatorRecordCommandTests
         RootCommand root = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
         Command family = root.Subcommands.Single(c => c.Name == "operator");
         Command record = Assert.IsType<OperatorRecordCommand>(family.Subcommands.Single(c => c.Name == "record"));
+        Assert.Contains("commit it with its generated register members", record.Description, StringComparison.Ordinal);
         Assert.Contains(family.Subcommands, c => c is OperatorListCommand);
         Assert.NotEmpty(root.Parse(["operator", "record", "acceptance"]).Errors);
         Assert.All(record.Options.Where(o => o.Name is "--by" or "--body"), o => Assert.True(o.Required));
