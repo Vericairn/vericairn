@@ -155,9 +155,10 @@ public class ClientCommandTests(HeadlessFixture fixture)
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task InterruptedEffectStaysUncertainAfterRefreshAndIsNotRetried(bool timeout)
+    [InlineData(false, 60_000)]
+    [InlineData(true, 100)]
+    [InlineData(true, 86_400_000)]
+    public async Task InterruptedEffectStaysUncertainAfterRefreshAndIsNotRetried(bool timeout, int deadlineMilliseconds)
     {
         string root = Seed.Temp("command-effect");
         string person = Seed.Init(root);
@@ -165,7 +166,8 @@ public class ClientCommandTests(HeadlessFixture fixture)
         IEstateApi api = connection.Api;
         (ShellViewModel shell, AssignmentComposer page) = await CreateComposerAsync(connection, person);
         connection.Control.StallAssign = true;
-        connection.Control.Timeout = timeout ? TimeSpan.FromMilliseconds(100) : TimeSpan.FromMinutes(1);
+        // The day-long case also proves that completion comes from the controlled clock.
+        connection.Control.Timeout = TimeSpan.FromMilliseconds(deadlineMilliseconds);
         await fixture.UiAsync(async () =>
         {
             Task request = shell.SubmitAssignmentAsync(page, TestContext.Current.CancellationToken);
