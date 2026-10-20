@@ -452,7 +452,7 @@ public class McpTests
     {
         // In 0.5.2 one of the peer's checks read work order MCP-01, so the documented command failed against any estate but Vericairn's.
         string? python = Python();
-        Assert.SkipWhen(python is null, "The peer is a Python 3 script, and no Python 3 is on the path (python3, or python).");
+        Assert.True(python is not null, "Missing prerequisite: Python 3 must be installed as python3 or python for the MCP peer.");
         string root = CliHarness.TempDirectory("mcp-peer");
         string bodies = CliHarness.TempDirectory("mcp-peer-bodies");
         try
@@ -479,7 +479,7 @@ public class McpTests
     private static async Task<(int Code, string Output)> Peer(string python, string root)
     {
         var info = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (string argument in new[] { "-I", Path.Combine(RepositoryRoot(), "tests", "mcp-peer", "mcp_peer.py"), Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"), root })
+        foreach (string argument in new[] { "-I", Path.Combine(RepositoryRoot(), "tests", "mcp-peer", "mcp_peer.py"), CliHarness.BuiltExecutable, root })
         {
             info.ArgumentList.Add(argument);
         }
@@ -488,7 +488,7 @@ public class McpTests
         Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
         Task both = Task.WhenAll(output, error);
-        if (await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(120), TestContext.Current.CancellationToken)) != both)
+        if (!await TestTiming.CompletesAsync(both, TestContext.Current.CancellationToken))
         {
             process.Kill(entireProcessTree: true);
             Assert.Fail("The peer did not finish within 120 seconds.");
@@ -510,7 +510,7 @@ public class McpTests
                 info.ArgumentList.Add("-c");
                 info.ArgumentList.Add("import sys; print(sys.version_info[0])");
                 using Process process = Process.Start(info)!;
-                if (!process.WaitForExit(30_000))
+                if (!process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds))
                 {
                     process.Kill(entireProcessTree: true);
                     continue;

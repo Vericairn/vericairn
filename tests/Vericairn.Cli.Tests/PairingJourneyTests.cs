@@ -58,6 +58,7 @@ public class PairingJourneyTests
             Assert.False(loopbackOnly.GetProperty("allowPublic").GetBoolean());
             Assert.Contains("configured at 127.0.0.1:0", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
 
+            CliHarness.RequireDaemonTransport();
             await using DaemonHost host = await DaemonHost.StartAsync(root, options: new DaemonOptions { IdentityStore = new FileKeyStore(home) }, cancellationToken: TestContext.Current.CancellationToken);
             Assert.Contains("local network  https://127.0.0.1:", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
 

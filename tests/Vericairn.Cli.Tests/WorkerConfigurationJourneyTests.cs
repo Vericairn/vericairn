@@ -31,7 +31,11 @@ public class WorkerConfigurationJourneyTests
         try
         {
             (string op, string agent, _, string assignment, string repository) = WorkerJourneyTests.Estate(root, scratch);
-            if (daemon) Success(await Binary("runtime", "start"));
+            if (daemon)
+            {
+                CliHarness.RequireDaemonTransport();
+                Success(await Binary("runtime", "start"));
+            }
             string[] run = ["worker", "run", assignment, "--launcher", "codex", "--agent", agent, "--by", op, "--repository", repository,
                 "--setting", "command=" + FakeHarness.Setting("native-codex", report)];
             CliHarness.Outcome missing = await Binary([.. run, "--execution", "model=model-a", "--execution", "effort=high"]);
@@ -85,7 +89,7 @@ public class WorkerConfigurationJourneyTests
 
         async Task<CliHarness.Outcome> Binary(params string[] arguments)
         {
-            var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"))
+            var info = new ProcessStartInfo(CliHarness.BuiltExecutable)
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
             };
@@ -99,7 +103,7 @@ public class WorkerConfigurationJourneyTests
             Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
             try
             {
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(90), TestContext.Current.CancellationToken);
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 return new(process.ExitCode, await output, await error);
             }
             finally

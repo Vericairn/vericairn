@@ -23,6 +23,7 @@ public class DaemonJourneyTests
             string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Daemon journey.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
             Assert.Contains("no daemon", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
 
+            CliHarness.RequireDaemonTransport();
             await using DaemonHost host = await DaemonHost.StartAsync(root, cancellationToken: TestContext.Current.CancellationToken);
             JsonElement status = CliHarness.Ok("--estate", root, "--json", "runtime", "status").Json;
             Assert.Equal("daemon", status.GetProperty("mode").GetString());
