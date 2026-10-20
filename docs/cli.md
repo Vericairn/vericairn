@@ -17,8 +17,11 @@ vericairn policies hash --body duty.json --json
 |---|---|
 | `--body <file>` | Required. Read the prepared JSON body from this file. Use `-` to read standard input. Supply the body without a record envelope. |
 | `--json` | Return `{"definitionHash":"sha256:...","problem":null}`. Without this option, print only the hash and a newline. |
-| `--help`, `-h` | Show command help. |
+| `--help`, `-h`, `-?`, `/?`, `/h` | Show command help. |
 | `--estate <root>`, `-e <root>` | Inherited root option; hashing does not use it or open an estate. |
+| `--recipient <id>` | Inherited presentation option; hashing does not use it. |
+| `--for-assignment <id>` | Inherited presentation option; hashing does not use it. |
+| `--depth <depth>` | Inherited presentation option; hashing always prints the same hash or JSON response. |
 
 The value is SHA-256 over the record format's RFC 8785 canonical body, with only the top-level `basis` member omitted. This is the `definitionHash` an operator approves and `policies declare` checks. `basis` may be absent while preparing approval; adding or changing it leaves the hash unchanged. Every other member contributes, including a nested member named `basis`.
 

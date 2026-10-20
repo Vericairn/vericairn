@@ -83,6 +83,14 @@ public class DocsTests
                 Assert.Contains("vericairn policies hash --body duty.json --json", guide, StringComparison.Ordinal);
                 Assert.Contains("definitionHash", guide, StringComparison.Ordinal);
             }
+            string cliGuide = File.ReadAllText(Path.Combine(root, "docs", "cli.md"));
+            RootCommand tree = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
+            Command hashCommand = tree.Subcommands.Single(c => c.Name == "policies").Subcommands.Single(c => c.Name == "hash");
+            foreach (Option option in tree.Options.Where(o => o.Recursive).Concat(hashCommand.Options))
+            {
+                Assert.Contains(option.Name, cliGuide, StringComparison.Ordinal);
+                foreach (string alias in option.Aliases) Assert.Contains(alias, cliGuide, StringComparison.Ordinal);
+            }
         }
         finally { Directory.Delete(output, recursive: true); }
     }
