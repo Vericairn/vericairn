@@ -36,7 +36,7 @@ public sealed class PackagesCommandTests
         // The harness initializes its own home before this fixture opens runtime storage.
         Assert.Equal(0, CliHarness.Run("packages", "--help").Code);
         using var f = new PackageTestEstate();
-        string[] action = ["--json", "packages", deprecate ? "deprecate" : "unlist", "--product", f.Product.Id, "--version", "1.0.0", "--package", "Example.Widget", "--by", f.Estate.OperatorId];
+        string[] action = ["--estate", f.Service.Session.Root, "--json", "packages", deprecate ? "deprecate" : "unlist", "--product", f.Product.Id, "--version", "1.0.0", "--package", "Example.Widget", "--by", f.Estate.OperatorId];
         if (deprecate) action = [.. action, "--reason", "Legacy", "Other", "--message", "Use the replacement package.", "--alternate-package", "Example.Replacement", "--alternate-range", "[2.0.0,)"];
         CliHarness.Outcome intent = CliHarness.RunWithApi(f.Service, null, action);
         Assert.Equal(0, intent.Code);
@@ -47,7 +47,7 @@ public sealed class PackagesCommandTests
         Assert.Equal(id, rerun.Json.GetProperty("intent").GetProperty("id").GetString());
         Assert.Single(f.Service.Session.Load().OfType("operation"));
         f.Handler.Registration = deprecate ? "deprecated" : "unlisted";
-        CliHarness.Outcome observed = CliHarness.RunWithApi(f.Service, null, "packages", "observe", "--operation", id, "--by", f.Estate.OperatorId);
+        CliHarness.Outcome observed = CliHarness.RunWithApi(f.Service, null, "--estate", f.Service.Session.Root, "packages", "observe", "--operation", id, "--by", f.Estate.OperatorId);
         Assert.Equal(0, observed.Code);
         Assert.Contains(deprecate ? "published, listed, deprecated" : "published, unlisted, not-deprecated", observed.Out, StringComparison.Ordinal);
         Assert.Contains("records/observation/", observed.Out, StringComparison.Ordinal);
@@ -60,12 +60,13 @@ public sealed class PackagesCommandTests
         Assert.Equal(0, CliHarness.Run("packages", "--help").Code);
         using var f = new PackageTestEstate();
         f.Handler.Registration = "not-found"; f.Handler.Versions = "not-found";
-        CliHarness.Outcome observed = CliHarness.RunWithApi(f.Service, null, "--json", "packages", "observe", "--product", f.Product.Id, "--version", "1.0.0", "--by", f.Estate.OperatorId);
+        CliHarness.Outcome observed = CliHarness.RunWithApi(f.Service, null, "--estate", f.Service.Session.Root, "--json", "packages", "observe", "--product", f.Product.Id, "--version", "1.0.0", "--by", f.Estate.OperatorId);
         Assert.Equal(0, observed.Code);
         Assert.Equal("not-found", observed.Json.GetProperty("packages")[0].GetProperty("state").GetProperty("publication").GetString());
         int before = f.Service.Session.Load().Records.Count;
-        CliHarness.Outcome refused = CliHarness.RunWithApi(f.Service, null, "--json", "packages", "observe", "--by", f.Estate.OperatorId);
-        Assert.Equal(2, refused.Code);
+        CliHarness.Outcome refused = CliHarness.RunWithApi(f.Service, null, "--estate", f.Service.Session.Root, "--json", "packages", "observe", "--by", f.Estate.OperatorId);
+        // A refusal exits 1, as the changes family's operations do.
+        Assert.Equal(1, refused.Code);
         Assert.Equal("refused", refused.Json.GetProperty("status").GetString());
         Assert.Equal(before, f.Service.Session.Load().Records.Count);
     }

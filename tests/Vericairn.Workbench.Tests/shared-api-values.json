@@ -287,7 +287,8 @@
     "repository",
     "release",
     "workflow-run",
-    "estate"
+    "estate",
+    "package"
   ],
   "Vericairn.Records.Types.OperationType.Statuses": [
     "not-started",
