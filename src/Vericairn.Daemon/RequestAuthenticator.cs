@@ -57,6 +57,7 @@ internal sealed class RequestAuthenticator
 
     /// <summary>The absolute body-read deadline after the device's header check passes.</summary>
     internal static readonly TimeSpan BodyReadTimeout = TimeSpan.FromSeconds(30);
+    internal Action? ReadingBody { get; set; }
 
     /// <summary>The route of the runtime identity's proof, whose request is signed as on loopback.</summary>
     internal const string ProofRoute = "GET " + RuntimeIdentityScheme.Path;
@@ -447,6 +448,7 @@ internal sealed class RequestAuthenticator
             // Cancelling a stream read can cancel the transport (notably TLS on Windows), losing the 401 as well.
             // Cancel only the pipe's pending read; the request and its response remain live until the refusal is written.
             using CancellationTokenRegistration pending = deadline.Token.Register(reader.CancelPendingRead);
+            ReadingBody?.Invoke();
             while (true)
             {
                 ReadResult read = await reader.ReadAsync(context.RequestAborted).ConfigureAwait(false);

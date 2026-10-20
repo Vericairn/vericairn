@@ -36,7 +36,7 @@ public class LocalNetworkConformanceTests
     public async Task ByDefaultNothingListensBeyondTheLocalSocketAndLoopback()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(host.Endpoint.LocalNetwork);
         Assert.Null(DaemonHost.Discover(estate.Root)!.LocalNetwork);
         Assert.Null(host.IdentityPublicKey);
@@ -73,7 +73,7 @@ public class LocalNetworkConformanceTests
 
         var options = new DaemonOptions { IdentityStore = new FileKeyStore(VericairnHome.Path()) };
         string identity;
-        await using (DaemonHost host = await DaemonHost.StartAsync(estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        await using (DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
         {
             LocalNetworkEndpoint served = host.Endpoint.LocalNetwork!;
             Assert.Equal("127.0.0.1", served.Host);
@@ -89,7 +89,7 @@ public class LocalNetworkConformanceTests
         string kept = File.ReadAllText(Path.Combine(directory, RuntimeIdentity.FileName));
         Assert.Contains(identity, kept, StringComparison.Ordinal);
         Assert.DoesNotContain("PRIVATE", kept, StringComparison.OrdinalIgnoreCase);
-        await using (DaemonHost again = await DaemonHost.StartAsync(estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        await using (DaemonHost again = await DaemonTestHome.StartAsync(estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
         {
             Assert.Equal(identity, again.IdentityPublicKey);
         }
@@ -354,9 +354,9 @@ public class LocalNetworkConformanceTests
             Assert.Equal(refused.Message, asynchronous.Message);
         }
 
-        ConnectionStatus check = harness.Connections.Probe(redirected, TimeSpan.FromSeconds(5));
+        ConnectionStatus check = harness.Connections.Probe(redirected, TestTiming.HangTimeout);
         Assert.Equal(ConnectionStates.Unavailable, check.State);
-        ConnectionStatus asynchronousCheck = await harness.Connections.ProbeAsync(redirected, TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
+        ConnectionStatus asynchronousCheck = await harness.Connections.ProbeAsync(redirected, TestTiming.HangTimeout, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ConnectionStates.Denied, asynchronousCheck.State);
         await impostor.DisposeAsync();
         Assert.All(impostor.Requests, r => Assert.StartsWith("GET /v1/runtime/identity?nonce=", r, StringComparison.Ordinal));

@@ -168,7 +168,7 @@ public class PairingTests
         // The codes live in the daemon's memory only: after a restart none of them pairs anything.
         PairingIssued last = harness.Issue(harness.Estate.BuilderId);
         await harness.Host.StopAsync();
-        await using DaemonHost restarted = await DaemonHost.StartAsync(harness.Estate.Root, options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()) }, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost restarted = await DaemonTestHome.StartAsync(harness.Estate.Root, options: new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()) }, cancellationToken: TestContext.Current.CancellationToken);
         string address = $"{restarted.Endpoint.LocalNetwork!.Host}:{restarted.Endpoint.LocalNetwork.Port}";
         PairingException forgotten = Assert.Throws<PairingException>(() => harness.Connections.Add(address, last.Code, new PairingOptions("Phone")));
         Assert.Contains("No pairing here matches this code", forgotten.Message, StringComparison.Ordinal);

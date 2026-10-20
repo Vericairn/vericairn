@@ -25,7 +25,7 @@ public class CommunicationQualificationTests
         using var estate = new TestEstate(2);
         string other = estate.Add("principal", estate.OperatorId, """{"kind":"human","name":"Reviewer","roles":["contributor"]}""").Id;
         estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Communication journey","intent":"Keep exact originals.","scope":["tests"],"exitQuestion":"Consistent?","inputs":[],"deliverables":["results"]}""");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         foreach ((string recipient, string depth, string decision) in new[] { (estate.OperatorId, "short", "comprehensive"), (other, "comprehensive", "standard") })
         {
@@ -72,7 +72,7 @@ public class CommunicationQualificationTests
         var attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"local clone","note":"Inspect."}""", assignment.Reference);
         var result = estate.Add("result", estate.BuilderId, """{"outcome":"partial","summary":"Needs attention.","outputs":[],"evidence":[],"checks":[{"name":"journey","outcome":"failed","summary":"The response was incomplete."}],"limitations":[],"unresolvedEffects":["The original widget effect remains uncertain."],"nextStep":"Inspect before retrying."}""", attempt.Reference);
         var ask = estate.Add("ask", estate.BuilderId, $$"""{"to":"{{estate.OperatorId}}","question":"Retry?","recommendation":"Inspect first.","options":["Reconcile the original effect.","Abandon the retry."],"consequence":"The work waits without a retry.","state":"open"}""");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         Assert.True(client.CommunicationSet(new(estate.OperatorId, "person", new("none", "short", "short", "short", "short"), estate.OperatorId)).Ok);
         int count = estate.Load().Records.Count;
@@ -142,7 +142,7 @@ public class CommunicationQualificationTests
         var order = estate.Add("work-order", estate.OperatorId, """{"key":"COMMS-J","kind":"ordinary","title":"Continuation","intent":"Inspect docs/lost.md if available.","scope":["tests"],"exitQuestion":"Honest limits?","inputs":[],"deliverables":["result"]}""");
         string saved;
         string pin;
-        await using (DaemonHost previous = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken))
+        await using (DaemonHost previous = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken))
         {
             using var client = new VericairnClient(previous.Endpoint);
             ContextPackage context = client.Context("COMMS-J").Package!;
@@ -155,7 +155,7 @@ public class CommunicationQualificationTests
         }
 
         var changed = estate.Add("work-order", estate.OperatorId, order.Body.GetRawText().Replace("if available", "only after restoring its exact bytes", StringComparison.Ordinal), supersedes: order.Id);
-        await using DaemonHost current = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost current = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var successor = new VericairnClient(current.Endpoint);
         HandoffPackage package = JsonSerializer.Deserialize<HandoffPackage>(saved, ProtocolJson.Options)!;
         int count = estate.Load().Records.Count;
@@ -212,7 +212,7 @@ public class CommunicationQualificationTests
         var attempt = estate.Add("attempt", estate.BuilderId, """{"startedAt":"2026-10-13T12:00:00Z","workspace":"local clone","note":"Inspect."}""", assignment.Reference);
         var result = estate.Add("result", estate.BuilderId, """{"outcome":"partial","summary":"Ready for review.","outputs":[],"evidence":[],"checks":[{"name":"platform matrix","outcome":"not-performed","summary":"The other platforms have not run."},{"name":"live harness","outcome":"skipped","summary":"No real coding agent was launched."}],"limitations":["Independent review remains."],"unresolvedEffects":[],"nextStep":"Inspect all findings."}""", attempt.Reference);
         var review = estate.Add("review", estate.OperatorId, """{"independence":"operator","outcome":"findings","summary":"Two issues remain.","findings":[{"severity":"error","summary":"The returned identity is wrong.","location":"src/identity.cs"},{"severity":"warning","summary":"The platform evidence is incomplete.","location":"tests/platform.cs"}]}""", result.Reference);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         Assert.True(client.CommunicationSet(new(estate.OperatorId, "person", new(Progress: "none", Result: "short"), estate.OperatorId)).Ok);
         int count = estate.Load().Records.Count;

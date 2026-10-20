@@ -49,12 +49,13 @@ public class RunApiTests
         using var estate = new TestEstate(recordFormat: 2);
         string scratch = Path.Combine(Path.GetTempPath(), "vericairn-run-api-" + Records.Identity.Ulid.NewUlid().Value);
         Directory.CreateDirectory(scratch);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         var registry = new ProviderRegistry();
         registry.Register(new ReportedLauncher(new StandInLauncher()));
         registry.Register(new DirectoryWorkspaces());
         host.Service.Providers = registry;
-        host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
+        var clock = new ClientClock(DateTimeOffset.UtcNow);
+        host.Service.WorkerOptions = new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
         string op = estate.OperatorId;
         string builder = estate.BuilderId;
         string report = Path.Combine(scratch, "report.jsonl");
@@ -83,16 +84,19 @@ public class RunApiTests
             Assert.Equal("Example/widget, branch work/w-1", started.Workspace);
             Assert.Equal(60, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
             // The stand-in holds SIGTERM off once it has reported, so the stop waits for the report.
-            RunRow row = await Until(api, started.Run, r => r.Observed && File.Exists(report));
+            RunRow row = await Until(host, scratch, api, started.Run, r => r.Observed && File.Exists(report));
             Assert.Equal("dispatched", row.Status);
             Assert.Equal(60, row.Charged.GetProperty("wallMinutes").GetInt64());
             LedgerRow ledger = Assert.Single(api.Runs().Goals);
             Assert.Equal((60L, 60L, 0L), (ledger.Units[0].Budget, ledger.Units[0].Spent, ledger.Units[0].Remaining));
             Assert.Equal(1, ledger.InFlight);
 
-            RunStopResponse stopped = api.RunStop(started.Run, new RunStopRequest(op, "Through the API.", 1));
+            Task<RunStopResponse> stopping = Task.Run(() => api.RunStop(started.Run, new RunStopRequest(op, "Through the API.", 1)), TestContext.Current.CancellationToken);
+            await Until(host, scratch, api, started.Run, r => r.Stop?.TransmittedAt is not null);
+            clock.Elapse(TimeSpan.FromSeconds(1));
+            RunStopResponse stopped = await stopping.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.True(stopped.Ok, stopped.Message);
-            row = await Until(api, started.Run, r => r.Status == "known-failure");
+            row = await Until(host, scratch, api, started.Run, r => r.Status == "known-failure");
             Assert.NotNull(row.Stop!.ContainedAt);
             Assert.NotNull(row.Stop.TransmittedAt);
             Assert.Null(row.Stop.AcknowledgedAt);
@@ -105,7 +109,9 @@ public class RunApiTests
             RunResponse audited = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Branch: "work/audit", Settings:
                 new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("watch-codex-audit", Path.Combine(scratch, "audit.jsonl")) }));
             Assert.True(audited.Ok, audited.Message);
-            RunRow watched = await Until(api, audited.Run, r => r.Status == "known-failure");
+            await Until(host, scratch, api, audited.Run, r => r.Stop?.TransmittedAt is not null);
+            clock.Elapse(TimeSpan.FromSeconds(1));
+            RunRow watched = await Until(host, scratch, api, audited.Run, r => r.Status == "known-failure");
             Assert.Contains(watched.Signals!, s => s.Code == "credentials" && s.Severity == "critical" && s.Attention is not null);
             Assert.NotNull(watched.Stop!.ContainedAt);
             Assert.Contains(api.Progress().Json.GetProperty("runSignals").EnumerateArray(), r => r.GetProperty("run").GetString() == audited.Run);
@@ -117,20 +123,14 @@ public class RunApiTests
         }
     }
 
-    private static async Task<RunRow> Until(VericairnClient api, string run, Func<RunRow, bool> condition)
+    private static async Task<RunRow> Until(DaemonHost host, string scratch, VericairnClient api, string run, Func<RunRow, bool> condition)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (true)
-        {
-            RunRow row = Assert.Single(api.Runs().Runs, r => r.Run == run);
-            if (condition(row))
-            {
-                return row;
-            }
-
-            Assert.True(DateTimeOffset.UtcNow < until, $"Run {run} is {row.Status}.");
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-        }
+        using var changed = new FileSignal(host.Service.Session.Root, scratch, new RunDirectory(host.Service.Session.Manifest.Estate, run).Path);
+        RunRow? row = null;
+        await changed.UntilAsync(() => condition(row = Assert.Single(api.Runs().Runs, r => r.Run == run)),
+            "the run's expected observation", TestContext.Current.CancellationToken);
+        Assert.True(condition(row!));
+        return row!;
     }
 
     private static RecordWritten Ok(WriteOutcome outcome)

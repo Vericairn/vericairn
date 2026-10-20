@@ -24,7 +24,7 @@ public class ApiJourneyTests
     public async Task J01_CreateAndDeliverALocalSoftwareProductThroughTheApi()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var api = new VericairnClient(DaemonHost.Discover(estate.Root)!);
         string op = estate.OperatorId;
         string builder = estate.BuilderId;
@@ -73,7 +73,7 @@ public class ApiJourneyTests
     public async Task J03_ContinueWorkWithAnotherAgentThroughTheApi()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var api = new VericairnClient(DaemonHost.Discover(estate.Root)!);
         string op = estate.OperatorId;
         string builder = estate.BuilderId;

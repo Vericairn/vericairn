@@ -38,7 +38,7 @@ public class LoopbackTlsTests
     private static async Task<SslStream> HandshakeAsync(LoopbackEndpoint endpoint, SslProtocols protocols)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(TestTiming.HangTimeout);
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         SslStream? tls = null;
         try

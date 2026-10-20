@@ -450,17 +450,20 @@ public class ReviewRegressionTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         Assert.True(RuntimeConnection.TryParseAddress(harness.Address, out string host, out int port));
 
+        var accepted = TestTiming.Signal();
+        harness.Host.ConnectionAccepted = () => accepted.TrySetResult();
+
         // A connection accepted but not yet through TLS, as one that waits mid-handshake under the old certificate.
         using var waiting = new Socket(SocketType.Stream, ProtocolType.Tcp);
         await waiting.ConnectAsync(host, port, TestContext.Current.CancellationToken);
-        await Task.Delay(300, TestContext.Current.CancellationToken);
+        await accepted.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         (CertificateRotated? rotated, Problem? problem) = harness.Socket.RotateCertificate(new CertificateRotateRequest(Compromised: true));
         Assert.True(rotated is not null, problem?.Message);
         Assert.True(rotated.Closed >= 1, $"closed {rotated.Closed}");
 
         // The runtime closed it at once, well before any handshake timeout.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        timeout.CancelAfter(TestTiming.HangTimeout);
         int read;
         try
         {
@@ -496,7 +499,8 @@ public class ReviewRegressionTests
             Assert.True(refused, $"handshake {i} was not refused: [{answer}]");
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        await harness.Host.StopAsync();
+        await addresses.DrainAsync();
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a client certificate named: {string.Join(", ", addresses.Requests)}");
     }
 
@@ -539,21 +543,21 @@ public class ReviewRegressionTests
             Exception refused;
             if (asynchronous)
             {
-                ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => RuntimePairing.PairAsync($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }, TestContext.Current.CancellationToken));
+                ClientRefusedException failure = await Assert.ThrowsAsync<ClientRefusedException>(() => RuntimePairing.PairAsync($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TestTiming.HangTimeout }, TestContext.Current.CancellationToken));
                 Assert.False(failure.OutcomeUnknown);
                 Assert.Equal("refused", ClientFailure.FromException(failure)!.Code);
                 refused = failure;
             }
             else
             {
-                PairingException failure = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TimeSpan.FromSeconds(10) }));
+                PairingException failure = Assert.Throws<PairingException>(() => RuntimePairing.Pair($"127.0.0.1:{port}", PairingProtocol.NewCode(), new PairingOptions("Phone") { Timeout = TestTiming.HangTimeout }));
                 Assert.Equal("unavailable", failure.Code); // The synchronous contract stays exactly as released.
                 Assert.StartsWith($"No runtime answered at 127.0.0.1:{port}:", failure.Message, StringComparison.Ordinal);
                 refused = failure;
             }
             Say(refused.Message);
             Assert.Contains("names an address to fetch", refused.Message, StringComparison.Ordinal);
-            await serve.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            await serve.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.True(!windows || swap?.Swapped == true, "The impostor never sent its certificate.");
         }
         finally
@@ -561,7 +565,7 @@ public class ReviewRegressionTests
             listener.Stop();
         }
 
-        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        await addresses.DrainAsync();
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a runtime's certificate named: {string.Join(", ", addresses.Requests)}");
     }
 
@@ -620,7 +624,7 @@ public class ReviewRegressionTests
         {
             string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
             string payload = $"GET /v1/status HTTP/1.1\r\nHost: x\r\n{RequestSigning.DeviceHeader}: {device}\r\n{RequestSigning.SignedAtHeader}: {at}\r\n{RequestSigning.SignatureHeader}: AAAA\r\n\r\n";
-            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(payload), TimeSpan.FromSeconds(3));
+            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(payload), TestTiming.HangTimeout);
             Assert.StartsWith("HTTP/1.1 401", answer, StringComparison.Ordinal);
             answers.Add(Message(answer[(answer.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4)..]));
         }
@@ -669,6 +673,7 @@ public class ReviewRegressionTests
     [Fact]
     public void F10_ACredentialIsDisposedWithItsKeyOnceItsSuccessorIsReplaced()
     {
+        TestPrerequisites.RequireTlsCertificates();
         string home = Path.Combine(Path.GetTempPath(), "vericairn-credential-" + Records.Identity.Ulid.NewUlid().Value);
         try
         {
@@ -765,7 +770,7 @@ public class ReviewRegressionTests
         {
             await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
             byte[] body = "{\"nonce\": [}"u8.ToArray();
-            string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. Encoding.ASCII.GetBytes($"POST /v1/pairing/hello HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TimeSpan.FromSeconds(3));
+            string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. Encoding.ASCII.GetBytes($"POST /v1/pairing/hello HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TestTiming.HangTimeout);
             Say(answer.Length > 600 ? answer[..600] : answer);
             Assert.StartsWith("HTTP/1.1 400", answer, StringComparison.Ordinal);
             Assert.DoesNotContain("   at ", answer, StringComparison.Ordinal);
@@ -782,6 +787,7 @@ public class ReviewRegressionTests
     [Fact]
     public async Task F14_TheSdkFollowsNoRedirect()
     {
+        TestPrerequisites.RequireLocalIpc();
         // A server on a local socket of its own that answers health with a redirect, and counts whoever follows it.
         int followed = 0;
         string socket = OperatingSystem.IsWindows() ? "vericairn-redirect-" + Records.Identity.Ulid.NewUlid().Value : Path.Combine(DaemonHost.SocketDirectory(), Records.Identity.Ulid.NewUlid().Value[^12..] + ".sock");
@@ -921,7 +927,7 @@ public class ReviewRegressionTests
         ];
         foreach (string head in heads)
         {
-            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(head + "\r\nHost: x\r\nContent-Length: 0\r\n\r\n"), TimeSpan.FromSeconds(3));
+            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(head + "\r\nHost: x\r\nContent-Length: 0\r\n\r\n"), TestTiming.HangTimeout);
             string first = answer.Split("\r\n")[0];
             Say($"{head} -> {first}");
             Assert.True(first.StartsWith("HTTP/1.1 401", StringComparison.Ordinal) || first.StartsWith("HTTP/1.1 400", StringComparison.Ordinal), first);
@@ -931,7 +937,7 @@ public class ReviewRegressionTests
         foreach (string head in new[] { "POST /V1/PAIRING/HELLO/ HTTP/1.1", "POST /v1/%70airing/hello HTTP/1.1" })
         {
             byte[] body = Encoding.UTF8.GetBytes("{\"nonce\":\"" + PairingProtocol.NewNonce() + "\",\"mac\":\"" + PairingProtocol.NewNonce() + "\"}");
-            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, [.. Encoding.ASCII.GetBytes($"{head}\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TimeSpan.FromSeconds(3));
+            string answer = await Raw.ExchangeAsync(harness.Address, null, pinned, [.. Encoding.ASCII.GetBytes($"{head}\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\n\r\n"), .. body], TestTiming.HangTimeout);
             Say($"{head} -> {answer.Split("\r\n")[0]} {answer[(answer.IndexOf("\r\n\r\n", StringComparison.Ordinal) + 4)..]}");
             Assert.Contains("No pairing here matches this code", answer, StringComparison.Ordinal);
         }
@@ -951,7 +957,7 @@ public class ReviewRegressionTests
         {
             string head = Raw.SignedHead(harness, signer, "POST", target, []);
             byte[] payload = Encoding.ASCII.GetBytes($"POST {target} HTTP/1.1\r\nHost: x\r\n{head}Content-Length: 0\r\n\r\n");
-            string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, payload, TimeSpan.FromSeconds(3));
+            string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, payload, TestTiming.HangTimeout);
             Say($"POST {target} -> {answer.Split("\r\n")[0]}");
             Assert.StartsWith("HTTP/1.1 401", answer, StringComparison.Ordinal);
         }
@@ -969,7 +975,7 @@ public class ReviewRegressionTests
         string pinned = harness.Host.Endpoint.Loopback!.Certificate;
 
         string payload = "GET /v1/status HTTP/1.1\r\nHost: x\r\n\r\n" + "GET /v1/health HTTP/1.1\r\nHost: x\r\n" + Raw.SignedHead(harness, signer, "GET", "/v1/health", []) + "\r\n";
-        string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, Encoding.ASCII.GetBytes(payload), TimeSpan.FromSeconds(3));
+        string answer = await Raw.ExchangeAsync(harness.Address, credential, pinned, Encoding.ASCII.GetBytes(payload), TestTiming.HangTimeout);
         int responses = answer.Split("HTTP/1.1 ").Length - 1;
         Say(answer);
         Assert.Equal(1, responses);
@@ -979,7 +985,7 @@ public class ReviewRegressionTests
         // A pairing request the endpoint refuses closes the connection too (F6): what was pipelined after it is not served.
         byte[] hello = Encoding.UTF8.GetBytes("{\"nonce\":\"" + PairingProtocol.NewNonce() + "\",\"mac\":\"" + PairingProtocol.NewNonce() + "\"}");
         string pipelined = $"POST /v1/pairing/hello HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {hello.Length}\r\n\r\n{Encoding.UTF8.GetString(hello)}GET /v1/status HTTP/1.1\r\nHost: x\r\n\r\n";
-        string second = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(pipelined), TimeSpan.FromSeconds(3));
+        string second = await Raw.ExchangeAsync(harness.Address, null, pinned, Encoding.ASCII.GetBytes(pipelined), TestTiming.HangTimeout);
         Say(second);
         Assert.Equal(1, second.Split("HTTP/1.1 ").Length - 1);
         Assert.StartsWith("HTTP/1.1 401", second, StringComparison.Ordinal);
@@ -1078,7 +1084,7 @@ internal static class Raw
         await tls.WriteAsync(Encoding.ASCII.GetBytes("GET /v1/health HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n"));
         await tls.FlushAsync();
         using var reader = new StreamReader(tls, Encoding.UTF8);
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var timeout = new CancellationTokenSource(TestTiming.HangTimeout);
         string answer;
         try
         {
@@ -1094,10 +1100,9 @@ internal static class Raw
 
     /// <summary>
     /// Writes exact bytes over TLS and reads the answer until the runtime closes the connection or the wait ends. After the payload,
-    /// <paramref name="meanwhile"/> runs once the runtime has had time to read it, and then <paramref name="trickle"/> follows, a chunk
-    /// at a time with a pause before each.
+    /// <paramref name="meanwhile"/> awaits an explicit server readiness signal, and then <paramref name="trickle"/> follows in chunks.
     /// </summary>
-    public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait, byte[]? trickle = null, int chunkSize = 0, TimeSpan delay = default, Action? meanwhile = null)
+    public static async Task<string> ExchangeAsync(string address, X509Certificate2? certificate, string runtimeCertificate, byte[] payload, TimeSpan wait, byte[]? trickle = null, int chunkSize = 0, Func<Task>? meanwhile = null)
     {
         Assert.True(RuntimeConnection.TryParseAddress(address, out string host, out int port));
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
@@ -1114,8 +1119,7 @@ internal static class Raw
         await tls.FlushAsync();
         if (meanwhile is not null)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(500));
-            meanwhile();
+            await meanwhile();
         }
 
         if (trickle is not null)
@@ -1126,11 +1130,6 @@ internal static class Raw
             {
                 for (int sent = 0; sent < trickle.Length; sent += size)
                 {
-                    if (delay > TimeSpan.Zero)
-                    {
-                        await Task.Delay(delay);
-                    }
-
                     await tls.WriteAsync(trickle.AsMemory(sent, Math.Min(size, trickle.Length - sent)));
                     await tls.FlushAsync();
                 }
@@ -1177,6 +1176,7 @@ internal sealed class AddressListener : IAsyncDisposable
 {
     private readonly TcpListener listener;
     private readonly Task accepting;
+    private readonly List<Task> requests = [];
 
     private AddressListener(TcpListener listener)
     {
@@ -1190,6 +1190,7 @@ internal sealed class AddressListener : IAsyncDisposable
 
     public static AddressListener Start()
     {
+        TestPrerequisites.RequireLoopback();
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         return new AddressListener(listener);
@@ -1221,6 +1222,20 @@ internal sealed class AddressListener : IAsyncDisposable
         return (X509CertificateLoader.LoadPkcs12(addressedWithKey.Export(X509ContentType.Pkcs12), null), X509CertificateLoader.LoadPkcs12(plain.Export(X509ContentType.Pkcs12), null));
     }
 
+    public async Task DrainAsync()
+    {
+        // The operation under test has joined its work. A request on this same accept loop orders
+        // all preceding connections before the assertion, without guessing at network latency.
+        using var client = new TcpClient();
+        using var guard = new CancellationTokenSource(TestTiming.HangTimeout);
+        await client.ConnectAsync(IPAddress.Loopback, Port, guard.Token);
+        await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes("GET /fixture-barrier HTTP/1.1\r\nHost: localhost\r\n\r\n"), guard.Token);
+        await client.GetStream().CopyToAsync(Stream.Null, guard.Token);
+        Task[] pending;
+        lock (requests) pending = [.. requests];
+        await Task.WhenAll(pending).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+    }
+
     public async ValueTask DisposeAsync()
     {
         listener.Stop();
@@ -1247,7 +1262,7 @@ internal sealed class AddressListener : IAsyncDisposable
                 return;
             }
 
-            _ = Task.Run(async () =>
+            Task request = Task.Run(async () =>
             {
                 using (client)
                 {
@@ -1255,9 +1270,10 @@ internal sealed class AddressListener : IAsyncDisposable
                     int read = 0;
                     try
                     {
-                        using var wait = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                        using var wait = new CancellationTokenSource(TestTiming.HangTimeout);
                         read = await client.GetStream().ReadAsync(buffer, wait.Token);
-                        Requests.Enqueue(Encoding.ASCII.GetString(buffer, 0, read).Split("\r\n")[0]);
+                        string line = Encoding.ASCII.GetString(buffer, 0, read).Split("\r\n")[0];
+                        if (!line.StartsWith("GET /fixture-barrier ", StringComparison.Ordinal)) Requests.Enqueue(line);
                         await client.GetStream().WriteAsync(Encoding.ASCII.GetBytes("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"), wait.Token);
                     }
                     catch (Exception exception) when (exception is IOException or SocketException or OperationCanceledException)
@@ -1266,6 +1282,7 @@ internal sealed class AddressListener : IAsyncDisposable
                     }
                 }
             });
+            lock (requests) requests.Add(request);
         }
     }
 }

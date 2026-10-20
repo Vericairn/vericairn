@@ -2,11 +2,13 @@
 // Copyright (c) 2026 Jason Furr
 
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Template;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Vericairn.Protocol;
 using Vericairn.Runtime.Service;
 using Vericairn.Runtime.Tests;
@@ -18,10 +20,13 @@ namespace Vericairn.Daemon.Tests;
 public sealed class PolicyAdoptionApiTests
 {
     [Fact]
-    public void CompleteAdoptionTraversesTheMappedApiRoutesWithoutOpeningASocket()
+    public async Task CompleteAdoptionTraversesTheMappedApiRoutesWithoutOpeningASocket()
     {
         DaemonTestHome.Ensure();
-        PolicyAdoptionJourney.Run(api => new RouteSurface(new RouteHandler(api)));
+        // The journey deliberately uses the synchronous SDK. ASP.NET's in-memory delegates must
+        // run without the test's synchronization context, just as they do on a server request thread.
+        await Task.Run(() => PolicyAdoptionJourney.Run(api => new RouteSurface(new RouteHandler(api))), TestContext.Current.CancellationToken)
+            .WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
     }
 
     private sealed class RouteSurface : PolicyAdoptionJourney.Surface
@@ -40,11 +45,15 @@ public sealed class PolicyAdoptionApiTests
         private readonly RouteEndpoint[] endpoints;
         internal RouteHandler(IEstateApi api)
         {
-            WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+            // Route binding needs server services, but no configuration files or change watchers.
+            WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+            builder.WebHost.UseKestrel();
+            builder.Services.AddRouting();
             builder.Logging.ClearProviders();
             app = builder.Build();
             ApiRoutes.Map(app, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
             endpoints = ((IEndpointRouteBuilder)app).DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
+            Assert.NotEmpty(endpoints);
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

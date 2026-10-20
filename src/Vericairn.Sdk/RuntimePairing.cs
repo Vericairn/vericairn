@@ -30,6 +30,7 @@ public sealed record PairingOptions(string Name)
 
     /// <summary>How long to wait for the runtime.</summary>
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(30);
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 }
 
 /// <summary>A pairing that completed: the runtime this device now reaches and what it recorded.</summary>
@@ -101,7 +102,7 @@ public static class RuntimePairing
         ArgumentNullException.ThrowIfNull(options);
         bool confirmationStarted = false;
         return ClientOperation.RunAsync("Pair", token => PairWithKeysAsync(address, code, options,
-            () => Volatile.Write(ref confirmationStarted, true), token), () => Volatile.Read(ref confirmationStarted), options.Timeout, cancellationToken);
+            () => Volatile.Write(ref confirmationStarted, true), token), () => Volatile.Read(ref confirmationStarted), options.Timeout, options.Clock, cancellationToken);
     }
 
     private static async Task<PairedRuntime> PairWithKeysAsync(string address, string code, PairingOptions options, Action? confirmationStarted, CancellationToken cancellationToken)

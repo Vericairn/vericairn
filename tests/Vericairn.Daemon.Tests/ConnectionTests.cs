@@ -37,6 +37,8 @@ public class ConnectionTests
     public async Task AConnectionIsConnectingUntilSomethingAnswersAndUnavailableWhenNothingDoes()
     {
         // A listener on 127.0.0.1 that accepts and never answers.
+        TestPrerequisites.RequireLoopback();
+        TestPrerequisites.RequireTlsCertificates();
         var silent = new TcpListener(IPAddress.Loopback, 0);
         silent.Start();
         string home = Path.Combine(Path.GetTempPath(), "vericairn-connections-" + Ulid.NewUlid().Value);
@@ -49,11 +51,16 @@ public class ConnectionTests
             var connection = new RuntimeConnection(Ulid.NewUlid().Value, $"127.0.0.1:{((IPEndPoint)silent.LocalEndpoint).Port}", Ulid.NewUlid().Value, null, Records.Signing.RecordSigning.EncodePublicKey(spki), device, Records.Signing.RecordSigning.EncodePublicKey(spki), Ulid.NewUlid().Value, null, ["local-network"], "2026-10-15T00:00:00Z");
             var heard = new List<string>();
             Task<TcpClient> accepted = silent.AcceptTcpClientAsync(TestContext.Current.CancellationToken).AsTask();
-            ConnectionStatus status = await Task.Run(() => connections.Probe(connection, TimeSpan.FromSeconds(2), heard.Add), TestContext.Current.CancellationToken);
+            Task<ConnectionStatus> probing = Task.Run(() => connections.Probe(connection, TestTiming.HangTimeout, heard.Add), TestContext.Current.CancellationToken);
+            using TcpClient peer = await accepted.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Assert.Equal([ConnectionStates.Connecting], heard);
+            Assert.False(probing.IsCompleted);
+            peer.Dispose();
+            ConnectionStatus status = await probing.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.Equal([ConnectionStates.Connecting, ConnectionStates.Unavailable], heard);
             Assert.Equal(ConnectionStates.Unavailable, status.State);
             Assert.Contains("No answer", status.Message, StringComparison.Ordinal);
-            (await accepted.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken)).Dispose();
+            Assert.True(accepted.IsCompletedSuccessfully);
         }
         finally
         {
@@ -79,7 +86,7 @@ public class ConnectionTests
 
         // A disconnected client, and a runtime that stops and starts again, revoke nothing: the device is still admitted.
         await harness.Host.StopAsync();
-        ConnectionStatus stopped = harness.Connections.Probe(kept, TimeSpan.FromSeconds(5));
+        ConnectionStatus stopped = harness.Connections.Probe(kept, TestTiming.HangTimeout);
         Assert.Equal(ConnectionStates.Cached, stopped.State);
         Assert.Contains("Last current at " + kept.LastCurrent!.At, stopped.Message, StringComparison.Ordinal);
         Assert.Equal(ConnectionStates.Cached, harness.Connections.Find(connection.Id)!.Observed!.State);

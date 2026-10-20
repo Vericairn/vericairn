@@ -3,6 +3,7 @@
 
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -54,7 +55,20 @@ internal static class TestPrerequisites
 
     private static readonly Lazy<bool> LocalIpcAvailable = new(() =>
     {
-        if (OperatingSystem.IsWindows()) return true;
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var pipe = new NamedPipeServerStream("vericairn-prerequisite-" + Guid.NewGuid().ToString("N"),
+                    PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+                return true;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                Assert.Fail("Missing prerequisite: permission to create a current-user named pipe for the daemon transport tests.");
+                return false;
+            }
+        }
         string directory = Path.Combine(Path.GetTempPath(), "vc-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try

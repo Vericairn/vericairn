@@ -36,7 +36,7 @@ public class DaemonTests
     public async Task TheDaemonServesWhatTheEmbeddedRuntimeSeesAndTheClientWritesThroughIt()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         DaemonEndpoint? discovered = DaemonHost.Discover(estate.Root);
         Assert.NotNull(discovered);
         Assert.Equal(host.Endpoint.Address, discovered.Address);
@@ -124,8 +124,8 @@ public class DaemonTests
         // finishes removing the file, so the test awaits that same stop (StopAsync returns the stop in flight, never a second one)
         // before it looks for the file; a second stop is harmless.
         client.Shutdown();
-        await DaemonTestHome.WaitUntilGoneAsync(discovered);
-        await host.StopAsync();
+        await host.StopAsync().WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.False(VericairnClient.IsAlive(discovered), "The daemon kept answering after shutdown.");
         Assert.Null(DaemonHost.Discover(estate.Root));
         await host.StopAsync();
     }
@@ -134,7 +134,7 @@ public class DaemonTests
     public async Task EveryMappedRouteIsInTheContractAndEveryContractRouteIsMapped()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Null(host.Endpoint.Loopback);
         HashSet<(string Method, string Path)> mapped = host.MappedRoutes().Where(r => r.Path != OpenApiDocument.Path).ToHashSet();
         HashSet<(string Method, string Path)> contract = OpenApiDocument.Routes.ToHashSet();
@@ -167,7 +167,7 @@ public class DaemonTests
     public async Task LoopbackIsPinnedToTheRuntimeCertificateAndAcceptsOnlyRequestsSignedByAnAdmittedDevice()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         DaemonEndpoint endpoint = DaemonHost.Discover(estate.Root)!;
         Assert.NotNull(endpoint.Loopback);
         Assert.StartsWith("sha256:", endpoint.Loopback.Certificate, StringComparison.Ordinal);
@@ -217,7 +217,7 @@ public class DaemonTests
     public async Task EveryFormOfAnAcceptedLoopbackSignatureIsRefusedAsARepeatAndAFreshSignatureIsNot()
     {
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         DaemonEndpoint endpoint = DaemonHost.Discover(estate.Root)!;
         using var socket = new VericairnClient(endpoint);
         WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.BuilderId, "Test device", "file"));
@@ -260,7 +260,7 @@ public class DaemonTests
         using var estate = new TestEstate(recordFormat: 2);
         estate.WriteFile("docs/guide.md", "# Guide\n");
         string declaration = estate.Add("living-document", estate.OperatorId, """{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"decision","level":"warn"}],"summary":"Says how to use it."}""").Id;
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         WriteOutcome refused = client.DocumentReview(declaration, new DocumentReviewRequest(estate.BuilderId, "current", "Read it.", Independence: "self"));
         Assert.Equal("refused", refused.Problem?.Code);
@@ -297,7 +297,7 @@ public class DaemonTests
         }
 
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("pipe", host.Endpoint.Kind);
         using var client = new NamedPipeClientStream(".", host.Endpoint.Address, PipeDirection.InOut, PipeOptions.Asynchronous);
         await client.ConnectAsync(5000, TestContext.Current.CancellationToken);
@@ -319,7 +319,7 @@ public class DaemonTests
     public async Task ARotatedDeviceSignsRequestsWithItsNewKeyAndTheReplacedKeyIsRefused()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         DaemonEndpoint endpoint = DaemonHost.Discover(estate.Root)!;
         using var socket = new VericairnClient(endpoint);
         WriteOutcome device = socket.DeviceCreate(new DeviceCreateRequest(estate.BuilderId, "Test device", "file"));
@@ -365,10 +365,10 @@ public class DaemonTests
     public async Task ARunningDaemonRefusesASecondOwnerOfTheSameEstate()
     {
         using var estate = new TestEstate();
-        await using DaemonHost first = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost first = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         InvalidOperationException refused = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
-            await using DaemonHost second = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+            await using DaemonHost second = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         });
         Assert.Contains("already serves", refused.Message, StringComparison.Ordinal);
         Assert.True(VericairnClient.IsAlive(first.Endpoint));
@@ -376,29 +376,36 @@ public class DaemonTests
         // After the first stops, a stale endpoint file or socket never blocks the next owner.
         await first.StopAsync();
         File.WriteAllText(DaemonHost.EndpointFilePath(estate.Root), JsonSerializer.Serialize(first.Endpoint, ProtocolJson.Options));
-        await using DaemonHost next = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost next = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(VericairnClient.IsAlive(next.Endpoint));
     }
 
     [Fact]
     public void TheRuntimeCertificateIsKeptOwnerOnlyAndRenewedWhenCloseToExpiry()
     {
+        TestPrerequisites.RequireTlsCertificates();
+        var clock = new ClientClock(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         string directory = Path.Combine(Path.GetTempPath(), "vericairn-certificate-" + Records.Identity.Ulid.NewUlid().Value);
         try
         {
-            using var first = RuntimeCertificate.Load(directory);
-            using var again = RuntimeCertificate.Load(directory);
+            using var first = RuntimeCertificate.Load(directory, clock);
+            using var again = RuntimeCertificate.Load(directory, clock);
             Assert.Equal(RuntimeCertificate.Fingerprint(first), RuntimeCertificate.Fingerprint(again));
             Assert.True(first.HasPrivateKey);
-            Assert.True(first.NotAfter.ToUniversalTime() - DateTime.UtcNow > RuntimeCertificate.Validity - TimeSpan.FromDays(1));
+            Assert.True(first.NotAfter.ToUniversalTime() - clock.GetUtcNow().UtcDateTime > RuntimeCertificate.Validity - TimeSpan.FromDays(1));
             if (!OperatingSystem.IsWindows())
             {
                 Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(directory, RuntimeCertificate.FileName)));
             }
 
+            clock.Advance(RuntimeCertificate.Validity - RuntimeCertificate.RenewBefore + TimeSpan.FromDays(1));
+            using var renewed = RuntimeCertificate.Load(directory, clock);
+            Assert.NotEqual(RuntimeCertificate.Fingerprint(first), RuntimeCertificate.Fingerprint(renewed));
+
             File.WriteAllText(Path.Combine(directory, RuntimeCertificate.FileName), "not a certificate");
-            using var replaced = RuntimeCertificate.Load(directory);
+            using var replaced = RuntimeCertificate.Load(directory, clock);
             Assert.NotEqual(RuntimeCertificate.Fingerprint(first), RuntimeCertificate.Fingerprint(replaced));
+            Assert.NotEqual(RuntimeCertificate.Fingerprint(renewed), RuntimeCertificate.Fingerprint(replaced));
         }
         finally
         {

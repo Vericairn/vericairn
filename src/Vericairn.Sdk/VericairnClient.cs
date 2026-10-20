@@ -88,17 +88,19 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         asyncHttp = AsyncTransport(chain, http.BaseAddress);
     }
 
-    private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout)
+    private VericairnClient(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout, TimeProvider clock)
     {
         Endpoint = new DaemonEndpoint("local-network", connection.Address, 0, string.Empty, string.Empty, ApiVersion.Current);
         Transport = "local-network";
         OperationTimeout = _ => timeout;
+        OperationClock = clock;
         credential = new LocalNetworkCredential(signer, Base64Url.DecodeFromChars(connection.DevicePublicKey));
         LocalNetworkCredential own = credential;
         var handler = new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
-            ConnectTimeout = timeout ?? TimeSpan.FromSeconds(30),
+            // The synchronous client's timeout and the async operation's deadline already cover connection setup.
+            ConnectTimeout = Timeout.InfiniteTimeSpan,
             ConnectCallback = (_, cancellationToken) => LocalNetworkTransport.ConnectAsync(connection, signer, own, cancellationToken),
         };
 
@@ -135,7 +137,10 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     /// refusal before any request surfaces as an <see cref="HttpRequestException"/> whose inner <see cref="RuntimeConnectionException"/>
     /// says denied or unavailable.
     /// </summary>
-    public static VericairnClient LocalNetwork(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout = null)
+    public static VericairnClient LocalNetwork(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout = null) =>
+        LocalNetwork(connection, signer, timeout, TimeProvider.System);
+
+    internal static VericairnClient LocalNetwork(RuntimeConnection connection, IRequestSigner signer, TimeSpan? timeout, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(signer);
@@ -144,7 +149,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
             throw new ArgumentException($"'{connection.Address}' is not an address and port.", nameof(connection));
         }
 
-        return new VericairnClient(connection, signer, timeout);
+        return new VericairnClient(connection, signer, timeout, clock);
     }
 
     /// <summary>True when a daemon answers at the endpoint's local socket.</summary>

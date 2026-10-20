@@ -63,7 +63,8 @@ public class TlsScreenStreamTests
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.2")], false));
-        using X509Certificate2 certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
+        using X509Certificate2 certificate = request.Create(request.SubjectName, X509SignatureGenerator.CreateForECDsa(key),
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), [1]);
         return certificate.RawData;
     }
 
@@ -72,7 +73,8 @@ public class TlsScreenStreamTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest("CN=stranger", key, HashAlgorithmName.SHA256);
         request.CertificateExtensions.Add(extension);
-        using X509Certificate2 certificate = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddDays(1));
+        using X509Certificate2 certificate = request.Create(request.SubjectName, X509SignatureGenerator.CreateForECDsa(key),
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero), new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero), [1]);
         return certificate.RawData;
     }
 

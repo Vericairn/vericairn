@@ -15,11 +15,11 @@ public sealed class OperatorRecordApiTests
 {
     public OperatorRecordApiTests() => DaemonTestHome.Ensure();
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = TestTiming.HangTimeoutMilliseconds)]
     public async Task TheSynchronousSdkOperationRoundTripsARefusalWithoutAuthoringAnything()
     {
         using var estate = new TestEstate(3);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var api = new VericairnClient(host.Endpoint);
         int count = host.Service.Session.Load().Records.Count;
         var request = new OperatorRecordRequest("acceptance", estate.OperatorId, JsonSerializer.SerializeToElement(new { statement = "Inspect first." }));

@@ -27,7 +27,7 @@ public class EarlyRefusalTests
         string framing = chunked ? "Transfer-Encoding: chunked\r\n" : $"Content-Length: {body.Length}\r\n";
         byte[] wireBody = chunked ? Encoding.ASCII.GetBytes($"{body.Length:X}\r\n{Encoding.ASCII.GetString(body)}\r\n0\r\n\r\n") : body;
         byte[] head = Encoding.ASCII.GetBytes($"POST /v1/pairing/{operation} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nConnection: close\r\n{framing}\r\n");
-        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, .. wireBody], TimeSpan.FromSeconds(15));
+        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, .. wireBody], TestTiming.HangTimeout);
         Assert.StartsWith("HTTP/1.1 413", answer, StringComparison.Ordinal);
         Assert.DoesNotContain("<<timeout", answer, StringComparison.Ordinal);
         Assert.Single(harness.Socket.Records("device"));
@@ -44,7 +44,7 @@ public class EarlyRefusalTests
         byte[] body = Encoding.UTF8.GetBytes(json);
         Assert.True(body.Length <= DaemonHost.RefusedBodyLimit);
         byte[] head = Encoding.ASCII.GetBytes($"POST /v1/pairing/{operation} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
-        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, .. body], TimeSpan.FromSeconds(15));
+        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, .. body], TestTiming.HangTimeout);
         Assert.StartsWith("HTTP/1.1 422", answer, StringComparison.Ordinal);
         Assert.DoesNotContain("<<timeout", answer, StringComparison.Ordinal);
         Assert.Single(harness.Socket.Records("device"));
@@ -124,7 +124,7 @@ public class EarlyRefusalTests
         Assert.True(body.Length <= DaemonHost.RefusedBodyLimit);
         string contentType = malformedJson ? "application/json" : "application/octet-stream";
         byte[] head = Encoding.ASCII.GetBytes($"POST /v1/pairing/{operation} HTTP/1.1\r\nHost: x\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
-        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, body[0]], TimeSpan.FromSeconds(15), trickle: body[1..], meanwhile: () => { });
+        string answer = await Raw.ExchangeAsync(harness.Address, null, harness.Host.Endpoint.Loopback!.Certificate, [.. head, body[0]], TestTiming.HangTimeout, trickle: body[1..]);
         Assert.StartsWith(malformedJson ? "HTTP/1.1 400" : "HTTP/1.1 415", answer, StringComparison.Ordinal);
         Assert.DoesNotContain("<<timeout", answer, StringComparison.Ordinal);
         Assert.Single(harness.Socket.Records("device"));
@@ -138,7 +138,7 @@ public class EarlyRefusalTests
         await socket.ConnectAsync(harness.Host.Endpoint.LocalNetwork!.Host, harness.Host.Endpoint.LocalNetwork.Port, TestContext.Current.CancellationToken);
         await using var stream = new NetworkStream(socket, ownsSocket: false);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(TestTiming.HangTimeout);
         // An impossible TLS record type is refused by the screen before the platform TLS sees it.
         await stream.WriteAsync(new byte[] { 99, 3, 3, 0, 0 }, deadline.Token);
         byte[] alert = new byte[7];
@@ -176,7 +176,7 @@ public class EarlyRefusalTests
             Assert.Equal(StatusCodes.Status413PayloadTooLarge, refused.StatusCode);
         }
 
-        Assert.Equal(8, await DaemonHost.DrainRefusedBodyAsync(pipe.Reader, DaemonHost.RefusedBodyLimit, TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        Assert.Equal(8, await DaemonHost.DrainRefusedBodyAsync(pipe.Reader, DaemonHost.RefusedBodyLimit, TestTiming.HangTimeout, new ClientClock(), TestContext.Current.CancellationToken));
         await pipe.Reader.CompleteAsync();
     }
 

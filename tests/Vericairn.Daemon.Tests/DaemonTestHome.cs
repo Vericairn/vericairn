@@ -16,21 +16,23 @@ internal static class DaemonTestHome
         Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, home);
     }
 
+    internal static Task<DaemonHost> StartAsync(string root, string? endpoint = null, bool loopback = true,
+        DaemonOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        Ensure();
+        TestPrerequisites.RequireLocalIpc();
+        if (loopback || options?.LocalNetwork is not null)
+        {
+            TestPrerequisites.RequireLoopback();
+            TestPrerequisites.RequireTlsCertificates();
+        }
+        return DaemonHost.StartAsync(root, endpoint, loopback, options, cancellationToken);
+    }
+
     /// <summary>Forces the static constructor.</summary>
     public static void Ensure()
     {
         // The work is in the static constructor.
     }
 
-    /// <summary>Waits until no daemon answers at the endpoint, or fails after ten seconds.</summary>
-    public static async Task WaitUntilGoneAsync(Protocol.DaemonEndpoint endpoint)
-    {
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
-        while (DateTimeOffset.UtcNow < deadline && Sdk.VericairnClient.IsAlive(endpoint))
-        {
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-        }
-
-        Assert.False(Sdk.VericairnClient.IsAlive(endpoint), "The daemon kept answering after shutdown.");
-    }
 }

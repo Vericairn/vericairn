@@ -40,7 +40,7 @@ public class TlsHandshakeLogTests
         }
 
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+        deadline.CancelAfter(TestTiming.HangTimeout);
         using var socket = new Socket(SocketType.Stream, ProtocolType.Tcp);
         await socket.ConnectAsync("127.0.0.1", localNetwork ? harness.Host.Endpoint.LocalNetwork!.Port : harness.Host.Endpoint.Loopback!.Port, deadline.Token);
         await using var stream = new NetworkStream(socket, ownsSocket: false);
