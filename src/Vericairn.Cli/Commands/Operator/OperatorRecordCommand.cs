@@ -10,7 +10,7 @@ namespace Vericairn.Cli;
 internal sealed class OperatorRecordCommand : Command
 {
     public OperatorRecordCommand(CommandContext context)
-        : base("record", "Sign your own operator record, commit it alone on a new estate branch, scan, push, open, wait for declared checks and merge through recorded changes operations. Identical input resumes the original action; failures retain its branch and pull request and report the next command. Requires your admitted device, a clean estate repository and declared checks. Not exposed through MCP.")
+        : base("record", "Sign your own operator record, commit it with its generated register members on a new estate branch, scan, push, open, wait for declared checks and merge through recorded changes operations. Identical input resumes the original action; failures retain its branch and pull request and report the next command. Requires your admitted device, a clean estate repository and declared checks. Not exposed through MCP.")
     {
         var type = new Argument<string>("type") { Description = "Record type, for example acceptance or decision." };
         var by = new Option<string>("--by") { Description = "Operator principal id acting on their own admitted device.", Required = true };
