@@ -225,6 +225,10 @@ public partial interface IEstateApi
     Task<WriteOutcome> DocumentReviewAsync(string declaration, DocumentReviewRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(DocumentReview), () => DocumentReview(declaration, request), true, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="DocumentPin"/>; a stopped observation does not undo an effect.</summary>
+    Task<DocumentPinResponse> DocumentPinAsync(DocumentPinRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(DocumentPin), () => DocumentPin(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Asks"/>; a stopped observation does not undo an effect.</summary>
     Task<AsksResponse> AsksAsync(string? principal = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Asks), () => Asks(principal), false, this as IClientOperationLifetime, cancellationToken);

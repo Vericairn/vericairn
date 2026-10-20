@@ -181,6 +181,9 @@ public partial interface IEstateApi
     /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
     WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
 
+    /// <summary>Pins the exact bytes of an estate document as its next revision; unchanged, generated, stale and forked pins are refused.</summary>
+    DocumentPinResponse DocumentPin(DocumentPinRequest request);
+
     /// <summary>
     /// What waits on a principal, or on every principal when none is named: the asks still open or notified, at most three in one
     /// delivery to each with the recommendation first, the rest waiting in order. Reading it answers nothing; an ask is answered by a
