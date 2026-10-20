@@ -180,10 +180,93 @@ public class ContinuousIntegrationTests
         foreach ((string file, string job) in new[] { ("ci.yml", "build-test:"), ("release.yml", "verify:") })
         {
             string steps = Block(Read(Path.Combine(workflows, file)), job, 2);
-            Assert.Contains("        run: python .github/scripts/run-tests.py\n", steps, StringComparison.Ordinal);
-            Assert.Contains("            python3 .github/scripts/run-tests.py'\n", steps, StringComparison.Ordinal);
+            Assert.Contains("        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}\n", steps, StringComparison.Ordinal);
+            Assert.Contains("            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'\n", steps, StringComparison.Ordinal);
             Assert.DoesNotContain("dotnet test --no-build", steps, StringComparison.Ordinal);
         }
+    }
+
+    [Theory]
+    [InlineData("ci.yml", "build-test:")]
+    [InlineData("release.yml", "verify:")]
+    public void EveryPlatformBuildsOnceInEachOfThreeIndependentTestShares(string file, string job)
+    {
+        string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", file)), job, 2);
+        Assert.Equal("      matrix:\n        os: [ubuntu-latest, macos-latest, windows-latest]\n        share: [1, 2, 3]\n", Block(steps, "matrix:", 6));
+        Assert.Contains("\n      fail-fast: false\n", steps, StringComparison.Ordinal);
+        Assert.Contains("\n    runs-on: ${{ matrix.os }}\n", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("max-parallel:", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("needs:", steps, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", steps, StringComparison.Ordinal);
+        foreach (string step in new[] { "Restore (locked)", "Build" })
+        {
+            string build = Block(steps, "- name: " + step, 6);
+            Assert.DoesNotContain("if:", build, StringComparison.Ordinal);
+            Assert.Contains(step == "Build" ? "dotnet build --no-restore --configuration Release" : "dotnet restore --locked-mode", build, StringComparison.Ordinal);
+            Assert.Single(steps.Split('\n'), line => line == "      - name: " + step);
+        }
+
+        string companions = Block(steps, "- name: Verify retained companion inputs and bytes", 6);
+        Assert.Contains("        if: matrix.share == 1\n", companions, StringComparison.Ordinal);
+        Assert.Contains("run: python tests/companion-build.py", companions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NonTestBuildChecksRunInOneSharePerPlatform()
+    {
+        string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), "build-test:", 2);
+        foreach (string name in new[] { "Smoke the CLI", "Pack the Community packages", "Install the tool and SDK from the local feed" })
+        {
+            string step = Block(steps, "- name: " + name, 6);
+            Assert.Contains("        if: matrix.share == 1\n", step, StringComparison.Ordinal);
+            Assert.Single(steps.Split('\n'), line => line == "      - name: " + name);
+        }
+
+        // The existing single-file analyzer check runs once, on Linux, after the tests and local-feed check.
+        string publish = Block(steps, "- name: Publish the single-file applications", 6);
+        Assert.Contains("        if: runner.os == 'Linux' && matrix.share == 1\n", publish, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("ci.yml", "build-test:")]
+    [InlineData("release.yml", "verify:")]
+    public void EverySharePreparesThePlatformPrerequisitesBeforeTesting(string file, string job)
+    {
+        string steps = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", file)), job, 2);
+        string enclave = Block(steps, "- name: Build the Secure Enclave helper", 6);
+        Assert.Contains("        if: runner.os == 'macOS'\n", enclave, StringComparison.Ordinal);
+        Assert.Contains("swiftc -O -o artifacts/enclave/vericairn-enclave", enclave, StringComparison.Ordinal);
+        Assert.Contains("VERICAIRN_ENCLAVE_HELPER=", enclave, StringComparison.Ordinal);
+        Assert.DoesNotContain("matrix.share", enclave, StringComparison.Ordinal);
+        if (file == "release.yml")
+        {
+            Assert.Contains("          artifacts/enclave/vericairn-enclave available\n", enclave, StringComparison.Ordinal);
+            Assert.Contains("VERICAIRN_EXPECT_ENCLAVE=1", enclave, StringComparison.Ordinal);
+        }
+
+        string service = Block(steps, "- name: Install a secret service", 6);
+        Assert.Contains("        if: runner.os == 'Linux'\n", service, StringComparison.Ordinal);
+        Assert.Contains("gnome-keyring libsecret-tools dbus-daemon", service, StringComparison.Ordinal);
+        Assert.DoesNotContain("matrix.share", service, StringComparison.Ordinal);
+        string linux = Block(steps, "- name: Test, with a secret service", 6);
+        Assert.Contains("        if: runner.os == 'Linux'\n", linux, StringComparison.Ordinal);
+        Assert.Contains("VERICAIRN_EXPECT_SECRET_SERVICE: \"1\"", linux, StringComparison.Ordinal);
+        Assert.Contains("dbus-run-session -- bash", linux, StringComparison.Ordinal);
+        Assert.Contains("gnome-keyring-daemon --unlock", linux, StringComparison.Ordinal);
+        Assert.Contains("secret-tool lookup", linux, StringComparison.Ordinal);
+        Assert.Contains("        if: runner.os != 'Linux'\n", Block(steps, "- name: Test", 6), StringComparison.Ordinal);
+        Assert.True(steps.IndexOf(enclave, StringComparison.Ordinal) < steps.IndexOf("- name: Test\n", StringComparison.Ordinal));
+        Assert.True(steps.IndexOf(service, StringComparison.Ordinal) < steps.IndexOf("- name: Test\n", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TheReleaseEvidenceWaitsForEveryPlatformAndShare()
+    {
+        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml"));
+        string package = Block(workflow, "package:", 2);
+        Assert.Contains("\n    needs: [verify, enclave-helper]\n", package, StringComparison.Ordinal);
+        Assert.DoesNotContain("always()", package, StringComparison.Ordinal);
+        Assert.Contains("built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform.", package, StringComparison.Ordinal);
     }
 
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);

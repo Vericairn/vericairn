@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Jason Furr
 
-"""Run every test suite once, then retry each failed test once, reporting every retry.
+"""Run every test suite (or one checked share), then retry each failed test once, reporting every retry.
 
 A failure that a retry clears is an intermittent failure until its cause is fixed: the run's summary and a warning name
 it, so it is fixed rather than hidden. A test that fails twice fails the run. So does any failure the run's summary does
@@ -9,11 +9,14 @@ not fully account for, such as a crashed test host or a run that stopped for ano
 than an intermittent failure explains.
 """
 
+import argparse
 import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+from shares import COUNT, checked_shares
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 FAILED = re.compile(r"^\s*failed (Vericairn\.[\w.]+?)(?:\(.*\))? \(\d")
@@ -76,9 +79,24 @@ def failures(code, lines):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--share", type=int, choices=range(1, COUNT + 1), help="Run one of the three checked class shares.")
+    parser.add_argument("--check-shares", action="store_true", help="Check discovery and all three filters without running tests.")
+    args = parser.parse_args()
     # Test output can hold any character; a Windows runner's default code page cannot encode them all.
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    code, lines = run(["dotnet", "test", "--no-build", "--configuration", "Release"])
+    command = ["dotnet", "test", "--no-build", "--configuration", "Release"]
+    if args.share is not None or args.check_shares:
+        try:
+            shares = checked_shares(Path.cwd())
+        except (OSError, ValueError) as error:
+            print(f"Test share guard failed: {error}")
+            return 1
+        if args.check_shares:
+            return 0
+        command += ["--", "--filter-class", *shares[args.share - 1]]
+        print(f"Running share {args.share} of {COUNT}.", flush=True)
+    code, lines = run(command)
     if code == 0:
         return 0
     failed = failures(code, lines)

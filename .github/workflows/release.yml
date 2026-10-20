@@ -22,6 +22,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        share: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -33,6 +34,7 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
       - name: Verify retained companion inputs and bytes
+        if: matrix.share == 1
         run: python tests/companion-build.py
       - name: Build the Secure Enclave helper
         # The release's own test run exercises real key custody on every platform it qualifies. Unlike continuous integration, it
@@ -57,7 +59,7 @@ jobs:
       - name: Test
         if: runner.os != 'Linux'
         # Each failed test is retried once and reported in the run's summary; a second failure fails the job.
-        run: python .github/scripts/run-tests.py
+        run: python .github/scripts/run-tests.py --share ${{ matrix.share }}
       - name: Test, with a secret service
         if: runner.os == 'Linux'
         env:
@@ -68,7 +70,7 @@ jobs:
             printf throwaway | gnome-keyring-daemon --unlock --components=secrets > /dev/null
             printf probe | secret-tool store --label "Vericairn release probe" application vericairn-ci probe 1
             test "$(secret-tool lookup application vericairn-ci probe 1)" = probe
-            python3 .github/scripts/run-tests.py'
+            python3 .github/scripts/run-tests.py --share ${{ matrix.share }}'
 
   enclave-helper:
     # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
@@ -252,7 +254,7 @@ jobs:
             echo "Vericairn $VERSION (unsigned developer build)"
             echo
             echo "Commit: ${{ github.sha }}"
-            echo "Evidence: workflow run ${{ github.run_id }} built and tested on ubuntu-latest, macos-latest and windows-latest."
+            echo "Evidence: workflow run ${{ github.run_id }} built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform."
             echo "Record format: $formats."
             echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
             echo
