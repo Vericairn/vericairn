@@ -58,6 +58,10 @@ public sealed partial class VericairnClient
     public Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
         RunOperationAsync<IReadOnlyList<PolicyKindDto>>(nameof(PolicyKinds), async token => (await GetAsync<List<PolicyKindDto>>("/v1/estate-policies/kinds", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyKinds)), cancellationToken);
 
+    /// <summary>The cancellable PolicyHash read, with a response deadline.</summary>
+    public Task<PolicyHashResponse> PolicyHashAsync(PolicyHashRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<PolicyHashResponse>(nameof(PolicyHash), async token => (await PostAsync<PolicyHashRequest, PolicyHashResponse>("/v1/estate-policies/hash", request, cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyHash)), cancellationToken);
+
     /// <summary>The cancellable PolicyEvaluate read, with a response deadline.</summary>
     public Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
         RunOperationAsync<PolicyResponse>(nameof(PolicyEvaluate), async token => (await GetAsync<PolicyResponse>(PolicyEvaluationPath(asOf, release), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(PolicyEvaluate)), cancellationToken);
@@ -286,6 +290,10 @@ public sealed partial class VericairnClient
     public Task<WriteOutcome> DocumentReviewAsync(string declaration, DocumentReviewRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(DocumentReview), async token => (await PostAsync<DocumentReviewRequest, WriteOutcome>("/v1/documents/" + Uri.EscapeDataString(declaration) + "/reviews", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DocumentReview)), cancellationToken);
 
+    /// <summary>The cancellable DocumentPin operation, with a deadline covering the complete response.</summary>
+    public Task<DocumentPinResponse> DocumentPinAsync(DocumentPinRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<DocumentPinResponse>(nameof(DocumentPin), async token => (await PostAsync<DocumentPinRequest, DocumentPinResponse>("/v1/documents/pin", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(DocumentPin)), cancellationToken);
+
     /// <summary>The cancellable Asks operation, with a deadline covering the complete response.</summary>
     public Task<AsksResponse> AsksAsync(string? principal = null, CancellationToken cancellationToken = default) =>
         RunOperationAsync<AsksResponse>(nameof(Asks), async token => (await GetAsync<AsksResponse>(principal is null ? "/v1/asks" : "/v1/asks?to=" + Uri.EscapeDataString(principal), cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Asks)), cancellationToken);
@@ -507,7 +515,14 @@ public sealed partial class VericairnClient
         {
             TResponse result = await response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options, cancellationToken).ConfigureAwait(false)
                 ?? throw new JsonException("The runtime returned no result.");
-            if (result is WriteOutcome { Written: null, Problem: null } or WriteOutcome { Written: not null, Problem: not null })
+            // Companion recovery can remain after the record was stored. A receipt paired with a
+            // refusal is still contradictory; only the recovery problem is a valid combined outcome.
+            if (result is WriteOutcome { Written: null, Problem: null }
+                or WriteOutcome { Written: not null, Problem: not null and not { Code: "reconcile-required" } }
+                or DocumentPinResponse { Written: null, Problem: null }
+                or DocumentPinResponse { Written: null, Revision: not null }
+                or DocumentPinResponse { Written: not null, Revision: null or <= 0 }
+                or DocumentPinResponse { Written: not null, Problem: not null and not { Code: "reconcile-required" } })
                 throw new JsonException("The runtime returned no definite write outcome.");
             return result;
         }

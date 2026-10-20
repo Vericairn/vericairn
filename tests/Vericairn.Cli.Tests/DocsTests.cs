@@ -42,6 +42,10 @@ public class DocsTests
             while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
             Assert.NotNull(root);
             string maintained = File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md"));
+            Assert.Contains("## Stored records awaiting companion recovery", maintained, StringComparison.Ordinal);
+            Assert.Contains("HTTP `200` with both `written`", maintained, StringComparison.Ordinal);
+            Assert.Contains("never resubmit the stored record", maintained, StringComparison.Ordinal);
+            Assert.Contains("exit code `2`", maintained, StringComparison.Ordinal);
             maintained = maintained[maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd()
                 .Replace("| --- | --- | --- |", "|---|---|---|", StringComparison.Ordinal);
             Assert.Equal(maintained, System.Net.WebUtility.HtmlDecode(section));
@@ -53,6 +57,47 @@ public class DocsTests
     private static readonly string[] Declared = ["README.md", "install.md", "operator-guide.md", "cli-reference.md", "api-reference.md", "record-reference.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
 
     private static readonly string[] Authored = ["README.md", "install.md", "operator-guide.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
+
+    [Fact]
+    public void GeneratedReferencesDescribeTheReadOnlyPolicyHashAndItsRequiredBody()
+    {
+        string output = CliHarness.TempDirectory("docs-policy-hash");
+        try
+        {
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, Declaration(output), json: false)).Code);
+            string reference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            int start = reference.IndexOf(" `vericairn policies hash`\n", StringComparison.Ordinal);
+            Assert.True(start >= 0);
+            int end = reference.IndexOf("\n#", start + 1, StringComparison.Ordinal);
+            string section = System.Net.WebUtility.HtmlDecode(end < 0 ? reference[start..] : reference[start..end]);
+            Assert.Contains("--body <", section, StringComparison.Ordinal);
+            Assert.Contains("Required.", section, StringComparison.Ordinal);
+            Assert.Contains("standard input", section, StringComparison.Ordinal);
+            Assert.Contains("writes nothing", section, StringComparison.Ordinal);
+            Assert.Contains("POST /v1/estate-policies/hash", File.ReadAllText(Path.Combine(output, "api-reference.md")), StringComparison.Ordinal);
+            using JsonDocument inventory = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "reference-inventory.json")));
+            Assert.Contains("policies hash", inventory.RootElement.GetRawText(), StringComparison.Ordinal);
+            string? root = AppContext.BaseDirectory;
+            while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
+            Assert.NotNull(root);
+            foreach (string name in new[] { "cli.md", "policy-adoption.md" })
+            {
+                string guide = File.ReadAllText(Path.Combine(root, "docs", name));
+                Assert.Contains("vericairn policies hash --body policy.json", guide, StringComparison.Ordinal);
+                Assert.Contains("vericairn policies hash --body duty.json --json", guide, StringComparison.Ordinal);
+                Assert.Contains("definitionHash", guide, StringComparison.Ordinal);
+            }
+            string cliGuide = File.ReadAllText(Path.Combine(root, "docs", "cli.md"));
+            RootCommand tree = CliApp.Build(cancellationToken: TestContext.Current.CancellationToken);
+            Command hashCommand = tree.Subcommands.Single(c => c.Name == "policies").Subcommands.Single(c => c.Name == "hash");
+            foreach (Option option in tree.Options.Where(o => o.Recursive).Concat(hashCommand.Options))
+            {
+                Assert.Contains(option.Name, cliGuide, StringComparison.Ordinal);
+                foreach (string alias in option.Aliases) Assert.Contains(alias, cliGuide, StringComparison.Ordinal);
+            }
+        }
+        finally { Directory.Delete(output, recursive: true); }
+    }
 
     [Fact]
     public void EveryVisibleOptionIsDocumentedAtItsDeclaringCommand()
@@ -134,6 +179,16 @@ public class DocsTests
                 Assert.Equal(reference.GetProperty("hash").GetString(), Vericairn.Records.Hashing.ContentHash.Sha256File(Path.Combine(output, reference.GetProperty("path").GetString()!)));
             List<string> commands = manifest.RootElement.GetProperty("commands").EnumerateArray().Select(c => c.GetString()!).ToList();
             Assert.Contains("docs check", commands);
+            Assert.Contains("docs pin", commands);
+            Assert.Contains("POST /v1/documents/pin", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            string pinReference = File.ReadAllText(Path.Combine(output, "cli-reference.md"));
+            int pinStart = pinReference.IndexOf(" `vericairn docs pin`\n", StringComparison.Ordinal);
+            Assert.True(pinStart >= 0);
+            int pinEnd = pinReference.IndexOf("\n#", pinStart + 1, StringComparison.Ordinal);
+            string pinSection = System.Net.WebUtility.HtmlDecode(pinEnd < 0 ? pinReference[pinStart..] : pinReference[pinStart..pinEnd]);
+            foreach (string option in new[] { "--by", "--summary", "--title", "--expected" }) Assert.Contains(option, pinSection, StringComparison.Ordinal);
+            Assert.Contains("exact estate file bytes", pinSection, StringComparison.Ordinal);
+            Assert.Contains("forks", pinSection, StringComparison.Ordinal);
             Assert.Contains("docs companions", commands);
             Assert.Contains("docs render", commands);
             foreach (string route in new[] { "/v1/companions", "/v1/companions/render", "/v1/companions/sources", "/v1/companions/compare" })

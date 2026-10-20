@@ -82,11 +82,20 @@ public sealed class DocumentRevisionType : IRecordType
 
         if (context.Model.IsCurrent(context.Record))
         {
-            bool duplicate = context.Model.Current(Name).Any(other => other.Id != context.Record.Id && other.Body.TryGetProperty("path", out System.Text.Json.JsonElement op) && op.GetString() == path);
-            if (duplicate)
+            Model.RecordEnvelope[] pins = context.Model.Current(Name).Where(other => EstateModel.BodyString(other, "path") == path).ToArray();
+            if (pins.Length > 1)
             {
-                context.Error("document.multiple", $"More than one current revision record exists for {path}.");
+                context.Error("document.multiple", MultipleMessage(path, pins));
             }
         }
+    }
+
+    /// <summary>The same reconciliation diagnostic for estate validation and document pinning.</summary>
+    public static string MultipleMessage(string path, IReadOnlyList<Model.RecordEnvelope> pins)
+    {
+        ArgumentNullException.ThrowIfNull(pins);
+        return $"More than one current revision record exists for {path}. Reconcile the forked pins before pinning again: "
+            + string.Join("; ", pins.OrderBy(p => p.Id, StringComparer.Ordinal)
+                .Select(p => $"{p.Id} (supersedes {p.Supersedes ?? "none"})")) + ".";
     }
 }

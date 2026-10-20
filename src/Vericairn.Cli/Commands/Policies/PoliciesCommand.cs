@@ -18,6 +18,7 @@ internal sealed class PoliciesCommand : Command
         Subcommands.Add(new PoliciesListCommand(context));
         Subcommands.Add(new PoliciesShowCommand(context));
         Subcommands.Add(new PoliciesKindsCommand(context));
+        Subcommands.Add(new PoliciesHashCommand(context));
         Subcommands.Add(new PoliciesCheckCommand(context));
     }
 }

@@ -53,6 +53,10 @@ public partial interface IEstateApi
     Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(PolicyKinds), () => PolicyKinds(), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable PolicyHash read.</summary>
+    Task<PolicyHashResponse> PolicyHashAsync(PolicyHashRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyHash), () => PolicyHash(request), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable PolicyEvaluate read.</summary>
     Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(PolicyEvaluate), () => PolicyEvaluate(asOf, release), false, this as IClientOperationLifetime, cancellationToken);
@@ -220,6 +224,10 @@ public partial interface IEstateApi
     /// <summary>The cancellable counterpart of <see cref="DocumentReview"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> DocumentReviewAsync(string declaration, DocumentReviewRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(DocumentReview), () => DocumentReview(declaration, request), true, this as IClientOperationLifetime, cancellationToken);
+
+    /// <summary>The cancellable counterpart of <see cref="DocumentPin"/>; a stopped observation does not undo an effect.</summary>
+    Task<DocumentPinResponse> DocumentPinAsync(DocumentPinRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(DocumentPin), () => DocumentPin(request), true, this as IClientOperationLifetime, cancellationToken);
 
     /// <summary>The cancellable counterpart of <see cref="Asks"/>; a stopped observation does not undo an effect.</summary>
     Task<AsksResponse> AsksAsync(string? principal = null, CancellationToken cancellationToken = default) =>

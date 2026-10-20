@@ -500,16 +500,19 @@ public sealed class AssignmentComposer(string workOrderKey, IReadOnlyList<Contri
         }
 
         WriteOutcome outcome = (await api.AssignAsync(new AssignRequest(WorkOrderKey, Contributor.Id, by, Brief(), string.IsNullOrWhiteSpace(Note) ? null : Note.Trim()), cancellationToken: cancellationToken).ConfigureAwait(true));
-        if (outcome.Ok)
+        if (outcome.Written is { } written)
         {
-            WrittenId = outcome.Written!.Id;
-            Status = $"Written: assignment {outcome.Written.Id} ({outcome.Written.Hash[..19]}...).";
+            WrittenId = written.Id;
+            Status = WithProblem($"Written: assignment {written.Id} ({written.Hash[..19]}...).", outcome.Problem);
         }
         else
         {
             Status = Refusal(outcome.Problem);
         }
     }
+
+    internal static string WithProblem(string stored, Problem? problem) =>
+        problem is null ? stored : stored + "\n" + Refusal(problem);
 
     internal static string Refusal(Problem? problem)
     {
@@ -737,15 +740,15 @@ public sealed class ReviewWorkspace : Document
         {
             using JsonDocument document = JsonDocument.Parse(body.ToJsonString());
             WriteOutcome outcome = (await api.NewRecordAsync(new NewRecordRequest(type, ActingPrincipal, document.RootElement.Clone(), Prepared.Subject), cancellationToken: cancellationToken).ConfigureAwait(true));
-            if (outcome.Ok)
+            if (outcome.Written is { } written)
             {
-                WrittenId = outcome.Written!.Id;
-                Status = $"Written: {type} {outcome.Written.Id}, signed by the runtime with the acting principal's device.";
+                WrittenId = written.Id;
+                Status = AssignmentComposer.WithProblem($"Written: {type} {written.Id}, signed by the runtime with the acting principal's device.", outcome.Problem);
                 Prepared = Prepared with { Facts = (await SubjectFacts.AboutAsync(api, SubjectId, cancellationToken: cancellationToken).ConfigureAwait(true)) };
                 PreparedState = PreparedAction.Label(Presentation.PreparedState.Reusable);
                 if (type == "review")
                 {
-                    Reviews.Add(new ReviewRow(outcome.Written.Id, ActingPrincipal, Independence, ReviewOutcome, ReviewSummary.Trim(), document.RootElement.GetProperty("findings")));
+                    Reviews.Add(new ReviewRow(written.Id, ActingPrincipal, Independence, ReviewOutcome, ReviewSummary.Trim(), document.RootElement.GetProperty("findings")));
                 }
             }
             else
@@ -1183,8 +1186,8 @@ public sealed class LivingDocumentsWorkspace : Document
 
         string? reviewed = string.IsNullOrWhiteSpace(Commit) ? null : Commit.Trim();
         WriteOutcome sent = (await api.DocumentReviewAsync(Selected.Row.Declaration, new DocumentReviewRequest(by, Outcome, Summary.Trim(), parsed, reviewed), cancellationToken: cancellationToken).ConfigureAwait(true));
-        Status = sent.Ok
-            ? $"Written: document review {sent.Written!.Id}. The runtime read {Selected.Row.Path}, recorded the triggers the review answers and ran the declared checks."
+        Status = sent.Written is { } written
+            ? AssignmentComposer.WithProblem($"Written: document review {written.Id}. The runtime read {Selected.Row.Path}, recorded the triggers the review answers and ran the declared checks.", sent.Problem)
             : AssignmentComposer.Refusal(sent.Problem);
     }
 }

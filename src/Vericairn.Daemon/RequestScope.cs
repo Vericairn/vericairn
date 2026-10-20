@@ -43,8 +43,10 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             }
         }
 
-        // Resume carries its retained baseline in a POST body but is a read, with no signing key or write ledger needed.
-        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) && !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase);
+        // These reads carry their input in a POST body, with no signing key or write ledger needed.
+        bool write = HttpMethods.IsPost(context.HttpContext.Request.Method) &&
+            !operation.Equals("POST /v1/resume", StringComparison.OrdinalIgnoreCase) &&
+            !operation.Equals("POST /v1/estate-policies/hash", StringComparison.OrdinalIgnoreCase);
         if (!write)
         {
             using EstateService.RequestDeviceScope request = service.ForDeviceRequest(device.Identity, device.PublicKey, device.LocalNetwork ? RequestAuthenticator.LocalNetworkProfile : null);
@@ -140,6 +142,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/companions/compare"] = typeof(CompanionCompareRequest),
         ["GET /v1/estate-policies"] = null,
         ["GET /v1/estate-policies/kinds"] = null,
+        ["POST /v1/estate-policies/hash"] = typeof(PolicyHashRequest),
         ["GET /v1/estate-policies/evaluate"] = null,
         ["GET /v1/estate-policies/{key}/view"] = null,
         ["GET /v1/writing-exceptions"] = null,
@@ -193,6 +196,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["GET /v1/release-bases/{hash}"] = null,
         ["GET /v1/documents"] = null,
         ["POST /v1/documents/{id}/reviews"] = typeof(DocumentReviewRequest),
+        ["POST /v1/documents/pin"] = typeof(DocumentPinRequest),
         ["GET /v1/asks"] = null,
         ["GET /v1/operator/actions"] = null,
         ["POST /v1/operator/record"] = typeof(OperatorRecordRequest),
@@ -259,6 +263,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
     {
         [typeof(CompanionRequest)] = (_, _, _) => null,
         [typeof(CompanionCompareRequest)] = (_, _, _) => null,
+        [typeof(PolicyHashRequest)] = (_, _, _) => null,
         [typeof(PolicyChangeRequest)] = (_, r, d) => Acting(((PolicyChangeRequest)r).By, d),
         [typeof(WritingExceptionRemoveRequest)] = (_, r, d) => Acting(((WritingExceptionRemoveRequest)r).By, d),
         [typeof(WorkPlaceRequest)] = (_, r, d) => Acting(((WorkPlaceRequest)r).By, d),
@@ -283,6 +288,7 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(DeviceRenameRequest)] = (scope, r, d) => scope.OwnDevice(((DeviceRenameRequest)r).Device, d),
         [typeof(DeviceRotateRequest)] = (scope, r, d) => scope.OwnDevice(((DeviceRotateRequest)r).Device, d),
         [typeof(DocumentReviewRequest)] = (_, r, d) => Acting(((DocumentReviewRequest)r).By, d),
+        [typeof(DocumentPinRequest)] = (_, r, d) => Acting(((DocumentPinRequest)r).By, d),
         [typeof(GoalProposeRequest)] = (_, r, d) => Acting(((GoalProposeRequest)r).By, d),
         [typeof(GoalActionRequest)] = (_, r, d) => Acting(((GoalActionRequest)r).By, d),
         [typeof(GoalEvaluateRequest)] = (_, r, d) => Acting(((GoalEvaluateRequest)r).By, d),

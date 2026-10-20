@@ -21,6 +21,11 @@ public static class ApiRoutes
         CompanionRoutes.Map(app, service);
         app.MapGet($"{v}/estate-policies", () => Results.Json(service.Policies(), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/kinds", () => Results.Json(service.PolicyKinds(), ProtocolJson.Options));
+        app.MapPost($"{v}/estate-policies/hash", (PolicyHashRequest request) =>
+        {
+            PolicyHashResponse response = service.PolicyHash(request);
+            return Results.Json(response, ProtocolJson.Options, statusCode: response.Problem is null ? 200 : 422);
+        });
         app.MapGet($"{v}/estate-policies/evaluate", (string? asOf, string? release) => Results.Json(service.PolicyEvaluate(asOf, release), ProtocolJson.Options));
         app.MapGet($"{v}/estate-policies/{{key}}/view", (string key) => service.Policy(key) is { } policy ? Results.Json(policy, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/writing-exceptions", () => Results.Json(service.WritingExceptions(), ProtocolJson.Options));
@@ -74,6 +79,11 @@ public static class ApiRoutes
         app.MapPost($"{v}/devices/revoke", (RevokeRequest request) => Outcome(service.DeviceRevoke(request)));
         app.MapGet($"{v}/releases", () => Results.Json(service.Releases(), ProtocolJson.Options));
         app.MapGet($"{v}/documents", () => Results.Json(service.Documents(), ProtocolJson.Options));
+        app.MapPost($"{v}/documents/pin", (DocumentPinRequest request) =>
+        {
+            DocumentPinResponse response = service.DocumentPin(request);
+            return Results.Json(response, ProtocolJson.Options, statusCode: response.Written is not null ? 200 : 422);
+        });
         app.MapPost($"{v}/documents/{{id}}/reviews", (string id, DocumentReviewRequest request) => Outcome(service.DocumentReview(id, request)));
         app.MapGet($"{v}/asks", (string? to) => Results.Json(service.Asks(string.IsNullOrWhiteSpace(to) ? null : to), ProtocolJson.Options));
         app.MapGet($"{v}/operator/actions", (string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) =>
@@ -134,7 +144,7 @@ public static class ApiRoutes
     }
 
     private static IResult Outcome(WriteOutcome outcome) =>
-        outcome.Ok
+        outcome.Written is not null
             ? Results.Json(outcome, ProtocolJson.Options)
             : Results.Json(outcome, ProtocolJson.Options, statusCode: outcome.Problem?.Code == "not-found" ? StatusCodes.Status404NotFound : outcome.Problem?.Code == "conflict" ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity);
 }

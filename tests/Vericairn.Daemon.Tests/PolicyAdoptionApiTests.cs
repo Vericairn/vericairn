@@ -34,7 +34,7 @@ public sealed class PolicyAdoptionApiTests
 
     // Exercise ApiRoutes.Map's actual binding and response delegates. No host is started and there
     // is no transport fallback: an unexpected route fails this test instead of reaching a network.
-    private sealed class RouteHandler : HttpMessageHandler
+    internal sealed class RouteHandler : HttpMessageHandler
     {
         private readonly WebApplication app;
         private readonly RouteEndpoint[] endpoints;

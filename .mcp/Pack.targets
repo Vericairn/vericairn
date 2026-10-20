@@ -1,0 +1,40 @@
+<Project>
+  <!-- Use NuGet's own normalization, including when PackageVersion overrides Version or
+       packing without a build changes the version. The checked-in file is only a template. -->
+  <UsingTask TaskName="WriteMcpServerManifest" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <TemplatePath ParameterType="System.String" Required="true" />
+      <PackageVersion ParameterType="System.String" Required="true" />
+      <OutputPath ParameterType="System.String" Required="true" />
+      <NuGetAssemblyPath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        // The SDK's NuGet assembly targets its runtime, while inline tasks compile against
+        // MSBuild's reference assemblies. Resolve it at execution time to keep both compatible.
+        Type versionType = System.Reflection.Assembly.LoadFrom(NuGetAssemblyPath).GetType("NuGet.Versioning.NuGetVersion", true);
+        object parsed = versionType.GetMethod("Parse", new[] { typeof(string) }).Invoke(null, new object[] { PackageVersion });
+        string version = (string)versionType.GetMethod("ToFullString", Type.EmptyTypes).Invoke(parsed, null);
+        string manifest = File.ReadAllText(TemplatePath).Replace("@PACKAGE_VERSION@", version);
+        Directory.CreateDirectory(Path.GetDirectoryName(OutputPath));
+        File.WriteAllText(OutputPath, manifest, new UTF8Encoding(false));
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="GenerateMcpServerManifest" BeforeTargets="_GetPackageFiles">
+    <PropertyGroup>
+      <_McpServerManifest>$(IntermediateOutputPath)mcp/server.json</_McpServerManifest>
+    </PropertyGroup>
+    <WriteMcpServerManifest TemplatePath="$(MSBuildThisFileDirectory)server.json.in"
+                            PackageVersion="$(PackageVersion)" OutputPath="$(_McpServerManifest)"
+                            NuGetAssemblyPath="$(MSBuildToolsPath)/NuGet.Versioning.dll" />
+    <ItemGroup>
+      <None Include="$(_McpServerManifest)" Pack="true" PackagePath="/.mcp/server.json" Visible="false" />
+      <FileWrites Include="$(_McpServerManifest)" />
+    </ItemGroup>
+  </Target>
+</Project>

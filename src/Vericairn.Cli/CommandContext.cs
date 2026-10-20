@@ -72,6 +72,13 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
         Recursive = true,
     };
 
+    // Registry clients supply the server's inputs before its positional command arguments.
+    // Share this option with mcp serve; it is not a global acting identity for other commands.
+    public Option<string> McpPrincipalOption { get; } = new("--as")
+    {
+        Description = "Principal id for mcp serve; its admitted device on this machine signs the writes. Without it only the read-only tools are listed.",
+    };
+
     public PresentationOptions Presentation { get; } = new();
 
     // Resolve the console writers at execution time, including when a caller captures output after building the tree.

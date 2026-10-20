@@ -14,8 +14,12 @@ internal sealed record PolicyKindRegistration(string Kind, int Version, string I
     Action<PolicyRuleContext> Validate, Func<PolicyRuleContext, IReadOnlyList<PolicyFinding>> Evaluate,
     Func<EstateModel, PolicySubmission?, JsonElement, PolicyRepository, IEnumerable<PolicyTreeRequest>>? RepositoryTrees = null);
 
-// Registrations are supplied by admitted application composition. Declarations never load code. The
-// adapter pins the digest of the implementation artifact it loaded; the evaluator only compares inputs.
+// Registrations are supplied by admitted application composition. Declarations never load code.
+// PolicySources.Digest pins SHA-256 of the UTF-8 string "vericairn.policy-implementation/1|<assembly-name>|<module-version-id>",
+// using the simple assembly name and deterministic manifest-module version identifier in N format.
+// Together with the registered kind and version, this binds the compiled kind, version and module identity
+// admitted by composition. It does not hash installed bytes or detect a modified installation;
+// the evaluator only compares inputs.
 internal sealed class PolicyKindRegistry(IEnumerable<PolicyKindRegistration> registrations)
 {
     internal ImmutableArray<PolicyKindRegistration> Registrations { get; } = registrations.OrderBy(r => r.Kind, StringComparer.Ordinal).ThenBy(r => r.Version)

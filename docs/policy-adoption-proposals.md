@@ -1,6 +1,6 @@
 # First-party policy and duty adoption proposals
 
-Revision 3, October 20, 2026. Clarify the release-set location of the unchanged register-coverage parameters.
+Revision 4, October 20, 2026. Clarify settled parallel results and prospective work-state consistency for adoption, and the release-set location of the unchanged register-coverage parameters.
 
 These are proposed definitions for the builder and POLICY-04. Adoption belongs to the operator's exact signed decision and authorized declarations after ESTATE-01 reconciliation. D18-4 is decision `01M54ZFDD1MG1GS49CQA56J6QW` at `sha256:086843a4140121cea86c686b496517c5f0058e82faf9bc7822fbefed3af0f3bc`; it selects the levels, builder ownership, 30-day exception limit and publication cohort. The adoption decision must also identify the accepted ESTATE-01 result and DESIGN-18 acceptance.
 
@@ -209,6 +209,8 @@ Each block is a complete proposed `estate-policy` body. The adoption decision ap
 ```
 
 ### review-wait
+
+The prepared implementation resolves results per assignment, so parallel submissions remain individually reviewable. This rule excludes every result of an accepted work order, including other assignments' results without an individual acceptance. Settled history therefore creates no review-wait debt. Unaccepted, unretired work still waits from each selected result's submission until the required exact-result review exists. This does not waive review obligations in the brief or create review evidence. Reevaluate this unchanged proposed body with that implementation before adoption.
 
 ```json
 {
@@ -886,6 +888,8 @@ Each block is a complete proposed `estate-policy` body. The adoption decision ap
 ```
 
 ### work-state-consistency
+
+Work-state consistency warns prospectively from this policy identity's first declaration, not from the beginning of estate history. A contradiction is in scope when the later of its explicit open status and exact acceptance or publication is recorded at or after that boundary. Earlier contradictions raise no finding; policy revisions and a changed activation time preserve the original boundary. The proposed version-1 body below needs no added parameter, historical status rewrite or new done status. Acceptance remains a separate derived fact. Reevaluate with the prepared implementation before obtaining exact adoption approval.
 
 ```json
 {

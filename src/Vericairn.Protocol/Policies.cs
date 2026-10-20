@@ -72,6 +72,12 @@ public sealed record PolicyRequirementDto(PolicyRecordReference Decision, string
 public sealed record PolicyKindDto(string Kind, int Version, string ImplementationDigest, IReadOnlyList<string> Selections,
     IReadOnlyList<string> SourceContracts, int MaximumRecords, int MaximumFindings);
 
+/// <summary>A prepared policy or duty body, without a record envelope. Basis may be omitted until approval.</summary>
+public sealed record PolicyHashRequest(JsonElement Body);
+
+/// <summary>The canonical definition hash with only top-level basis omitted, or a preparation problem. Grants no approval.</summary>
+public sealed record PolicyHashResponse(string? DefinitionHash, Problem? Problem = null);
+
 /// <summary>A scanned record field or repository-relative path.</summary>
 public sealed record WritingLocationDto(string Kind, string Identity, string Member);
 

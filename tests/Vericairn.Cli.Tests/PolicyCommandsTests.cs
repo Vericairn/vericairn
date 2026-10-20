@@ -7,12 +7,53 @@ using Vericairn.Protocol;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Tests;
 
 namespace Vericairn.Cli.Tests;
 
 [Collection("cli")]
 public sealed class PolicyCommandsTests
 {
+    [Fact]
+    public void WritingReadsSkipGeneratedCopiesAndRetainAuthoredAndRecordWarnings()
+    {
+        CliHarness.Ok("policies", "--help");
+        using var fixture = new GeneratedWritingFixture();
+        string root = fixture.Estate.Root;
+        int before = fixture.Estate.Load().Records.Count;
+        FindingsResponse check = JsonSerializer.Deserialize<FindingsResponse>(CliHarness.Ok("--estate", root, "estate", "check", "--json").Out, ProtocolJson.Options)!;
+        WritingExceptionsResponse writing = JsonSerializer.Deserialize<WritingExceptionsResponse>(CliHarness.Ok("--estate", root, "estate", "writing-exceptions", "list", "--json").Out, ProtocolJson.Options)!;
+        Assert.True(writing.Complete);
+        Assert.Equal(fixture.ExpectedLocations, check.Findings.Where(f => f.Code == "writing.spacing").Select(f => f.Location).Order(StringComparer.Ordinal));
+        Assert.Equal(fixture.ExpectedLocations.Count, writing.Warnings.Count);
+        Assert.Equal(fixture.ExpectedLocations, writing.Warnings.Select(w => w.Occurrence.Diagnostic.Location).Order(StringComparer.Ordinal));
+        Assert.Empty(writing.ExceptedOccurrences);
+        string expected = JsonSerializer.Serialize(writing, ProtocolJson.Options);
+        Assert.Equal(expected, JsonSerializer.Serialize(check.WritingExceptions, ProtocolJson.Options));
+        // status and progress print canonical JSON, so compare the section as the same response, not its raw text.
+        foreach (string view in new[] { "status", "progress" })
+        {
+            string section = CliHarness.Ok("--estate", root, view, "--json").Json.GetProperty("writingExceptions").GetRawText();
+            Assert.Equal(expected, JsonSerializer.Serialize(JsonSerializer.Deserialize<WritingExceptionsResponse>(section, ProtocolJson.Options), ProtocolJson.Options));
+        }
+        Assert.Equal(before, fixture.Estate.Load().Records.Count);
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void CheckShowsUnsettledParallelWorkAndProspectiveConsistency(int assignments)
+    {
+        CliHarness.Ok("policies", "--help");
+        PolicyWorkJourney.Run(api =>
+        {
+            CliHarness.Outcome response = CliHarness.RunWithApi(api, null, "--estate", api.Session.Root, "--json",
+                "policies", "check", "--as-of", "2026-11-01T00:00:00Z");
+            Assert.Equal(0, response.Code);
+            return JsonSerializer.Deserialize<PolicyResponse>(response.Out, ProtocolJson.Options)!;
+        }, assignments);
+    }
+
     [Theory]
     [InlineData(0, true)]
     [InlineData(1, true)]

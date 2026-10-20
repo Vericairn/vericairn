@@ -44,6 +44,9 @@ public sealed partial class VericairnClient
     public IReadOnlyList<PolicyKindDto> PolicyKinds() => Get<List<PolicyKindDto>>("/v1/estate-policies/kinds")!;
 
     /// <inheritdoc />
+    public PolicyHashResponse PolicyHash(PolicyHashRequest request) => Post<PolicyHashRequest, PolicyHashResponse>("/v1/estate-policies/hash", request)!;
+
+    /// <inheritdoc />
     public PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => Get<PolicyResponse>(PolicyEvaluationPath(asOf, release))!;
 
     /// <inheritdoc />

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.vericairn/vericairn",
+  "description": "Read and contribute to a Vericairn estate under the acting principal's authority.",
+  "repository": {
+    "url": "https://github.com/Vericairn/vericairn",
+    "source": "github"
+  },
+  "version": "@PACKAGE_VERSION@",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "identifier": "dotnet-vc",
+      "version": "@PACKAGE_VERSION@",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--verbosity",
+          "isRequired": true,
+          "value": "quiet"
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--estate",
+          "isRequired": true,
+          "value": "{estate_root}",
+          "variables": {
+            "estate_root": {
+              "description": "Root directory of the estate to serve.",
+              "isRequired": true,
+              "format": "string"
+            }
+          }
+        },
+        {
+          "type": "named",
+          "name": "--as",
+          "isRequired": true,
+          "value": "{acting_principal}",
+          "variables": {
+            "acting_principal": {
+              "description": "Principal id to act for in this estate.",
+              "isRequired": true,
+              "format": "string"
+            }
+          }
+        },
+        {
+          "type": "positional",
+          "isRequired": true,
+          "value": "mcp"
+        },
+        {
+          "type": "positional",
+          "isRequired": true,
+          "value": "serve"
+        }
+      ]
+    }
+  ]
+}

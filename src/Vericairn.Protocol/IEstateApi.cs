@@ -45,6 +45,9 @@ public partial interface IEstateApi
     /// <summary>Read PolicyKinds; returns server-derived evidence and creates no record.</summary>
     IReadOnlyList<PolicyKindDto> PolicyKinds() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
 
+    /// <summary>Hash a prepared policy or duty body with only basis omitted; reads no estate state, writes nothing and requires no write authority.</summary>
+    PolicyHashResponse PolicyHash(PolicyHashRequest request) => throw new NotSupportedException("Policy hashing is not supported by this API implementation.");
+
     /// <summary>Read PolicyEvaluate; returns server-derived evidence and creates no record.</summary>
     PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
 
@@ -177,6 +180,9 @@ public partial interface IEstateApi
 
     /// <summary>Reviews a living document by its declaration: the content, the covered paths' identity, the triggers it answers and the declared checks are the runtime's.</summary>
     WriteOutcome DocumentReview(string declaration, DocumentReviewRequest request);
+
+    /// <summary>Pins the exact bytes of an estate document as its next revision; unchanged, generated, stale and forked pins are refused.</summary>
+    DocumentPinResponse DocumentPin(DocumentPinRequest request);
 
     /// <summary>
     /// What waits on a principal, or on every principal when none is named: the asks still open or notified, at most three in one

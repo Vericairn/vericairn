@@ -368,6 +368,27 @@ dotnet add package Vericairn --version 0.8.0
 
 NuGet Trusted Publishing uploads exactly the package assets the operator publishes, verified against the release's own `SHA256SUMS`, without rebuilding them. It does not compare with the estate's accepted candidate or require its acceptance record; publishing the exact accepted draft is the operator's responsibility. Published prereleases also trigger upload. Retries use `--skip-duplicate` and cannot replace an existing package version or verify the bytes already held by nuget.org.
 
+### MCP discovery in 0.8.1
+
+The 0.8.1 tool package carries both `DotnetTool` and `McpServer` package types for
+[nuget.org's MCP server filter](https://www.nuget.org/packages?packagetype=McpServer&q=dotnet-vc).
+Its embedded `.mcp/server.json` describes `io.github.vericairn/vericairn` for the
+[official MCP Registry](https://registry.modelcontextprotocol.io/). NuGet indexing follows
+package publication; the registry listing requires the operator's separate
+[publication step](operator-actions.md#mcp-registry-publication). These are publication targets,
+not evidence that either listing is already live.
+
+After that version is published, a client with the .NET 10 SDK can start the server without
+installing a global tool:
+
+```sh
+dnx dotnet-vc@0.8.1 --verbosity quiet -- --estate "<estate-root>" --as "<principal-id>" mcp serve
+```
+
+Supply an existing estate root and the principal id to act for. Registry clients request both
+inputs; neither has a default. The server uses stdio and the same estate authority as `dotnet vc`.
+See [the MCP guide](mcp.md#discovery-and-dnx) for client configuration.
+
 ## Release check and upgrades (0.8.0)
 
 By default, `version`, `doctor` and `status`, and Workbench when opened, check for a newer published
