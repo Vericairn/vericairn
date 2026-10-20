@@ -3,6 +3,8 @@
 
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
@@ -12,6 +14,17 @@ namespace Vericairn.Adapters.Git;
 /// <summary>Scans a pinned commit range with redaction and a count-only report. Matched text never enters a record.</summary>
 public sealed partial class GitleaksScanner : ISecretScanner
 {
+    /// <summary>
+    /// gitleaks' default rules with every built-in allowlist removed, then Vericairn's own allowances, none of which exempts a
+    /// path or admits a sample credential. Each scan records this configuration's hash beside the scanner's version.
+    /// </summary>
+    internal static readonly byte[] Configuration = ReadConfiguration();
+
+    internal static readonly string ConfigurationHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(Configuration));
+
+    // The configuration's allowances target rules by name, which gitleaks reads from 8.25.0.
+    private static readonly Version Minimum = new(8, 25, 0);
+
     private readonly Func<ProcessStartInfo, ProcessResult> run;
 
     /// <summary>Each scanner invocation is bounded to five minutes.</summary>
@@ -27,8 +40,13 @@ public sealed partial class GitleaksScanner : ISecretScanner
             throw new ProviderRefusedException("The scan requires two exact commit ids.");
         ProcessResult version = Invoke(directory, "version");
         string number = version.StandardOutput.Trim();
-        if (version.Outcome != ProcessOutcome.Exited || version.ExitCode != 0 || !VersionPattern().IsMatch(number))
+        Match parsed = VersionPattern().Match(number);
+        if (version.Outcome != ProcessOutcome.Exited || version.ExitCode != 0 || !parsed.Success)
             return new("gitleaks", "unknown", plan.Range, "unavailable", null);
+        if (new Version(int.Parse(parsed.Groups["major"].Value, CultureInfo.InvariantCulture), int.Parse(parsed.Groups["minor"].Value, CultureInfo.InvariantCulture),
+                int.Parse(parsed.Groups["patch"].Value, CultureInfo.InvariantCulture)) < Minimum)
+            return new("gitleaks", number, plan.Range, "unavailable", null);
+        number += "; rules " + ConfigurationHash;
         int? commits = Count(directory, plan.Range);
         if (commits is null) return new("gitleaks", number, plan.Range, "incomplete", null);
         string temporary = Path.Combine(Path.GetTempPath(), "vericairn-scan-" + Guid.NewGuid().ToString("N"));
@@ -40,7 +58,7 @@ public sealed partial class GitleaksScanner : ISecretScanner
             File.WriteAllText(template, "{{ len . }}");
             string configuration = Path.Combine(temporary, "rules.toml");
             string ignored = Path.Combine(temporary, "ignore.txt");
-            File.WriteAllText(configuration, "[extend]\nuseDefault = true\n");
+            File.WriteAllBytes(configuration, Configuration);
             File.WriteAllText(ignored, string.Empty);
             // Gitleaks writes only the aggregate count to disk, even for a finding. No JSON findings report is created or read.
             ProcessResult result = Invoke(directory, "git", "--redact=100", "--no-banner", "--log-level=error", "--ignore-gitleaks-allow",
@@ -83,6 +101,16 @@ public sealed partial class GitleaksScanner : ISecretScanner
             && int.TryParse(result.StandardOutput.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int count) && count >= 0 ? count : null;
     }
 
-    [GeneratedRegex(@"^v?[0-9]+\.[0-9]+\.[0-9]+(?:[-+][a-zA-Z0-9.-]+)?$", RegexOptions.CultureInvariant)]
+    private static byte[] ReadConfiguration()
+    {
+        using Stream stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Vericairn.Adapters.Git.gitleaks.toml")
+            ?? throw new InvalidOperationException("The scan configuration is not embedded.");
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        return bytes.ToArray();
+    }
+
+    // Bounded so that the version with the configuration's hash fits the recorded scan's version field.
+    [GeneratedRegex(@"^v?(?<major>[0-9]{1,3})\.(?<minor>[0-9]{1,3})\.(?<patch>[0-9]{1,3})(?:-[a-zA-Z0-9.]{1,8})?$", RegexOptions.CultureInvariant)]
     private static partial Regex VersionPattern();
 }

@@ -67,9 +67,15 @@ public class ContinuousIntegrationTests
         Assert.Contains("\n  pull_request:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.Contains("\npermissions:\n  contents: read\n", workflow, StringComparison.Ordinal);
+        // ci.yml installs the same pinned gitleaks for the secret scan's own tests, and scans nothing with it.
         string ci = Read(Path.Combine(workflows, "ci.yml"));
-        Assert.DoesNotContain("gitleaks", ci, StringComparison.Ordinal);
+        Assert.DoesNotContain("gitleaks\" detect", ci, StringComparison.Ordinal);
+        Assert.DoesNotContain("gitleaks git", ci, StringComparison.Ordinal);
         Assert.DoesNotContain("\n  secret-scan:", ci, StringComparison.Ordinal);
+        string install = Block(ci, "- name: Install gitleaks for the scanner's tests", 6);
+        Assert.Contains($"GITLEAKS_VERSION: {GitleaksVersion}\n", install, StringComparison.Ordinal);
+        Assert.Contains($"GITLEAKS_SHA256: {GitleaksSha256}\n", install, StringComparison.Ordinal);
+        Assert.Contains("sha256sum --check --strict", install, StringComparison.Ordinal);
         Assert.Contains("\n  build-test:\n", ci, StringComparison.Ordinal);
 
         // One job on Linux, which nothing gates but a push that deletes a branch.

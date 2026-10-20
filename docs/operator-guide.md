@@ -1034,9 +1034,11 @@ The queue and one-step command are not MCP tools.
 body and identity, presence, authority and the separate uncommitted receipts.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
-The push scans the exact complete commit range using installed Gitleaks; missing
-history, scanner or a complete report refuses it. Merges require every declared
-check and every reported check to pass at the pinned head; missing, skipped,
+The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
+later and Vericairn's own rules, which keep none of gitleaks' built-in allowlists;
+missing history, scanner or a complete report refuses it. Merges require a recorded
+scanned push of the pinned head, and every declared check and every reported check
+to pass at that head; missing, skipped,
 pending or stale checks refuse. The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.

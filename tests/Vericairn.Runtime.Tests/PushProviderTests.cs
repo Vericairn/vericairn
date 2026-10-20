@@ -26,7 +26,7 @@ public sealed class PushProviderTests
         var scanner = new GitleaksScanner(info =>
         {
             if (info.FileName == "git") return Success("2");
-            if (info.ArgumentList[0] == "version") return Success("8.24.2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
             Assert.Contains("--redact=100", info.ArgumentList);
             Assert.Contains("--ignore-gitleaks-allow", info.ArgumentList);
             Assert.Contains("--log-opts=" + Plan.Range + " --full-history --no-renames -m --no-ext-diff --no-textconv --text", info.ArgumentList);
@@ -34,7 +34,7 @@ public sealed class PushProviderTests
             string template = info.ArgumentList.Single(a => a.StartsWith("--report-template=", StringComparison.Ordinal)).Split('=', 2)[1];
             Assert.Equal("{{ len . }}", File.ReadAllText(template));
             string configuration = info.ArgumentList.Single(a => a.StartsWith("--config=", StringComparison.Ordinal)).Split('=', 2)[1];
-            Assert.Equal("[extend]\nuseDefault = true\n", File.ReadAllText(configuration));
+            Assert.Equal(GitleaksScanner.Configuration, File.ReadAllBytes(configuration));
             string ignored = info.ArgumentList.Single(a => a.StartsWith("--gitleaks-ignore-path=", StringComparison.Ordinal)).Split('=', 2)[1];
             Assert.Empty(File.ReadAllText(ignored));
             string report = info.ArgumentList.Single(a => a.StartsWith("--report-path=", StringComparison.Ordinal)).Split('=', 2)[1];
@@ -44,7 +44,7 @@ public sealed class PushProviderTests
         SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
         Assert.Equal(verdict, scan.Verdict);
         Assert.Equal(Plan.Range, scan.Range);
-        Assert.Equal("8.24.2", scan.Version);
+        Assert.Equal("8.30.1; rules " + GitleaksScanner.ConfigurationHash, scan.Version);
         Assert.DoesNotContain("untrusted", JsonSerializer.Serialize(scan), StringComparison.Ordinal);
         Assert.Equal(verdict == "passed", scan.Passed(Plan));
     }
@@ -57,11 +57,29 @@ public sealed class PushProviderTests
     [InlineData("Failed")]
     public void MissingTimedOutAndIncompleteScannersNeverPass(string outcome)
     {
-        var scanner = new GitleaksScanner(info => info.FileName == "git" ? Success("2") : info.ArgumentList[0] == "version" ? Success("8.24.2")
+        var scanner = new GitleaksScanner(info => info.FileName == "git" ? Success("2") : info.ArgumentList[0] == "version" ? Success("8.30.1")
             : new(Enum.Parse<ProcessOutcome>(outcome), outcome != "NotStarted", null, string.Empty, string.Empty));
         SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
         Assert.False(scan.Passed(Plan));
         Assert.Null(scan.FindingCount);
+    }
+
+    [Theory]
+    [InlineData("8.24.2")]
+    [InlineData("v7.6.1")]
+    public void AScannerOlderThanItsConfigurationNeedsIsUnavailable(string version)
+    {
+        int scans = 0;
+        var scanner = new GitleaksScanner(info =>
+        {
+            if (info.FileName == "git") return Success("2");
+            if (info.ArgumentList[0] == "version") return Success(version);
+            scans++;
+            return Success();
+        });
+        SecretScan scan = scanner.Scan(Path.GetTempPath(), Plan);
+        Assert.Equal("unavailable", scan.Verdict);
+        Assert.Equal(0, scans);
     }
 
     [Fact]
@@ -80,7 +98,7 @@ public sealed class PushProviderTests
         var scanner = new GitleaksScanner(info =>
         {
             if (info.FileName == "git") return new(ProcessOutcome.Exited, true, 128, string.Empty, "unreadable range");
-            if (info.ArgumentList[0] == "version") return Success("8.24.2");
+            if (info.ArgumentList[0] == "version") return Success("8.30.1");
             scans++;
             return Success();
         });

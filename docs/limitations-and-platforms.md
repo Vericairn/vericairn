@@ -567,9 +567,12 @@ API v1 wire contracts.
 
 ## Checked changes and operator actions
 
-Checked pushes need an installed Gitleaks scanner and complete local history of the
-exact range. Aggregate scan success is no claim about every possible secret or an
-unobserved future commit. Merges require exact declared check names and every reported
+Checked pushes need an installed Gitleaks scanner, 8.25.0 or later, and complete local
+history of the exact range. Aggregate scan success is no claim about every possible secret or an
+unobserved future commit. From 0.8.1 the scan applies gitleaks' rules without their built-in
+allowlists, so it can report a finding that gitleaks' defaults pass. A finding refuses the push,
+and with it the merge; there is no per-estate allowance, so a change refused for a value that is
+not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
 check successful at the expected head; forks and required merge queues are unsupported.
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
