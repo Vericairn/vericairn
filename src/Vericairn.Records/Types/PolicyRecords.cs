@@ -31,6 +31,10 @@ internal static class PolicyRecords
 
     internal static string Identity(EstateModel model, RecordEnvelope record) => model.Chain(record)[0];
 
+    internal static bool ReleaseMatchesProduct(EstateModel model, RecordEnvelope release, string? product) =>
+        product is not null && release.Subject is { Type: "product" } subject &&
+        LivingDocuments.ProductIdentity(model, subject.Id) == LivingDocuments.ProductIdentity(model, product);
+
     internal static RecordEnvelope? Reference(ValidationContext context, BodyReader? reader, bool exact = true, params string[] types)
     {
         if (reader is null) return null;

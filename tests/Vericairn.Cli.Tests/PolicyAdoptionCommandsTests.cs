@@ -11,11 +11,13 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class PolicyAdoptionCommandsTests
 {
-    [Fact]
-    public void CompleteAdoptionUsesTheBuiltCommandsWithoutDiscoveryOrProviders()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompleteAdoptionUsesTheBuiltCommandsWithoutDiscoveryOrProviders(bool reviseProduct)
     {
         CliHarness.Ok("policies", "--help"); // Creates this suite's isolated home before fixture signers.
-        PolicyAdoptionJourney.Run(api => new Commands(api));
+        PolicyAdoptionJourney.Run(api => new Commands(api), reviseProduct);
     }
 
     private sealed class Commands(EstateService api) : PolicyAdoptionJourney.Surface(api)

@@ -108,7 +108,7 @@ internal static class PolicyWork
         if (Status(model, carrier, at) is { } status && EstateModel.BodyString(status, "status") == "retired") return ("unmet", "The release carrier is retired.", status);
         JsonElement plan = Get(carrier.Body, "releasePlan");
         if (Text(plan, "product") != Text(placement, "product") || Text(plan, "version") != Text(placement, "version")) return ("unmet", "The carrier's current plan contradicts this placement.", carrier);
-        RecordEnvelope? ended = model.OfType("release").FirstOrDefault(r => r.AtTime <= at && r.Subject?.Id == Text(plan, "product") &&
+        RecordEnvelope? ended = model.OfType("release").FirstOrDefault(r => r.AtTime <= at && ReleaseMatchesProduct(model, r, Text(plan, "product")) &&
             EstateModel.BodyString(r, "version") == Text(plan, "version") && EstateModel.BodyString(r, "status") is "published" or "withdrawn");
         return ended is null ? ("satisfied", "The exact release placement is valid.", carrier) : ("unmet", "The release target has been published or withdrawn.", ended);
     }
