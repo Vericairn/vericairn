@@ -57,6 +57,84 @@ The queue itself signs nothing and holds no key. Each authoring command also off
 `operator record` with the same type, author, subject, superseded record and JSON input. Neither
 operator command is offered through MCP.
 
+## Package publication, unlisting and deprecation
+
+The development build after 0.8.0 adds `packages observe`, `packages unlist` and `packages deprecate`.
+The NuGet provider reads nuget.org's public V3 API without an account or API key. Unlisting and
+deprecation remain the package account holder's acts in the nuget.org website. Vericairn records
+their intent first and their observed outcome afterwards; it never takes a NuGet key or performs
+those registry changes.
+
+Declare the package inventory in the current product record at record format 3. For this product,
+the `packages` member is:
+
+```json
+{
+  "provider": "nuget-org",
+  "ids": [
+    "dotnet-vc", "Vericairn", "Vericairn.Daemon", "Vericairn.Mcp",
+    "Vericairn.Protocol", "Vericairn.Records", "Vericairn.Runtime", "Vericairn.Sdk"
+  ]
+}
+```
+
+The declaration accepts one to sixteen distinct package ids. Use an already recorded release
+version of the product; a candidate can be observed while publication is pending. After every
+package publication, including the Trusted Publishing workflow, record the registry state:
+
+```sh
+vericairn packages observe --product <product-id> --version <version> --by <principal-id>
+```
+
+This writes one observation per declared package version, pinning the release and product
+declaration. Publication comes from agreement between the V3 registration and package-content
+version indexes. Listing comes from registration's explicit `listed` flag, and deprecation from
+its metadata. Every response retains its exact registry URL, body SHA-256, HTTP status, byte
+count and content encoding. Hashes cover bytes before gzip decoding. An absent version is
+recorded as `not-found`, with listing and deprecation unknown.
+Search results, workflow completion and upload receipts are not publication observations.
+
+Before unlisting one version, record the intent:
+
+```sh
+vericairn packages unlist --product <product-id> --version <version> --package <package-id> --by <operator-id>
+```
+
+The command prints the version's nuget.org management URL and the account-holder step to remove
+its listing, followed by an observation command containing the original intent id. Sign in to
+nuget.org as that package's owner and perform that step for the named version. Then run the printed
+command:
+
+```sh
+vericairn packages observe --operation <original-intent-id> --by <operator-id>
+```
+
+For deprecation, record the exact reasons and optional message or replacement before acting:
+
+```sh
+vericairn packages deprecate --product <product-id> --version <version> --package <package-id> --by <operator-id> --reason Legacy --message "Use the replacement package." --alternate-package Example.Replacement --alternate-range "[2.0.0,)"
+```
+
+Follow the printed deprecation URL, select only the named version, enter the recorded metadata,
+save, then observe its original operation. Reasons are NuGet's `Legacy`, `CriticalBugs` and `Other`.
+Omitted message or alternate options mean that no corresponding value is intended; confirmation
+checks the reasons, message, alternate package and range, not merely that some deprecation exists.
+The estate operator records these intents and outcomes; package ownership is established by nuget.org.
+
+Rerunning an identical intent command returns the original intent and latest operation revision.
+It does not create another intent or query the registry. Changing the intended metadata under that
+identity is refused. `observe --operation` keeps the original package and release pins even if the
+product declaration changes later. A complete read matching the intent records `observed-success`.
+A missing, still-listed or differently deprecated version leaves the outcome `uncertain`, with its
+actual state recorded. Allow for registry propagation, then observe again under the same identity.
+A timeout, malformed response, size limit or inconsistent indexes establish no new state and leave
+the existing intent untouched. No registry act or dispatch time is inferred from a command exit.
+
+These observations do not accept a release, verify package archive bytes or replace the release
+publication record. The workflow does not call the estate automatically: the post-publication
+observation is an operator step. See the [CLI reference](cli.md#vericairn-packages) for every option,
+JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-development-build) for the read bounds.
+
 ## Record and merge in one command
 
 Fill the required body fields, inspect the pinned evidence, and run the item's **Record and merge**

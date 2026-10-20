@@ -54,6 +54,46 @@ Actions policy. The NuGet pull-request job builds packages and symbols and runs 
 it has no login, identity-token permission or upload. Checksum verification detects missing, duplicate,
 altered or mismatched package files, not a malicious producer that changes both assets and checksums.
 
+## Package registry observations (development build)
+
+The development build after 0.8.0 observes nuget.org publication, listing and deprecation through
+`packages observe`. Each observation pins a product declaration and recorded release version,
+retaining the exact public API URLs and SHA-256 digests of response bodies. A missing version is
+`not-found`, with listing and deprecation unknown; it is never treated as unlisted. Registration and
+package-content indexes must agree before a state is recorded. Index lag, incomplete metadata and
+provider failures require another observation and establish no new registry state.
+
+Unlisting and deprecation remain the account holder's acts on nuget.org. The commands record intent
+before that act, print its exact step and observe the outcome separately against the original intent.
+An identical rerun retains one intent. No command accepts, reads or stores a NuGet API key, performs
+a registry write, or claims the identity or time of the account holder's actual act. A matching
+deprecation includes its recorded reasons, message and alternate package/range. Later observations
+can report relisting or changed metadata without erasing a historical observed success. A different
+deprecation intent under an existing package/action/version identity is refused; revising or canceling
+such intents is not provided by this command family.
+
+The host registers the `nuget-org` provider behind `IPackageRegistryProvider`; the runtime chooses
+only the declared provider. Its anonymous transport allows HTTPS requests only to `api.nuget.org`,
+with no cookies, credentials, proxy, redirects or trace headers. Each package observation has a
+twenty-second deadline, at most thirty-two requests, at most one MiB per response both before and
+after gzip decompression, and eight MiB total including decompressed bytes. Response hashes cover
+the received body bytes before decoding, with content encoding retained beside them.
+The whole command's provider reads have a two-minute deadline. Oversized responses, unsupported
+URLs, malformed metadata and incomplete page inventories refuse rather than truncate or infer state.
+The provider supports three-component release versions with optional prerelease identifiers and
+the semver2 registration resource; it does not download package archives or prove their equality
+with an accepted release. Very large registry inventories may exceed these bounds.
+
+No background watcher or release-workflow callback is installed. After each publication, the
+operator must run the observation command; changes made outside this procedure do not acquire
+records automatically. These commands require record format 3 and a build that understands the
+package declaration and observation fields. Older builds sharing format 3 may not read those fields.
+Observations and outcome revisions are validated together before storage; storage is journaled and
+sequential, so an interrupted write can leave an incomplete batch requiring reconciliation. Intent
+identity is serialized within one runtime writer, not across independent writers or unsynchronized
+estate clones. Tests replay small retained API responses and transport failures, and make no live
+nuget.org availability or account-holder qualification claim.
+
 ## Goals, routing and asks
 
 0.8.0 retains goal proposal and lifecycle, record predicates, independent evaluations, acceptance, roster routing, asks and one-step dispatch, and retains record-derived hand-over and resume. It adds record format 3; 0.5.2 was the first published format-2 release. The upgrade preserves original bytes and supplies a refusal boundary for older readers. The progress, communication, execution and harness-qualification additions shipped in 0.7.1 remain; the scope-read and attempt-missing signal values need readers that understand 0.7.2. A shared format number does not establish that an older writer understands them.
