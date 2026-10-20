@@ -140,6 +140,7 @@ public class WorkspaceCleanupTests
         }
 
         // Junctions require no symbolic-link privilege, so Windows CI exercises the no-follow cleanup boundary too.
+        TestPrerequisites.RequireExecutable("cmd.exe", "/d", "/c", "ver");
         var start = new ProcessStartInfo("cmd.exe")
         {
             UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
