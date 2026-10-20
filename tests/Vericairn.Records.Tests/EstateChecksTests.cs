@@ -88,6 +88,71 @@ public class EstateChecksTests
     }
 
     [Fact]
+    public void ObservedTopLevelExclusionsSkipOnlyUnexpectedEntries()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile(".DS_Store", "residue");
+        estate.WriteFile("cache/output.txt", "ignored\r\n");
+        var ignored = new HashSet<string>(StringComparer.Ordinal) { ".DS_Store", "cache" };
+        Assert.Empty(EstateChecks.Run(estate.Load(), ignored));
+
+        estate.WriteFile("unexpected.txt", "still checked\n");
+        Finding unexpected = Assert.Single(EstateChecks.Run(estate.Load(), ignored));
+        Assert.Equal("layout.unexpected", unexpected.Code);
+        Assert.Equal("unexpected.txt", unexpected.Location);
+    }
+
+    [Fact]
+    public void AdapterExclusionsCannotHideEstateContent()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile(".gitignore", "*\n");
+        string[] text = ["records/invalid.json", "design/plan.md", "docs/guide.md", "estate/extra.json", "README.md", ".gitignore"];
+        foreach (string path in text)
+        {
+            estate.WriteFile(path, string.Empty);
+            File.WriteAllBytes(Path.Combine(estate.Root, path), [0xff]);
+        }
+        estate.WriteFile("objects/" + new string('a', 64), "wrong content");
+        var ignored = EstateLayout.AllowedTopLevel.ToHashSet(StringComparer.Ordinal);
+        EstateModel model = estate.Load();
+        FindingList checks = EstateChecks.Run(model, ignored);
+        Assert.True(model.Findings.HasErrors);
+        foreach (string path in text)
+            Assert.Contains(checks, f => f.Code == "layout.encoding" && f.Location == path);
+        Assert.Contains(checks, f => f.Code == "objects.hash");
+    }
+
+    [Theory]
+    [InlineData("records", "Records")]
+    [InlineData("design", "Design")]
+    [InlineData("objects", "Objects")]
+    public void DifferentlyCasedEstatePathsCannotBeExcluded(string directory, string alias)
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile(directory + "/example.txt", "checked\r\n");
+        Directory.Move(Path.Combine(estate.Root, directory), Path.Combine(estate.Root, "temporary"));
+        Directory.Move(Path.Combine(estate.Root, "temporary"), Path.Combine(estate.Root, alias));
+        var ignored = new HashSet<string>(StringComparer.Ordinal) { alias };
+        FindingList checks = EstateChecks.Run(estate.Load(), ignored);
+        Assert.Contains(checks, f => f.Code == "layout.unexpected" && f.Location == alias);
+        Assert.Contains(checks, f => f.Code == "layout.line-endings" && f.Location == alias + "/example.txt");
+    }
+
+    [Fact]
+    public void WithoutAnAdapterObservationIgnoreFilesDoNotChangeTheCheck()
+    {
+        using var estate = new TestEstate();
+        estate.WriteFile(".gitignore", ".DS_Store\nunexpected.txt\n");
+        estate.WriteFile(".DS_Store", "residue");
+        estate.WriteFile("unexpected.txt", "still checked\n");
+        FindingList checks = EstateChecks.Run(estate.Load());
+        Assert.Contains(checks, f => f.Code == "layout.unexpected" && f.Location == ".DS_Store");
+        Assert.Contains(checks, f => f.Code == "layout.residue" && f.Location == ".DS_Store");
+        Assert.Contains(checks, f => f.Code == "layout.unexpected" && f.Location == "unexpected.txt");
+    }
+
+    [Fact]
     public void AbsolutePathsSecretsAndStrayFilesAreReported()
     {
         using var estate = new TestEstate();

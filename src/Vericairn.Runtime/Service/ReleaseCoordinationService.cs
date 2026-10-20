@@ -323,7 +323,7 @@ internal sealed class ReleaseCoordinationService(
             if (fresh.Objections.Count > 0) return GateRefusal(identity, "not-started", fresh.Assessment, fresh.Objections);
             admitted = fresh.Assessment;
             Retain(first.Assessment, first.Compared, claimBody, excluded, basisEvidence);
-            if (first.Assessment.Basis.Digest != admitted.Basis.Digest) Retain(admitted, fresh.Compared, claimBody, excluded, basisEvidence);
+            if (!first.Assessment.HasSameInputsAndFindings(admitted)) Retain(admitted, fresh.Compared, claimBody, excluded, basisEvidence);
             if (fresh.Compared.Count > 0) claimBody["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Living documents of the product at their repository commits: " + string.Join("; ", fresh.Compared) + "." });
             WriteOutcome claim = recordAccess.WriteLocked(new("operation", request.By, Element(claimBody), new("product", request.Product, null), current?.Id, now()), session.Load());
             if (!claim.Ok) return ReleaseProblem(identity, status ?? "not-started", claim.Problem!) with { Policies = admitted.View, BasisEvidence = basisEvidence };
@@ -352,7 +352,7 @@ internal sealed class ReleaseCoordinationService(
                     fresh.Objections.Add(new("error", "release.signature", identity, signerRefusal ?? "The acting principal no longer has an admitted held signing device; reconcile the intent."));
                 if (probeRecord is not null) fresh.Objections.AddRange(recordAccess.LoadWith([probeRecord]).Findings.Where(f => f.Severity == Severity.Error).Select(f => new FindingDto("error", f.Code, f.Location, f.Message)));
                 JsonObject checkedBody = JsonNode.Parse(previousBody.GetRawText())!.AsObject();
-                if (fresh.Assessment.Basis.Digest != admitted.Basis.Digest) Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
+                if (!admitted.HasSameInputsAndFindings(fresh.Assessment)) Retain(fresh.Assessment, fresh.Compared, checkedBody, excluded, basisEvidence);
                 admitted = fresh.Assessment;
                 if (fresh.Objections.Count > 0)
                 {

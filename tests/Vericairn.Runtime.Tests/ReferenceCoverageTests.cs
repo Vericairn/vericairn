@@ -35,6 +35,32 @@ public class ReferenceCoverageTests
         """;
     private static string Register => Terms + "\n" + Rows + "\n";
 
+    [Theory]
+    [MemberData(nameof(ReleaseProductSubjects), MemberType = typeof(FoundationPolicyTests))]
+    public void ReferenceCoverageMatchesAnyProductRevision(string releaseProduct, bool matches)
+    {
+        var pin = new EstateManifest { Estate = "estate", RecordFormat = 3, Profile = "repository-synced", Mode = "release", Repository = "Example/product", Version = "0.8.0" };
+        RecordEnvelope release = R("release", "publication", new { status = "published", version = "0.8.0", repository = "Example/product", commit = ReferenceInventoryTests.Commit },
+            subject: new("product", releaseProduct, null));
+        PolicyEvaluation result = Evaluate(Register, pin: pin, records: [.. ProductRevisions(), release]);
+        if (!matches)
+        {
+            AssertUnavailable(result);
+            return;
+        }
+
+        Assert.True(result.Complete);
+        PolicyFinding finding = Assert.Single(result.Findings);
+        Assert.Equal("satisfied", finding.Verdict);
+        Assert.Equal(release.Reference, finding.Anchor);
+        Assert.Contains(ReferenceInventoryTests.Commit, finding.Actual, StringComparison.Ordinal);
+        RecordEnvelope unrelated = R("release", "unrelated", new { status = "published", version = "0.8.0", repository = "Example/product", commit = new string('b', 40) },
+            subject: new("product", "other-v3", null));
+        PolicyFinding withOther = Assert.Single(Evaluate(Register, pin: pin, records: [.. ProductRevisions(), release, unrelated]).Findings);
+        Assert.Equal("satisfied", withOther.Verdict);
+        Assert.Equal(release.Reference, withOther.Anchor);
+    }
+
     [Fact]
     public void EveryExactInventoryItemMapsToOneCurrentConceptAndWarnNeverHolds()
     {

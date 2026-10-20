@@ -4,7 +4,9 @@ Vericairn is a local-first creation and operations platform. It helps you, alone
 carry work from an intention to a reviewed, delivered and maintained result, with its decisions, sources
 and history kept as records in your own git repository. People and agents do the work, and nothing is
 released until you accept it. Software is its first domain: today Vericairn helps you build and ship
-software with coding agents, and workflows for other kinds of work are planned.
+software with coding agents. Its catalog plans more than 3,000 entries across creative and technical work
+and 27 industries, from books, courses and games to construction, medicine and finance; none of them ships
+yet.
 
 Its Community edition keeps work, decisions,
 evidence and history as append-only, content-addressed, signed records. These packages contain Community

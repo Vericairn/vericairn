@@ -78,8 +78,13 @@ The command selects the unique matching product; `--product <product-id>` resolv
 It refuses a different repository, an unavailable provider or adapter, incomplete history, a detached
 head, an in-progress repository operation, and other working-tree or index changes.
 
-After validating your signed record, it creates `operator/<record-id>` from the current head and
-commits that record alone. Local git hooks are disabled for branch creation and commit, and git
+After validating your signed record, it stores that record with every member required by the
+estate's declared generated registers, creates `operator/<record-id>` from the pinned head,
+and commits them together. Storing the signed bytes before branch creation lets a branch failure
+resume without another signature. It uses the same journaled writer and generators as `records new`;
+a decision or release includes its declared register member before the pull request runs the estate check. The commit check
+requires exactly those paths and their expected bytes, refusing missing, changed or extra files.
+Local git hooks are disabled for branch creation and commit, and git
 commit signing is disabled; the record retains its own device signature. The runtime invokes MERGE-01's recorded
 push (including its scan), opening, observations and merge. Each check must pass at the exact
 committed head. The merge rechecks the inventory and uses the provider's atomic head condition.
@@ -90,11 +95,13 @@ once. Missing or pending checks may become ready during that interval. Failed, s
 incomplete or stale-head observations stop the command. A successful merge with pending or failed
 target checks remains an incomplete command; a failed target run records MERGE-01's operator ask.
 
-Every stop retains the branch, signed record and any pull request already opened. The output gives
-the last operation and a next step. Supply exactly the same JSON body and authoring arguments to
+On a stop, any stored record and members, created branch and opened pull request are retained.
+The output gives the last operation and a next step. Supply exactly the same JSON body and authoring arguments to
 resume, even after restarting the runtime. A local checkpoint pins the original record identity,
-hash, branch and base; the runtime verifies the record and commit and continues from the recorded
-operations. It does not sign or commit a second acceptance. The checkpoint contains no input body,
+hash, branch and base; the runtime verifies the record, generated members and commit and continues
+from the recorded operations. It reuses the stored record and member bytes without signing or committing again.
+If member publication was interrupted, reopening the estate recovers the prepared outputs through
+the original batch journal; it does not create another record. The checkpoint contains no input body,
 key or credential and belongs to this clone's runtime storage; resume from that clone.
 
 A known failure needs `--reconciliation <explanation>` after its cause has been resolved. An
@@ -103,8 +110,9 @@ alone never permits a retry. If the host still cannot establish the outcome, fol
 operator reconciliation procedure in [Checked repository changes](changes.md). Another action
 cannot displace an unfinished action's checkpoint. Keep the original body until the action completes.
 
-The acceptance commit contains only the acceptance. Operation revisions, observations and any
-target-failure ask stay in the estate as separate, uncommitted records. A resumed action tolerates
+The action's commit contains only its signed record and required generated register members.
+Operation revisions, observations and any target-failure ask stay in the estate as separate,
+uncommitted records. A resumed action tolerates
 only its own untracked receipts; it never stages them or unrelated work. Preserve and commit those
 receipts separately before starting a new action. No branch is automatically deleted or reset.
 

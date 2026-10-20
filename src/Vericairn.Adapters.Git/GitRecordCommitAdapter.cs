@@ -3,13 +3,14 @@
 
 using System.Diagnostics;
 using System.Text;
+using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Types;
 using Vericairn.Runtime.Providers;
 
 namespace Vericairn.Adapters.Git;
 
-/// <summary>Creates a local branch and commits one verified record. No remote, credential, hook or signing command is invoked.</summary>
+/// <summary>Creates a local branch and commits one verified record with its generated members. No remote, credential, hook or signing command is invoked.</summary>
 public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
 {
     private readonly Func<ProcessStartInfo, ProcessResult> run;
@@ -34,43 +35,47 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
     }
 
     /// <inheritdoc />
-    public void Branch(string directory, RecordCommitBasis basis, string branch)
+    public void Branch(string directory, RecordCommitBasis basis, string branch, IReadOnlyDictionary<string, string> files)
     {
         ArgumentNullException.ThrowIfNull(basis);
+        ValidateFiles(files);
         ValidBranch(directory, branch);
         string current = Read(directory, "symbolic-ref", "--short", "HEAD").Trim();
         if (current == branch) return; // Commit verifies the base, record bytes and every changed path on recovery.
-        Check(directory, basis.Branch, basis.Head, new HashSet<string>(StringComparer.Ordinal));
+        RequireBranch(directory, basis.Branch, basis.Head);
+        RequireChanges(directory, new HashSet<string>(StringComparer.Ordinal), files.Keys.ToHashSet(StringComparer.Ordinal));
         WithoutHooks(directory, "checkout", "-b", branch, basis.Head);
     }
 
     /// <inheritdoc />
-    public string Commit(string directory, string branch, string basis, string path, string byteHash, IReadOnlySet<string> receipts)
+    public string Commit(string directory, string branch, string basis, IReadOnlyDictionary<string, string> files, IReadOnlySet<string> receipts)
     {
         ArgumentNullException.ThrowIfNull(receipts);
-        if (!path.StartsWith("records/", StringComparison.Ordinal) || !path.EndsWith(".json", StringComparison.Ordinal)
-            || path.Split('/').Any(p => p is "" or "." or "..") || path.Contains('\\', StringComparison.Ordinal))
-            throw new ProviderRefusedException("Only a canonical record path can be committed.");
+        string record = ValidateFiles(files);
         string head = Head(directory);
         RequireBranch(directory, branch, head);
-        RequireChanges(directory, receipts, head == basis ? path : null);
+        RequireChanges(directory, receipts, head == basis ? files.Keys.ToHashSet(StringComparer.Ordinal) : null);
         if (head != basis)
         {
-            Verify(directory, head, basis, path, byteHash);
+            Verify(directory, head, basis, files);
             return head;
         }
 
-        string file = Path.Combine(directory, path.Replace('/', Path.DirectorySeparatorChar));
-        for (FileSystemInfo? entry = new FileInfo(file); entry is not null && entry.FullName != Path.GetFullPath(directory); entry = new DirectoryInfo(Path.GetDirectoryName(entry.FullName)!))
-            if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
-                throw new ProviderRefusedException("The record path must not traverse a symbolic link.");
-        if (ContentHash.Sha256(File.ReadAllBytes(file)) != byteHash)
-            throw new ProviderRefusedException("The signed record's bytes changed before the commit.");
-        // --only names precisely this record. Disable hooks and git signing: the record already carries its device signature.
-        Read(directory, "add", "--intent-to-add", "--", path);
-        WithoutHooks(directory, "commit", "--only", "--no-gpg-sign", "-m", "Record operator action " + Path.GetFileNameWithoutExtension(path), "--", path);
+        foreach ((string path, string byteHash) in files)
+        {
+            string file = Path.Combine(directory, path.Replace('/', Path.DirectorySeparatorChar));
+            for (FileSystemInfo? entry = new FileInfo(file); entry is not null && entry.FullName != Path.GetFullPath(directory); entry = new DirectoryInfo(Path.GetDirectoryName(entry.FullName)!))
+                if ((entry.Attributes & FileAttributes.ReparsePoint) != 0)
+                    throw new ProviderRefusedException("The record and member paths must not traverse a symbolic link.");
+            if (ContentHash.Sha256(File.ReadAllBytes(file)) != byteHash)
+                throw new ProviderRefusedException("The signed record or generated member bytes changed before the commit.");
+        }
+        string[] paths = files.Keys.Order(StringComparer.Ordinal).ToArray();
+        // --only names precisely the prepared record and members. The record already carries its device signature.
+        Read(directory, ["add", "--intent-to-add", "--", .. paths]);
+        WithoutHooks(directory, ["commit", "--only", "--no-gpg-sign", "-m", "Record operator action " + Path.GetFileNameWithoutExtension(record), "--", .. paths]);
         head = Head(directory);
-        Verify(directory, head, basis, path, byteHash);
+        Verify(directory, head, basis, files);
         Check(directory, branch, head, receipts);
         return head;
     }
@@ -98,7 +103,7 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
         }
     }
 
-    private void RequireChanges(string directory, IReadOnlySet<string> receipts, string? record)
+    private void RequireChanges(string directory, IReadOnlySet<string> receipts, HashSet<string>? files)
     {
         string status = Read(directory, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none");
         foreach (string entry in status.Split('\0', StringSplitOptions.RemoveEmptyEntries))
@@ -106,20 +111,33 @@ public sealed class GitRecordCommitAdapter : IRecordCommitAdapter
             if (entry.Length < 4) throw new ProviderRefusedException("The working tree could not be inspected completely.");
             string path = entry[3..];
             if (entry[..2] == "??" && receipts.Contains(path)) continue;
-            if (path == record && entry[..2] is "??" or " A" or "A " or "AM") continue;
+            if (files?.Contains(path) == true && entry[..2] is "??" or " A" or "A " or "AM") continue;
             throw new ProviderRefusedException("The estate working tree holds other changes; settle them separately before resuming this action.");
         }
     }
 
     /// <inheritdoc />
-    public void Verify(string directory, string head, string basis, string path, string byteHash)
+    public void Verify(string directory, string head, string basis, IReadOnlyDictionary<string, string> files)
     {
+        ValidateFiles(files);
         if (!Patterns.Commit.IsMatch(head) || !Patterns.Commit.IsMatch(basis)
             || Read(directory, "rev-list", "--parents", "-n", "1", head).Trim() != head + " " + basis
-            || Read(directory, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", basis, head) != path + "\0"
-            || Read(directory, "ls-tree", head, "--", path).Split(' ')[0] != "100644"
-            || ContentHash.Sha256(Encoding.UTF8.GetBytes(Read(directory, "show", head + ":" + path))) != byteHash)
-            throw new ProviderRefusedException("The branch does not contain exactly the original signed record on its pinned base; inspect it before resuming.");
+            || !Read(directory, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", basis, head).Split('\0', StringSplitOptions.RemoveEmptyEntries)
+                .Order(StringComparer.Ordinal).SequenceEqual(files.Keys.Order(StringComparer.Ordinal), StringComparer.Ordinal)
+            || files.Any(file => Read(directory, "ls-tree", head, "--", file.Key).Split(' ')[0] != "100644"
+                || ContentHash.Sha256(Encoding.UTF8.GetBytes(Read(directory, "show", head + ":" + file.Key))) != file.Value))
+            throw new ProviderRefusedException("The branch does not contain exactly the original signed record and generated members on its pinned base; inspect it before resuming.");
+    }
+
+    private static string ValidateFiles(IReadOnlyDictionary<string, string> files)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        string[] records = files.Keys.Where(path => path.StartsWith("records/", StringComparison.Ordinal) && path.EndsWith(".json", StringComparison.Ordinal)).ToArray();
+        if (records.Length != 1 || files.Keys.Distinct(StringComparer.OrdinalIgnoreCase).Count() != files.Count
+            || files.Any(file => !DocumentPatterns.IsSafePath(file.Key) || !ContentHash.IsValid(file.Value)
+                || file.Key != records[0] && !Patterns.DocumentPath.IsMatch(file.Key)))
+            throw new ProviderRefusedException("The commit requires one canonical record and its exact generated document paths and byte hashes.");
+        return records[0];
     }
 
     private string Head(string directory)

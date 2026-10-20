@@ -1,6 +1,6 @@
 # Adopting and operating estate policies
 
-Revision 2, October 20, 2026. Use the read-only definition hash command when preparing exact approval.
+Revision 3, October 20, 2026. Use the read-only definition hash command when preparing exact approval, and explain why generated copies need no writing entry.
 
 Use this guide with the command and transport tables in [Estate policies](policies.md), the strict bodies in [Record format 3](record-format-v3.md), and the [first-party proposals](policy-adoption-proposals.md). The proposals are preparations for exact operator approval. They do not activate policies, authorize work or certify the estate's current state. First-party adoption follows the estate's upgrade to 0.8.0 and record format 3.
 
@@ -59,6 +59,8 @@ The first-party duration limit is at most 30 days; delegated limits may be short
 Read the finding again: its underlying verdict remains unmet, with the exception and deferred enforcement visible. An exception clears no built-in error, document gate, acceptance requirement or reserved-action boundary.
 
 ## Add and remove writing entries
+
+Generated copies need no writing entry. The spacing scan skips whole files owned by a current, unretired `kind: generated` declaration, including its `pathPattern` members, and declared generated regions inside authored documents. The generator checks continue to hold that text to its sources. Authored files, the authored lines around each region and record prose fields are still scanned; other declaration kinds do not exempt whole files. An entry used only by generated copies therefore has no matches and warns as unused after a complete scan.
 
 Prepare a complete `writing-exception` body with an exact case-sensitive whole `token`, `code: writing.spacing`, its reason, `state: active`, and `basis`. An operator uses `{kind: operator}`; a delegated writer uses `{kind: authority, grant: {type, id, hash}}`. Optional `scope` is a union of repository path selectors and exact record ids, optionally limited to one scanned prose field.
 

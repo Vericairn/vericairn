@@ -11,11 +11,13 @@ namespace Vericairn.Cli.Tests;
 [Collection("cli")]
 public sealed class PolicyAdoptionCommandsTests
 {
-    [Fact]
-    public void CompleteAdoptionUsesTheBuiltCommandsWithoutDiscoveryOrProviders()
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    public void CompleteAdoptionUsesTheBuiltCommandsWithoutDiscoveryOrProviders(int recheckSeconds, bool reviseProduct)
     {
         CliHarness.Ok("policies", "--help"); // Creates this suite's isolated home before fixture signers.
-        PolicyAdoptionJourney.Run(api => new Commands(api));
+        PolicyAdoptionJourney.Run(api => new Commands(api), recheckSeconds, reviseProduct);
     }
 
     private sealed class Commands(EstateService api) : PolicyAdoptionJourney.Surface(api)
@@ -64,6 +66,11 @@ public sealed class PolicyAdoptionCommandsTests
             CliHarness.Outcome result = Invoke(null, "release", "submit", "--product", request.Product, "--version", request.Version, "--commit", request.Commit!, "--expected", request.Expected!, "--by", request.By);
             ReleaseResponse response = JsonSerializer.Deserialize<ReleaseResponse>(result.Out, ProtocolJson.Options)!;
             Assert.Equal(response.Ok ? 0 : 2, result.Code);
+            if (response.Ok)
+            {
+                Assert.Single(result.Json.GetProperty("basisEvidence").EnumerateArray());
+                Assert.Equal(2, api.Session.Load().OfType("operation").Count());
+            }
             return response;
         }
         public override FindingsResponse Check() => Read<FindingsResponse>("estate", "check");

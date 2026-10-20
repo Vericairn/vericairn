@@ -51,4 +51,6 @@ roadmap.
 
 ## Later milestone: specialist workflows — planned
 
-Workflows and domain templates for books, Unity projects and courses.
+Domain packs and templates for books, Unity projects and courses come first. Vericairn's catalog plans more
+than 3,000 entries across creative and technical work and 27 industries, listed in the
+[README](README.md#planned); each further domain is placed on this roadmap when its milestone is chosen.

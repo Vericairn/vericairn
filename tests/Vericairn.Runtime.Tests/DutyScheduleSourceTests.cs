@@ -15,6 +15,85 @@ namespace Vericairn.Runtime.Tests;
 
 public class DutyScheduleSourceTests
 {
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]
+    [InlineData(2, true)]
+    [InlineData(0, false)]
+    [InlineData(1, false)]
+    [InlineData(2, false)]
+    public void ReleaseScheduleMatchesAnyProductRevision(int revision, bool matches)
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope product = Product(f, "example");
+        RecordEnvelope revised = f.Add("product", PolicyFixture.Body(product), supersedes: product.Id);
+        RecordEnvelope latest = f.Add("product", PolicyFixture.Body(revised), supersedes: revised.Id);
+        RecordEnvelope other = Product(f, "other");
+        RecordEnvelope otherRevised = f.Add("product", PolicyFixture.Body(other), supersedes: other.Id);
+        RecordEnvelope otherLatest = f.Add("product", PolicyFixture.Body(otherRevised), supersedes: otherRevised.Id);
+        RecordEnvelope[] subjects = matches ? [product, revised, latest] : [other, otherRevised, otherLatest];
+        JsonObject body = f.PolicyBody();
+        Parameters(body)["schedule"] = new JsonObject { ["kind"] = "release", ["product"] = product.Id };
+        Parameters(body)["graceDays"] = 0;
+        RecordEnvelope policy = f.Policy(body);
+        f.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        RecordEnvelope publication = Publish(f, Candidate(f, subjects[revision], "1.0.0"));
+        PolicyEvaluation result = Evaluate(f);
+        Assert.True(result.Complete);
+        Assert.Equal(matches ? 1 : 0, Assert.Single(result.Rules).Subjects);
+        Assert.Equal(matches ? 1 : 0, result.Holds);
+        if (matches)
+        {
+            PolicyFinding finding = Assert.Single(result.Findings);
+            Assert.Equal("unmet", finding.Verdict);
+            Assert.Equal(publication.Id, finding.Duty!.Occurrence.GetProperty("publication").GetProperty("id").GetString());
+            Assert.Equal(publication.ComputedHash, finding.Duty.Occurrence.GetProperty("publication").GetProperty("hash").GetString());
+            Assert.Equal(publication.At, finding.Duty.DueAt);
+        }
+        JsonObject link = f.DutyLink(policy);
+        link["occurrence"] = new JsonObject { ["kind"] = "release", ["publication"] = PolicyFixture.Ref(publication) };
+        RecordEnvelope completion = f.Result(link);
+        if (matches)
+        {
+            f.Review(completion);
+            Assert.True(Assert.Single(Evaluate(f).Findings).Duty!.Completed);
+        }
+        else Assert.Contains(f.Estate.Load().Findings, finding => finding.Code == "duty.publication" &&
+            finding.Location.StartsWith(completion.ExpectedPath, StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ReleaseScheduleRetirementAccountsForDebtAcrossProductRevisions(bool endDebt)
+    {
+        using var f = new PolicyFixture();
+        RecordEnvelope product = Product(f, "example");
+        RecordEnvelope revised = f.Add("product", PolicyFixture.Body(product), supersedes: product.Id);
+        JsonObject body = f.PolicyBody();
+        Parameters(body)["schedule"] = new JsonObject { ["kind"] = "release", ["product"] = product.Id };
+        RecordEnvelope policy = f.Policy(body);
+        f.Estate.SetClock(At("2026-10-13T14:00:00Z"));
+        RecordEnvelope publication = Publish(f, Candidate(f, revised, "1.0.0"));
+        f.AssertValid();
+        JsonObject retirement = Retired(policy);
+        if (endDebt)
+        {
+            JsonObject disposition = f.Disposition(policy);
+            disposition["occurrence"] = new JsonObject { ["kind"] = "release", ["publication"] = PolicyFixture.Ref(publication) };
+            retirement["dutyDispositions"] = new JsonArray(disposition);
+        }
+        RecordEnvelope retired = f.Policy(retirement, policy);
+        if (endDebt)
+        {
+            PolicyFinding finding = Assert.Single(Evaluate(f).Findings);
+            Assert.Equal("ended-unmet", finding.Disposition);
+            Assert.False(finding.Duty!.Completed);
+        }
+        else Assert.Contains(f.Estate.Load().Findings, finding => finding.Code == "duty.inventory" &&
+            finding.Location.StartsWith(retired.ExpectedPath, StringComparison.Ordinal));
+    }
+
     internal static JsonObject CredentialBody(PolicyFixture f, string name = "fixture-reference", string date = "2026-10-14T00:00:00Z") => new()
     {
         ["name"] = name, ["purpose"] = "Synthetic date evidence.", ["kind"] = "other", ["holder"] = f.Estate.OperatorId, ["store"] = "Fixture reference only",

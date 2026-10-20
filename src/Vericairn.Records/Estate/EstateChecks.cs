@@ -17,14 +17,24 @@ public static partial class EstateChecks
     {
         ".json", ".md", ".txt", ".yml", ".yaml", ".sh", ".ps1", ".toml", ".csv", ".xml", ".html", ".css", ".js", ".ts", ".cs", ".py", ".gitignore", ".gitattributes", ".mailmap",
     };
+    // A differently cased estate path must still be checked on case-insensitive filesystems and refused as unexpected.
+    private static readonly HashSet<string> ProtectedTopLevel = new(EstateLayout.AllowedTopLevel, StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Runs every check against a loaded estate.</summary>
-    public static FindingList Run(EstateModel model)
+    public static FindingList Run(EstateModel model) => Run(model, null);
+
+    /// <summary>
+    /// Runs every check, excluding unexpected top-level entries observed by a source adapter to be ignored and untracked.
+    /// Allowed estate paths are always checked, regardless of the supplied exclusions.
+    /// </summary>
+    public static FindingList Run(EstateModel model, IReadOnlySet<string>? ignoredTopLevel)
     {
         ArgumentNullException.ThrowIfNull(model);
         var findings = new FindingList();
         string root = model.Root;
-        foreach (string entry in Directory.EnumerateFileSystemEntries(root).OrderBy(e => e, StringComparer.Ordinal))
+        string[] entries = Directory.EnumerateFileSystemEntries(root).OrderBy(e => e, StringComparer.Ordinal)
+            .Where(e => ProtectedTopLevel.Contains(Path.GetFileName(e)) || ignoredTopLevel?.Contains(Path.GetFileName(e)) != true).ToArray();
+        foreach (string entry in entries)
         {
             string name = Path.GetFileName(entry);
             if (!EstateLayout.AllowedTopLevel.Contains(name))
@@ -33,7 +43,7 @@ public static partial class EstateChecks
             }
         }
 
-        foreach (string file in Walk(root))
+        foreach (string file in Walk(entries))
         {
             string relative = EstateLayout.Relative(root, file);
             var info = new FileInfo(file);
@@ -65,7 +75,7 @@ public static partial class EstateChecks
 
             if (IsTextFile(file))
             {
-                ScanText(file, relative, findings);
+                ScanText(file, relative, findings, model);
             }
         }
 
@@ -97,9 +107,9 @@ public static partial class EstateChecks
         return findings;
     }
 
-    private static IEnumerable<string> Walk(string root)
+    private static IEnumerable<string> Walk(IEnumerable<string> entries)
     {
-        foreach (string entry in Directory.EnumerateFileSystemEntries(root).OrderBy(e => e, StringComparer.Ordinal))
+        foreach (string entry in entries)
         {
             string name = Path.GetFileName(entry);
             if (EstateLayout.IgnoredTopLevel.Contains(name))
@@ -143,9 +153,9 @@ public static partial class EstateChecks
         }
     }
 
-    private static void ScanText(string file, string relative, FindingList findings) => ScanText(File.ReadAllBytes(file), relative, findings);
+    private static void ScanText(string file, string relative, FindingList findings, EstateModel model) => ScanText(File.ReadAllBytes(file), relative, findings, model);
 
-    private static void ScanText(byte[] bytes, string relative, FindingList findings)
+    private static void ScanText(byte[] bytes, string relative, FindingList findings, EstateModel? model = null)
     {
         if (Array.IndexOf(bytes, (byte)0) >= 0)
         {
@@ -193,7 +203,9 @@ public static partial class EstateChecks
         }
         else if (relative.EndsWith(".md", StringComparison.Ordinal) && (relative.StartsWith(EstateLayout.DocsDirectory + "/", StringComparison.Ordinal) || relative.StartsWith(EstateLayout.DesignDirectory + "/", StringComparison.Ordinal)))
         {
-            ScanProse(text, relative, findings);
+            if (model is null) ScanProse(text, relative, findings);
+            else
+                foreach (SpacingOccurrence occurrence in WritingScanner.ScanFile(model, model.Manifest?.Estate, text, relative)) findings.Add(occurrence.Diagnostic);
         }
     }
 
