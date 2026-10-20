@@ -12,7 +12,7 @@ internal sealed class McpServeCommand : Command
     public McpServeCommand(CommandContext context)
         : base("serve", "Serve the estate's tools over standard input and output until the input ends; a client of the daemon or the embedded runtime, never a second owner.")
     {
-        var asOption = new Option<string>("--as") { Description = "Principal id the agent acts for; its admitted device on this machine signs the writes. Without it only the read-only tools are listed." };
+        Option<string> asOption = context.McpPrincipalOption;
         Options.Add(asOption);
         SetAction(parseResult => Execute(context, parseResult.GetValue(context.EstateOption)!, parseResult.GetValue(asOption)));
     }
