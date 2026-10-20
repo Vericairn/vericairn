@@ -921,8 +921,10 @@ public class WorkerTests
     [Fact]
     public void AStopNoWorkerObservesIsReportedAsRequestedAndALostWorkerIsNotAStoppedRun()
     {
+        using var run = new RunEstate();
+        // The controlled clock starts once setup has recorded the goal, so the run is never stamped before the records it relies on.
         var clock = new WorkerClock(DateTimeOffset.UtcNow);
-        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100) });
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = new WorkerOptions().Grace };
         string report = run.Report("lingering");
         RunResponse started = run.Start("generic", "ack-stop", report);
         Assert.True(started.Ok, started.Message);

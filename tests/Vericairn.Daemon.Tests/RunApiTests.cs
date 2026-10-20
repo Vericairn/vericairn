@@ -54,8 +54,8 @@ public class RunApiTests
         registry.Register(new ReportedLauncher(new StandInLauncher()));
         registry.Register(new DirectoryWorkspaces());
         host.Service.Providers = registry;
-        var clock = new ClientClock(DateTimeOffset.UtcNow);
-        host.Service.WorkerOptions = new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
+        host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1) };
+        ClientClock clock;
         string op = estate.OperatorId;
         string builder = estate.BuilderId;
         string report = Path.Combine(scratch, "report.jsonl");
@@ -72,6 +72,9 @@ public class RunApiTests
             string assignment = Ok(api.Assign(new AssignRequest("W-1", builder, op, Json("""{"outcome":"A widget.","sources":[],"permittedChanges":["path:widget/"],"prohibitedEffects":[],"workspace":["widget"],"limits":[],"expectedOutputs":["widget"],"reviewCriteria":["it builds"],"recovery":"Record a result."}""")))).Id;
             string resource = Ok(api.NewRecord(new NewRecordRequest("resource", op, Json("""{"kind":"repository","name":"widget","role":"Its source.","location":{"github":"Example/widget"},"visibility":"private"}""")))).Id;
             RepositoryClones.Register(host.Service.Session.Manifest.Estate, resource, scratch);
+            // The controlled clock starts once setup has recorded the goal, so the run is never stamped before the records it relies on.
+            clock = new ClientClock(DateTimeOffset.UtcNow);
+            host.Service.WorkerOptions = host.Service.WorkerOptions with { Clock = clock };
 
             ProviderRow launcher = Assert.Single(api.Launchers());
             Assert.Equal(("stand-in", "launcher", IAgentLauncher.Contract), (launcher.Provider, launcher.Kind, launcher.Contract));

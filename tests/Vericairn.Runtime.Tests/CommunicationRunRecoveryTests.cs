@@ -20,9 +20,10 @@ public class CommunicationRunRecoveryTests
     [InlineData(true)]
     public void D08E_InterruptedDispatchIsReconciledUnderItsOriginalIdentityBeforeAnyRetry(bool dispatchRecorded)
     {
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""");
+        // The controlled clock starts once setup has recorded the goal, so the run is never stamped before the records it relies on.
         var clock = new WorkerClock(DateTimeOffset.UtcNow);
-        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""",
-            options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100) });
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = new WorkerOptions().Grace };
         if (!dispatchRecorded)
         {
             run.Service.WorkerOptions = run.Service.WorkerOptions with { BeforeDispatchRecord = () => throw new IOException("The stand-in dispatch write was interrupted.") };
