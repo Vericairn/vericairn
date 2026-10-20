@@ -5,8 +5,10 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Vericairn.Adapters.Git;
 using Vericairn.Packs.Software;
 using Vericairn.Protocol;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Tests;
@@ -57,7 +59,8 @@ public static class PolicyAdoptionJourney
 
     private sealed class Fixture : IDisposable
     {
-        private const string Commit = "0123456789abcdef0123456789abcdef01234567";
+        private readonly ReferenceRepository source = new();
+        private string Commit { get; }
         private static readonly DateTimeOffset Start = new(2100, 1, 1, 0, 0, 0, TimeSpan.Zero);
         internal PolicyFixture Records { get; } = new();
         internal EstateService Api { get; }
@@ -96,6 +99,13 @@ public static class PolicyAdoptionJourney
             });
             publicationProduct = reviseProduct ? Records.Add("product", PolicyFixture.Body(product), supersedes: product.Id) : product;
             repository = Records.Add("resource", new() { ["kind"] = "repository", ["name"] = "Fixture product source", ["role"] = "Retain exact inventory bytes.", ["location"] = new JsonObject { ["github"] = "Example/fixture" }, ["visibility"] = "public" }, subject: product.Reference);
+            foreach (string version in new[] { "0.7.9", "0.8.0", "0.8.1" }) source.Retain(version);
+            Commit = source.Commit();
+            RepositoryClones.Register(Records.Estate.Estate.Id, repository.Id, source.Root);
+            JsonObject manifest = new() { ["estate"] = Records.Estate.Estate.Id, ["format"] = "vericairn.estate-manifest/1", ["recordFormat"] = 3,
+                ["vericairn"] = new JsonObject { ["mode"] = "release", ["repository"] = "Example/fixture", ["version"] = "0.7.9",
+                    ["artifacts"] = new JsonObject { ["linux-x64"] = PolicyBasis.Hash("fixture") } } };
+            File.WriteAllBytes(Path.Combine(Records.Estate.Root, EstateLayout.ManifestPath), CanonicalJson.SerializePrettyUtf8(PolicyFixture.Element(manifest)));
             reviewer = Agent("Security reviewer");
             independent = Agent("Independent reviewer");
             Api = EstateService.Open(Records.Estate.Root);
@@ -108,13 +118,17 @@ public static class PolicyAdoptionJourney
             }
             // All scenario events use explicit time after the signer bootstrap; no deadline depends on wall time.
             At(Start.AddDays(-1));
+            RecordEnvelope prior = Candidate("0.7.9");
+            Records.Add("acceptance", new() { ["statement"] = "Accept the prior fixture publication.", ["basis"] = new JsonArray(), ["self"] = true }, subject: prior.Reference);
+            JsonObject published = PolicyFixture.Body(prior); published["status"] = "published"; published["publishedAt"] = Stamp(Records.Estate.Clock); published["url"] = "https://example.invalid/prior-fixture";
+            Records.Add("release", published, subject: prior.Subject, supersedes: prior.Id);
             Api.PolicyClock = Time;
             provider = new JourneyProvider(Time);
             var providers = new ProviderRegistry();
             providers.Register(provider);
             Api.Providers = providers;
             PolicySources.Register(ReferenceCoverage.Registration(PolicySources.Digest(typeof(ReferenceCoverage).Assembly)));
-            PolicySources.RepositorySource = new Sources(repository.Id);
+            PolicySources.RepositorySource = new GitPolicySource();
             Records.Estate.WriteFile("design/catalog.md", "Rapid7\n");
             Records.Estate.WriteFile("design/catalog/information-technology-services-and-operations.md", "Rapid7\n");
             Records.Estate.WriteFile("design/catalog/public-sector.md", "Open311 Open311 Open311 Open311\n");
@@ -214,6 +228,7 @@ public static class PolicyAdoptionJourney
         {
             PolicyResponse preview = Surface.Evaluate(Stamp(Time.Now));
             Assert.Contains(preview.Findings, f => f.PolicyKey == "register-coverage" && f.Item == "command:vericairn status" && f.Verdict == "unmet" && f.Level == "warn");
+            AssertReferenceSource(preview);
             Assert.Contains(preview.Findings, f => f.PolicyKey == "planned-placement" && f.Verdict == "unmet");
             Assert.Equal(8, Surface.Writing().Warnings.Count);
             RecordEnvelope grant = Records.Grant("manage-writing-exceptions", new() { ["scope"] = "manage-writing-exceptions", ["actions"] = new JsonArray("add", "remove"), ["tokens"] = new JsonArray("Rapid7", "Open311", "project44", "efea482") }, "2101-01-01T00:00:00Z");
@@ -258,6 +273,7 @@ public static class PolicyAdoptionJourney
             ReleaseResponse held = Surface.Submit(request);
             Assert.False(held.Ok);
             Assert.True(held.Policies is not null, JsonSerializer.Serialize(held, ProtocolJson.Options));
+            AssertReferenceSource(held.Policies!);
             Assert.Contains(held.Policies!.Findings, f => f.PolicyKey == "release-devlog" && f.Verdict == "unmet" && f.ReleaseHold);
             Assert.Equal(0, provider.Calls);
             Assert.Empty(Model.OfType("operation"));
@@ -309,6 +325,8 @@ public static class PolicyAdoptionJourney
             Assert.Equal(1, provider.Calls);
             Assert.Equal(2, Model.OfType("operation").Count());
             ReleaseBasisEvidence retained = Api.ReleaseBasis(Assert.Single(admitted.BasisEvidence!))!.Evidence;
+            AssertReferenceSource(admitted.Policies!);
+            Assert.Equal(source.SourceCommit, Assert.Single(Assert.Single(retained.Repositories, r => r.Identity == repository.Id && !r.Evidence).TreeComparisons).SourceCommit);
             PolicyFindingDto age = Assert.Single(retained.Policies.Findings, f => f.PolicyKey == "planned-age" && f.Actual.EndsWith(" elapsed seconds.", StringComparison.Ordinal));
             PolicyFindingDto fresh = Assert.Single(admitted.Policies!.Findings, f => f.PolicyKey == age.PolicyKey && f.Item == age.Item && f.Target == age.Target);
             Assert.Equal(age.Verdict, fresh.Verdict);
@@ -423,12 +441,20 @@ public static class PolicyAdoptionJourney
             Assert.Contains(replay.Findings, f => f.PolicyKey == "advisory-review" && f.Duty is { Missed: true, Completed: false });
             Assert.Contains(replay.Findings, f => f.PolicyKey == "dependency-review" && f.Duty?.DueAt == Stamp(Start.AddMonths(3)) && !f.Duty.Completed);
         }
-        public void Dispose() { PolicySources.RepositorySource = previousSource; Api.Dispose(); Records.Dispose(); }
-    }
-
-    private sealed class Sources(string repository) : IPolicyRepositorySource
-    {
-        public PolicyRepository Read(EstateModel model, RecordEnvelope resource, string? commit) => ReferenceInventoryTests.Repository(commit: commit ?? "0123456789abcdef0123456789abcdef01234567") with { Identity = repository };
+        private void AssertReferenceSource(PolicyResponse response)
+        {
+            Assert.DoesNotContain(response.Findings, f => f.PolicyKey == "register-coverage" && f.Verdict == "unavailable");
+            PolicyRepositoryDto observed = Assert.Single(response.Basis.Repositories, r => r.Identity == repository.Id && !r.Evidence);
+            Assert.DoesNotContain(observed.Files, f => f.Path == ReferenceInventory.FileName);
+            string version = response.Basis.Submission?.Version ?? "0.7.9";
+            Assert.Contains(observed.Files, f => f.Path == "docs/releases/" + version + "/" + ReferenceInventory.FileName);
+            PolicyTreeComparisonDto comparison = Assert.Single(observed.TreeComparisons);
+            Assert.True(comparison.Complete);
+            Assert.Equal(source.SourceCommit, comparison.SourceCommit);
+            Assert.Equal(Commit, comparison.SelectedCommit);
+            Assert.Equal(comparison.SourceTree, comparison.SelectedTree);
+        }
+        public void Dispose() { PolicySources.RepositorySource = previousSource; Api.Dispose(); Records.Dispose(); source.Dispose(); }
     }
     private sealed class JourneyProvider(Clock clock) : IReleaseProvider
     {

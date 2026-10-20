@@ -52,7 +52,10 @@ public sealed class PolicyAdoptionCommandsTests
             List<string> args = ["policies", "check"];
             if (at is not null) args.AddRange(["--as-of", at]);
             if (release is not null) args.AddRange(["--release", release]);
-            return Read<PolicyResponse>([.. args]);
+            PolicyResponse response = Read<PolicyResponse>([.. args]);
+            Assert.DoesNotContain(response.Findings, f => f.PolicyKey == "register-coverage" && f.Verdict == "unavailable");
+            Assert.Contains(response.Basis.Repositories, r => r.TreeComparisons.Count > 0);
+            return response;
         }
         public override WritingExceptionsResponse Writing() => Read<WritingExceptionsResponse>("estate", "writing-exceptions", "list");
         public override ReleaseResponse Submit(ReleaseSubmitRequest request)

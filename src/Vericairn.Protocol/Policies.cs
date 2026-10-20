@@ -35,7 +35,14 @@ public sealed record PolicySubmissionDto(PolicyRecordReference? Release, string 
     IReadOnlyList<string>? Repositories = null, IReadOnlyList<string>? WorkOrders = null);
 
 /// <summary>A repository inventory identity without machine paths or source bytes.</summary>
-public sealed record PolicyRepositoryDto(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<PolicyFileDto> Files, bool Evidence = false);
+public sealed record PolicyRepositoryDto(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<PolicyFileDto> Files, bool Evidence = false)
+{
+    /// <summary>Local tree comparisons captured before evaluation, each bound to its commits and exact path set.</summary>
+    public IReadOnlyList<PolicyTreeComparisonDto> TreeComparisons { get; init; } = [];
+}
+
+/// <summary>A complete or unavailable local comparison of the requested build trees at two exact commits.</summary>
+public sealed record PolicyTreeComparisonDto(string SourceCommit, string SelectedCommit, IReadOnlyList<string> Paths, bool Complete, string? SourceTree, string? SelectedTree);
 
 /// <summary>Exact source content identity and availability.</summary>
 public sealed record PolicyFileDto(string Path, string Hash, bool Available, bool IsLink);

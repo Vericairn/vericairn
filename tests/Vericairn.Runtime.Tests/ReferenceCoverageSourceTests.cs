@@ -97,6 +97,87 @@ public sealed class ReferenceCoverageSourceTests
         AssertUnavailable(api.PolicyEvaluate());
     }
 
+    [Fact]
+    public void AnIncompleteComparisonChangesTheBasisAndCannotSatisfyCoverage()
+    {
+        using var f = new Fixture();
+        f.Source.Retain("0.8.0");
+        string selected = f.Source.Commit();
+        f.Release("0.8.0", selected, published: true);
+        f.Pin("0.8.0");
+        using var api = EstateService.Open(f.Records.Estate.Root);
+        PolicyResponse complete = api.PolicyEvaluate();
+        AssertCovered(complete, 3, selected);
+        PolicySources.RepositorySource = new FilesOnlySource();
+        PolicyResponse incomplete = api.PolicyEvaluate();
+        AssertUnavailable(incomplete);
+        Assert.Contains("complete matching build-tree observation", Assert.Single(incomplete.Findings).Actual, StringComparison.Ordinal);
+        Assert.NotEqual(complete.Basis.Digest, incomplete.Basis.Digest);
+        Assert.Equal(complete.Basis.RecordDigest, incomplete.Basis.RecordDigest);
+        Assert.False(Assert.Single(incomplete.Basis.Repositories.SelectMany(r => r.TreeComparisons)).Complete);
+    }
+
+    [Fact]
+    public void AFileModeChangeIsABuildSourceChange()
+    {
+        using var f = new Fixture();
+        f.Source.Retain("0.8.0");
+        f.Source.Commit();
+        f.Source.Git("update-index", "--chmod=+x", "src/program.cs");
+        f.Source.Git("commit", "--quiet", "-m", "Change fixture executable mode");
+        f.Release("0.8.0", f.Source.Git("rev-parse", "HEAD"), published: true);
+        f.Pin("0.8.0");
+        using var api = EstateService.Open(f.Records.Estate.Root);
+        AssertUnavailable(api.PolicyEvaluate());
+    }
+
+    [Fact]
+    public void ARootInventoryCannotReplaceAMissingReleaseSet()
+    {
+        using var f = new Fixture();
+        foreach (PolicyFile file in ReferenceInventoryTests.Repository(commit: f.Source.SourceCommit).Files)
+            f.Source.Write(file.Path, PolicyInputs.Read(file));
+        f.Release("0.8.0", f.Source.Commit(), published: true);
+        f.Pin("0.8.0");
+        using var api = EstateService.Open(f.Records.Estate.Root);
+        AssertUnavailable(api.PolicyEvaluate());
+        Assert.Contains("inventory is missing", Assert.Single(api.PolicyEvaluate().Findings).Actual, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AmbientGitRoutingAndConfigurationDoNotReplaceTheObservedRepository()
+    {
+        using var f = new Fixture();
+        using var decoy = new ReferenceRepository();
+        f.Source.Retain("0.8.0");
+        string selected = f.Source.Commit();
+        f.Release("0.8.0", selected, published: true);
+        f.Pin("0.8.0");
+        using var api = EstateService.Open(f.Records.Estate.Root);
+        PolicyResponse expected = api.PolicyEvaluate();
+        AssertCovered(expected, 3, selected);
+        var ambient = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["GIT_DIR"] = Path.Combine(decoy.Root, ".git"), ["GIT_WORK_TREE"] = decoy.Root,
+            ["GIT_CONFIG_COUNT"] = "1", ["GIT_CONFIG_KEY_0"] = "core.repositoryformatversion", ["GIT_CONFIG_VALUE_0"] = "999",
+            ["GIT_CONFIG_PARAMETERS"] = "'core.repositoryformatversion=999'", ["GIT_ICASE_PATHSPECS"] = "1",
+        };
+        var saved = ambient.Keys.ToDictionary(k => k, Environment.GetEnvironmentVariable, StringComparer.Ordinal);
+        try
+        {
+            foreach (var (key, value) in ambient) Environment.SetEnvironmentVariable(key, value);
+            PolicyResponse observed = api.PolicyEvaluate();
+            AssertCovered(observed, 3, selected);
+            Assert.Equal(expected.Basis.Digest, observed.Basis.Digest);
+        }
+        finally { foreach (var (key, value) in saved) Environment.SetEnvironmentVariable(key, value); }
+    }
+
+    private sealed class FilesOnlySource : IPolicyRepositorySource
+    {
+        public PolicyRepository Read(EstateModel model, RecordEnvelope repository, string? commit) => new GitPolicySource().Read(model, repository, commit);
+    }
+
     private static void AssertCovered(PolicyResponse response, int count, string commit)
     {
         Assert.True(response.Complete, response.Text);

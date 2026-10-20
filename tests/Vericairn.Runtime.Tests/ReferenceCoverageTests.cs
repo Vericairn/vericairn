@@ -228,10 +228,10 @@ public class ReferenceCoverageTests
         RecordEnvelope product = R("product", "product", new { release = new { destination = new { provider = "github-releases", settings = new { repository = "Example/product" } } } });
         RecordEnvelope resource = R("resource", "repository", new { kind = "repository", location = new { github = "Example/product" } });
         RecordEnvelope[] records = basis.Records.Select(r => r.Type == "product" ? product : r.Id == resource.Id ? resource : r).ToArray();
-        PolicyBasis selected = new(PolicyBasisTests.Model(records), basis.AsOf, basis.Origin, basis.Repositories, implementations: Registry.Implementations);
+        PolicyBasis selected = new(PolicyBasisTests.Model(records), basis.AsOf, basis.Origin, basis.Repositories, implementations: Registry.Implementations, submission: basis.Submission);
         Assert.Equal("satisfied", Assert.Single(PolicyEvaluator.Evaluate(selected, Registry).Findings).Verdict);
         RecordEnvelope unrelated = R("resource", "repository", resource.Body, subject: new("product", "other", null));
-        PolicyBasis conflict = new(PolicyBasisTests.Model(records.Select(r => r.Id == unrelated.Id ? unrelated : r)), basis.AsOf, basis.Origin, basis.Repositories, implementations: Registry.Implementations);
+        PolicyBasis conflict = new(PolicyBasisTests.Model(records.Select(r => r.Id == unrelated.Id ? unrelated : r)), basis.AsOf, basis.Origin, basis.Repositories, implementations: Registry.Implementations, submission: basis.Submission);
         AssertUnavailable(PolicyEvaluator.Evaluate(conflict, Registry));
     }
 
@@ -246,7 +246,7 @@ public class ReferenceCoverageTests
             foreach (string culture in new[] { "en-US", "tr-TR", "ar-SA", "fr-FR" })
             {
                 System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo(culture);
-                var reversed = new PolicyBasis(PolicyBasisTests.Model(basis.Records.Reverse()), basis.AsOf, basis.Origin, basis.Repositories.Reverse(), implementations: Registry.Implementations);
+                var reversed = new PolicyBasis(PolicyBasisTests.Model(basis.Records.Reverse()), basis.AsOf, basis.Origin, basis.Repositories.Reverse(), implementations: Registry.Implementations, submission: basis.Submission);
                 Assert.Equal(expected, PolicyEvaluator.Evaluate(reversed, Registry).Canonical());
             }
         }
@@ -276,6 +276,10 @@ public class ReferenceCoverageTests
         basis.Model.Manifest = pin;
         PolicyTimeOrigin origin = submission is not null ? PolicyTimeOrigin.Submission : pin is not null ? PolicyTimeOrigin.Recorded : PolicyTimeOrigin.Preview;
         string? at = origin == PolicyTimeOrigin.Recorded ? basis.Records.Max(r => r.At) : basis.AsOf;
-        return new(basis.Model, at, origin, [source ?? ReferenceInventoryTests.Repository(), Repository(registerFile ?? PolicyBasisTests.File(RegisterPath, text))], implementations: Registry.Implementations, submission: submission);
+        string version = submission?.Version ?? pin?.Version ?? "0.8.0";
+        PolicyRepository selected = source ?? ReferenceInventoryTests.Repository();
+        selected = selected with { Files = [.. selected.Files.Select(f => f with { Path = "docs/releases/" + version + "/" + f.Path })] };
+        submission ??= pin is null ? new(null, "product", version, ReferenceInventoryTests.Commit) : null;
+        return new(basis.Model, at, origin, [selected, Repository(registerFile ?? PolicyBasisTests.File(RegisterPath, text))], implementations: Registry.Implementations, submission: submission);
     }
 }
