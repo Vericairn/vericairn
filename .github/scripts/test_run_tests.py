@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Jason Furr
 
+import json
 import os
 from pathlib import Path
 import stat
@@ -17,7 +18,7 @@ SCRIPT = Path(__file__).with_name("run-tests.py")
 # test, each assembly's result as it finishes, and a summary that repeats every assembly's result.
 FAKE = textwrap.dedent('''\
     #!/usr/bin/env python3
-    import os, sys
+    import json, os, sys
     scenario, state = os.environ["FAKE_SCENARIO"], os.environ["FAKE_STATE"]
     args = sys.argv[1:]
     def failed(name, assembly="Vericairn.Cli.Tests"):
@@ -32,10 +33,24 @@ FAKE = textwrap.dedent('''\
         print(""); print("  total: 40"); print("  failed: " + str(failures)); print("  succeeded: " + str(40 - failures))
         print("Test run completed with non-success exit code: " + str(code)); sys.exit(code)
     passed = result("passed (5s 1ms)", "Vericairn.Records.Tests")
+    if "--list-tests" in args:
+        if scenario == "discovery-failed": sys.exit(1)
+        names = ["Vericairn.Cli.Tests.Class" + str(i) for i in range(30)]
+        if "--filter-class" in args and scenario != "ignored-filter":
+            names = [name for name in names if name in args[args.index("--filter-class") + 1:]]
+        print(json.dumps({"schemaVersion": 1, "tests": [{"type": {
+            "assemblyFullName": "Vericairn.Cli.Tests, Version=1.0.0.0",
+            "namespace": "Vericairn.Cli.Tests", "typeName": name.rsplit(".", 1)[1]}} for name in names]}))
+        sys.exit(0)
     if "--filter-method" in args:
         with open(os.path.join(state, "retries"), "a") as out:
             out.write(args[args.index("--filter-method") + 1] + " " + args[args.index("--project") + 1] + "\\n")
-        sys.exit(2 if scenario == "persistent" else 0)
+        sys.exit(2 if scenario in ("persistent", "share-persistent") else 0)
+    with open(os.path.join(state, "commands"), "a") as out:
+        out.write(json.dumps(args) + "\\n")
+    if scenario in ("share-flaky", "share-persistent"):
+        failed(args[args.index("--filter-class") + 1] + ".Case")
+        finish([result("failed with 1 error(s) (1m 2s)")], 1)
     if scenario == "pass":
         sys.exit(0)
     if scenario == "unicode":
@@ -73,14 +88,79 @@ class RetryRunnerTests(unittest.TestCase):
         fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
         self.summary = self.root / "summary.md"
 
-    def run_scenario(self, scenario, **extra):
+    def run_scenario(self, scenario, *arguments, **extra):
+        for path in (self.root / "retries", self.root / "commands", self.summary):
+            if path.exists():
+                path.unlink()
         env = dict(os.environ, FAKE_SCENARIO=scenario, FAKE_STATE=str(self.root), GITHUB_STEP_SUMMARY=str(self.summary),
                    PATH=str(self.root / "bin") + os.pathsep + os.environ["PATH"], **extra)
-        result = subprocess.run([sys.executable, str(SCRIPT)], cwd=self.root, env=env, capture_output=True, text=True,
+        result = subprocess.run([sys.executable, str(SCRIPT), *arguments], cwd=self.root, env=env, capture_output=True, text=True,
                                 encoding="utf-8")
         retries = (self.root / "retries").read_text().splitlines() if (self.root / "retries").exists() else []
         summary = self.summary.read_text() if self.summary.exists() else ""
         return result.returncode, result.stdout, retries, summary
+
+    def prepare_share_project(self):
+        project = self.root / "tests" / "Vericairn.Cli.Tests" / "Vericairn.Cli.Tests.csproj"
+        project.parent.mkdir(parents=True)
+        project.write_text("<Project><PropertyGroup><IsTestProject>true</IsTestProject></PropertyGroup></Project>")
+        (self.root / "Vericairn.slnx").write_text(
+            '<Solution><Project Path="tests/Vericairn.Cli.Tests/Vericairn.Cli.Tests.csproj" /></Solution>')
+        assembly = self.root / "artifacts" / "bin" / "Vericairn.Cli.Tests" / "release" / "Vericairn.Cli.Tests.dll"
+        assembly.parent.mkdir(parents=True)
+        assembly.touch()
+
+    def test_every_share_runs_its_classes_once_and_reports_its_retry(self):
+        self.prepare_share_project()
+        selected = []
+        for share in (1, 2, 3):
+            with self.subTest(share=share):
+                code, out, retries, summary = self.run_scenario("share-flaky", "--share", str(share))
+                self.assertEqual(0, code, out)
+                [command] = [json.loads(line) for line in (self.root / "commands").read_text().splitlines()]
+                self.assertEqual(["test", "--no-build", "--configuration", "Release", "--", "--filter-class"], command[:6])
+                classes = command[6:]
+                self.assertTrue(classes)
+                selected.extend(classes)
+                self.assertEqual([classes[0] + ".Case " + os.path.join("tests", "Vericairn.Cli.Tests")], retries)
+                self.assertIn("::warning title=Retried test::", out)
+                self.assertIn("passed when retried; fix its cause", summary)
+        self.assertCountEqual(["Vericairn.Cli.Tests.Class" + str(i) for i in range(30)], selected)
+
+    def test_a_persistent_failure_still_fails_each_share(self):
+        self.prepare_share_project()
+        for share in (1, 2, 3):
+            with self.subTest(share=share):
+                code, out, retries, summary = self.run_scenario("share-persistent", "--share", str(share))
+                self.assertEqual(1, code, out)
+                self.assertEqual(1, len(retries))
+                self.assertIn("::error title=Failed twice::", out)
+                self.assertIn("failed again", summary)
+
+    def test_a_bad_guard_stops_before_any_test_or_retry_runs(self):
+        self.prepare_share_project()
+        for scenario in ("discovery-failed", "ignored-filter"):
+            with self.subTest(scenario=scenario):
+                code, out, retries, summary = self.run_scenario(scenario, "--share", "1")
+                self.assertEqual(1, code)
+                self.assertIn("Test share guard failed:", out)
+                self.assertEqual(([], ""), (retries, summary))
+                self.assertFalse((self.root / "commands").exists())
+
+    def test_checking_shares_does_not_execute_tests(self):
+        self.prepare_share_project()
+        code, out, retries, summary = self.run_scenario("pass", "--check-shares")
+        self.assertEqual(0, code, out)
+        self.assertEqual(([], ""), (retries, summary))
+        self.assertFalse((self.root / "commands").exists())
+
+    def test_an_invalid_share_cannot_run_unfiltered_tests(self):
+        for share in ("0", "4"):
+            with self.subTest(share=share):
+                code, _, retries, _ = self.run_scenario("pass", "--share", share)
+                self.assertEqual(2, code)
+                self.assertEqual([], retries)
+                self.assertFalse((self.root / "commands").exists())
 
     def test_a_clean_run_passes_without_retrying(self):
         code, _, retries, summary = self.run_scenario("pass")
