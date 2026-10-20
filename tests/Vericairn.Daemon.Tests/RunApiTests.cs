@@ -109,6 +109,9 @@ public class RunApiTests
             Assert.Equal("not-found", api.RunStop("01M4TRNE1GYEK4P8MXQAB3C8Q4", new RunStopRequest(op)).Problem!.Code);
             Assert.Equal("refused", api.RunStart(new RunStartRequest(assignment, "claude-code", builder, op, resource)).Problem!.Code);
 
+            // The first run's settlement was recorded on the wall clock; the controlled clock catches up before the next run starts.
+            TimeSpan behind = DateTimeOffset.UtcNow - clock.GetUtcNow();
+            if (behind > TimeSpan.Zero) clock.Elapse(behind);
             RunResponse audited = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Branch: "work/audit", Settings:
                 new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("watch-codex-audit", Path.Combine(scratch, "audit.jsonl")) }));
             Assert.True(audited.Ok, audited.Message);
