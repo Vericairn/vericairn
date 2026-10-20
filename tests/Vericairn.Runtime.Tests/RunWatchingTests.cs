@@ -3,6 +3,7 @@
 
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Model;
 using Vericairn.Runtime.Workers;
 
 namespace Vericairn.Runtime.Tests;
@@ -306,6 +307,28 @@ public class RunWatchingTests
         Assert.Equal(0, run.Service.Check().Errors);
         run.Reopen();
         Assert.Equal(launcher == "codex" ? 5 : 4, run.Row(started.Run).Signals!.Count);
+    }
+
+    [Fact]
+    public void TheWorkersOwnStopForACriticalSignalIsStampedOnItsClock()
+    {
+        using var run = new RunEstate(brief: RunEstate.Brief.Replace("path:widget/", "src/", StringComparison.Ordinal));
+        // The audit stamps a signal on the wall clock. The worker's clock stands still at the start of a second that has ended
+        // by the time the run starts, so a stop request stamped by the signal would follow the stop's own transmission.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        run.Service.WorkerOptions = run.Service.WorkerOptions with { Clock = new WorkerClock(now) };
+        TimeSpan untilNextSecond = TimeSpan.FromTicks(TimeSpan.TicksPerSecond - now.Ticks % TimeSpan.TicksPerSecond) + TimeSpan.FromMilliseconds(50);
+        Thread.Sleep(untilNextSecond);
+
+        RunResponse started = run.Start("codex", "watch-codex-audit", run.Report("audit"));
+        Assert.True(started.Ok, started.Message);
+        RunRow settled = run.Settled(started.Run);
+
+        Assert.Equal("known-failure", settled.Status);
+        Assert.Equal("worker", settled.Stop!.RequestedBy);
+        Assert.Equal(RecordParser.FormatTimestamp(now), settled.Stop.RequestedAt);
+        Assert.True(string.CompareOrdinal(settled.Stop.TransmittedAt, settled.Stop.RequestedAt) >= 0);
+        Assert.Equal(0, run.Service.Check().Errors);
     }
 
 }

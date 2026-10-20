@@ -620,7 +620,9 @@ public sealed class RunSupervisor
             state.Signals.Add(signal);
             if (signal.Severity == "critical" && state.Stop is null)
             {
-                Begin(new StopRequest(signal.At, "worker", $"Critical {signal.Code} signal: {signal.Summary}"));
+                // The worker requests this stop on its own clock, which also stamps its transmission and containment, so the
+                // recorded order holds whichever clock stamped the signal.
+                Begin(new StopRequest(RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), "worker", $"Critical {signal.Code} signal: {signal.Summary}"));
             }
 
             Save();
