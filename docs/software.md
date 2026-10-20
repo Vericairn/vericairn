@@ -1033,7 +1033,10 @@ Recognizable network commands, structured network URLs and web tools produce war
 network attempt. Credential access remains critical for reads, copies and listings as well as writes. FIX-20 recognizes
 the Vericairn home's `keys/` (file keys and the other stores' local handles), `connections/` (paired runtime and device
 state), and `estates/<estate>/<clone>/runtime-certificate.p12` and `runtime-identity.json`, including the identity's
-pending `.tmp` file. Listing the per-clone runtime directory itself also counts, including a listing or search with
+pending `.tmp` file. A recursive copy, archive or sync of the home, an ancestor of it, its `estates` directory, one estate's
+directory or one clone's directory, which hold each clone's `live.db` with its runtime certificate and identity,
+is critical too; a workspace beside them in an estate's `workspaces` directory holds none.
+Listing the per-clone runtime directory itself also counts, including a listing or search with
 no path operand after a known directory change. These are the stores used by `VericairnHome`, `DeviceKeyStores`, `RuntimeConnections`,
 `EstateLocations`, `RuntimeCertificate` and `RuntimeIdentity`; pending pairing codes themselves exist only in daemon
 memory. Recognizable `.p8` and `.p12` operands, the existing credential paths and secret environment variables,
@@ -1044,6 +1047,8 @@ warning; `git credential reject` does not produce a credential-output signal.
 
 The audit resolves absolute paths, traversal, `~`, simple `$NAME`, `${NAME}`, `$env:NAME` and `%NAME%` substitutions
 from the captured launch environment, and simple assignments and exports visible within the reported command.
+Quoting is removed as a POSIX shell removes it, so a partly quoted word such as `''"$HOME"/x` or `..''/x` resolves to
+the path the shell would use; a backslash escapes only where it is not the path separator.
 It derives the default Vericairn home from those captured platform home/configuration variables when no override is
 supplied. It reads no credential content and does not consult an ambient environment to resolve a reported path.
 An unresolved expansion cannot establish its target and raises `audit-unverified`; independently recognizable
@@ -1081,7 +1086,10 @@ a system temporary directory or take a boundary from tool-event input; system `/
 run's supplied temporary variable names it.
 
 Common options of `env`, `sudo`, `nohup`, `time`, `nice`, `timeout`, `command`, `exec` and `busybox`, including
-nested wrappers, do not hide the inner command. Known `cd`/`chdir`/`Set-Location` targets and wrapper directory options
+nested wrappers, do not hide the inner command. The `-c` body of `bash`, `sh`, `zsh`, `dash`, `ksh`, `mksh`, `ash`,
+`yash` and `posh`, and `eval`'s operands, are inspected as commands. A program in command position that the captured
+environment cannot resolve, such as `$RUNNER`, and a shell with another syntax (`fish`, `csh`, `tcsh`, `nu`, `xonsh`,
+`elvish`, `rc`, `es`, `ion` or `ysh`) raise `audit-unverified`; their `-c` body is still read as a POSIX shell's. Known `cd`/`chdir`/`Set-Location` targets and wrapper directory options
 supply the base for subsequent relative operands. Child shells and pipelines do not change the parent's base;
 a failure branch does not assume a preceding directory change succeeded. Quoted operators and message text remain
 text. Git message values (`-m`, `--message`, `--message=…`) for commit, tag, merge, revert, notes and stash are not paths.
@@ -1091,14 +1099,18 @@ objects. A directory supplied to a classified Git read is a read target, and cop
 Mutating or helper-executing options such as `find -delete`, `rg --pre` and `git diff --output` are not reads.
 
 The remaining warning-only cases are ordinary outside reads (`scope-read`), including listing the Vericairn home
-itself (`ls` or `ls -R`) and reading a per-clone `live.db`, recognizable network attempts (`network`),
+itself or its `estates` directory (`ls` or `ls -R`) and reading or copying a single file there, such as a per-clone
+`live.db`, recognizable network attempts (`network`),
 and uncertainty (`audit-unverified`): unresolved variables or command substitutions; unclassified outside-looking
 operands, including helper-executing forms; unknown working directories; paths whose physical containment cannot be
 verified; remote `rsync` operands; opaque interpreter input (including `osascript`); and `xargs`, whose input-supplied
 operands or replacements are not visible in the invocation. An independently recognized literal outside write or
 credential target in any of these still produces its critical signal. Archive contents, patch bodies, arbitrary
 scripts, computed filenames, aliases, every command option and shell expansion are not interpreted. A missing or
-unrecognized effect cannot be inferred absent from an emitted command.
+unrecognized effect cannot be inferred absent from an emitted command. These give no signal at all: commands that a
+script file runs (`sh script.sh`, `source`, `make` recipes or package scripts), since the audit does not read files;
+shell functions and aliases defined earlier; a workspace program reached through a changed `PATH` under a reader's
+name; and the effects of an unclassified program whose operands do not look like outside paths.
 Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.

@@ -705,6 +705,16 @@ other untracked changes still count. Committed history remains separately audite
 committed audit can retain the branch for review when the file inventory is incomplete. Timed-out
 checks retry once; a credential check that still cannot finish requests containment.
 
+In 0.8.1, FIX-34 removes quoting as a POSIX shell does before the workspace test, so a partly quoted
+path such as `''"$HOME"/x` or `..''/x` resolves to the path the shell would use. `dash`, `ksh`, `mksh`,
+`ash`, `yash`, `posh` and `eval` have their inner commands inspected. A program the captured environment
+cannot resolve (`$RUNNER`) or a shell with another syntax (`fish`, `csh`, `tcsh`, `nu` and others)
+warns with `audit-unverified`, and its `-c` body is still read. A recursive copy, archive or sync of the
+home's `estates` directory, of one estate's directory or of one clone's directory is critical, like the home
+itself; copies inside a workspace under an estate's `workspaces` directory are not. Commands a
+script file runs, earlier shell functions and aliases, programs reached through a changed `PATH`, and
+unclassified programs whose operands look like workspace paths still give no signal.
+
 FIX-25 removes a newly prepared, unused workspace after pre-dispatch refusal only when its complete
 inventory still matches preparation. Reused, changed, concurrently used or incompletely inspected
 workspaces are preserved with a warning. Windows opens use extended paths for the longer staging
