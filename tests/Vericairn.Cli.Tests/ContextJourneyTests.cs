@@ -117,8 +117,15 @@ public class ContextJourneyTests
         using var output = new MemoryStream();
         Task copied = process.StandardOutput.BaseStream.CopyToAsync(output, TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-        await copied;
+        try
+        {
+            await Task.WhenAll(process.WaitForExitAsync(TestContext.Current.CancellationToken), copied, error)
+                .WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
         Assert.Equal(string.Empty, await error);
         Assert.Equal(0, process.ExitCode);
         Assert.Equal(original, output.ToArray());

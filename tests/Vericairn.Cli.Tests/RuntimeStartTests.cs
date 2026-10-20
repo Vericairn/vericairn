@@ -41,7 +41,7 @@ public class RuntimeStartTests
             try
             {
                 Assert.True(finished, "The output of 'runtime start' did not end before the hang guard: the daemon holds the caller's output open.");
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.True(process.ExitCode == 0, await output + await error);
                 Assert.Contains("serves", await output, StringComparison.Ordinal);
                 Assert.Contains("daemon", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
@@ -90,7 +90,7 @@ public class RuntimeStartTests
             try
             {
                 Assert.True(finished, "The output of a failed 'runtime start' did not end before the hang guard.");
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 string log = Path.Combine(Path.GetDirectoryName(live)!, "daemon.log");
                 string said = await error;
                 Assert.True(process.ExitCode != 0, await output + said);

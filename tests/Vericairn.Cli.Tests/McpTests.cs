@@ -487,14 +487,13 @@ public class McpTests
         using Process process = Process.Start(info)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        Task both = Task.WhenAll(output, error);
+        Task both = Task.WhenAll(output, error, process.WaitForExitAsync(TestContext.Current.CancellationToken));
         if (!await TestTiming.CompletesAsync(both, TestContext.Current.CancellationToken))
         {
             process.Kill(entireProcessTree: true);
             Assert.Fail("The peer did not finish within 120 seconds.");
         }
 
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
         return (process.ExitCode, await output + await error);
     }
 
