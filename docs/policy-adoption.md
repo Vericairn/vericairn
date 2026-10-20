@@ -1,6 +1,6 @@
 # Adopting and operating estate policies
 
-Revision 1, October 19, 2026. Follow the implemented policy lifecycle, duty evidence and release admission flows.
+Revision 3, October 20, 2026. Use the read-only definition hash command when preparing exact approval, and explain why generated copies need no writing entry.
 
 Use this guide with the command and transport tables in [Estate policies](policies.md), the strict bodies in [Record format 3](record-format-v3.md), and the [first-party proposals](policy-adoption-proposals.md). The proposals are preparations for exact operator approval. They do not activate policies, authorize work or certify the estate's current state. First-party adoption follows the estate's upgrade to 0.8.0 and record format 3.
 
@@ -22,7 +22,16 @@ Inspect the basis, each rule's underlying verdict, disposition, owner, evidence 
 
 ## Declare, revise and retire
 
-Prepare the complete policy body with its exact kind versions, selection, level, owner, activation and exception limit. Obtain the operator's signed decision approving its canonical definition hash with only `basis` omitted. That decision's `policies` requirement names the action and policy; revision and retirement also name the prior hash. Add the exact decision and requirement to `basis`. A manager's authority and the operator's definition approval are separate requirements.
+Prepare the complete policy or duty body with its exact kind versions, selection, level, owner, activation and exception limit. Before adding the approval to `basis`, print its definition hash:
+
+```sh
+vericairn policies hash --body policy.json
+vericairn policies hash --body duty.json --json
+```
+
+The development command added after 0.8.0 reads only the prepared file, opens no estate and writes nothing. Plain output is the hash; JSON returns it as `definitionHash`. The value hashes the canonical body with only top-level `basis` omitted, using the same calculation as `policies declare`. See the [CLI reference](cli.md) for every option and invalid-input behavior.
+
+Put that value in the operator's signed decision's `policies` requirement as `definitionHash`. The requirement names the action and policy; revision and retirement also name the prior hash. Add the exact decision and requirement to the body's `basis`, then run `policies hash` again to confirm the value is unchanged. Any change outside `basis` needs the hash of the changed definition. A manager's authority and the operator's definition approval are separate requirements.
 
 ```sh
 vericairn policies declare --body policy.json --by <principal> --json
@@ -30,7 +39,7 @@ vericairn policies revise planned-placement --body revised-policy.json --expecte
 vericairn policies retire planned-placement --body retired-policy.json --expected <current-policy-hash> --by <principal> --json
 ```
 
-The CLI hashes the complete creation body for `expected`; API callers supply that canonical body hash in `PolicyChangeRequest`. Revision and retirement expect the current record hash. The runtime requires the acting principal's held, admitted signing device, validates the sources and strict parameters, and checks current authority. A conflict means read the current revision and prepare again.
+The definition hash is for approval. The CLI separately hashes the complete creation body, including `basis`, for `expected`; API callers supply that complete canonical body hash in `PolicyChangeRequest`. Revision and retirement expect the current record hash. The runtime requires the acting principal's held, admitted signing device, validates the sources and strict parameters, and checks current authority. A conflict means read the current revision and prepare again.
 
 A revised body includes the entire definition. Behavioral changes need exact approval; an ownership transfer needs transfer authority too. Retirement uses `state: retired` and `retirement: {reason, findings, successor?}`. It is terminal and retains the identity and history. Removing a duty rule or retiring its policy must account for every outstanding occurrence, including grace, using approved `dutyDispositions`. `ended-unmet` records an explicit end to debt; it does not claim completion. Forward schedule changes retain already-open occurrences and their original proof requirements.
 
@@ -50,6 +59,8 @@ The first-party duration limit is at most 30 days; delegated limits may be short
 Read the finding again: its underlying verdict remains unmet, with the exception and deferred enforcement visible. An exception clears no built-in error, document gate, acceptance requirement or reserved-action boundary.
 
 ## Add and remove writing entries
+
+Generated copies need no writing entry. The spacing scan skips whole files owned by a current, unretired `kind: generated` declaration, including its `pathPattern` members, and declared generated regions inside authored documents. The generator checks continue to hold that text to its sources. Authored files, the authored lines around each region and record prose fields are still scanned; other declaration kinds do not exempt whole files. An entry used only by generated copies therefore has no matches and warns as unused after a complete scan.
 
 Prepare a complete `writing-exception` body with an exact case-sensitive whole `token`, `code: writing.spacing`, its reason, `state: active`, and `basis`. An operator uses `{kind: operator}`; a delegated writer uses `{kind: authority, grant: {type, id, hash}}`. Optional `scope` is a union of repository path selectors and exact record ids, optionally limited to one scanned prose field.
 

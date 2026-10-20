@@ -53,6 +53,10 @@ public partial interface IEstateApi
     Task<IReadOnlyList<PolicyKindDto>> PolicyKindsAsync(CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(PolicyKinds), () => PolicyKinds(), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable PolicyHash read.</summary>
+    Task<PolicyHashResponse> PolicyHashAsync(PolicyHashRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(PolicyHash), () => PolicyHash(request), false, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable PolicyEvaluate read.</summary>
     Task<PolicyResponse> PolicyEvaluateAsync(string? asOf = null, string? release = null, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(PolicyEvaluate), () => PolicyEvaluate(asOf, release), false, this as IClientOperationLifetime, cancellationToken);

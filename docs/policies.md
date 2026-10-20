@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 7, October 20, 2026. Describe parallel results, settled review waits and prospective work-state consistency.
+Revision 10, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, which authored text the writing scan checks, parallel results, settled review waits and prospective work-state consistency.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -11,17 +11,22 @@ For preparation, authoring and review steps, see [Adopting and operating estate 
 | `policies list` | `GET /v1/estate-policies` | `Policies` | `policies_list` |
 | `policies show <key>` | `GET /v1/estate-policies/{key}/view` | `Policy` | `policy_show` |
 | `policies kinds` | `GET /v1/estate-policies/kinds` | `PolicyKinds` | `policy_kinds` |
+| `policies hash --body <file>` | `POST /v1/estate-policies/hash` | `PolicyHash` | — |
 | `policies check` | `GET /v1/estate-policies/evaluate` | `PolicyEvaluate` | `policy_evaluate` |
 | `estate writing-exceptions list` | `GET /v1/writing-exceptions` | `WritingExceptions` | `writing_exceptions_list` |
 | `estate writing-exceptions show <id>` | `GET /v1/writing-exceptions/{id}` | `WritingException` | `writing_exception_show` |
 
-Each SDK method has an `Async` counterpart with cancellation and a response deadline. The CLI uses the same operations through the embedded runtime or daemon. `--json` returns the complete typed response; the human view always names the basis. A policy key or any revision id selects its current declaration. Exception records and writing removals remain visible as history.
+Each SDK method has an `Async` counterpart with cancellation and a response deadline. The CLI uses the same operations through the embedded runtime or daemon; hashing runs the shared calculation directly on the supplied file without opening an estate. `--json` returns the complete typed response. Evaluation views name their basis; hashing prints just the definition hash. A policy key or any revision id selects its current declaration. Exception records and writing removals remain visible as history.
 
-The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate` and `access` remain distinct from the named collection operations.
+The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate`, `access` and `hash` remain distinct from the named collection operations.
+
+`policies hash`, added after 0.8.0, accepts a prepared policy or recurring-duty body with `basis` either absent or an array. It returns SHA-256 over the canonical body with only top-level `basis` omitted, exactly the `definitionHash` checked during approval. The [CLI reference](cli.md) lists its options. The API takes `PolicyHashRequest` (`{"body":{...}}`) and returns `PolicyHashResponse` (`{"definitionHash":"sha256:...","problem":null}`); the SDK exposes `PolicyHash` and `PolicyHashAsync`. This POST reads only its supplied body, needs no write authority and writes no records or write ledger. Normal transport authentication still applies. Invalid JSON returns HTTP 400; a non-policy body or a value outside the canonical format returns HTTP 422 with an `invalid` problem and a null hash. Hashing grants no approval and does not validate estate references or installed rule parameters.
 
 `policies check --as-of 2026-11-01T00:00:00Z` previews an explicit canonical UTC instant. `--release <release-id>` selects a recorded release's product, version and exact commit; both options may be combined. The API and MCP arguments are `asOf` and `release`. A missing target is reported as a problem. An instant before a record in the snapshot is unavailable; historical replay requires the historical snapshot. Preview output grants no release authority.
 
-Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and installed kind implementation hashes. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
+Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and registered kind/version compilation identities. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
+
+Each implementation digest is computed from the assembly's simple name and deterministic module version identifier, as specified in [Policy evaluator](policy-evaluator.md). Together with the registered kind and version, it binds the compiled kind, version and module identity that application composition admitted. It is not a hash of installed bytes and does not detect a modified installation; declarations cannot load code or choose an ambient assembly.
 
 Work policies resolve the latest attempt and its current result separately for each current assignment. Parallel assignments can each submit a result. Two latest attempts at the same recorded time within one assignment, or two current results of one attempt, remain unavailable. Exact acceptance of the current work order or of any current assignment's current result settles the work order. Acceptance of a replaced result or an earlier attempt does not settle its successor.
 
@@ -34,6 +39,8 @@ Recurring-duty findings preserve the occurrence, originating policy revision, ex
 The policy section also lists current decisions' exact policy requirements as pending, recorded or unavailable. A requirement stays pending until an authorized declaration or revision cites that exact decision and requirement, matches its definition hash and uses the named prior revision. Matching a policy key alone does not satisfy it. A requirement without an approved definition remains pending design work. Recording the change clears neither a separate obligation nor a review requirement, and a pending requirement creates no release hold by itself. Duty findings are grouped by owner and subject in the human view, retaining every occurrence and proof.
 
 The writing registry reports each active token's original author, reason, scope, match count and matching locations. A count is unknown when the scan is incomplete. Removed entries remain inspectable. Excepted occurrences retain all matching entry references, line numbers and UTF-8 byte offsets. Moving a token within its admitted scope preserves the exception; changing case or matching outside that scope does not. Only warning occurrences of `writing.spacing` can be excepted.
+
+The spacing scan skips text owned by a current, unretired generated declaration: a whole `path` or the files owned by its `pathPattern` in the declared repository. Only `kind: generated` exempts a whole file. In an authored document, only the content between valid markers for its declared generated regions is skipped. Authored lines around those regions and record prose fields keep their usual scan. Generated copies contribute neither spacing warnings nor writing-entry matches; `matches-generator` still checks them against their sources, and other content checks still apply. Check, status, progress and the policy writing evaluation share this rule.
 
 Authoring uses the same acting principal and expected hashes through every transport:
 

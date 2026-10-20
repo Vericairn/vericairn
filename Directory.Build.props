@@ -23,6 +23,7 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/Vericairn/vericairn</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>package-icon.png</PackageIcon>
     <PackageTags>vericairn;community;records;sdk;cli</PackageTags>
     <RepositoryUrl>https://github.com/Vericairn/vericairn</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -37,6 +38,7 @@
   </PropertyGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)docs/nuget-readme.md" Pack="true" PackagePath="/README.md" />
+    <None Include="$(MSBuildThisFileDirectory)brand/package-icon.png" Pack="true" PackagePath="/package-icon.png" />
     <None Include="$(MSBuildThisFileDirectory)NOTICE" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

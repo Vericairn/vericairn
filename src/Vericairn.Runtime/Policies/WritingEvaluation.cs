@@ -34,7 +34,7 @@ internal sealed record WritingEvaluation(string Basis, string Scanner, bool Comp
                 PolicyRepository repository = Repository(basis, inventory.Identity);
                 foreach (PolicyFile file in repository.Files.Where(f => (f.Path.StartsWith("design/", StringComparison.Ordinal) || f.Path.StartsWith("docs/", StringComparison.Ordinal)) && f.Path.EndsWith(".md", StringComparison.Ordinal)))
                 {
-                    try { candidates.AddRange(WritingScanner.Scan(Read(file), file.Path).Select(o => (new WritingLocation("file", repository.Identity, file.Path), o))); }
+                    try { candidates.AddRange(WritingScanner.ScanFile(basis.Model, repository.Identity, Read(file), file.Path).Select(o => (new WritingLocation("file", repository.Identity, file.Path), o))); }
                     catch (PolicyInputException error) { Missing(file.Path, error.Message); }
                 }
             }

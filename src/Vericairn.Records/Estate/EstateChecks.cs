@@ -75,7 +75,7 @@ public static partial class EstateChecks
 
             if (IsTextFile(file))
             {
-                ScanText(file, relative, findings);
+                ScanText(file, relative, findings, model);
             }
         }
 
@@ -153,9 +153,9 @@ public static partial class EstateChecks
         }
     }
 
-    private static void ScanText(string file, string relative, FindingList findings) => ScanText(File.ReadAllBytes(file), relative, findings);
+    private static void ScanText(string file, string relative, FindingList findings, EstateModel model) => ScanText(File.ReadAllBytes(file), relative, findings, model);
 
-    private static void ScanText(byte[] bytes, string relative, FindingList findings)
+    private static void ScanText(byte[] bytes, string relative, FindingList findings, EstateModel? model = null)
     {
         if (Array.IndexOf(bytes, (byte)0) >= 0)
         {
@@ -203,7 +203,9 @@ public static partial class EstateChecks
         }
         else if (relative.EndsWith(".md", StringComparison.Ordinal) && (relative.StartsWith(EstateLayout.DocsDirectory + "/", StringComparison.Ordinal) || relative.StartsWith(EstateLayout.DesignDirectory + "/", StringComparison.Ordinal)))
         {
-            ScanProse(text, relative, findings);
+            if (model is null) ScanProse(text, relative, findings);
+            else
+                foreach (SpacingOccurrence occurrence in WritingScanner.ScanFile(model, model.Manifest?.Estate, text, relative)) findings.Add(occurrence.Diagnostic);
         }
     }
 

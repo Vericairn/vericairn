@@ -38,7 +38,7 @@ public static class GeneratedRegions
         return text.Length == 0 || text.EndsWith('\n') ? text : text + "\n";
     }
 
-    private static (int From, int To)? Find(string text, string id)
+    internal static (int From, int To)? Find(string text, string id)
     {
         if (!ValidMarkers(text)) return null;
         string start = Start(id);

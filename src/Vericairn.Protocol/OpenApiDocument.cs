@@ -21,6 +21,7 @@ public static class OpenApiDocument
         ("GET", "/v1/companions/compare"),
         ("GET", "/v1/estate-policies"),
         ("GET", "/v1/estate-policies/kinds"),
+        ("POST", "/v1/estate-policies/hash"),
         ("GET", "/v1/estate-policies/evaluate"),
         ("GET", "/v1/estate-policies/{key}/view"),
         ("GET", "/v1/writing-exceptions"),
@@ -237,7 +238,7 @@ public static class OpenApiDocument
                 ["title"] = "Vericairn API",
                 ["version"] = ApiVersion.Current,
                 ["description"] = "One versioned API that every client uses. Authority is evaluated by the runtime behind it; a client presents, requests and observes. "
-                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict), "
+                    + "Every response is what the runtime observed, never what a client assumed. Problems carry a stable code (refused, rejected, not-found, invalid, denied, provider, conflict, reconcile-required), "
                     + "a message with the permitted next action and, for rejected records, the findings. "
                     + "Transports: a local socket (Unix domain socket, or a named pipe on Windows) authenticated by operating-system identity, and loopback TLS pinned to the "
                     + "runtime certificate where every request is signed by an admitted device (headers Vericairn-Device, Vericairn-Signed-At, Vericairn-Signature; scheme vericairn-request/1). "
@@ -286,6 +287,20 @@ public static class OpenApiDocument
         {
             responses["200"] = new JsonObject { ["description"] = "ResumeResponse: every difference, or an invalid-handoff problem. This POST is a read; it authors no record." };
         }
+        else if (path == "/v1/estate-policies/hash")
+        {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "PolicyHashResponse: the definitionHash checked by policy approval, with only top-level basis omitted. This POST reads only its input and writes nothing.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PolicyHashResponse" } } },
+            };
+            responses["422"] = new JsonObject
+            {
+                ["description"] = "PolicyHashResponse with an invalid problem and no definitionHash: supply a prepared policy or duty body, without a record envelope.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PolicyHashResponse" } } },
+            };
+            responses["400"] = new JsonObject { ["description"] = "The request is not valid JSON or cannot bind to PolicyHashRequest." };
+        }
         else if (path == "/v1/operator/actions")
         {
             responses["200"] = new JsonObject { ["description"] = "OperatorActionsResponse: text in the selected communication settings, complete canonical JSON (vericairn.operator-actions/1), and hasErrors. Items retain their sources, reasons, waitsOn, inspection command and record-authoring commands with argument arrays and required JSON bodies; null body fields require operator input. No signing or provider access occurs." };
@@ -324,8 +339,13 @@ public static class OpenApiDocument
         }
         else if (method == "POST" && path != "/v1/shutdown" && path != "/v1/objects" && path != "/v1/estate/upgrade" && path != "/v1/estate/export")
         {
+            responses["200"] = new JsonObject
+            {
+                ["description"] = "WriteOutcome with written (path, id, hash): the record was stored. An interrupted companion publication also carries a reconcile-required problem with its recovery action; retain both and never resubmit the stored record.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/WriteOutcome" } } },
+            };
             responses["404"] = new JsonObject { ["description"] = "The subject named does not exist (WriteOutcome with a not-found problem)." };
-            responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with a problem; a rejection carries findings)." };
+            responses["422"] = new JsonObject { ["description"] = "Refused or rejected (WriteOutcome with written null and a problem; a rejection carries findings). A reconcile-required problem without written holds further writes until recovery." };
         }
 
         if (path is "/v1/estate/upgrade" or "/v1/estate/export")
@@ -392,6 +412,13 @@ public static class OpenApiDocument
             return new JsonObject { ["type"] = "object", ["properties"] = props };
         }
 
+        JsonObject policyHashRequest = Object(("body", "object"));
+        policyHashRequest["required"] = new JsonArray("body");
+        JsonObject policyHashResponse = Object(("definitionHash", "string"), ("problem", "object"));
+        policyHashResponse["required"] = new JsonArray("definitionHash", "problem");
+        policyHashResponse["properties"]!["definitionHash"]!["nullable"] = true;
+        policyHashResponse["properties"]!["problem"]!["nullable"] = true;
+
         JsonObject operatorRecordRequest = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"),
             ("supersedes", "string"), ("product", "string"), ("waitSeconds", "integer"), ("reconciliation", "string"));
         operatorRecordRequest["required"] = new JsonArray("type", "by", "body");
@@ -406,6 +433,8 @@ public static class OpenApiDocument
             ["CompanionComparison"] = Object(("version", "integer"), ("status", "string"), ("currentness", "string"), ("snapshot", "string"), ("commit", "string"), ("differences", "array"), ("problems", "array")),
             ["CompanionSource"] = Object(("kind", "string"), ("identity", "string"), ("hash", "string"), ("path", "string"), ("repository", "string"), ("recordType", "string"), ("at", "string"), ("current", "boolean"), ("bytes", "integer")),
             ["PolicyChangeRequest"] = Object(("by", "string"), ("body", "object"), ("expected", "string")),
+            ["PolicyHashRequest"] = policyHashRequest,
+            ["PolicyHashResponse"] = policyHashResponse,
             ["WritingExceptionRemoveRequest"] = Object(("by", "string"), ("expected", "string"), ("reason", "string"), ("basis", "object")),
             ["WorkPlaceRequest"] = Object(("by", "string"), ("expected", "string"), ("expectedSelection", "string"), ("releasePlan", "string"), ("backlog", "string")),
             ["CommunicationSetRequest"] = Object(("by", "string"), ("scope", "string"), ("values", "object"), ("recipient", "string"), ("assignment", "string"), ("expected", "string"), ("authority", "string"), ("basis", "string")),
@@ -469,6 +498,7 @@ public static class OpenApiDocument
     private static string RequestSchema(string path) => path switch
     {
         "/v1/estate-policies" => "PolicyChangeRequest",
+        "/v1/estate-policies/hash" => "PolicyHashRequest",
         "/v1/estate-policies/{key}/revisions" => "PolicyChangeRequest",
         "/v1/estate-policies/{key}/retire" => "PolicyChangeRequest",
         "/v1/estate-policies/{key}/exceptions" => "PolicyChangeRequest",
@@ -544,6 +574,7 @@ public static class OpenApiDocument
         ("GET", "/v1/estate-policies") => "PolicyResponse: declarations, exception history and findings at recorded time, with the explicit basis; creates no record.",
         ("GET", "/v1/estate-policies/{key}/view") => "PolicyResponse for a key or revision id, including recurring-duty deadlines, completion evidence and exceptions.",
         ("GET", "/v1/estate-policies/kinds") => "Installed kind versions, implementation hashes, supported selections, sources and bounds.",
+        ("POST", "/v1/estate-policies/hash") => "PolicyHash: hash a prepared policy or duty body with only basis omitted. Reads only the supplied body, requires no write authority and writes nothing; grants no approval.",
         ("GET", "/v1/estate-policies/evaluate") => "PolicyResponse evaluated from server sources, with optional canonical UTC asOf and exact release record preview; never authorizes submission.",
         ("GET", "/v1/writing-exceptions") => "WritingExceptionsResponse: registry history, authors, reasons, scopes, counts and exact warning and excepted locations with the basis.",
         ("GET", "/v1/writing-exceptions/{id}") => "WritingExceptionsResponse for one entry identity, including removal history and current matches; creates no record.",
