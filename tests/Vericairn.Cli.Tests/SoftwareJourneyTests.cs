@@ -150,6 +150,7 @@ public class SoftwareJourneyTests
             Assert.Single(provider.Dispatches);
             Assert.Equal("0.2.0", provider.Dispatches[0].Inputs["version"]);
             Assert.Equal(2, Directory.EnumerateFiles(Path.Combine(root, "records", "operation"), "*.json", SearchOption.AllDirectories).Count());
+            Assert.Single(submitted.Json.GetProperty("basisEvidence").EnumerateArray());
             Assert.Contains("github-releases:Example/widget:v0.2.0  dispatched", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
 
             // A delayed decision leaves it pending: nothing new is recorded, and a second submit is refused until reconciled.
@@ -296,6 +297,7 @@ public class SoftwareJourneyTests
             string gadget = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "gadget.json", gadgetBody)).Id;
             CliHarness.Outcome submitted = ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--product", gadget, "--version", "1.0.0", "--by", builder);
             Assert.Equal("github-releases:Example/gadget:v1.0.0", submitted.Json.GetProperty("identity").GetString());
+            Assert.Single(submitted.Json.GetProperty("basisEvidence").EnumerateArray());
             DispatchRequest dispatch = Assert.Single(provider.Dispatches);
             Assert.Equal("Example/gadget", dispatch.Destination);
             Assert.Equal("ship.yml", dispatch.Settings["workflow"]);
