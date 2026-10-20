@@ -85,6 +85,14 @@ class McpPackageVerificationTests(unittest.TestCase):
                     verify_mcp_package(self.package)
                 target["version"] = "1.2.3"
 
+    def test_a_description_the_registry_refuses_fails(self):
+        for description in ("", "x" * 101):
+            with self.subTest(length=len(description)):
+                self.manifest["description"] = description
+                self.write()
+                with self.assertRaisesRegex(SystemExit, "description"):
+                    verify_mcp_package(self.package)
+
     def test_both_inputs_must_be_required(self):
         for argument in self.manifest["packages"][0]["packageArguments"][:2]:
             variable = next(iter(argument["variables"].values()))
