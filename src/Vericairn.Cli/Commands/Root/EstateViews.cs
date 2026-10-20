@@ -38,7 +38,7 @@ internal sealed class EstateViews(CommandContext context)
         {
             return context.WithFiles(root, model =>
             {
-                FindingList checks = EstateChecks.Run(model);
+                FindingList checks = EstateChecks.Run(model, CommandProviders.SourceAdapter?.IgnoredEstateEntries(model.Root));
                 context.Output.Write(json ? EstateStatus.RenderJson(model, checks) : EstateStatus.Render(model, checks));
                 return model.Findings.HasErrors || checks.HasErrors ? HasErrors : Clean;
             });

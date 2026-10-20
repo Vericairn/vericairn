@@ -122,7 +122,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         lock (gate)
         {
             EstateModel model = session.Load();
-            ProgressResponse progress = ProgressCore(model, EstateChecks.Run(model));
+            ProgressResponse progress = ProgressCore(model, RepositoryChecks(model));
             JsonObject json = JsonNode.Parse(progress.Json.GetRawText())!.AsObject();
             json["attention"] = JsonSerializer.SerializeToNode(RequiredAttention(model, () => progress), ProtocolJson.Options);
             return progress with { Json = Element(json) };
@@ -2093,7 +2093,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     /// <summary>The estate's checks with this machine's interrupted batches among them, as status, reconcile and inspect show them. Caller holds the gate.</summary>
     private FindingList ChecksWithBatches(EstateModel model)
     {
-        FindingList checks = EstateChecks.Run(model);
+        FindingList checks = RepositoryChecks(model);
         foreach (Finding finding in InterruptedBatches(model))
         {
             checks.Add(finding);
@@ -2101,6 +2101,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         return checks;
     }
+
+    private FindingList RepositoryChecks(EstateModel model) =>
+        EstateChecks.Run(model, Providers.Source("git")?.IgnoredEstateEntries(model.Root));
 
     /// <summary>
     /// The batches this machine began storing and did not finish, each a warning of code batch.incomplete, a reconcile task naming what

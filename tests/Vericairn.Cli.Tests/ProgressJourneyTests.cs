@@ -199,11 +199,19 @@ public class ProgressJourneyTests
         try
         {
             Init(root);
+            ContextJourneyTests.Git(root, "init", "-q");
+            File.WriteAllText(Path.Combine(root, ".gitignore"), ".DS_Store\n");
+            File.WriteAllText(Path.Combine(root, ".DS_Store"), "ignored residue");
+            Assert.Equal(0, CliHarness.Run("--estate", root, "progress").Code);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "status").Code);
+            Assert.Equal(0, CliHarness.Run("--estate", root, "estate", "check").Code);
+
             File.WriteAllText(Path.Combine(root, "scratch.txt"), "not estate content\n");
             CliHarness.Outcome outcome = CliHarness.Run("--estate", root, "progress");
             Assert.Equal(1, outcome.Code);
             Assert.Contains("  Check: 1 error, 0 warnings [every record and the repository, as vericairn estate check runs them]\n    ERROR layout.unexpected scratch.txt: ", outcome.Out, StringComparison.Ordinal);
             Assert.Equal(1, CliHarness.Run("--estate", root, "status").Code);
+            Assert.Equal(1, CliHarness.Run("--estate", root, "estate", "check").Code);
             Assert.Equal(2, CliHarness.Run("--estate", Path.Combine(root, "records"), "progress").Code);
         }
         finally

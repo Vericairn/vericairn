@@ -108,7 +108,7 @@ internal sealed class EstateOperations(CommandContext context)
 
             using EstateSession session = EstateSession.Open(to);
             EstateModel model = session.Load();
-            FindingList checks = EstateChecks.Run(model);
+            FindingList checks = EstateChecks.Run(model, CommandProviders.SourceAdapter?.IgnoredEstateEntries(model.Root));
             if (json)
             {
                 context.Output.WriteLine(JsonSerializer.Serialize(new { summary.Id, summary.Estate, summary.Records, summary.Objects, summary.Documents, restoredTo = Path.GetFullPath(to), errors = model.Findings.Errors + checks.Errors }));
@@ -199,7 +199,7 @@ internal sealed class EstateOperations(CommandContext context)
     private static FindingList Combined(EstateModel model)
     {
         var all = new FindingList();
-        foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model)))
+        foreach (Finding finding in model.Findings.Concat(EstateChecks.Run(model, CommandProviders.SourceAdapter?.IgnoredEstateEntries(model.Root))))
         {
             all.Add(finding);
         }
