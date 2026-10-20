@@ -36,14 +36,14 @@ public static class PolicyAdoptionJourney
         public virtual void Dispose() { GC.SuppressFinalize(this); }
     }
 
-    public static void Run(Func<EstateService, Surface> connect)
+    public static void Run(Func<EstateService, Surface> connect, int recheckSeconds = 0)
     {
         using var f = new Fixture();
         using Surface surface = connect(f.Api);
         f.Surface = surface;
         f.Adopt();
         f.InitialViewsAndWriting();
-        RecordEnvelope publication = f.PublicationAndDevlog();
+        RecordEnvelope publication = f.PublicationAndDevlog(recheckSeconds);
         f.CompleteInitialDuties(publication);
         f.CarriedDebt();
         f.Records.AssertValid();
@@ -241,7 +241,7 @@ public static class PolicyAdoptionJourney
         }
         private JsonObject Paths(params string[] paths) => new() { ["paths"] = new JsonArray(new JsonObject { ["repository"] = Records.Estate.Estate.Id, ["selectors"] = Strings(paths) }) };
 
-        internal RecordEnvelope PublicationAndDevlog()
+        internal RecordEnvelope PublicationAndDevlog(int recheckSeconds)
         {
             At(Start.AddHours(1));
             RecordEnvelope candidate = Candidate("0.8.0");
@@ -290,9 +290,28 @@ public static class PolicyAdoptionJourney
             Records.Add("review", new() { ["independence"] = "operator", ["outcome"] = "pass", ["summary"] = "Reviewed the exact Internal draft.", ["findings"] = new JsonArray() }, subject: pin.Reference);
             Advance();
             Assert.Equal("satisfied", Assert.Single(Surface.Evaluate(Stamp(Time.Now), next.Id).Findings, f => f.PolicyKey == "release-devlog").Verdict);
-            ReleaseResponse admitted = Surface.Submit(request);
+            Api.ReleaseBoundary = _ => Time.Now = Time.Now.AddSeconds(recheckSeconds);
+            provider.OnDispatch = () =>
+            {
+                Assert.Equal(0, provider.Calls);
+                RecordEnvelope intent = Assert.Single(Model.OfType("operation"));
+                Assert.Equal("not-started", EstateModel.BodyString(intent, "status"));
+                Assert.Single(intent.Body.GetProperty("evidence").EnumerateArray());
+            };
+            ReleaseResponse admitted;
+            try { admitted = Surface.Submit(request); }
+            finally { Api.ReleaseBoundary = null; provider.OnDispatch = null; }
             Assert.True(admitted.Ok, admitted.Message);
             Assert.Equal(1, provider.Calls);
+            Assert.Equal(2, Model.OfType("operation").Count());
+            ReleaseBasisEvidence retained = Api.ReleaseBasis(Assert.Single(admitted.BasisEvidence!))!.Evidence;
+            PolicyFindingDto age = Assert.Single(retained.Policies.Findings, f => f.PolicyKey == "planned-age" && f.Actual.EndsWith(" elapsed seconds.", StringComparison.Ordinal));
+            PolicyFindingDto fresh = Assert.Single(admitted.Policies!.Findings, f => f.PolicyKey == age.PolicyKey && f.Item == age.Item && f.Target == age.Target);
+            Assert.Equal(age.Verdict, fresh.Verdict);
+            Assert.Equal(age.ReleaseHold, fresh.ReleaseHold);
+            Assert.Equal(recheckSeconds == 0, age.Actual == fresh.Actual);
+            Assert.Equal(retained.Basis.RecordDigest, admitted.Policies.Basis.RecordDigest);
+            Assert.Equal(recheckSeconds == 0, retained.Basis.Digest == admitted.Policies.Basis.Digest);
             return publication;
         }
         private RecordEnvelope Candidate(string version)
@@ -410,10 +429,11 @@ public static class PolicyAdoptionJourney
     private sealed class JourneyProvider(Clock clock) : IReleaseProvider
     {
         internal int Calls { get; private set; }
+        internal Action? OnDispatch { get; set; }
         public string Provider => "github-releases";
         public ProviderDescriptor Descriptor => new FakeReleaseProvider().Descriptor;
         public string? ResolveCommit(string destination, IReadOnlyDictionary<string, string> settings) => throw new InvalidOperationException("No provider resolution is allowed in this journey.");
-        public DispatchReceipt Dispatch(DispatchRequest request) { Calls++; return new("fixture-run", "https://example.invalid/run", "Synthetic dispatch only.", RecordParser.FormatTimestamp(clock.Now)); }
+        public DispatchReceipt Dispatch(DispatchRequest request) { OnDispatch?.Invoke(); Calls++; return new("fixture-run", "https://example.invalid/run", "Synthetic dispatch only.", RecordParser.FormatTimestamp(clock.Now)); }
         public RunObservation? ObserveRun(string destination, string runId) => throw new InvalidOperationException("No provider observations are allowed.");
         public ReleaseObservation? ObserveRelease(string destination, string tag, IReadOnlyDictionary<string, string> settings) => throw new InvalidOperationException("No provider observations are allowed.");
         public string ManualPublicationCommand(string destination, string tag) => throw new InvalidOperationException("No publication is allowed.");
@@ -424,6 +444,8 @@ public static class PolicyAdoptionJourney
 [Collection("policy-sources")]
 public sealed class PolicyAdoptionJourneyTests
 {
-    [Fact]
-    public void InitialAdoptionRetainsEveryWarningReviewAndMissedOccurrence() => PolicyAdoptionJourney.Run(api => new(api));
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void InitialAdoptionRetainsEveryWarningReviewAndMissedOccurrence(int recheckSeconds) => PolicyAdoptionJourney.Run(api => new(api), recheckSeconds);
 }
