@@ -21,6 +21,7 @@ class CompanionBuildTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(shutil.which("git"), "Missing prerequisite: git for the companion source inventory.")
         self.assertIsNotNone(shutil.which("dotnet"), "Missing prerequisite: dotnet must be installed for the companion build tests.")
+        self.assertIsNotNone(shutil.which("ruby"), "Missing prerequisite: Ruby for the retained workflow source adapter.")
         self.assertTrue(TOOL.is_file(), "Missing prerequisite: the Release build of Vericairn.DocsTool.")
         self.temporary = tempfile.TemporaryDirectory(prefix="companion-build-", dir=ROOT / "artifacts")
         self.root = Path(self.temporary.name)
