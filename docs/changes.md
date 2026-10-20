@@ -32,6 +32,17 @@ from whichever checks happen to be present. An empty declaration authorizes no
 merge. The operation pins the product and repository record hashes as well as
 the commit, so its evidence remains intelligible after a declaration changes.
 
+`operator record` carries the operator's signed record through this checked
+change flow. It writes and commits the record together with every member required
+by the estate's declared generated registers, using the same generators as
+`records new` and the estate check. A decision or release therefore includes its
+declared register member in the head checked by the pull request. The commit
+check requires exactly the record and its members, with their expected bytes;
+extra files, missing members and changed members are refused. Resuming with the
+same input reuses the stored signed record and members without signing or
+committing again. Operation receipts remain separate, uncommitted records.
+See [Operator actions](operator-actions.md) for prerequisites and recovery.
+
 ## Push and open
 
 ```sh
