@@ -557,9 +557,31 @@ the exact accepted draft. Changing both assets and their checksum file would not
 
 From 0.7.2, CI checks every workflow's external action and reusable-workflow reference against
 `.github/workflows/actions.allow`, requiring a full commit SHA. Tags, short hashes, expressions, local
-and container references are refused. This checks the repository's declared list, not the organization's
-live Actions settings. The NuGet pull-request job builds packages and symbols, writes checksums and runs
-the same verifier used by publication, without a NuGet login, identity-token permission or upload.
+actions and container references are refused; from 0.8.1 a reusable workflow beside the others in
+`.github/workflows` is allowed, since the same check covers it. This checks the repository's declared list,
+not the organization's live Actions settings.
+
+From 0.8.1 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
+`release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no
+release-only step can first fail during a release. It checks the version, restores locked, compares the
+documentation set with the build over the full history, packs, publishes the self-contained command line and
+Workbench for six platforms, writes the bill of materials, the documentation archive, the readable build
+reports, the checksums and the notes, and runs the same package verifier publication uses. Until release
+preparation writes a version's own set, and while `VersionPrefix` still names a released, frozen set, a
+change compares a provisional set generated from its own build instead; a release requires its own set.
+The path creates no tag, release or upload and holds only a read token. `release.yml`'s draft job alone
+creates the draft: it holds the write token, in that one step, and checks nothing out. Every checkout drops
+its credentials, and every workflow input reaches a script through an environment variable, never
+interpolated into it. `nuget.yml` has no pull-request trigger, so no pull request reports its skipped job.
+
+The self-contained publishes restore locked from committed runtime-specific lock files:
+`packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and
+Workbench ship, for the six platforms. Ordinary builds and the NuGet packages keep the portable graph. After a
+dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
+`-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
+stale ones. The bill of materials is generated from those restores without restoring again, so it describes
+the packages and every platform graph of the distributables, and a check confirms it names every package
+their lock files hold. Every tool the path installs is pinned to an exact version.
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and

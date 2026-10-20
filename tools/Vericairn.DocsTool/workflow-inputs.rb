@@ -18,7 +18,8 @@ load File.join(root, parser)
 module CaptureWorkflowUses
   attr_accessor :uses
 
-  def visit(node, file, allowed, errors)
+  # The checker's own further arguments pass through unchanged.
+  def visit(node, file, allowed, errors, *rest)
     if node.is_a?(Psych::Nodes::Mapping)
       node.children.each_slice(2) do |key, value|
         next unless key.is_a?(Psych::Nodes::Scalar) && key.value == 'uses'

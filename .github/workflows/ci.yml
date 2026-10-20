@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - name: Check the workflow action allow-list and full commit pins
         run: ruby .github/scripts/check-workflow-actions.rb
       - name: Test workflow policy and package verification
@@ -30,6 +32,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           global-json-file: global.json
@@ -137,17 +141,10 @@ jobs:
               dotnet("add", project, "package", "Vericairn", "--version", version, "--no-restore")
               dotnet("restore", project, "--source", feed, "--configfile", config, "-p:NuGetAudit=false")
               dotnet("build", project, "--no-restore", "--configuration", "Release")
-      - name: Publish the single-file applications
-        # The release ships the command line and Workbench as self-contained single files. Publishing them here runs the
-        # single-file analyzer on every change, which an ordinary build does not; 0.8.0's release build first found it.
-        if: runner.os == 'Linux' && matrix.share == 1
-        shell: bash
-        run: |
-          set -eu
-          for project in src/Vericairn.Cli/Vericairn.Cli.csproj src/Vericairn.Workbench/Vericairn.Workbench.csproj; do
-            dotnet publish "$project" --configuration Release --runtime linux-x64 --self-contained \
-              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:RestoreLockedMode=false \
-              --output "$RUNNER_TEMP/single-file/$(basename "$project" .csproj)" --nologo --verbosity quiet
-          done
-          # Runtime-specific restores rewrite the lock files in the working tree; the repository's lock files are the truth.
-          git checkout -- $(git ls-files '*packages.lock.json')
+
+  package:
+    # The release's packaging path on every change, everything but the draft: release.yml runs the same package.yml. It runs
+    # beside the tests rather than after them, so it adds no time to the run's critical path.
+    uses: ./.github/workflows/package.yml
+    with:
+      release: false

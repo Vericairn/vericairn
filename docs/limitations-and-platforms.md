@@ -623,7 +623,7 @@ The workflow is configured to produce:
 |---|---|
 | `vericairn-0.8.0-<platform>.tar.gz` (`.zip` on Windows), six platforms | Self-contained CLI, LICENSE, NOTICE, notices and `licenses/`; macOS includes `bin/vericairn-enclave` |
 | `vericairn-workbench-0.8.0-<platform>.tar.gz` (`.zip` on Windows), six platforms | Workbench with the CLI, macOS helper where applicable, and license material |
-| `vericairn-0.8.0-sbom.cdx.json` | CycloneDX bill of materials |
+| `vericairn-0.8.0-sbom.cdx.json` | CycloneDX bill of materials; from 0.8.1 it also covers every platform graph of the self-contained distributables |
 | `vericairn-0.8.0-THIRD-PARTY-NOTICES.md` | Third-party notices |
 | `vericairn-0.8.0-docs.zip` | This documentation set, including the estate-derived release notes and their recorded window |
 | `dotnet-vc.0.8.0.nupkg` | Portable .NET tool, invoked as `dotnet vc`; no Workbench or macOS helper |

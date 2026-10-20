@@ -22,4 +22,4 @@ Vericairn Community is licensed under the Apache License 2.0. Its distributables
 
 The two fonts are embedded in Workbench's executable. As the SIL Open Font License 1.1 requires, their copyright notices and the license travel with every copy, in each Workbench archive's `licenses/` directory; their source is `src/Vericairn.Workbench/Assets/Fonts`.
 
-Used to build or test Vericairn and not distributed: xunit.v3 and Microsoft.Testing.Platform (Apache-2.0 and MIT), Avalonia.Headless (MIT), Avalonia.BuildServices (MIT, build time only), and the WebAssembly native assets of SkiaSharp and HarfBuzzSharp, which no desktop archive contains.
+Used to build or test Vericairn and not distributed: xunit.v3 and Microsoft.Testing.Platform (Apache-2.0 and MIT), Avalonia.Headless (MIT), Avalonia.BuildServices (MIT, build time only), Microsoft.NET.ILLink.Tasks (MIT, the single-file and trimming analyzers the distributables' publish loads, build time only), and the WebAssembly native assets of SkiaSharp and HarfBuzzSharp, which no desktop archive contains.

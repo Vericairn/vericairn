@@ -31,28 +31,32 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void PullRequestsVerifyBuiltNugetPackagesWithoutPublication()
+    public void ThePackagingPathVerifiesThePackagesAndNugetRunsOnlyForPublication()
     {
-        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "nuget.yml"));
-        Assert.Contains("\n  pull_request:\n", Block(workflow, "on:", 0), StringComparison.Ordinal);
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        string workflow = Read(Path.Combine(workflows, "nuget.yml"));
+        // A job skipped on every pull request is a check that never passes, which a checked merge refuses.
+        string triggers = Block(workflow, "on:", 0);
+        Assert.DoesNotContain("pull_request", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  release:\n", triggers, StringComparison.Ordinal);
+        Assert.Contains("\n  workflow_dispatch:\n", triggers, StringComparison.Ordinal);
         Assert.DoesNotContain("id-token", Block(workflow, "permissions:", 0), StringComparison.Ordinal);
-        string verify = Block(workflow, "verify:", 2);
-        Assert.Contains("if: github.event_name == 'pull_request'", verify, StringComparison.Ordinal);
-        Assert.Contains("dotnet restore --locked-mode", verify, StringComparison.Ordinal);
-        Assert.Contains("dotnet pack --no-restore --configuration Release --output packages -warnaserror", verify, StringComparison.Ordinal);
-        Assert.Contains("SHA256SUMS", verify, StringComparison.Ordinal);
-        Assert.Contains("hashlib.file_digest(content, \"sha256\")", verify, StringComparison.Ordinal);
-        const string verifier = "python3 .github/scripts/verify-packages.py packages";
-        Assert.Contains(verifier, verify, StringComparison.Ordinal);
-        Assert.DoesNotContain("NuGet/login", verify, StringComparison.Ordinal);
-        Assert.DoesNotContain("nuget push", verify, StringComparison.Ordinal);
-        Assert.DoesNotContain("id-token", verify, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n  verify:\n", workflow, StringComparison.Ordinal);
+        const string verifier = "python3 .github/scripts/verify-packages.py";
         string publish = Block(workflow, "publish:", 2);
         Assert.Contains("if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'", publish, StringComparison.Ordinal);
         Assert.Contains("id-token: write", publish, StringComparison.Ordinal);
-        Assert.Contains(verifier, publish, StringComparison.Ordinal);
+        Assert.Contains(verifier + " packages", publish, StringComparison.Ordinal);
         Assert.True(publish.IndexOf(verifier, StringComparison.Ordinal) < publish.IndexOf("NuGet/login@", StringComparison.Ordinal));
         Assert.DoesNotContain("dotnet pack", publish, StringComparison.Ordinal);
+
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        Assert.Contains("dotnet restore --locked-mode", package, StringComparison.Ordinal);
+        Assert.Contains("dotnet pack --no-restore --configuration Release --output dist", package, StringComparison.Ordinal);
+        Assert.Contains(verifier + " dist", package, StringComparison.Ordinal);
+        Assert.True(package.IndexOf("sha256sum * > SHA256SUMS", StringComparison.Ordinal) < package.IndexOf(verifier, StringComparison.Ordinal));
+        foreach (string forbidden in new[] { "NuGet/login", "nuget push", "id-token", "gh release" })
+            Assert.DoesNotContain(forbidden, package, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -139,9 +143,9 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
-    public void TheReleasePackageJobChecksOutTheHistoryItsDocumentationComparisonReads()
+    public void ThePackageJobChecksOutTheHistoryItsDocumentationComparisonReads()
     {
-        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml")), "package:", 2);
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml")), "package:", 2);
 
         // A set's references are pinned to the commit that generated them, and the comparison proves that the release commit's
         // build sources agree with that commit; a shallow checkout lacks it, so 0.8.0's first release run stopped there.
@@ -149,12 +153,17 @@ public class ContinuousIntegrationTests
         int history = package.IndexOf("\n          fetch-depth: 0\n", StringComparison.Ordinal);
         int compare = package.IndexOf("--project tools/Vericairn.DocsTool -- compare", StringComparison.Ordinal);
         Assert.True(checkout > 0 && history > checkout && compare > history, "The package job checks out the complete history before it compares the documentation set.");
+        // A release needs its own, unfrozen set; a change compares a provisional set generated from its build.
+        string docs = Block(package, "- name: Check the documentation set", 6);
+        Assert.Contains("docs check \"$docs\" --documents docs/releases/documents.json", docs, StringComparison.Ordinal);
+        Assert.Contains("elif [ \"$RELEASE\" = true ]; then", docs, StringComparison.Ordinal);
+        Assert.Contains("-- generate --out \"$docs\"", docs, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheReleaseBillOfMaterialsUsesAPinnedToolAtASpecificationTheComponentsReportReads()
+    public void TheBillOfMaterialsUsesAPinnedToolAndDescribesWhatTheDistributablesShip()
     {
-        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml")), "package:", 2);
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml")), "package:", 2);
 
         // The components report reads CycloneDX specifications 1.2 to 1.6. The tool, installed unpinned, moved to 1.7 by default,
         // so 0.8.0's third release run stopped retaining its readable build reports.
@@ -162,21 +171,87 @@ public class ContinuousIntegrationTests
         Assert.True(step > 0, "The package job writes the software bill of materials.");
         string sbom = package[step..package.IndexOf("- name: Documentation set", step, StringComparison.Ordinal)];
         Assert.Matches(@"dotnet tool install --global CycloneDX --version \d+\.\d+\.\d+\n", sbom);
-        Assert.Contains(" --spec-version 1.6\n", sbom, StringComparison.Ordinal);
+        Assert.Contains(" --spec-version 1.6 --disable-package-restore\n", sbom, StringComparison.Ordinal);
+        // Until 0.8.1 the bill described the solution's locked portable graph while the bundles were resolved live and discarded.
+        Assert.True(package.IndexOf("- name: Restore the distributables (locked)", StringComparison.Ordinal) < step);
+        Assert.Contains("python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json", sbom, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PullRequestsPublishTheSingleFileApplicationsTheReleaseShips()
+    public void EveryChangeRunsTheReleasesPackagingPathFromItsLockedPlatformGraphs()
     {
-        string job = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), "build-test:", 2);
-        int step = job.IndexOf("- name: Publish the single-file applications", StringComparison.Ordinal);
-        Assert.True(step > 0, "The build-test job publishes the single-file applications, so the single-file analyzer runs on every change.");
-        string publish = job[step..];
-        Assert.Contains("-p:PublishSingleFile=true", publish, StringComparison.Ordinal);
-        Assert.Contains("src/Vericairn.Cli/Vericairn.Cli.csproj", publish, StringComparison.Ordinal);
-        Assert.Contains("src/Vericairn.Workbench/Vericairn.Workbench.csproj", publish, StringComparison.Ordinal);
-        Assert.Contains("git checkout -- $(git ls-files '*packages.lock.json')", publish, StringComparison.Ordinal);
-        Assert.DoesNotContain("continue-on-error", publish, StringComparison.Ordinal);
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        // One definition: a release-only step cannot first fail during a release, as three of 0.8.0's release runs did.
+        string ci = Block(Read(Path.Combine(workflows, "ci.yml")), "package:", 2);
+        Assert.Contains("    uses: ./.github/workflows/package.yml\n", ci, StringComparison.Ordinal);
+        Assert.Contains("      release: false\n", ci, StringComparison.Ordinal);
+        Assert.DoesNotContain("needs:", ci, StringComparison.Ordinal);
+        string release = Block(Read(Path.Combine(workflows, "release.yml")), "package:", 2);
+        Assert.Contains("    uses: ./.github/workflows/package.yml\n", release, StringComparison.Ordinal);
+        Assert.Contains("      release: true\n", release, StringComparison.Ordinal);
+        Assert.DoesNotContain("Publish the single-file applications", Read(Path.Combine(workflows, "ci.yml")), StringComparison.Ordinal);
+
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        string restore = Block(package, "- name: Restore the distributables (locked)", 6);
+        Assert.Contains("--locked-mode -p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true", restore, StringComparison.Ordinal);
+        foreach (string step in new[] { "- name: Publish self-contained distributables", "- name: Publish Workbench distributables" })
+        {
+            string publish = Block(package, step, 6);
+            Assert.Contains("--no-restore", publish, StringComparison.Ordinal);
+            Assert.Contains("-p:VericairnDistributable=true -p:PublishSingleFile=true", publish, StringComparison.Ordinal);
+            Assert.DoesNotContain("RestoreLockedMode=false", publish, StringComparison.Ordinal);
+            Assert.DoesNotContain("git checkout --", publish, StringComparison.Ordinal);
+        }
+        Assert.Contains("git diff --exit-code -- '*.lock.json'", package, StringComparison.Ordinal);
+        foreach (string project in new[] { "Vericairn.Cli", "Vericairn.Workbench" })
+        {
+            using System.Text.Json.JsonDocument locks = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(RepositoryRoot(), "src", project, "packages.distributable.lock.json")));
+            foreach (string rid in new[] { "linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64" })
+                Assert.True(locks.RootElement.GetProperty("dependencies").TryGetProperty("net10.0/" + rid, out _), $"{project} locks its {rid} graph.");
+        }
+    }
+
+    [Fact]
+    public void EveryCheckoutKeepsNoCredentialsAndOnlyTheDraftStepCanWrite()
+    {
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        foreach (string file in Directory.GetFiles(workflows, "*.yml"))
+        {
+            string text = Read(file);
+            foreach (string checkout in Steps(text).Where(step => step.Contains("uses: actions/checkout@", StringComparison.Ordinal)))
+                Assert.Contains("persist-credentials: false", checkout, StringComparison.Ordinal);
+            if (Path.GetFileName(file) != "release.yml") Assert.DoesNotContain("contents: write", text, StringComparison.Ordinal);
+        }
+
+        string release = Read(Path.Combine(workflows, "release.yml"));
+        Assert.Single(release.Split('\n'), line => line.Trim() == "contents: write");
+        string draft = Block(release, "draft:", 2);
+        Assert.Contains("      contents: write\n", draft, StringComparison.Ordinal);
+        Assert.DoesNotContain("actions/checkout", draft, StringComparison.Ordinal);
+        Assert.Contains("GH_TOKEN: ${{ github.token }}", Block(draft, "- name: Create the draft release", 6), StringComparison.Ordinal);
+        Assert.Single(release.Split('\n'), line => line.Contains("github.token", StringComparison.Ordinal));
+        Assert.DoesNotContain("github.token", Read(Path.Combine(workflows, "package.yml")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoWorkflowInterpolatesAnInputOrEventValueIntoAScript()
+    {
+        // 0.8.0's package job interpolated the dispatch input version unquoted into a bash step.
+        foreach (string file in Directory.GetFiles(Path.Combine(RepositoryRoot(), ".github", "workflows"), "*.yml"))
+            foreach (string script in Scripts(Read(file)))
+                foreach (string untrusted in new[] { "${{ inputs.", "${{ github.event", "${{ github.head_ref", "${{ secrets.", "${{ vars.", "${{ steps." })
+                    Assert.False(script.Contains(untrusted, StringComparison.Ordinal), $"{Path.GetFileName(file)} interpolates {untrusted} into a script.");
+    }
+
+    [Fact]
+    public void EveryToolThePackagingPathInstallsIsPinned()
+    {
+        string package = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml"));
+        string[] installs = package.Split('\n').Where(line => line.TrimStart().StartsWith("dotnet tool install", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(installs);
+        Assert.All(installs, line => Assert.Matches(@"--version \d+\.\d+\.\d+\s*$", line));
+        foreach (string unpinned in new[] { "pip install", "npm install", "npx ", "apt-get install", "brew install", "curl ", "wget " })
+            Assert.DoesNotContain(unpinned, package, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -242,10 +317,6 @@ public class ContinuousIntegrationTests
             Assert.Contains("        if: matrix.share == 1\n", step, StringComparison.Ordinal);
             Assert.Single(steps.Split('\n'), line => line == "      - name: " + name);
         }
-
-        // The existing single-file analyzer check runs once, on Linux, after the tests and local-feed check.
-        string publish = Block(steps, "- name: Publish the single-file applications", 6);
-        Assert.Contains("        if: runner.os == 'Linux' && matrix.share == 1\n", publish, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -283,11 +354,43 @@ public class ContinuousIntegrationTests
     [Fact]
     public void TheReleaseEvidenceWaitsForEveryPlatformAndShare()
     {
-        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml"));
-        string package = Block(workflow, "package:", 2);
-        Assert.Contains("\n    needs: [verify, enclave-helper]\n", package, StringComparison.Ordinal);
+        string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
+        string release = Read(Path.Combine(workflows, "release.yml"));
+        Assert.Contains("\n    needs: [verify]\n", Block(release, "package:", 2), StringComparison.Ordinal);
+        Assert.Contains("\n    needs: [package]\n", Block(release, "draft:", 2), StringComparison.Ordinal);
+        Assert.DoesNotContain("always()", release, StringComparison.Ordinal);
+        string package = Block(Read(Path.Combine(workflows, "package.yml")), "package:", 2);
+        Assert.Contains("\n    needs: [enclave-helper]\n", package, StringComparison.Ordinal);
         Assert.DoesNotContain("always()", package, StringComparison.Ordinal);
         Assert.Contains("built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform.", package, StringComparison.Ordinal);
+    }
+
+    /// <summary>Each step of a workflow: from its "- " line to the next step or the end of its job.</summary>
+    private static IEnumerable<string> Steps(string yaml)
+    {
+        string[] lines = yaml.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (!lines[i].TrimStart().StartsWith("- ", StringComparison.Ordinal) || !lines[i].StartsWith("      - ", StringComparison.Ordinal)) continue;
+            int end = i + 1;
+            while (end < lines.Length && (lines[end].Length == 0 || lines[end].StartsWith("        ", StringComparison.Ordinal))) end++;
+            yield return string.Join('\n', lines[i..end]);
+        }
+    }
+
+    /// <summary>Every script a workflow runs: each run value, inline or as a block.</summary>
+    private static IEnumerable<string> Scripts(string yaml)
+    {
+        string[] lines = yaml.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            string trimmed = lines[i].TrimStart();
+            if (!trimmed.StartsWith("run:", StringComparison.Ordinal)) continue;
+            int indent = lines[i].Length - trimmed.Length;
+            int end = i + 1;
+            while (end < lines.Length && (lines[end].Length == 0 || lines[end].TakeWhile(c => c == ' ').Count() > indent)) end++;
+            yield return string.Join('\n', lines[i..end]);
+        }
     }
 
     private static string Read(string path) => File.ReadAllText(path).Replace("\r\n", "\n", StringComparison.Ordinal);
