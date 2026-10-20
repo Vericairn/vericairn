@@ -22,6 +22,7 @@ public static class PolicyAdoptionJourney
 {
     public class Surface(IEstateApi api) : IDisposable
     {
+        public virtual PolicyHashResponse Hash(PolicyHashRequest request) => api.PolicyHash(request);
         public virtual WriteOutcome DeclarePolicy(PolicyChangeRequest request) => api.PolicyDeclare(request);
         public virtual WriteOutcome Except(string key, PolicyChangeRequest request) => api.PolicyExcept(key, request);
         public virtual WriteOutcome WritingAdd(PolicyChangeRequest request) => api.WritingExceptionAdd(request);
@@ -153,8 +154,19 @@ public static class PolicyAdoptionJourney
         }
         private void Declare(JsonObject body)
         {
+            int before = Model.Records.Count;
+            PolicyHashResponse prepared = Surface.Hash(new(PolicyFixture.Element(body)));
+            Assert.Null(prepared.Problem);
+            Assert.NotNull(prepared.DefinitionHash);
+            Assert.Equal(prepared, Api.PolicyHash(new(PolicyFixture.Element(body))));
+            var changed = (JsonObject)body.DeepClone();
+            changed["title"] = "A changed definition";
+            Assert.NotEqual(prepared.DefinitionHash, Surface.Hash(new(PolicyFixture.Element(changed))).DefinitionHash);
+            Assert.Equal(before, Model.Records.Count);
             RecordEnvelope approval = Records.Approve(body);
+            Assert.Equal(prepared.DefinitionHash, approval.Body.GetProperty("policies")[0].GetProperty("definitionHash").GetString());
             body["basis"] = new JsonArray(new JsonObject { ["decision"] = PolicyFixture.Ref(approval), ["requirement"] = "definition" });
+            Assert.Equal(prepared, Surface.Hash(new(PolicyFixture.Element(body))));
             Advance();
             JsonElement json = PolicyFixture.Element(body);
             RecordWritten written = Ok(Surface.DeclarePolicy(new(Operator, json, PolicyBasis.Hash(json))));

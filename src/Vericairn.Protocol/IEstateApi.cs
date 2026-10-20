@@ -45,6 +45,9 @@ public partial interface IEstateApi
     /// <summary>Read PolicyKinds; returns server-derived evidence and creates no record.</summary>
     IReadOnlyList<PolicyKindDto> PolicyKinds() => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
 
+    /// <summary>Hash a prepared policy or duty body with only basis omitted; reads no estate state, writes nothing and requires no write authority.</summary>
+    PolicyHashResponse PolicyHash(PolicyHashRequest request) => throw new NotSupportedException("Policy hashing is not supported by this API implementation.");
+
     /// <summary>Read PolicyEvaluate; returns server-derived evidence and creates no record.</summary>
     PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null) => throw new NotSupportedException("Policy reads are not supported by this API implementation.");
 

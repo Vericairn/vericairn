@@ -69,6 +69,7 @@ public sealed class SdkOperationsTests
     [InlineData("kinds")]
     [InlineData("evaluate")]
     [InlineData("access")]
+    [InlineData("hash")]
     public async Task PolicyKeysCannotCollideWithNamedReadRoutes(string key)
     {
         using var client = Client((request, _) =>
@@ -79,6 +80,23 @@ public sealed class SdkOperationsTests
         Assert.Null(client.Policy(key));
         Assert.Null(await client.PolicyAsync(key, TestContext.Current.CancellationToken));
         Assert.Null(new CancellationBoundApi(client, TestContext.Current.CancellationToken).Policy(key));
+    }
+
+    [Fact]
+    public async Task InterruptedPolicyHashIsAReadWithNoUncertainEffect()
+    {
+        using var client = Client((request, _) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/v1/estate-policies/hash", request.RequestUri!.AbsolutePath);
+            throw new HttpRequestException("The fixture transport is unavailable.");
+        });
+        var body = new PolicyHashRequest(JsonSerializer.SerializeToElement(new { }));
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
+            client.PolicyHashAsync(body, TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
+        Assert.False(Assert.Throws<ClientUnavailableException>(() =>
+            new CancellationBoundApi(client, TestContext.Current.CancellationToken).PolicyHash(body)).OutcomeUnknown);
     }
 
     [Theory]
@@ -173,7 +191,7 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(94, synchronous.Length);
+        Assert.Equal(95, synchronous.Length);
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];

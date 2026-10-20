@@ -39,6 +39,9 @@ public sealed partial class EstateService
         new PolicyKindDto(r.Kind, r.Version, r.ImplementationDigest, r.Selections, r.SourceContracts, r.MaximumRecords, r.MaximumFindings)).ToArray();
 
     /// <inheritdoc />
+    public PolicyHashResponse PolicyHash(PolicyHashRequest request) => PolicyPreparation.Hash(request);
+
+    /// <inheritdoc />
     public PolicyResponse PolicyEvaluate(string? asOf = null, string? release = null)
     {
         lock (gate) return PolicyRead(session.Load(), asOf, release);

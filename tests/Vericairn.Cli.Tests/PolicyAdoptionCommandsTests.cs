@@ -40,6 +40,12 @@ public sealed class PolicyAdoptionCommandsTests
             }
             finally { Directory.Delete(directory, recursive: true); }
         }
+        public override PolicyHashResponse Hash(PolicyHashRequest request)
+        {
+            string directory = CliHarness.TempDirectory("policy-hash-body");
+            try { return Read<PolicyHashResponse>("policies", "hash", "--body", CliHarness.WriteJson(directory, "body.json", request.Body.GetRawText())); }
+            finally { Directory.Delete(directory, recursive: true); }
+        }
         public override WriteOutcome DeclarePolicy(PolicyChangeRequest request) => Write(request.Body.GetRawText(), "policies", "declare", "--by", request.By);
         public override WriteOutcome Except(string key, PolicyChangeRequest request) => Write(request.Body.GetRawText(), "policies", "except", key, "--by", request.By, "--expected", request.Expected);
         public override WriteOutcome WritingAdd(PolicyChangeRequest request) => Write(request.Body.GetRawText(), "estate", "writing-exceptions", "add", "--by", request.By);
