@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 6, October 19, 2026. Link the operating guide and exact first-party adoption proposals alongside the implemented surfaces.
+Revision 7, October 20, 2026. Locate reference coverage in the selected release's documentation set and state its build binding.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -22,6 +22,10 @@ The single-policy route ends in `/view` so valid keys such as `kinds`, `evaluate
 `policies check --as-of 2026-11-01T00:00:00Z` previews an explicit canonical UTC instant. `--release <release-id>` selects a recorded release's product, version and exact commit; both options may be combined. The API and MCP arguments are `asOf` and `release`. A missing target is reported as a problem. An instant before a record in the snapshot is unavailable; historical replay requires the historical snapshot. Preview output grants no release authority.
 
 Without either option, the basis uses the greatest valid timestamp in the observed records and labels it recorded time. An idle estate's recorded-time view can therefore precede today's deadline. The basis identifies its record digest, time origin, repository inventories, content hashes, retained object hashes and installed kind implementation hashes. Missing kinds, unsupported versions, inaccessible sources and incomplete inventories stay visible as unavailable.
+
+Reference coverage reads `referenceManifest` relative to `docs/releases/<version>/` in the product repository at the selected commit. With `referenceManifest: reference-inventory.json`, it reads that inventory and its three sibling references, `cli-reference.md`, `record-reference.md` and `api-reference.md`. Status and previews without a release target select the estate's pinned publication's version and commit. A submission or named release preview selects the candidate's version and commit.
+
+The inventory names the source commit used to generate the references. A later documentation commit may retain that set only when both commits are locally available and their complete build source trees agree: `src`, `tools`, `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`, `global.json`, `Vericairn.slnx`, `.gitattributes` and `NuGet.Config`. The Git source captures this comparison before evaluation, without fetching or building. Missing source commits, changed build trees, incomplete observations or inconsistent reference bytes make coverage unavailable, with no partial item count.
 
 Recurring-duty findings preserve the occurrence, originating policy revision, examined subject revision, due time, grace deadline, completion flag and time, missed history, late duration and exact result, review and proof references. A scheduled or within-grace occurrence has not been completed. An excepted occurrence retains its unmet verdict and its debt. Exception history includes expiry, revocations and the exact submission restrictions.
 
