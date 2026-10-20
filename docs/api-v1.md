@@ -795,9 +795,14 @@ creation gap before the job owns the suspended child. See [platform limits](soft
 
 ## Outcomes and problems
 
-A write answers with a `WriteOutcome`: either `written` (path, id, hash) or `problem`, never both. A
-problem has a stable `code`, a `message` that names the permitted next action, and `findings` when a
-record was rejected:
+A write answers with a `WriteOutcome`. A non-null `written` (path, id, hash) means the record was
+stored and the daemon answers HTTP `200`. If companion publication was interrupted after storage,
+the response also carries a `reconcile-required` problem. The SDK preserves both fields, including
+the recovery action; `Ok` is false for this response because required companion publication did not
+complete. Retain the receipt, reconcile the pending companion outputs under the original batch
+identity, and never resubmit the stored record. A genuine refusal has `written: null` and keeps its
+existing HTTP status. A problem has a stable `code`, a `message` that names the permitted next action,
+and `findings` when a record was rejected:
 
 | Code | Meaning | HTTP |
 |---|---|---|
@@ -807,7 +812,7 @@ record was rejected:
 | `invalid` | The estate has errors and the operation needs a valid estate (upgrade), or an export request lacks its output path or names a malformed exporter | 409 |
 | `denied` | A loopback request without a valid signature by a device admitted now; from 0.6.0 also a device-signed request naming a principal other than its device's, or stopping the daemon or replacing its certificate without an administrator's authority; a local-network request over a connection whose client certificate the device's key did not issue (one refusal, whatever the device), from a device revoked, not admitted or not permitted that profile, acting on the runtime's own machine, or whose write would be signed here by a device that needs its owner's presence; a JSON body in another charset than UTF-8 or with a byte order mark; a signing time before this runtime instance started accepting requests or more than five seconds ahead of its clock; a body that arrives after its signature is stale, or after its device was revoked; a write whose requesting device lost admission, rotated its key or lost its required profile before the estate write lock was taken; and a pairing hello that proves no code, or a code expired, used or out of attempts, or a confirmation that does not match | 401 |
 | `provider` | Observing a release, the provider refused or could not say what happened; a receiptless intent may already have been revised to uncertain before that provider call. Starting a run, the harness could not be started, and the run is recorded as a known failure that spent nothing | 200, inside the `ReleaseResponse` or the `RunResponse` |
-| `reconcile-required` | An unreadable local batch journal holds all further single and grouped record writes until local reconciliation; reads remain available | 422 for `WriteOutcome` routes; inside the response on composite routes |
+| `reconcile-required` | With `written`, the record was stored but companion publication stopped; the batch journal retains pending outputs. Reopen the estate or run `docs regenerate` to recover those outputs without repeating the record write. Without `written`, an unreadable local batch journal or unresolved generated outputs hold further record writes until reconciliation; reads remain available | 200 with `written`; 422 without `written` on `WriteOutcome` routes; inside the response on composite routes |
 | `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting | 409 |
 
 The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
@@ -818,7 +823,9 @@ is nothing to record yet, and a refusal is its `problem`, not an HTTP status. Th
 hand-over (`POST /v1/goals/{id}/step` and `POST /v1/work/takeover`, from 0.6.0), with a `GoalStepResponse` or a
 `TakeoverResponse`. Other reads of a missing subject answer 404 with an empty body; the context responses above carry their own problem.
 
-Exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step, takeover, context and hand-over/resume routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
+For record writes, HTTP `200` confirms storage even when companion recovery remains; clients must inspect both fields. The CLI keeps the embedded path's receipt on standard output (the same `path`, `id`, `hash` object with `--json`), recovery diagnostic on standard error and exit code `2`. Workbench retains the written identity beside the recovery action. MCP keeps the structured `written` and `problem` response and `isError: true` while recovery remains; that flag does not mean the record was refused. See [client outcomes](cli-client-outcomes.md).
+
+Otherwise exit status and HTTP status report whether the operation itself completed, except on the release, run, goal-step, takeover, context and hand-over/resume routes, which answer the requests they handle with `200` and carry a refusal in the body's `problem`; the observed state is
 in the body, and partial, pending and changed-target states are never flattened into success.
 
 ## The runtime command family

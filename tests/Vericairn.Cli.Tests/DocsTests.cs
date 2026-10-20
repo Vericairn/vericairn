@@ -42,6 +42,10 @@ public class DocsTests
             while (root is not null && !File.Exists(Path.Combine(root, "Vericairn.slnx"))) root = Path.GetDirectoryName(root);
             Assert.NotNull(root);
             string maintained = File.ReadAllText(Path.Combine(root, "docs", "cli-client-outcomes.md"));
+            Assert.Contains("## Stored records awaiting companion recovery", maintained, StringComparison.Ordinal);
+            Assert.Contains("HTTP `200` with both `written`", maintained, StringComparison.Ordinal);
+            Assert.Contains("never resubmit the stored record", maintained, StringComparison.Ordinal);
+            Assert.Contains("exit code `2`", maintained, StringComparison.Ordinal);
             maintained = maintained[maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd()
                 .Replace("| --- | --- | --- |", "|---|---|---|", StringComparison.Ordinal);
             Assert.Equal(maintained, System.Net.WebUtility.HtmlDecode(section));
