@@ -19,15 +19,25 @@ internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluati
         // keeps its actual timestamp and digest; neither evaluation is rerun at an earlier time.
         var comparable = new PolicyBasis(other.Basis.Model, Basis.AsOf, other.Basis.Origin,
             other.Basis.Repositories, other.Basis.Objects, other.Basis.Implementations, other.Basis.Submission, other.Basis.Complete);
-        return Basis.Digest == comparable.Digest && WithoutEvaluationStamp(Evaluation).Canonical() == WithoutEvaluationStamp(other.Evaluation).Canonical();
+        return Basis.Digest == comparable.Digest && AdmissionState(Evaluation).Canonical() == AdmissionState(other.Evaluation).Canonical();
     }
 
-    // The finding's verdict, disposition, deadlines, lateness and every other evaluated value still count.
-    private static PolicyEvaluation WithoutEvaluationStamp(PolicyEvaluation evaluation) => evaluation with
+    // Finding prose and elapsed counters describe an evaluation; they do not decide admission.
+    // Keep identities, verdicts, enforcement, anchors, exact evidence and duty state, including
+    // occurrence, due time, deadline, completion and missed state. Retained evaluations stay intact.
+    private static PolicyEvaluation AdmissionState(PolicyEvaluation evaluation) => evaluation with
     {
         Basis = "",
         AsOf = null,
-        Findings = evaluation.Findings.Select(finding => finding with { Basis = "", AsOf = null }).ToImmutableArray(),
+        Findings = evaluation.Findings.Select(finding => finding with
+        {
+            Basis = "",
+            AsOf = null,
+            Actual = "",
+            Required = "",
+            NextAction = "",
+            Duty = finding.Duty is { } duty ? duty with { LateSeconds = 0 } : null,
+        }).ToImmutableArray(),
     };
 }
 
