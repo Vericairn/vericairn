@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Anonymous, bounded observations of nuget.org package publication, listing and deprecation.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vericairn.Runtime.Tests" />
+    <ProjectReference Include="../Vericairn.Runtime/Vericairn.Runtime.csproj" />
+  </ItemGroup>
+</Project>

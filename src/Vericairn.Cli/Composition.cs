@@ -22,6 +22,7 @@ internal static class Composition
         ArgumentNullException.ThrowIfNull(registry);
         registry.RegisterIfAbsent(new GitHubReleaseProvider());
         registry.RegisterIfAbsent(new GitHubPullRequestProvider());
+        registry.RegisterIfAbsent(Vericairn.Providers.NuGet.NuGetRegistryProvider.Default);
         registry.PushAdapter ??= new GitPushAdapter();
         registry.SecretScanner ??= new GitleaksScanner();
         registry.RecordCommitAdapter ??= new GitRecordCommitAdapter();

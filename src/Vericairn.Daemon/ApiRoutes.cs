@@ -107,6 +107,9 @@ public static class ApiRoutes
         app.MapPost($"{v}/changes/open", (ChangesOpenRequest request) => Results.Json(service.ChangesOpen(request), ProtocolJson.Options));
         app.MapPost($"{v}/changes/merge", (ChangesMergeRequest request) => Results.Json(service.ChangesMerge(request), ProtocolJson.Options));
         app.MapPost($"{v}/changes/observe", (ChangesObserveRequest request) => Results.Json(service.ChangesObserve(request), ProtocolJson.Options));
+        app.MapPost($"{v}/packages/observe", async (PackagesObserveRequest request, CancellationToken cancellationToken) => Results.Json(await service.PackagesObserveAsync(request, cancellationToken).ConfigureAwait(false), ProtocolJson.Options));
+        app.MapPost($"{v}/packages/unlist", (PackagesUnlistRequest request) => Results.Json(service.PackagesUnlist(request), ProtocolJson.Options));
+        app.MapPost($"{v}/packages/deprecate", (PackagesDeprecateRequest request) => Results.Json(service.PackagesDeprecate(request), ProtocolJson.Options));
 
         app.MapPost($"{v}/estate/upgrade", (UpgradeRequest request) =>
         {

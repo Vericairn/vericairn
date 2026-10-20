@@ -167,29 +167,29 @@
       "vericairn.adapters.git": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.7.3-dev, )",
-          "Vericairn.Runtime": "[0.7.3-dev, )"
+          "Vericairn.Records": "[0.8.0-dev, )",
+          "Vericairn.Runtime": "[0.8.0-dev, )"
         }
       },
       "vericairn.daemon": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.7.3-dev, )",
-          "Vericairn.Runtime": "[0.7.3-dev, )",
-          "Vericairn.Sdk": "[0.7.3-dev, )"
+          "Vericairn.Protocol": "[0.8.0-dev, )",
+          "Vericairn.Runtime": "[0.8.0-dev, )",
+          "Vericairn.Sdk": "[0.8.0-dev, )"
         }
       },
       "vericairn.mcp": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.7.3-dev, )"
+          "Vericairn.Protocol": "[0.8.0-dev, )"
         }
       },
       "vericairn.packs.software": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.7.3-dev, )",
-          "Vericairn.Runtime": "[0.7.3-dev, )"
+          "Vericairn.Records": "[0.8.0-dev, )",
+          "Vericairn.Runtime": "[0.8.0-dev, )"
         }
       },
       "vericairn.protocol": {
@@ -198,15 +198,21 @@
       "vericairn.providers.github": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Providers.GitHub.Releases": "[0.7.3-dev, )",
-          "Vericairn.Records": "[0.7.3-dev, )",
-          "Vericairn.Runtime": "[0.7.3-dev, )"
+          "Vericairn.Providers.GitHub.Releases": "[0.8.0-dev, )",
+          "Vericairn.Records": "[0.8.0-dev, )",
+          "Vericairn.Runtime": "[0.8.0-dev, )"
         }
       },
       "vericairn.providers.github.releases": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.7.3-dev, )"
+          "Vericairn.Records": "[0.8.0-dev, )"
+        }
+      },
+      "vericairn.providers.nuget": {
+        "type": "Project",
+        "dependencies": {
+          "Vericairn.Runtime": "[0.8.0-dev, )"
         }
       },
       "vericairn.records": {
@@ -215,7 +221,7 @@
       "vericairn.records.tests": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Records": "[0.7.3-dev, )",
+          "Vericairn.Records": "[0.8.0-dev, )",
           "xunit.v3": "[4.0.2, )"
         }
       },
@@ -223,29 +229,30 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.Sqlite": "[10.0.11, )",
-          "Vericairn.Protocol": "[0.7.3-dev, )",
-          "Vericairn.Records": "[0.7.3-dev, )"
+          "Vericairn.Protocol": "[0.8.0-dev, )",
+          "Vericairn.Records": "[0.8.0-dev, )"
         }
       },
       "vericairn.runtime.tests": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Adapters.Git": "[0.7.3-dev, )",
-          "Vericairn.Mcp": "[0.7.3-dev, )",
-          "Vericairn.Packs.Software": "[0.7.3-dev, )",
-          "Vericairn.Providers.GitHub": "[0.7.3-dev, )",
-          "Vericairn.Records": "[0.7.3-dev, )",
-          "Vericairn.Records.Tests": "[0.7.3-dev, )",
-          "Vericairn.Runtime": "[0.7.3-dev, )",
-          "Vericairn.Sdk": "[0.7.3-dev, )",
+          "Vericairn.Adapters.Git": "[0.8.0-dev, )",
+          "Vericairn.Mcp": "[0.8.0-dev, )",
+          "Vericairn.Packs.Software": "[0.8.0-dev, )",
+          "Vericairn.Providers.GitHub": "[0.8.0-dev, )",
+          "Vericairn.Providers.NuGet": "[0.8.0-dev, )",
+          "Vericairn.Records": "[0.8.0-dev, )",
+          "Vericairn.Records.Tests": "[0.8.0-dev, )",
+          "Vericairn.Runtime": "[0.8.0-dev, )",
+          "Vericairn.Sdk": "[0.8.0-dev, )",
           "xunit.v3": "[4.0.2, )"
         }
       },
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.7.3-dev, )",
-          "Vericairn.Records": "[0.7.3-dev, )"
+          "Vericairn.Protocol": "[0.8.0-dev, )",
+          "Vericairn.Records": "[0.8.0-dev, )"
         }
       },
       "Microsoft.Data.Sqlite": {

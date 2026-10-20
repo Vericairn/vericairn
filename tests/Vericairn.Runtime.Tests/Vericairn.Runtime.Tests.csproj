@@ -20,6 +20,8 @@
     <Using Include="Vericairn.TestSupport" />
     <Compile Include="../TestSupport/FakeReleaseProvider.cs" Link="TestSupport/FakeReleaseProvider.cs" />
     <Compile Include="../TestSupport/SilentPeer.cs" Link="TestSupport/SilentPeer.cs" />
+    <Compile Include="../TestSupport/RecordedNuGetHandler.cs" Link="TestSupport/RecordedNuGetHandler.cs" />
+    <None Include="../TestSupport/NuGetFixtures/*.json" Link="NuGetFixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -28,6 +30,7 @@
     <ProjectReference Include="../../src/Vericairn.Mcp/Vericairn.Mcp.csproj" />
     <ProjectReference Include="../../src/Vericairn.Adapters.Git/Vericairn.Adapters.Git.csproj" />
     <ProjectReference Include="../../src/Vericairn.Providers.GitHub/Vericairn.Providers.GitHub.csproj" />
+    <ProjectReference Include="../../src/Vericairn.Providers.NuGet/Vericairn.Providers.NuGet.csproj" />
     <ProjectReference Include="../../src/Vericairn.Packs.Software/Vericairn.Packs.Software.csproj" />
     <ProjectReference Include="../../src/Vericairn.Records/Vericairn.Records.csproj" />
     <ProjectReference Include="../../src/Vericairn.Sdk/Vericairn.Sdk.csproj" />

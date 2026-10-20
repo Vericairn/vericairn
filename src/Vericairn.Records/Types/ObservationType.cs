@@ -11,13 +11,13 @@ namespace Vericairn.Records.Types;
 public sealed class ObservationType : IRecordType
 {
     /// <summary>What kinds of subject are observed so far.</summary>
-    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate"];
+    public static readonly ImmutableArray<string> Kinds = ["repository", "release", "workflow-run", "estate", "package"];
 
     /// <inheritdoc />
     public string Name => "observation";
 
     /// <inheritdoc />
-    public string Summary => "Something reported or measured about an exact subject with an as-of time: a repository, release or workflow run; from record format 2, a person's explicit observation of an estate. Facts, never permission or health.";
+    public string Summary => "Something reported or measured about an exact subject with an as-of time: a repository, release or workflow run; from record format 2, a person's explicit observation of an estate; from format 3, package registry state with response evidence. Facts, never permission or health.";
 
     /// <inheritdoc />
     public string? SubjectType => null;
@@ -33,6 +33,7 @@ public sealed class ObservationType : IRecordType
         new("summary", "string", true, "The observation in a sentence."),
         new("facts", "object", true, "Flat facts: strings, numbers, booleans or arrays of strings; never machine paths. An estate observation requires records (count), recordSetHash, pinHash and statusHash."),
         new("limitations", "string[]", true, "What the observation does not establish; may be empty."),
+        new("evidence", "object[]", false, "For package observations: exact public registry url, response-body hash, HTTP status, byte count and content encoding for each response; hashes cover bytes before gzip decoding.", 3),
     ];
 
     /// <inheritdoc />
@@ -40,7 +41,7 @@ public sealed class ObservationType : IRecordType
     {
         ArgumentNullException.ThrowIfNull(context);
         BodyReader body = context.Body;
-        string? kind = body.Enum("kind", true, context.Format >= 2 ? Kinds : ["repository", "release", "workflow-run"]);
+        string? kind = body.Enum("kind", true, context.Format >= 3 ? Kinds : context.Format >= 2 ? ["repository", "release", "workflow-run", "estate"] : ["repository", "release", "workflow-run"]);
         string? asOf = body.Timestamp("asOf", true);
         body.Text("summary", true, 4000);
         BodyReader? facts = body.Nested("facts", true);
@@ -74,6 +75,7 @@ public sealed class ObservationType : IRecordType
         }
 
         body.StringArray("limitations", true, allowEmpty: true, maxItemLength: 2000);
+        PackageRecordRules.Observation(context, kind, facts);
         body.NoOtherKeys();
         if (context.Principal(context.Record.By) is null)
         {

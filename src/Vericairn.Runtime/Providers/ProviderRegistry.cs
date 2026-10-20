@@ -15,6 +15,38 @@ public sealed class ProviderRegistry
     private readonly object gate = new();
     private readonly Dictionary<string, IReleaseProvider> releases = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IPullRequestProvider> pullRequests = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, IPackageRegistryProvider> packages = new(StringComparer.Ordinal);
+
+    /// <summary>Registers an anonymous package registry provider and returns its predecessor.</summary>
+    public IPackageRegistryProvider? Register(IPackageRegistryProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate)
+        {
+            IPackageRegistryProvider? previous = packages.GetValueOrDefault(provider.Provider);
+            packages[provider.Provider] = provider;
+            return previous;
+        }
+    }
+
+    /// <summary>Registers a package registry provider unless its id is already served.</summary>
+    public bool RegisterIfAbsent(IPackageRegistryProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        lock (gate) return packages.TryAdd(provider.Provider, provider);
+    }
+
+    /// <summary>The implementation registered for exactly this package registry provider.</summary>
+    public IPackageRegistryProvider? PackageRegistry(string provider)
+    {
+        lock (gate) return packages.GetValueOrDefault(provider);
+    }
+
+    /// <summary>The registered package registry providers, ordered by id.</summary>
+    public IReadOnlyList<IPackageRegistryProvider> PackageRegistries
+    {
+        get { lock (gate) return packages.Values.OrderBy(p => p.Provider, StringComparer.Ordinal).ToArray(); }
+    }
     private readonly Dictionary<string, ISourceAdapter> sources = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IAgentLauncher> launchers = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IWorkspaceProvider> workspaces = new(StringComparer.Ordinal);

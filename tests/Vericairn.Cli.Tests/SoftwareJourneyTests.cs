@@ -330,6 +330,10 @@ public class SoftwareJourneyTests
             Assert.Equal("repository", github.GetProperty("destination").GetString());
             Assert.Contains(github.GetProperty("settings").EnumerateArray(), s => s.GetProperty("name").GetString() == "workflow" && s.GetProperty("default").GetString() == "release.yml");
             Assert.Contains(providers.EnumerateArray(), p => p.GetProperty("kind").GetString() == "source" && p.GetProperty("provider").GetString() == "git");
+            JsonElement nuget = providers.EnumerateArray().Single(p => p.GetProperty("provider").GetString() == "nuget-org");
+            Assert.Equal("package-registry", nuget.GetProperty("kind").GetString());
+            Assert.Equal("vericairn.provider.package-registry/1", nuget.GetProperty("contract").GetString());
+            Assert.Equal("observe", Assert.Single(nuget.GetProperty("operations").EnumerateArray()).GetString());
             Assert.Contains("repository   destination, required", CliHarness.Ok("--estate", root, "release", "providers").Out, StringComparison.Ordinal);
         }
         finally
