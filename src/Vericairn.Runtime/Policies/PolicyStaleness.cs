@@ -172,7 +172,7 @@ internal static partial class FoundationPolicyKinds
         string version = Text(condition, "version")!;
         if (kind == "release-published")
         {
-            RecordEnvelope? publication = context.Model.OfType("release").FirstOrDefault(r => r.Subject?.Id == product && EstateModel.BodyString(r, "version") == version && EstateModel.BodyString(r, "status") == "published");
+            RecordEnvelope? publication = context.Model.OfType("release").FirstOrDefault(r => ReleaseMatchesProduct(context.Model, r, product) && EstateModel.BodyString(r, "version") == version && EstateModel.BodyString(r, "status") == "published");
             return (publication?.AtTime, publication);
         }
         RecordEnvelope? intent = context.Model.OfType("operation").FirstOrDefault(o => EstateModel.BodyString(o, "action") == Release.ReleaseFlow.DispatchAction &&

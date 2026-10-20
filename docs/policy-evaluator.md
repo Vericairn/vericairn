@@ -1,6 +1,6 @@
 # Policy evaluator
 
-Revision 5, October 19, 2026. Describe the connected release gate and distinguish it from pending first-party adoption.
+Revision 6, October 20, 2026. State how policies match releases across product record revisions.
 
 The runtime service collects the basis for the [policy read surfaces](policies.md). Application composition installs the foundation kinds, the software pack's reference-coverage kind and the local Git source. A named release preview carries the candidate's exact product, version and commit with preview origin; it cannot authorize dispatch. Source collection reads retained objects and local bytes without fetching or building.
 
@@ -19,6 +19,8 @@ The caller chooses one clock origin:
 A timestamp preceding an included record is unavailable. A preview cannot become submission evidence by relabeling its output. The evaluator reads no wall clock, environment, filesystem, process or network. Source adapters perform I/O before constructing the basis. A changed source, time, implementation or record view changes the basis.
 
 `PolicyKindRegistry` supplies exact kind/version implementations. Application composition pins the hash of the actual implementation artifact it admitted; declarations cannot load code or choose an ambient assembly. The foundation implements staleness, work placement, work-key family, revision-line, work-state consistency, release-entry and recurring-duty version 1. Missing, duplicate or mismatched implementations and unsupported source contracts are unavailable. Kind availability and strict parameters are checked even before activation, while the policy's level waits for `startsAt`. Invalid versioned parameters retain an error diagnostic. Pack conformance compares complete canonical evaluations over explicit vectors, including unavailable and erroneous cases.
+
+Policies match a release to its product through the product record's `supersedes` chain. The release's typed product subject may name any revision of that product record. This rule applies to release-entry cohorts, recurring-duty release schedules and their occurrence evidence and outstanding debt, reference-coverage's recorded-time release selection, release-published obligation gates, the published or withdrawn end of a release placement, and the published-plan-still-open consistency case. A release of another product never matches, even when its version and repository agree. Version strings, publication references and hashes, status checks and timing boundaries remain exact.
 
 Findings keep the policy identity and current revision, stable rule key, target, item, level, owner, basis, clock, underlying verdict, evidence and next action. An exception adds `excepted` only to an unmet finding whose exact policy revision, rule and target match. Authority, bounds, expiry and any exact submission restriction still apply. It changes neither the verdict nor built-in diagnostics. Expiry is exclusive. Multiple matching grants remain listed.
 

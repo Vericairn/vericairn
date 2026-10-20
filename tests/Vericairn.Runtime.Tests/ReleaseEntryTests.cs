@@ -17,6 +17,35 @@ public class ReleaseEntryTests
     private const string ReviewedAt = "2026-01-01T03:00:00Z";
     private const string Directory = "docs/knowledge/devlog";
 
+    [Theory]
+    [MemberData(nameof(ReleaseProductSubjects), MemberType = typeof(FoundationPolicyTests))]
+    public void ReleaseEntryMatchesAnyProductRevision(string releaseProduct, bool matches)
+    {
+        RecordEnvelope publication = R("release", "publication", new { status = "published", version = "0.8.0" },
+            PublishedAt, new("product", releaseProduct, null));
+        RecordEnvelope[] records = [.. ProductRevisions(), publication];
+        PolicyEvaluation missing = Run(records);
+        Assert.True(missing.Complete);
+        Assert.Equal(matches ? 1 : 0, Assert.Single(missing.Rules).Subjects);
+        Assert.Equal(matches ? 1 : 0, missing.Holds);
+        if (!matches)
+        {
+            Assert.Equal("unavailable", Assert.Single(Run(records, policy: Policy(Reference(publication))).Findings).Verdict);
+            return;
+        }
+
+        Assert.Equal(publication.Reference, Assert.Single(missing.Findings).Target.Record);
+        Assert.Equal("unmet", Assert.Single(Run(records, policy: Policy(Reference(publication))).Findings).Verdict);
+        var entry = Entry(publication, text: Text(publication).Replace("product: product", "product: " + releaseProduct, StringComparison.Ordinal));
+        PolicyFinding satisfied = Assert.Single(Run([.. records, entry.Pin, Review(entry.Pin)], [entry.File]).Findings);
+        Assert.Equal("satisfied", satisfied.Verdict);
+        Assert.Equal(publication.Reference, satisfied.Target.Record);
+        Assert.False(satisfied.ReleaseHold);
+        var next = new PolicySubmission(null, "product", "0.9.0", new string('a', 40));
+        Assert.Equal(1, Run(records, submission: next).Holds);
+        Assert.Equal(0, Run(records, submission: next with { Product = "other" }).Holds);
+    }
+
     [Fact]
     public void CandidateAndPrepublicationWithdrawalOweNothingButPublishedHistorySurvivesWithdrawal()
     {

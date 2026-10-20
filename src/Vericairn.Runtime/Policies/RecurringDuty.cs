@@ -118,7 +118,7 @@ internal static class RecurringDuty
     {
         string product = String(schedule, "product");
         if (!context.Model.ById.TryGetValue(product, out RecordEnvelope? record) || record.Type != "product") throw new PolicyInputException("The publication schedule's product is unavailable.");
-        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => r.Subject?.Id == product && EstateModel.BodyString(r, "status") == "published" &&
+        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => ReleaseMatchesProduct(context.Model, r, product) && EstateModel.BodyString(r, "status") == "published" &&
             !context.Model.Chain(r).SkipLast(1).Any(id => EstateModel.BodyString(context.Model.ById[id], "status") == "published")).ToArray();
         if (publications.GroupBy(r => EstateModel.BodyString(r, "version"), StringComparer.Ordinal).Any(g => g.Count() != 1)) throw new PolicyInputException("The publication identity is ambiguous.");
         return publications;

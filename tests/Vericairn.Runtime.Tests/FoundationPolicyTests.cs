@@ -18,6 +18,82 @@ public class FoundationPolicyTests
     private static readonly string[] AllPaths = ["**"];
     private static readonly string[] OperatorRoles = ["operator"];
     private static readonly string[] AcceptedCase = ["accepted-still-open"];
+    private static readonly string[] PublishedCase = ["published-plan-still-open"];
+
+    public static TheoryData<string, bool> ReleaseProductSubjects => new()
+    {
+        { "product", true }, { "product-v2", true }, { "product-v3", true },
+        { "other", false }, { "other-v2", false }, { "other-v3", false },
+    };
+
+    internal static RecordEnvelope[] ProductRevisions() =>
+    [
+        R("product", "product-v2", new { }, supersedes: "product"),
+        R("product", "product-v3", new { }, supersedes: "product-v2"),
+        R("product", "other", new { }),
+        R("product", "other-v2", new { }, supersedes: "other"),
+        R("product", "other-v3", new { }, supersedes: "other-v2"),
+    ];
+
+    [Theory]
+    [MemberData(nameof(ReleaseProductSubjects))]
+    public void ReleasePlacementMatchesAnyProductRevision(string releaseProduct, bool matches)
+    {
+        RecordEnvelope carrier = R("work-order", "carrier", new { key = "REL-001", releasePlan = new { product = "product", version = "1.0.0" } });
+        RecordEnvelope order = Order(new { kind = "release", carrier = carrier.Id, product = "product", version = "1.0.0" });
+        foreach (string status in new[] { "published", "withdrawn" })
+        {
+            RecordEnvelope release = R("release", "release", new { status, version = "1.0.0" }, "2026-01-01T01:00:00Z", new("product", releaseProduct, null));
+            PolicyEvaluation result = Run(FoundationPolicyKinds.Placement, new { backlogs = System.Array.Empty<object>() },
+                [.. ProductRevisions(), carrier, order, release], selection: new { kind = "work-orders", workOrders = OrderIds });
+            Assert.True(result.Complete);
+            PolicyFinding finding = Assert.Single(result.Findings);
+            Assert.Equal(matches ? "unmet" : "satisfied", finding.Verdict);
+            Assert.Equal(matches ? release.Reference : carrier.Reference, Assert.Single(finding.Evidence));
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ReleaseProductSubjects))]
+    public void ObligationPublicationGateMatchesAnyProductRevision(string releaseProduct, bool matches)
+    {
+        RecordEnvelope decision = R("decision", "decision", new { obligations = new[] { new { key = "check", gates = "After publication." } } });
+        var parameters = new
+        {
+            @class = "obligation-past-gate", maxAgeDays = 0,
+            gates = new[] { new { subject = Reference(decision), obligation = "check", conditions = new[] { new { kind = "release-published", product = "product", version = "1.0.0" } } } },
+        };
+        RecordEnvelope release = R("release", "release", new { status = "published", version = "1.0.0" }, "2026-01-01T01:00:00Z", new("product", releaseProduct, null));
+        PolicyEvaluation result = Run(FoundationPolicyKinds.Staleness, parameters, [.. ProductRevisions(), decision, release]);
+        Assert.True(result.Complete);
+        PolicyFinding finding = Assert.Single(result.Findings);
+        Assert.Equal(matches ? "unmet" : "satisfied", finding.Verdict);
+        if (matches)
+        {
+            Assert.Equal(release.Reference, finding.Anchor);
+            Assert.Equal(release.At, finding.AnchorAt);
+            Assert.Contains(release.Reference, finding.Evidence);
+        }
+        else Assert.Empty(finding.Evidence);
+    }
+
+    [Theory]
+    [MemberData(nameof(ReleaseProductSubjects))]
+    public void WorkStatePublicationMatchesAnyProductRevision(string releaseProduct, bool matches)
+    {
+        RecordEnvelope order = R("work-order", "carrier", new { key = "REL-001", releasePlan = new { product = "product", version = "1.0.0" } });
+        RecordEnvelope status = R("work-status", "open", new { status = "active" }, subject: order.Reference);
+        RecordEnvelope release = R("release", "release", new { status = "published", version = "1.0.0" }, "2026-01-01T01:00:00Z", new("product", releaseProduct, null));
+        PolicyEvaluation result = Run(FoundationPolicyKinds.Consistency, new { cases = PublishedCase },
+            [.. ProductRevisions(), order, status, release]);
+        Assert.True(result.Complete);
+        PolicyFinding finding = Assert.Single(result.Findings);
+        Assert.Equal(matches ? "unmet" : "satisfied", finding.Verdict);
+        Assert.Equal(status.Reference, finding.Anchor);
+        if (matches) Assert.Equal(release.Reference, Assert.Single(finding.Evidence));
+        else Assert.Empty(finding.Evidence);
+    }
+
     [Theory]
     [InlineData("2026-01-01T23:59:59Z", "satisfied")]
     [InlineData("2026-01-02T00:00:00Z", "unmet")]
