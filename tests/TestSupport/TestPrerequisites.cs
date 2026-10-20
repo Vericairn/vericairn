@@ -106,13 +106,18 @@ internal static class TestPrerequisites
         try
         {
             using Process process = Process.Start(start)!;
-            Task<string> output = process.StandardOutput.ReadToEndAsync();
-            Task<string> error = process.StandardError.ReadToEndAsync();
+            // Fixture setup is synchronous and may occupy the runner's only pool thread.
+            // Dedicated drains must not depend on that thread becoming available.
+            Task<string> output = Task.Factory.StartNew(() => process.StandardOutput.ReadToEnd(),
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            Task<string> error = Task.Factory.StartNew(() => process.StandardError.ReadToEnd(),
+                CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             try
             {
                 Assert.True(process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds),
                     "Missing prerequisite: " + name + " did not answer its availability check.");
-                Task.WhenAll(output, error).WaitAsync(TestTiming.HangTimeout).GetAwaiter().GetResult();
+                Assert.True(Task.WaitAll([output, error], TestTiming.HangTimeout),
+                    "Missing prerequisite: " + name + " did not close its availability-check output.");
                 Assert.True(process.ExitCode == 0, "Missing prerequisite: " + name + " failed its availability check.");
             }
             finally
