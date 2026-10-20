@@ -42,6 +42,8 @@ and an estate can disable or copy into its own library. A first estate needs no 
 The Remote companion brings supervision, eligible decisions and readable records to a phone, with
 handoff to the desktop for work that needs it. From Workbench or the phone, a saved prompt can be sent to a
 running agent in one step; it steers the agent without widening what the agent may do.
+A public example estate and app show the whole loop on GitHub, from a work order through an agent's
+recorded run, review and acceptance to a release, and every release upgrades them.
 
 ## Later milestone: coordination, packages and websites — planned
 
