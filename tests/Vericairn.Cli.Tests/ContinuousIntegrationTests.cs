@@ -145,6 +145,20 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void TheReleaseBillOfMaterialsUsesAPinnedToolAtASpecificationTheComponentsReportReads()
+    {
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "release.yml")), "package:", 2);
+
+        // The components report reads CycloneDX specifications 1.2 to 1.6. The tool, installed unpinned, moved to 1.7 by default,
+        // so 0.8.0's third release run stopped retaining its readable build reports.
+        int step = package.IndexOf("- name: Software bill of materials", StringComparison.Ordinal);
+        Assert.True(step > 0, "The package job writes the software bill of materials.");
+        string sbom = package[step..package.IndexOf("- name: Documentation set", step, StringComparison.Ordinal)];
+        Assert.Matches(@"dotnet tool install --global CycloneDX --version \d+\.\d+\.\d+\n", sbom);
+        Assert.Contains(" --spec-version 1.6\n", sbom, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void PullRequestsPublishTheSingleFileApplicationsTheReleaseShips()
     {
         string job = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "ci.yml")), "build-test:", 2);
