@@ -3,6 +3,7 @@
 
 namespace Vericairn.Cli.Tests;
 
+[Collection("cli")]
 public sealed class EstateLayoutJourneyTests
 {
     [Theory]
