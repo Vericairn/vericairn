@@ -20,7 +20,9 @@ public class CommunicationRunRecoveryTests
     [InlineData(true)]
     public void D08E_InterruptedDispatchIsReconciledUnderItsOriginalIdentityBeforeAnyRetry(bool dispatchRecorded)
     {
-        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""");
+        var clock = new WorkerClock(DateTimeOffset.UtcNow);
+        using var run = new RunEstate("""{"wallMinutes":60,"attemptsPerStep":3,"concurrency":2}""",
+            options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100) });
         if (!dispatchRecorded)
         {
             run.Service.WorkerOptions = run.Service.WorkerOptions with { BeforeDispatchRecord = () => throw new IOException("The stand-in dispatch write was interrupted.") };
@@ -29,7 +31,7 @@ public class CommunicationRunRecoveryTests
         RunResponse started = run.Start("claude-code", "ack-stop", report, wallMinutes: 5);
         Assert.True(started.Ok, started.Message);
         Assert.Equal(dispatchRecorded ? "dispatched" : "not-started", started.Status);
-        CommunicationRunJourneyTests.WaitUntil(() => File.Exists(report));
+        run.WaitUntil(() => File.Exists(report));
         using Process harness = Process.GetProcessById(Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>());
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         string launchedAt = directory.Read()!.LaunchedAt!;
@@ -41,7 +43,8 @@ public class CommunicationRunRecoveryTests
         {
             // Dispose abandons observation without claiming the stand-in stopped. A successor only has the retained facts.
             run.Reopen();
-            CommunicationRunJourneyTests.WaitUntil(() => !run.Row(started.Run).Observed);
+            clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.False(run.Row(started.Run).Observed);
             Assert.False(harness.HasExited);
             Assert.Null(run.Row(started.Run).Usage);
             Assert.Equal(5, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
@@ -71,7 +74,7 @@ public class CommunicationRunRecoveryTests
 
             // Only this synthetic process is terminated and observed. No provider conversation or external effect is inferred.
             harness.Kill(entireProcessTree: true);
-            Assert.True(harness.WaitForExit(10000));
+            Assert.True(harness.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds));
             JsonObject reconciled = (JsonObject)uncertain.DeepClone();
             reconciled["status"] = "known-failure";
             reconciled["reconciliation"] = "The stand-in process was terminated and its exit observed. No usage or provider conversation was recovered.";
@@ -108,7 +111,7 @@ public class CommunicationRunRecoveryTests
             if (!harness.HasExited)
             {
                 harness.Kill(entireProcessTree: true);
-                Assert.True(harness.WaitForExit(10000));
+                Assert.True(harness.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds));
             }
         }
     }

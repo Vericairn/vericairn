@@ -13,6 +13,7 @@ namespace Vericairn.Runtime.Workers;
 internal sealed class ContainedProcess
 {
     private readonly object lifecycle = new();
+    private readonly TaskCompletionSource resourcesClosed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly SafeFileHandle? job;
     private readonly SafeProcessHandle? windowsProcess;
     private volatile bool closed;
@@ -34,7 +35,8 @@ internal sealed class ContainedProcess
         this.windowsProcess = windowsProcess;
     }
 
-    internal bool IsClosed => closed && (job?.IsClosed ?? true) && (windowsProcess?.IsClosed ?? true);
+    internal bool IsClosed => resourcesClosed.Task.IsCompletedSuccessfully;
+    internal Task WhenClosed => resourcesClosed.Task;
 
     public int Id { get; }
 
@@ -313,6 +315,7 @@ internal sealed class ContainedProcess
             {
                 windowsProcess?.Dispose();
                 job?.Dispose();
+                resourcesClosed.TrySetResult();
             }
         }
     }

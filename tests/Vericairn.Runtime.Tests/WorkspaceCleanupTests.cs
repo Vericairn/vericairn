@@ -150,7 +150,7 @@ public class WorkspaceCleanupTests
         start.Environment["VERICAIRN_TEST_TARGET"] = target;
         using Process process = Process.Start(start)!;
         string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, output);
     }
 

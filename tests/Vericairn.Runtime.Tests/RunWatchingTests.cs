@@ -22,7 +22,7 @@ public class RunWatchingTests
         });
         RunResponse started = run.Start("codex", "watch-codex-critical-hold", run.Report("initial-state"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
 
@@ -58,12 +58,12 @@ public class RunWatchingTests
         });
         RunResponse started = run.Start("codex", "watch-codex-critical-hold", run.Report("contain"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
         Assert.Null(run.Row(started.Run).Stop!.ContainedAt);
         if (!permanent)
         {
-            WaitUntil(() => run.Row(started.Run).Signals?.All(s => s.Attention is not null) == true);
+            run.WaitUntil(() => run.Row(started.Run).Signals?.All(s => s.Attention is not null) == true);
         }
 
         clock.Advance(TimeSpan.FromSeconds(1));
@@ -101,7 +101,7 @@ public class RunWatchingTests
         using var run = new RunEstate();
         RunResponse started = run.Start("codex", "watch-codex-warning-hold", run.Report("warning"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 } signals && signals[0].Attention is not null);
+        run.WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 } signals && signals[0].Attention is not null);
         RunRow live = run.Row(started.Run);
         RunSignal signal = Assert.Single(live.Signals!);
         Assert.Equal("scope-read", signal.Code);
@@ -185,7 +185,7 @@ public class RunWatchingTests
         Assert.True(started.Ok, started.Message);
         try
         {
-            WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 });
+            run.WaitUntil(() => run.Row(started.Run).Signals is { Count: > 0 });
             RunRow live = run.Row(started.Run);
             RunSignal signal = Assert.Single(live.Signals!);
             Assert.Equal("audit-unverified", signal.Code);
@@ -215,13 +215,13 @@ public class RunWatchingTests
         string attempt = RunEstate.Ok(run.Service.Attempt(new AttemptRequest(run.Assignment, run.Estate.BuilderId, "widget repository", "Work."))).Id;
         RunResponse started = run.Start("generic", "silent-ignore", run.Report("claims"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("claims")));
+        run.WaitUntil(() => File.Exists(run.Report("claims")));
         clock.Advance(TimeSpan.FromSeconds(60));
         Assert.True(run.Service.WorkProgress(new WorkProgressRequest(attempt, run.Estate.BuilderId, "build", "I claim to be active.")).Ok);
-        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        run.WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
         clock.Advance(TimeSpan.FromSeconds(60));
         Assert.True(run.Service.WorkProgress(new WorkProgressRequest(attempt, run.Estate.BuilderId, "build", "Still claiming activity.")).Ok);
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         Assert.Equal(0, run.Service.Check().Errors);
@@ -308,5 +308,4 @@ public class RunWatchingTests
         Assert.Equal(launcher == "codex" ? 5 : 4, run.Row(started.Run).Signals!.Count);
     }
 
-    private static void WaitUntil(Func<bool> condition) => Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(20)), "The worker observation did not arrive.");
 }

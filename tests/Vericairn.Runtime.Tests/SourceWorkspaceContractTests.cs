@@ -103,7 +103,7 @@ public sealed class SourceWorkspaceContractTests
     private static ISourceAdapter Source(RunEstate run, bool recorded)
     {
         if (!recorded)
-            return new GitCommandAdapter(info => BoundedProcess.Run(info, TimeSpan.FromSeconds(30)), new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
+            return new GitCommandAdapter(info => BoundedProcess.Run(info, TestTiming.HangTimeout), new GitWorktreeWorkspaces(FakeHarness.ScopeCommand()));
         string head = RunEstate.Git(run.Clone, "rev-parse", "HEAD");
         return new DirectorySource(new RecordedSourceAdapter(new Dictionary<string, RepositoryObservation>(StringComparer.Ordinal)
         {

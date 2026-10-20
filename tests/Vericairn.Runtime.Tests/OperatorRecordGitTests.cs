@@ -255,7 +255,7 @@ public sealed class OperatorRecordGitTests : IDisposable
         foreach (string value in new[] { "user.name=Test", "user.email=test@example.invalid", "commit.gpgsign=false", "core.autocrlf=false", "core.hooksPath=" + hooks })
         { info.ArgumentList.Add("-c"); info.ArgumentList.Add(value); }
         foreach (string argument in args) info.ArgumentList.Add(argument);
-        ProcessResult result = BoundedProcess.Run(info, TimeSpan.FromSeconds(15));
+        ProcessResult result = BoundedProcess.Run(info, TestTiming.HangTimeout);
         if (args.Contains("commit") && result.ExitCode == 0)
         {
             commits++;

@@ -34,6 +34,7 @@ public sealed class McpCancellationTests
     [InlineData(true)]
     public async Task RegistryMapsDeadlinesAndCancellationWithoutLosingWriteUncertainty(bool cancel)
     {
+        var clock = new ClientClock();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int writes = 0;
         using var client = Client(async (request, token) =>
@@ -41,14 +42,15 @@ public sealed class McpCancellationTests
             if (request.RequestUri!.AbsolutePath == "/v1/devices") return Devices();
             writes++;
             entered.SetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return new(HttpStatusCode.OK);
-        }, cancel ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(100));
+        }, TimeSpan.FromSeconds(30), clock);
         using var stop = new CancellationTokenSource();
         var registry = new ToolRegistry(client, "contributor");
         Task<ToolCallResult> pending = registry.CallAsync("work_attempt", AttemptArguments(), stop.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         if (cancel) stop.Cancel();
+        else clock.Elapse(TimeSpan.FromSeconds(30));
         ToolCallResult result = await pending;
         Assert.True(result.IsError);
         Assert.False(result.Unknown);
@@ -66,12 +68,12 @@ public sealed class McpCancellationTests
         {
             calls++;
             entered.SetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return Devices();
         });
         using var stop = new CancellationTokenSource();
         Task<ToolCallResult> pending = new ToolRegistry(client, "contributor").CallAsync("work_attempt", AttemptArguments(), stop.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         stop.Cancel();
         ToolCallResult result = await pending;
         Assert.True(result.IsError);
@@ -87,14 +89,14 @@ public sealed class McpCancellationTests
         using var client = Client(async (_, token) =>
         {
             entered.SetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return new(HttpStatusCode.OK);
         });
         using var input = new Input();
         using var output = new Output();
         Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
         input.Add("""{"id":"slow","method":"tools/call","params":{"name":"estate_health"}}""");
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         input.Add("""{"id":2,"method":"ping"}""");
         JsonObject ping = await output.Next();
         Assert.Equal(2, ping["id"]!.GetValue<int>());
@@ -107,7 +109,7 @@ public sealed class McpCancellationTests
         Assert.True(cancelled["result"]!["isError"]!.GetValue<bool>());
         Assert.Equal("The request was cancelled.", cancelled["result"]!["content"]![0]!["text"]!.GetValue<string>());
         input.Complete();
-        await serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await serving.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -120,15 +122,15 @@ public sealed class McpCancellationTests
         Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: stop.Token);
         try
         {
-            await input.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await input.Entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             stop.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
             Assert.Empty(output.ToString());
         }
         finally
         {
             input.Release.Set();
-            await input.Finished.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await input.Finished.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         }
     }
 
@@ -140,7 +142,7 @@ public sealed class McpCancellationTests
         using var client = Client(async (_, token) =>
         {
             if (Interlocked.Increment(ref calls) == 2) entered.TrySetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return new(HttpStatusCode.OK);
         });
         using var input = new Input();
@@ -149,9 +151,9 @@ public sealed class McpCancellationTests
         Task serving = new McpServer(new ToolRegistry(client, null), "test").RunAsync(input, output, cancellationToken: stop.Token);
         input.Add("""{"id":1,"method":"tools/call","params":{"name":"estate_health"}}""");
         input.Add("""{"id":2,"method":"tools/call","params":{"name":"estate_health"}}""");
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         stop.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serving.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
         JsonObject[] responses = [await output.Next(), await output.Next()];
         Assert.Equal([1, 2], responses.Select(response => response["id"]!.GetValue<int>()).Order());
         Assert.All(responses, response => Assert.Equal("The request was cancelled.", response["result"]!["content"]![0]!["text"]!.GetValue<string>()));
@@ -160,14 +162,21 @@ public sealed class McpCancellationTests
     [Fact]
     public async Task TimedOutListingReturnsAnIntendedProtocolError()
     {
+        var clock = new ClientClock();
+        var entered = TestTiming.Signal();
         using var client = Client(async (_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            entered.TrySetResult();
+            await TestTiming.UntilCancelled(token);
             return Devices();
-        }, TimeSpan.FromMilliseconds(50));
+        }, TimeSpan.FromSeconds(30), clock);
         using var input = new StringReader("""{"id":1,"method":"tools/list"}""");
         using var output = new StringWriter();
-        await new McpServer(new ToolRegistry(client, "contributor"), "test").RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
+        Task serving = new McpServer(new ToolRegistry(client, "contributor"), "test").RunAsync(input, output, cancellationToken: TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.False(serving.IsCompleted);
+        clock.Elapse(TimeSpan.FromSeconds(30));
+        await serving.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         JsonObject result = JsonNode.Parse(output.ToString())!.AsObject();
         Assert.Equal(-32603, result["error"]!["code"]!.GetValue<int>());
         Assert.Equal("The request timed out.", result["error"]!["message"]!.GetValue<string>());
@@ -205,8 +214,8 @@ public sealed class McpCancellationTests
         Content = JsonContent.Create(new[] { new DeviceRow("device", "contributor", null, null, null, null, "admitted", true) }, options: ProtocolJson.Options),
     };
 
-    private static VericairnClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, TimeSpan? timeout = null) =>
-        new(new HttpClient(new Handler(respond)) { BaseAddress = new Uri("http://localhost/") }) { OperationTimeout = _ => timeout };
+    private static VericairnClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, TimeSpan? timeout = null, TimeProvider? clock = null) =>
+        new(new HttpClient(new Handler(respond)) { BaseAddress = new Uri("http://localhost/") }) { OperationTimeout = _ => timeout, OperationClock = clock ?? new ClientClock() };
 
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler
     {
@@ -229,7 +238,7 @@ public sealed class McpCancellationTests
         private readonly Channel<string> lines = Channel.CreateUnbounded<string>();
         public override Encoding Encoding => Encoding.UTF8;
         public override Task WriteLineAsync(string? value) { Assert.True(lines.Writer.TryWrite(value!)); return Task.CompletedTask; }
-        public async Task<JsonObject> Next() => JsonNode.Parse(await lines.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken))!.AsObject();
+        public async Task<JsonObject> Next() => JsonNode.Parse(await lines.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken))!.AsObject();
     }
 
     private sealed class BlockingInput : TextReader
@@ -240,7 +249,7 @@ public sealed class McpCancellationTests
         public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
         {
             Entered.TrySetResult();
-            Release.Wait(TimeSpan.FromSeconds(10), CancellationToken.None);
+            Release.Wait(TestTiming.HangTimeout, CancellationToken.None);
             Finished.TrySetResult();
             return ValueTask.FromResult<string?>(null);
         }

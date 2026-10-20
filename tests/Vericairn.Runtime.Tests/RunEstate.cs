@@ -29,6 +29,7 @@ internal sealed class RunEstate : IDisposable
 
     public RunEstate(string budget = """{"wallMinutes":60,"attemptsPerStep":3}""", bool keepOperatorKey = false, WorkerOptions? options = null, string? brief = null)
     {
+        TestPrerequisites.RequireGit();
         Estate = new TestEstate(recordFormat: 2);
         Scratch = Path.Combine(Path.GetTempPath(), "vericairn-run-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(Scratch);
@@ -105,22 +106,19 @@ internal sealed class RunEstate : IDisposable
     }
 
     /// <summary>Waits until a run is no longer in flight, and returns its row.</summary>
-    public RunRow Settled(string run, int seconds = 30)
+    public RunRow Settled(string run)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(seconds);
-        while (DateTimeOffset.UtcNow < until)
-        {
-            RunRow row = Row(run);
-            if (row.Status is "observed-success" or "known-failure" or "canceled")
-            {
-                return row;
-            }
+        WaitUntil(() => Row(run).Status is "observed-success" or "known-failure" or "canceled", $"run {run} to settle");
+        return Row(run);
+    }
 
-            Thread.Sleep(100);
-        }
-
-        Assert.Fail($"Run {run} did not settle within {seconds} seconds.");
-        return null!;
+    public void WaitUntil(Func<bool> condition, string because = "the worker's expected state")
+    {
+        string[] directories = [Estate.Root, Scratch, .. Service.Runs().Runs
+            .Select(row => new RunDirectory(Service.Session.Manifest.Estate, row.Run).Path).Where(Directory.Exists)];
+        using var changed = new FileSignal(directories);
+        changed.Until(condition, because, TestContext.Current.CancellationToken);
+        Assert.True(condition(), because);
     }
 
     public RunRow Row(string run) => Assert.Single(Service.Runs().Runs, r => r.Run == run);
@@ -150,6 +148,7 @@ internal sealed class RunEstate : IDisposable
 
     public static string Git(string directory, params string[] arguments)
     {
+        TestPrerequisites.RequireGit();
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = directory };
         foreach (string argument in GitIdentity.Concat(arguments))
         {
@@ -159,7 +158,7 @@ internal sealed class RunEstate : IDisposable
         using Process process = Process.Start(info)!;
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
         return output.Trim();
     }

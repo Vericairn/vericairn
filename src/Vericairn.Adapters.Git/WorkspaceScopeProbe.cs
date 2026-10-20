@@ -29,7 +29,8 @@ public static class WorkspaceScopeProbe
         return 0;
     }
 
-    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
+    internal static WorkspaceSnapshot Capture(string workspace, TimeSpan deadline, IReadOnlyList<string>? command = null, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false,
+        TimeProvider? clock = null, Action? launched = null)
     {
         if (deadline <= TimeSpan.Zero)
         {
@@ -65,23 +66,33 @@ public static class WorkspaceScopeProbe
 
         try
         {
+            clock ??= TimeProvider.System;
+            long started = clock.GetTimestamp();
+            using var budget = new CancellationTokenSource(deadline, clock);
             using Process process = Process.Start(info) ?? throw new IOException("The scope observer could not start.");
             process.StandardInput.Close();
             Task<string> output = process.StandardOutput.ReadToEndAsync();
             Task<string> error = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(deadline))
+            try
             {
-                process.Kill(entireProcessTree: true);
-                _ = process.WaitForExit(5000);
-                return Incomplete();
+                launched?.Invoke();
+                // Launch, exit and both pipe drains share one deadline.
+                Task.WhenAll(process.WaitForExitAsync(), output, error).WaitAsync(budget.Token).GetAwaiter().GetResult();
+                budget.Token.ThrowIfCancellationRequested();
+                if (clock.GetElapsedTime(started) >= deadline) return Incomplete();
+                string json = output.GetAwaiter().GetResult();
+                return process.ExitCode == 0 ? JsonSerializer.Deserialize<WorkspaceSnapshot>(json) ?? Incomplete() : Incomplete();
             }
-
-            // Bound pipe reads even if an observer or one of its Git children does not close them.
-            string json = output.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-            _ = error.WaitAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult();
-            return process.ExitCode == 0 ? JsonSerializer.Deserialize<WorkspaceSnapshot>(json) ?? Incomplete() : Incomplete();
+            finally
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    _ = process.WaitForExit(5000);
+                }
+            }
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or JsonException or TimeoutException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or InvalidOperationException or JsonException or TimeoutException or OperationCanceledException)
         {
             return Incomplete();
         }

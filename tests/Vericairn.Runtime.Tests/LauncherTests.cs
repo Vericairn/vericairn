@@ -79,6 +79,7 @@ public class LauncherTests
     {
         string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CODEX");
         Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CODEX to run read-only mcp list probes with synthetic configuration.");
+        TestPrerequisites.RequireExecutable(executable!, "--version");
         string root = Path.Combine(Path.GetTempPath(), "vericairn-config-" + Ulid.NewUlid().Value);
         string workspace = Path.Combine(root, "workspace.with.dots");
         string home = Path.Combine(root, "home");
@@ -102,7 +103,7 @@ public class LauncherTests
             };
             string trust = "projects=" + CodexLauncher.Projects(context).Replace("untrusted", "trusted", StringComparison.Ordinal) + "\n";
             File.WriteAllText(Path.Combine(home, "config.toml"), trust + "[mcp_servers.ambient]\ncommand=\"nonexistent-ambient-sentinel\"\ndefault_tools_approval_mode=\"approve\"\n");
-            (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), workspace);
+            (int code, string baseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TestTiming.HangTimeout, workspace);
             Assert.Equal(0, code);
             Assert.Contains("project_ambient", baseline, StringComparison.Ordinal);
             Assert.Contains("ambient", baseline, StringComparison.Ordinal);
@@ -123,7 +124,7 @@ public class LauncherTests
             File.Copy(Path.Combine(workspace, ".codex", "config.toml"), Path.Combine(linked, ".codex", "config.toml"));
             LaunchContext linkedContext = context with { Workspace = linked };
             File.WriteAllText(Path.Combine(home, "config.toml"), trust);
-            (int linkedCode, string linkedBaseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TimeSpan.FromSeconds(30), linked);
+            (int linkedCode, string linkedBaseline, _) = HarnessProcess.Run([executable, "mcp", "list", "--json"], environment, TestTiming.HangTimeout, linked);
             Assert.Equal(0, linkedCode);
             Assert.Contains("project_ambient", linkedBaseline, StringComparison.Ordinal);
             CodexLauncher.VerifyMcp(linkedContext);
@@ -143,7 +144,7 @@ public class LauncherTests
             Assert.Contains("projects=" + CodexLauncher.Projects(prepared), configuration, StringComparison.Ordinal);
             Assert.Contains("default_tools_approval_mode=\"approve\"", configuration, StringComparison.Ordinal);
             Assert.DoesNotContain("approval_policy", configuration, StringComparison.Ordinal);
-            (int approvalCode, string approvalList, _) = HarnessProcess.Run([executable, .. CodexLauncher.Overrides(prepared), "mcp", "list", "--json"], prepared.Environment, TimeSpan.FromSeconds(30), prepared.Workspace);
+            (int approvalCode, string approvalList, _) = HarnessProcess.Run([executable, .. CodexLauncher.Overrides(prepared), "mcp", "list", "--json"], prepared.Environment, TestTiming.HangTimeout, prepared.Workspace);
             Assert.Equal(0, approvalCode);
             // The installed baseline accepts the setting but does not expose it or the server's tools in this report.
             Assert.DoesNotContain("default_tools_approval_mode", approvalList, StringComparison.Ordinal);
@@ -163,7 +164,7 @@ public class LauncherTests
     {
         string? executable = Environment.GetEnvironmentVariable("VERICAIRN_TEST_CLAUDE");
         Assert.SkipWhen(executable is null, "Set VERICAIRN_TEST_CLAUDE to check isolation flags against --help only.");
-        (int code, string help, _) = HarnessProcess.Run([executable, "--help"], WorkerEnvironment.Build(WorkerEnvironment.Current(), []), TimeSpan.FromSeconds(30));
+        (int code, string help, _) = HarnessProcess.Run([executable, "--help"], WorkerEnvironment.Build(WorkerEnvironment.Current(), []), TestTiming.HangTimeout);
         Assert.Equal(0, code);
         Assert.Contains("--setting-sources <sources>", help, StringComparison.Ordinal);
         Assert.Contains("--settings <file-or-json>", help, StringComparison.Ordinal);
@@ -399,7 +400,7 @@ public class LauncherTests
         using Process process = Process.Start(info)!;
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
         return output.Trim();
     }

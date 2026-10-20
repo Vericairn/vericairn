@@ -88,7 +88,7 @@ public class WorkerTests
                 if (Interlocked.Increment(ref inventories) == 2)
                 {
                     repeated.Set();
-                    Assert.True(resume.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inspection was not released.");
+                    Assert.True(resume.Wait(TestTiming.HangTimeout, cancellation), "The boundary inspection was not released.");
                 }
 
                 return Volatile.Read(ref empty) == 0 ? 1u : 0u;
@@ -100,22 +100,22 @@ public class WorkerTests
         try
         {
             Assert.True(started.Ok, started.Message);
-            WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
+            run.WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
             child = System.Diagnostics.Process.GetProcessById(Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>());
             // End only the ready leader. Its child ignores this file and remains in the actual native boundary to signal.
             new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).TransmitStop(new StopRequest("2026-10-15T12:00:00Z", "test"));
-            Assert.True(repeated.Wait(TimeSpan.FromSeconds(20), cancellation), "The boundary inventory was not retried.");
+            Assert.True(repeated.Wait(TestTiming.HangTimeout, cancellation), "The boundary inventory was not retried.");
             Assert.Null(run.Row(started.Run).Stop);
             Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
             clock.Advance(TimeSpan.FromSeconds(1));
             resume.Set();
-            WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+            run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
             clock.Advance(TimeSpan.FromSeconds(1));
-            WaitUntil(() => run.Row(started.Run).Stop?.EscalatedAt is not null);
+            run.WaitUntil(() => run.Row(started.Run).Stop?.EscalatedAt is not null);
             Assert.Null(run.Row(started.Run).Stop!.ContainedAt);
             Assert.Equal("dispatched", run.Row(started.Run).Status);
             Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
-            WaitUntil(() => child.HasExited);
+            Assert.True(child.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds), "The descendant did not exit.");
             Volatile.Write(ref empty, 1);
             RunRow settled = run.Settled(started.Run);
             Assert.Equal("known-failure", settled.Status);
@@ -150,7 +150,7 @@ public class WorkerTests
         string report = run.Report("device-stop");
         RunResponse started = run.Start("generic", "ack-stop", report);
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(report));
+        run.WaitUntil(() => File.Exists(report));
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         try
         {
@@ -199,18 +199,18 @@ public class WorkerTests
             Assert.True(started.Ok, started.Message); // A live launch stays owned and reserved even when its record write is denied.
             Assert.Equal("not-started", started.Status);
             Assert.Equal("denied", request.Refusal!.Code);
-            WaitUntil(() => File.Exists(run.Report("guarded-writes")));
+            run.WaitUntil(() => File.Exists(run.Report("guarded-writes")));
             clock.Advance(TimeSpan.FromSeconds(60));
-            WaitUntil(() => run.Row(started.Run).Liveness?.AttentionAt is not null);
+            run.WaitUntil(() => run.Row(started.Run).Liveness?.AttentionAt is not null);
             Assert.Empty(run.Service.Records("ask"));
             Assert.Single(AgentRuns.Find(run.Estate.Load(), started.Run)!.Revisions);
             Assert.Equal(60, run.Row(started.Run).Charged.GetProperty("wallMinutes").GetInt64());
         }
 
         // Once the request ends, continuing supervision is the runtime's work, not another use of the revoked credential.
-        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        run.WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
         clock.Advance(TimeSpan.FromSeconds(60));
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
         Assert.NotNull(settled.Stop!.ContainedAt);
@@ -260,30 +260,29 @@ public class WorkerTests
     [Fact]
     public void TransmissionIsTimestampedAfterItsActualTransportAttemptOnEveryPlatform()
     {
-        using var run = new RunEstate();
+        var clock = new WorkerClock(DateTimeOffset.UtcNow.AddDays(1));
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100) });
         string? attemptedAt = null;
         string? signalAttemptedAt = null;
         run.Service.WorkerOptions = run.Service.WorkerOptions with
         {
             BeforeTransmission = () =>
             {
-                string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-                WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
-                attemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                clock.Advance(TimeSpan.FromSeconds(1));
+                attemptedAt = RecordParser.FormatTimestamp(clock.GetUtcNow());
             },
             BeforeSignal = force =>
             {
                 if (!force)
                 {
-                    string before = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
-                    WaitUntil(() => RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) != before);
-                    signalAttemptedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                    clock.Advance(TimeSpan.FromSeconds(1));
+                    signalAttemptedAt = RecordParser.FormatTimestamp(clock.GetUtcNow());
                 }
             },
         };
         RunResponse started = run.Start("generic", "ack-stop", run.Report("transmission-time"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("transmission-time")));
+        run.WaitUntil(() => File.Exists(run.Report("transmission-time")));
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Observe transmission after the attempt.", 5));
         Assert.True(stopped.Ok, stopped.Message);
         RunStop stop = run.Settled(started.Run).Stop!;
@@ -322,9 +321,9 @@ public class WorkerTests
         });
         RunResponse started = run.Start("claude-code", "silent-ignore", run.Report("revised-stall"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("revised-stall")));
+        run.WaitUntil(() => File.Exists(run.Report("revised-stall")));
         clock.Advance(TimeSpan.FromSeconds(120));
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
         Assert.Equal(60, settled.Liveness!.StallSeconds);
@@ -369,9 +368,9 @@ public class WorkerTests
         RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(run.Estate.OperatorId)));
         RunResponse started = run.Start("generic", "silent-ignore", run.Report("stalled"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "3" });
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("stalled")));
+        run.WaitUntil(() => File.Exists(run.Report("stalled")));
         clock.Advance(TimeSpan.FromSeconds(60));
-        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        run.WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
         RunRow attention = run.Row(started.Run);
         Assert.Equal("dispatched", attention.Status);
         Assert.Equal(60, attention.Liveness!.StallSeconds);
@@ -389,7 +388,7 @@ public class WorkerTests
         RecordWritten unrelated = RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("ask", ask.By, RunEstate.Json($$"""{"to":"{{run.Estate.OperatorId}}","question":"Should we change the next assignment?","recommendation":"Review the assignment.","consequence":"The next assignment stays unchanged.","state":"open"}"""), $"operation:{ask.Subject.Id}:{ask.Subject.Hash}")));
 
         clock.Advance(TimeSpan.FromSeconds(60));
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         RunRow settled = run.Settled(started.Run);
         Assert.Equal("known-failure", settled.Status);
@@ -430,16 +429,16 @@ public class WorkerTests
         using var run = new RunEstate(options: new WorkerOptions { Clock = clock, AfterEvent = eventSeen.Set, Heartbeat = TimeSpan.FromMilliseconds(50), Grace = TimeSpan.FromSeconds(1) });
         RunResponse started = run.Start("generic", "silent-recovery", run.Report("recovered"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "60" });
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("recovered")));
+        run.WaitUntil(() => File.Exists(run.Report("recovered")));
         clock.Advance(TimeSpan.FromSeconds(60));
-        WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
+        run.WaitUntil(() => run.Row(started.Run).Liveness?.Attention is not null);
         clock.Advance(TimeSpan.FromSeconds(30));
         File.WriteAllText(run.Report("recovered") + ".recover", "release");
-        WaitUntil(() => eventSeen.IsSet);
+        Assert.True(eventSeen.Wait(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
         var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         long heartbeat = files.Read()!.Heartbeats;
         clock.Advance(TimeSpan.FromSeconds(30)); // The old silence deadline; the new event reset it.
-        WaitUntil(() => files.Read()?.Heartbeats is long beats && beats > heartbeat);
+        run.WaitUntil(() => files.Read()?.Heartbeats is long beats && beats > heartbeat);
         Assert.Null(run.Row(started.Run).Stop);
         File.WriteAllText(run.Report("recovered") + ".finish", "release");
         RunRow settled = run.Settled(started.Run);
@@ -604,7 +603,7 @@ public class WorkerTests
         RunResponse started = run.Start("generic", "ignore-stop", run.Report("retry-signal"));
         Assert.True(started.Ok, started.Message);
         files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
-        WaitUntil(() => File.Exists(run.Report("retry-signal")));
+        run.WaitUntil(() => File.Exists(run.Report("retry-signal")));
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Stop.", 0));
         Assert.True(stopped.Ok, stopped.Message);
         _ = run.Settled(started.Run);
@@ -621,7 +620,7 @@ public class WorkerTests
         string report = run.Report("descendants");
         RunResponse started = run.Start("generic", "child-survives-root", report);
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
+        run.WaitUntil(() => File.Exists(report) && File.Exists(report + ".child"));
         int child = Assert.Single(FakeHarness.Reports(report + ".child"))["process"]!.GetValue<int>();
         Assert.Equal(Assert.Single(FakeHarness.Reports(report))["group"]!.GetValue<int>(), Assert.Single(FakeHarness.Reports(report + ".child"))["group"]!.GetValue<int>());
         if (!OperatingSystem.IsWindows())
@@ -666,7 +665,7 @@ public class WorkerTests
         Assert.Equal(run.Estate.OperatorId, AgentRuns.Find(run.Estate.Load(), started.Run)!.Intent.By);
         var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
         Directory.Delete(files.StateFile);
-        WaitUntil(() => File.Exists(run.Report("state-failure")) && run.Row(started.Run).Observed);
+        run.WaitUntil(() => File.Exists(run.Report("state-failure")) && run.Row(started.Run).Observed);
         Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "End the stand-in.", 0)).Ok);
         Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         Assert.Equal("known-failure", run.Settled(started.Run).Status);
@@ -840,7 +839,7 @@ public class WorkerTests
 
         // Unknown usage is never zero: the whole token cap was charged, so the goal is budget-limited and no further run starts.
         // The goal-status record follows the run's settlement in a separate write.
-        WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
+        run.WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
         Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
         LedgerRow ledger = Assert.Single(run.Service.Runs().Goals);
         Assert.Equal(0, Assert.Single(ledger.Units, u => u.Unit == "tokens").Remaining);
@@ -857,7 +856,7 @@ public class WorkerTests
         using var run = new RunEstate();
         RunResponse started = run.Start("claude-code", "ignore-stop", run.Report("ignore"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("ignore")) && run.Row(started.Run).Observed);
+        run.WaitUntil(() => File.Exists(run.Report("ignore")) && run.Row(started.Run).Observed);
 
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "The widget is cancelled.", 1));
         Assert.True(stopped.Ok, stopped.Message);
@@ -888,7 +887,7 @@ public class WorkerTests
         using var run = new RunEstate();
         RunResponse started = run.Start("generic", "ack-stop", run.Report("replaced"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("replaced")) && run.Row(started.Run).Observed);
+        run.WaitUntil(() => File.Exists(run.Report("replaced")) && run.Row(started.Run).Observed);
 
         // A state file caught half written reads as nothing for a moment; the worker writes it whole again at its next heartbeat.
         File.WriteAllText(new RunDirectory(run.Service.Session.Manifest.Estate, started.Run).StateFile, "{");
@@ -904,7 +903,7 @@ public class WorkerTests
         using var run = new RunEstate(options: new WorkerOptions { Clock = new WorkerClock(), Heartbeat = TimeSpan.FromMilliseconds(50) });
         RunResponse started = run.Start("generic", "ack-stop", run.Report("ack"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("ack")) && run.Row(started.Run).Observed);
+        run.WaitUntil(() => File.Exists(run.Report("ack")) && run.Row(started.Run).Observed);
         RunStopResponse stopped = run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, null, 5));
         Assert.True(stopped.Ok, stopped.Message);
         RunStop stop = run.Settled(started.Run).Stop!;
@@ -922,17 +921,19 @@ public class WorkerTests
     [Fact]
     public void AStopNoWorkerObservesIsReportedAsRequestedAndALostWorkerIsNotAStoppedRun()
     {
-        using var run = new RunEstate();
+        var clock = new WorkerClock(DateTimeOffset.UtcNow);
+        using var run = new RunEstate(options: new WorkerOptions { Clock = clock, Heartbeat = TimeSpan.FromMilliseconds(100) });
         string report = run.Report("lingering");
         RunResponse started = run.Start("generic", "ack-stop", report);
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(report));
+        run.WaitUntil(() => File.Exists(report));
         int harness = Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>();
         try
         {
             // The worker that supervised the run lets go of it; the harness runs on, and nothing calls it stopped.
             run.Reopen();
-            WaitUntil(() => !run.Row(started.Run).Observed);
+            clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.False(run.Row(started.Run).Observed);
             RunRow lost = run.Row(started.Run);
             Assert.Equal("dispatched", lost.Status);
             Assert.Null(lost.Usage);
@@ -966,8 +967,8 @@ public class WorkerTests
         using var run = new RunEstate();
         RunResponse started = run.Start("claude-code", "close-output", run.Report("closing"));
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("closing")));
-        WaitUntil(() => File.Exists(run.Report("closing") + ".closed"));
+        run.WaitUntil(() => File.Exists(run.Report("closing")));
+        run.WaitUntil(() => File.Exists(run.Report("closing") + ".closed"));
         Assert.Equal("dispatched", run.Row(started.Run).Status);
         File.WriteAllText(run.Report("closing") + ".finish", "release");
         RunRow row = run.Settled(started.Run);
@@ -985,7 +986,7 @@ public class WorkerTests
         RunResponse started = run.Start("generic", "ack-stop", run.Report("capped"));
         Assert.True(started.Ok, started.Message);
         Assert.Equal(3, started.Cap!.Value.GetProperty("wallMinutes").GetInt64());
-        WaitUntil(() => File.Exists(run.Report("capped")));
+        run.WaitUntil(() => File.Exists(run.Report("capped")));
         clock.Advance(TimeSpan.FromMilliseconds(100));
         RunRow row = run.Settled(started.Run);
         Assert.Equal("known-failure", row.Status);
@@ -1014,7 +1015,7 @@ public class WorkerTests
         Assert.Equal(1050, row.Usage!.Value.GetProperty("tokens").GetInt64());
         Assert.Equal(1050, row.Charged.GetProperty("tokens").GetInt64());
         // The goal-status record follows the run's settlement in a separate write.
-        WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
+        run.WaitUntil(() => run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString() == "budget-limited");
         Assert.Equal("budget-limited", run.Service.Goal(run.Goal)!.Json.GetProperty("status").GetString());
     }
 
@@ -1040,7 +1041,7 @@ public class WorkerTests
 
         foreach ((RunResponse started, string report) in new[] { (first, "first"), (second, "second") })
         {
-            WaitUntil(() => File.Exists(run.Report(report)) && run.Row(started.Run).Observed);
+            run.WaitUntil(() => File.Exists(run.Report(report)) && run.Row(started.Run).Observed);
             Assert.True(run.Service.RunStop(started.Run, new RunStopRequest(run.Estate.OperatorId, "Enough.", 5)).Ok);
             Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         }
@@ -1186,14 +1187,15 @@ public class WorkerTests
     [Fact]
     public void AnExceptionThatLapsesWhileARunIsPreparedLaunchesNothing()
     {
-        using var run = new RunEstate(keepOperatorKey: true);
+        var clock = new WorkerClock(DateTimeOffset.UtcNow.AddDays(1));
+        using var run = new RunEstate(keepOperatorKey: true, options: new WorkerOptions { Clock = clock });
         RoutingServiceTests.Routed(run);
-        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+        string first = Except(run, clock.GetUtcNow().AddHours(1), "The first window.");
 
         // The sponsor replaces the exception with one that expires seconds later, and the preparation outlasts it.
         Func<string?> replace = () =>
         {
-            string expires = Except(run, Soon(), "Only a moment.", first);
+            string expires = Except(run, clock.GetUtcNow().AddSeconds(3), "Only a moment.", first);
             WaitPast(run, expires);
             return null;
         };
@@ -1204,7 +1206,7 @@ public class WorkerTests
         Assert.EndsWith("Nothing was recorded.", replaced.Message, StringComparison.Ordinal);
 
         // An exception in force when the preflight read it, and expired before the intent, launches nothing either.
-        string brief = Except(run, Soon(), "A short window.");
+        string brief = Except(run, clock.GetUtcNow().AddSeconds(3), "A short window.");
         HookedLauncher.Install(run, () =>
         {
             WaitPast(run, brief);
@@ -1223,12 +1225,13 @@ public class WorkerTests
     [Fact]
     public void AnExceptionThatLapsesAfterTheIntentCancelsTheRunBeforeItsDispatch()
     {
-        using var run = new RunEstate(keepOperatorKey: true);
+        var clock = new WorkerClock(DateTimeOffset.UtcNow.AddDays(1));
+        using var run = new RunEstate(keepOperatorKey: true, options: new WorkerOptions { Clock = clock });
         RoutingServiceTests.Routed(run);
-        string first = Except(run, DateTimeOffset.UtcNow.AddHours(1), "The first window.");
+        string first = Except(run, clock.GetUtcNow().AddHours(1), "The first window.");
 
         // The intent names the exception in force; then, before the launch, the sponsor replaces it with one that expires within seconds.
-        HookedLauncher.Install(run, command: () => WaitPast(run, Except(run, Soon(), "Only a moment.", first)));
+        HookedLauncher.Install(run, command: () => WaitPast(run, Except(run, clock.GetUtcNow().AddSeconds(3), "Only a moment.", first)));
         RunResponse canceled = run.Start("claude-code", "claude", run.Report("lapsed"));
         Assert.False(canceled.Ok, canceled.Message);
         Assert.Equal("canceled", canceled.Status);
@@ -1267,39 +1270,29 @@ public class WorkerTests
     /// <summary>Records the operator's custody exception for the run estate's goal, or a revision of one; returns its id.</summary>
     private static string Except(RunEstate run, DateTimeOffset expires, string reason, string? replaces = null)
     {
+        string? authoredAt = null;
+        if (run.Service.WorkerOptions.Clock is WorkerClock clock)
+        {
+            clock.Advance(TimeSpan.FromSeconds(1));
+            authoredAt = RecordParser.FormatTimestamp(clock.GetUtcNow());
+        }
         string hash = run.Service.Goal(run.Goal)!.Json.GetProperty("goal").GetProperty("hash").GetString()!;
         string until = RecordParser.FormatTimestamp(expires);
-        return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"{{reason}}","expires":"{{until}}"}"""), $"goal:{run.Goal}:{hash}", replaces))).Id;
+        return RunEstate.Ok(run.Service.NewRecord(new NewRecordRequest("custody-exception", run.Estate.OperatorId, RunEstate.Json($$"""{"reason":"{{reason}}","expires":"{{until}}"}"""), $"goal:{run.Goal}:{hash}", replaces, At: authoredAt))).Id;
     }
 
-    /// <summary>
-    /// An expiry a few seconds away. Records keep whole seconds, so an expiry one second away can fall in the same second as the
-    /// record that makes it when the runner is slow, and the estate rightly refuses an exception that expires when it is made.
-    /// </summary>
-    private static DateTimeOffset Soon() => DateTimeOffset.UtcNow.AddSeconds(3);
-
-    /// <summary>Waits until a custody exception has expired.</summary>
+    /// <summary>Moves the controlled admission clock beyond the recorded expiry.</summary>
     private static void WaitPast(RunEstate run, string exception)
     {
         DateTimeOffset expires = CustodyExceptions.Expires(run.Estate.Load().ById[exception])!.Value;
-        while (DateTimeOffset.UtcNow <= expires)
-        {
-            Thread.Sleep(50);
-        }
+        var clock = Assert.IsType<WorkerClock>(run.Service.WorkerOptions.Clock);
+        Assert.True(clock.GetUtcNow() <= expires, "The exception must be in force before simulating its expiry.");
+        clock.Advance(expires - clock.GetUtcNow() + TimeSpan.FromSeconds(1));
+        Assert.True(clock.GetUtcNow() > expires);
     }
 
     private static JsonElement Route(RunEstate run, string key) =>
         Assert.Single(run.Service.GoalNext(run.Goal)!.Json.GetProperty("steps").EnumerateArray(), s => s.GetProperty("key").GetString() == key).GetProperty("route");
-
-    private static void WaitUntil(Func<bool> condition, int seconds = 30)
-    {
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(seconds);
-        while (!condition())
-        {
-            Assert.True(DateTimeOffset.UtcNow < until, "The condition did not hold in time.");
-            Thread.Sleep(50);
-        }
-    }
 
     private static string Toml(string value) => "\"" + value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
 }

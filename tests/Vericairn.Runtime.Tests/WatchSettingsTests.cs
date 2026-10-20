@@ -47,12 +47,12 @@ public class WatchSettingsTests
         Goal(run, "{}", roles: true);
         RunResponse started = run.Start("generic", "silent-ignore", run.Report("roster-stall"), settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["stall-seconds"] = "2" });
         Assert.True(started.Ok, started.Message);
-        WaitUntil(() => File.Exists(run.Report("roster-stall")));
+        run.WaitUntil(() => File.Exists(run.Report("roster-stall")));
         AgentRuns.Run recorded = AgentRuns.Find(run.Estate.Load(), started.Run)!;
         Assert.Equal("20", recorded.Target("stallSeconds"));
         Assert.Equal(current, recorded.Target("watchRoster"));
         clock.Advance(TimeSpan.FromSeconds(40));
-        WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
+        run.WaitUntil(() => run.Row(started.Run).Stop?.TransmittedAt is not null);
         clock.Advance(TimeSpan.FromSeconds(1));
         Assert.NotNull(run.Settled(started.Run).Stop!.ContainedAt);
         Assert.Equal(0, run.Service.Check().Errors);
@@ -129,5 +129,4 @@ public class WatchSettingsTests
         RunEstate.Ok(run.Service.GoalActivate(revised, new GoalActionRequest(run.Estate.OperatorId)));
     }
 
-    private static void WaitUntil(Func<bool> condition) => Assert.True(SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(20)), "The worker observation did not arrive.");
 }

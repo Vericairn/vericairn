@@ -36,7 +36,8 @@ internal static class BoundedProcess
     internal const int DefaultOutputLimit = 4 * 1024 * 1024;
     private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(1);
 
-    internal static ProcessResult Run(ProcessStartInfo info, TimeSpan timeout, int outputLimit = DefaultOutputLimit, CancellationToken cancellationToken = default)
+    internal static ProcessResult Run(ProcessStartInfo info, TimeSpan timeout, int outputLimit = DefaultOutputLimit, TimeProvider? clock = null, Action? launched = null, Action? rootExited = null,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(info);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
@@ -52,7 +53,8 @@ internal static class BoundedProcess
         }
 
         // The deadline includes launch, both drains and exit observation. No stream read starts a fresh allowance.
-        var watch = Stopwatch.StartNew();
+        clock ??= TimeProvider.System;
+        long started = clock.GetTimestamp();
         ContainedProcess process;
         try
         {
@@ -78,6 +80,8 @@ internal static class BoundedProcess
             // Native pipe handles are synchronous. Dedicated readers keep both pipes draining even if the pool is busy.
             outputTask = Task.Factory.StartNew(() => output.Drain(process.StandardOutput), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             errorTask = Task.Factory.StartNew(() => error.Drain(process.StandardError), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+            launched?.Invoke();
+            bool sawExit = false;
             while (true)
             {
                 if (cancellationToken.IsCancellationRequested)
@@ -97,13 +101,20 @@ internal static class BoundedProcess
                     break;
                 }
 
-                if (watch.Elapsed >= timeout)
+                bool exited = process.WaitForExit(TimeSpan.Zero);
+                if (exited && !sawExit)
+                {
+                    sawExit = true;
+                    rootExited?.Invoke();
+                }
+
+                if (clock.GetElapsedTime(started) >= timeout)
                 {
                     outcome = ProcessOutcome.TimedOut;
                     break;
                 }
 
-                if (process.WaitForExit(TimeSpan.Zero) && outputTask.IsCompleted && errorTask.IsCompleted)
+                if (exited && outputTask.IsCompleted && errorTask.IsCompleted)
                 {
                     // Recheck capture failures after joining the readers; neither partial nor oversized output is success.
                     outcome = output.Overflow || error.Overflow ? ProcessOutcome.OutputLimitExceeded

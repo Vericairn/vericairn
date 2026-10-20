@@ -250,7 +250,7 @@ internal sealed class RunAdmissionService(
                 return Refused(RunProblem(pending, "not-started", "refused", assignmentRefusal + " Nothing was recorded."));
             }
 
-            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = WorkerOptions.Clock.GetUtcNow();
             if (goal is not null)
             {
                 IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, plan.Agent), DeviceKeyStores.All(), Environment.UserName);
@@ -534,7 +534,7 @@ internal sealed class RunAdmissionService(
         // A run is an external operation: recorded by the operator, under 'local-engineering', or by the goal's sponsor when a person,
         // who takes a step of the goal under its activation.
         GoalRules.Accepter decider = GoalRules.AccepterOf(model, goal);
-        if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, DateTimeOffset.UtcNow) && (decider.Principal is null || decider.Principal != request.By))
+        if (!model.HasRole(request.By, Roles.Operator) && !model.HasScope(request.By, Scopes.LocalEngineering, WorkerOptions.Clock.GetUtcNow()) && (decider.Principal is null || decider.Principal != request.By))
         {
             return (null, $"A run is an external operation, recorded by the operator, under the 'local-engineering' scope, or by the sponsor of the goal it is charged to when the sponsor is a person, and {PrincipalName(model, request.By)} ({request.By}) is none of these.", null);
         }
@@ -543,7 +543,7 @@ internal sealed class RunAdmissionService(
         // sponsor's key on this machine that signs without its owner's presence, unless the goal's sponsor recorded an exception in
         // force for the goal, which the run then names.
         IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, request.Agent), stores, Environment.UserName);
-        if (exposed.Count > 0 && CustodyExceptions.InForce(model, goal, DateTimeOffset.UtcNow) is null)
+        if (exposed.Count > 0 && CustodyExceptions.InForce(model, goal, WorkerOptions.Clock.GetUtcNow()) is null)
         {
             return (null, CustodyRefusal(goal.Id, exposed), null);
         }
@@ -684,7 +684,7 @@ internal sealed class RunAdmissionService(
     /// current revision, whose keys sign here without their owners' presence, when no custody exception is in force for the goal now;
     /// empty when the launch may go on.
     /// </summary>
-    private static IReadOnlyList<(string Device, string Reason)> Lapsed(EstateModel model, string goalId, string agent)
+    private IReadOnlyList<(string Device, string Reason)> Lapsed(EstateModel model, string goalId, string agent)
     {
         if (AgentRuns.GoalAt(model, goalId) is not RecordEnvelope goal)
         {
@@ -692,7 +692,7 @@ internal sealed class RunAdmissionService(
         }
 
         IReadOnlyList<(string Device, string Reason)> exposed = CustodyGuard.Exposed(model, CustodyGuard.Guarded(model, goal, agent), DeviceKeyStores.All(), Environment.UserName);
-        return exposed.Count > 0 && CustodyExceptions.InForce(model, goal, DateTimeOffset.UtcNow) is null ? exposed : [];
+        return exposed.Count > 0 && CustodyExceptions.InForce(model, goal, WorkerOptions.Clock.GetUtcNow()) is null ? exposed : [];
     }
 
     /// <summary>The custody guard's refusal of an unattended run of a goal, with each device it found exposed and the way to an exception.</summary>
