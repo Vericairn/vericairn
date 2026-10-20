@@ -7,17 +7,23 @@ decisions, sources, relationships and history intact.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command-line interface, the SDK and the Workbench desktop. The Remote client is not implemented here.
 
-The current published release is [0.7.3](https://github.com/Vericairn/vericairn/releases/tag/v0.7.3),
-published on October 18, 2026 at 05:00:34 UTC, tag `v0.7.3`, commit `b4f4bca`.
-It carries five changes after published 0.7.2. FIX-19 gives each worker run an independent
-workspace repository, permits Codex to commit within its own `.git`, and fetches the audited branch into
-the registered clone after settlement. UPDATE-01 adds a disclosed daily check for newer published releases,
-disabled with `vericairn updates configure --enabled false`. FIX-20 recognizes Vericairn credential reads,
-token-output commands and more outside writes, and excludes null-device output from outside-write signals.
-FIX-21 prepares loaded and rotated certificates before concurrent TLS use and logs handshake failures.
-FIX-22 shows compact attention for obligations still open in the available records. The
-[0.7.3 documentation set](docs/releases/0.7.3/README.md) describes the behavior and remaining limits;
-the estate's release record establishes publication and qualification.
+The current published release is [0.8.0](https://github.com/Vericairn/vericairn/releases/tag/v0.8.0),
+published on October 20, 2026 at 11:28:45 UTC, tag `v0.8.0`, commit `cd50842`.
+It carries 26 work orders after published 0.7.3. POLICY-01 through POLICY-04 and DOCS-05 add record
+format 3's estate policies, writing exceptions and recurring duties, the combined release gate and the
+adoption guide; READ-01 through READ-04 add readable companions. CODE-02 through CODE-06 restructure the
+command line and runtime, make client operations cancellable and settle public API ownership;
+[API compatibility](docs/api-compatibility-0.8.0.md) lists the source and binary changes. OPS-01's
+`vericairn operator` shows what waits on the operator with its exact command and records the operator's own
+signed record through its pull request in one step, and MERGE-01 adds checked pull requests and merges with
+a secret scan before each push. FIX-23 makes the release gate judge each living document at its own
+repository's commit. FIX-24 through FIX-26 correct the worker's command audit, refused-run cleanup and false
+stops, FIX-27 reads a work step's pinned context originals from history, and FIX-28 settles intermittent
+run-watching and client-deadline failures at their cause. FIX-30 and FIX-33 correct the release workflow's
+package job, FIX-31 lets the single-file command line and Workbench evaluate policies, and CI-02 retries
+failed tests once and reports every retry. The [0.8.0 documentation set](docs/releases/0.8.0/README.md)
+describes the behavior and remaining limits; the estate's release record establishes publication and
+qualification.
 
 0.7.2's release notes open with [Security](docs/releases/0.7.2/release-notes.md#security): F-01 affected export
 restoration in every published release from 0.1.0 through 0.7.1. Upgrade to 0.7.2 or later before restoring an export.
@@ -26,17 +32,16 @@ The fix binds restored bytes to the verified inventory; it does not authenticate
 Release 0.7.1 carried the withdrawn 0.7.0 candidate's work with
 FIX-12: a machine-local workspace root, current assignment-holder checks and precise treatment of validated
 public keys and signatures. Its earlier frozen set remains unchanged. All eight command-line and library
-packages are available at 0.7.3 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
+packages are available at 0.8.0 on nuget.org; [the release index](docs/releases/README.md#nuget-publication-setup)
 records publication and the earlier 0.7.1 recovery.
 
-Ordinary source builds retain `0.8.0-dev`. The maintained guides and the
-[0.8.0 documentation set](docs/releases/0.8.0/README.md) describe record format 3,
-estate policies and recurring duties, readable companions, cancellable clients,
-operator actions and checked repository changes, with FIX-23 through FIX-28, FIX-30 and FIX-31.
-0.8.0 has no publication or platform qualification established by this documentation.
-Earlier release sets keep their original bytes. Release checks reach only GitHub, ignore system proxies and retain cached
-information when disabled. Command observations remain signals, not an enforcement boundary. Required
-attention cannot infer closure from prose or missing evidence; its [rules](docs/required-attention.md)
+Ordinary source builds retain `0.8.0-dev`. The maintained guides describe 0.8.0; earlier release sets
+keep their original bytes. Upgrading an estate to record format 3 is forward-only, and a format-2-only binary
+refuses the upgraded estate, so every writer and clone moves to 0.8.0 together. The upgrade declares no policy
+or duty; the operator adopts them explicitly, as the [adoption guide](docs/policy-adoption.md) describes.
+Release checks reach only GitHub, ignore system proxies, are disabled with `vericairn updates configure --enabled false`
+and retain cached information when disabled. Command observations remain signals, not an enforcement boundary.
+Required attention cannot infer closure from prose or missing evidence; its [rules](docs/required-attention.md)
 keep undecidable items visible as unknown.
 
 The native worker baselines are codex-cli `0.159.0-alpha.12.1` and Claude Code `2.1.296`; another exact version
@@ -63,7 +68,8 @@ qualified local tokenizer. Spending and containment limits remain as described i
 The seventh live Codex run committed the permitted file in its independent workspace on macOS; settlement
 audited the commit and fetched its branch into the registered clone. Only the workspace's own `.git` is
 added to Codex's writable roots. This live qualification covers the reported macOS path, not other harness
-versions, accounts, platforms, provider billing or acceptance of the work. The
+versions, accounts, platforms, provider billing or acceptance of the work. 0.8.0's worker changes, FIX-24
+through FIX-28, are covered by tests only; no live run has used the 0.8.0 worker yet. The
 [software guide](docs/software.md#native-inventory-qualification-run-02-and-run-03) retains all seven observations.
 
 ## Releases
@@ -78,30 +84,33 @@ sets, from 0.2.0 on, are also kept under [docs/releases](docs/releases/README.md
 and cold start, the operator's guide, the generated command-line, API and record references, frozen copies of
 the maintained documents, the release notes and known limitations. The index there also names the versions
 withdrawn before publication and why; their sets stay as the record of what was built and reviewed. The
-documents at `docs/` are the maintained drafts. The 0.7.3 set carries the five changes described above;
-the earlier sets remain frozen, including 0.7.0's withdrawn candidate.
+documents at `docs/` are the maintained drafts. The 0.8.0 set documents the work described above except
+CI-02 and FIX-33, which followed its freeze and changed no build source; the earlier sets remain frozen,
+including 0.7.0's withdrawn candidate.
 
-For 0.7.3, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
+For 0.8.0, the command line is qualified on `linux-x64`, `osx-arm64` and `win-x64`, where the release's tests ran.
 The `linux-arm64`, `osx-x64` and `win-arm64` archives are provided but unqualified. Workbench is not qualified on
 any platform. The archives are unsigned developer builds, without code signing or notarization; verify downloads
-as the [install guide](docs/releases/0.7.3/install.md) describes.
+as the [install guide](docs/releases/0.8.0/install.md) describes. 0.8.0's `SHA256SUMS` also lists
+`vericairn-0.8.0-companions.zip`, the readable build reports, which the release run keeps in its CI artifact
+and does not attach; check the attached assets with `--ignore-missing`, as the guide does.
 
 Nothing here is a release until a release record in the Vericairn estate says so. The estate records every
 release and pins the one it runs on.
 
 ## Install the command line and SDK
 
-The 0.7.3 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
+The 0.8.0 NuGet packages are available. Install the command line with the .NET 10 SDK on Linux, macOS or Windows:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.7.3
+dotnet tool install --global dotnet-vc --version 0.8.0
 dotnet vc version
 dotnet vc doctor
 dotnet vc records describe
 ```
 
 The global tool directory must be on PATH, as the installer describes. A repository can instead keep a
-local tool manifest; see the [0.7.3 install guide](docs/releases/0.7.3/install.md#9-nuget-command-line-and-sdk).
+local tool manifest; see the [0.8.0 install guide](docs/releases/0.8.0/install.md#9-nuget-command-line-and-sdk).
 The tool is framework-dependent; the self-contained archives continue to ship `vericairn` for machines without the SDK, and the macOS archives
 also carry the Secure Enclave helper. The NuGet tool does not bundle that helper or Workbench.
 The worker's agent-side MCP command still resolves `vericairn`; keep the archive executable on PATH for worker
@@ -110,18 +119,18 @@ runs. A NuGet-only worker installation is not qualified by the package installat
 In a .NET 10 project, install the SDK with:
 
 ```sh
-dotnet add package Vericairn --version 0.7.3
+dotnet add package Vericairn --version 0.8.0
 ```
 
 `Vericairn` brings `Vericairn.Sdk`, `Vericairn.Protocol` and `Vericairn.Records`, preserving their namespaces
-and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.7.3;
+and assemblies. `Vericairn.Runtime`, `Vericairn.Daemon` and `Vericairn.Mcp` are also available at 0.8.0;
 the SDK front door does not embed a runtime or daemon. See the [SDK guide](docs/api-v1.md#the-sdk).
 The packages contain Community code only.
 Commands written as `vericairn ...` in the archive documentation take the same arguments as `dotnet vc ...`.
 
 ## What is here
 
-The following capabilities are in the 0.8.0 source.
+The following capabilities are in 0.8.0.
 
 - `Vericairn.Records`: record formats 1, 2 and 3 (canonical JSON, ULIDs, content hashes, signed records, devices
   and admission, estate loading, validation, cleanliness checks, status, living documents), documented in
@@ -141,7 +150,8 @@ The following capabilities are in the 0.8.0 source.
   verification evidence, and the coding-agent launchers and independent Git workspaces the worker uses),
   `Vericairn.Adapters.Git` (repository observation, exact source reads and checked workspace/push operations) and
   `Vericairn.Providers.GitHub` (releases built by a GitHub Actions workflow and held as drafts, with intent
-  recorded before effect and publication left to the operator), documented in [docs/software.md](docs/software.md).
+  recorded before effect and publication left to the operator, and the pull requests and merges of checked
+  changes), documented in [docs/software.md](docs/software.md) and [docs/changes.md](docs/changes.md).
   The foundation keeps their contracts; a release goes through the provider its request names or its product
   record declares.
 - `vericairn` CLI: `records`, `estate`, `work`, `goal`, `worker`, `devices`, `connections`, `release`, `sources`,
@@ -180,16 +190,17 @@ The following capabilities are in the 0.8.0 source.
   its next request, a device acts only for its own principal, and `vericairn devices writes` shows what paired
   devices wrote through the runtime, whose own devices sign those records until paired devices sign their own.
   `vericairn docs` writes a release's notes from an estate's records, refuses an incomplete documentation set,
-  and keeps the estate's living documents: their declarations, what is due and why, reviews and generated
-  regions. `vericairn mcp serve` is the Model Context Protocol server for coding agents, a client adapter over
-  the API that lists only the tools the connected device may use, documented in [docs/mcp.md](docs/mcp.md);
-  `Vericairn.Mcp` is the library behind it.
+  lists and renders readable companions and keeps the estate's living documents: their declarations, what is
+  due and why, reviews and generated regions. `vericairn mcp serve` is the Model Context Protocol server for
+  coding agents, a client adapter over the API that lists only the tools the connected device may use,
+  documented in [docs/mcp.md](docs/mcp.md); `Vericairn.Mcp` is the library behind it.
 - Worker spending limits are soft, and unknown usage is charged at the reserved cap. The launchers are tested with
   stand-in processes; live coding-agent sessions and sign-in are not qualified by those tests. Process containment
   and the workspace audit have platform limits, detailed in [docs/software.md](docs/software.md#launch-accounting-and-containment).
 - `Vericairn.Workbench`: the desktop, a client of the daemon that starts it when none answers and never hosts
   the runtime: home with attention, the asks waiting among it, and the progress report, products, work orders, assignments,
-  results, review and decisions, goals, releases, living documents, communication settings, hand-over/resume and the runtime, documented in
+  results, review and decisions, goals, releases, living documents, readable views, communication settings,
+  hand-over/resume and the runtime, documented in
   [docs/workbench.md](docs/workbench.md). `Vericairn.Presentation` holds
   the state language Workbench shares with the command line and the clients to come.
 - `tools/Vericairn.DocsTool`: build tooling, never shipped. It generates a release's command-line, API and record

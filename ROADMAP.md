@@ -4,29 +4,26 @@ This page shows where Vericairn is headed, release by release. Everything after 
 release is planned, not promised, and has no dates. Each release's notes and documentation set are the
 record of what shipped.
 
-## 0.7.3 — current published release
+## 0.8.0 — current published release
 
-Each worker run gets a workspace repository of its own, so a worker-launched Codex run can commit its
-changes, which a live run confirmed on macOS. The command line and Workbench show a newer-release notice
-with release notes and upgrade guidance. The check runs at most once a day, can be switched off, works
-offline and never installs anything. Worker command auditing stops a run on recognized reads of
-Vericairn's credentials and on token-printing commands, recognizes more write forms and handles
-null-device output correctly; it remains a signal, not an enforcement boundary. Simultaneous connections
-to the daemon no longer fail on a freshly loaded or rotated certificate, and status shows only what still
-needs attention, with compact, current items. Its [release notes](docs/releases/0.7.3/release-notes.md) and
-[documentation set](docs/releases/0.7.3/README.md) describe what shipped and its limits.
-
-## 0.8.0 — planned
-
-Estate policies and recurring maintenance duties help keep required work current. Readable views make
-records easier to inspect, and client operations can be cancelled. The release gate reads documents kept in other repositories at
-those repositories' own commits. Commands show what needs the operator's attention and carry authorized
-work through checked pull requests and merges.
+Estates can declare policies and recurring maintenance duties that help keep required work current, and
+the release gate holds a release on the policies that apply to it; an upgraded estate adopts them
+explicitly. Readable views make records easier to inspect, and client operations can be cancelled or
+given deadlines. The release gate reads documents kept in other repositories at those repositories' own
+commits. Commands show what needs the operator's attention, with the exact command to run, and carry
+authorized work through checked pull requests and merges. Upgrading moves an estate to record format 3,
+which 0.7.3 refuses, so every machine that writes to it upgrades together. Its
+[release notes](docs/releases/0.8.0/release-notes.md) and [documentation set](docs/releases/0.8.0/README.md)
+describe what shipped and its limits.
 
 ## 0.8.1 — planned
 
-Commands record exact document revisions and observe NuGet publication, listing and deprecation. An
-optional efficiency adapter helps reduce eligible agent context.
+Commands record exact document revisions and observe NuGet publication, listing and deprecation, and the
+packages carry the cairn mark as their icon. An optional efficiency adapter helps reduce eligible agent
+context. Every client reports a record as stored, not refused, when publishing its readable companions was
+interrupted; the policy guides describe policy implementation identity accurately; and the estate check
+ignores top-level files the repository's own ignore rules exclude. The test suites run split across
+parallel jobs and no longer depend on real time, and CI runs the release's packaging steps on every change.
 
 ## 0.8.2 — planned
 

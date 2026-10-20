@@ -1,7 +1,9 @@
 # Release documentation sets
 
-The current published release is **0.7.3**, published on October 18, 2026 at 05:00:34 UTC,
-with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
+The current published release is **0.8.0**, published on October 20, 2026 at 11:28:45 UTC,
+with tag `v0.8.0` at `cd508425339415944411cf71cce9ad20f46ff41f`
+(estate release record `01M5CH7JNSD0MPQZHW51BGYNN4`). It follows 0.7.3, published on October 18, 2026
+at 05:00:34 UTC with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
 (estate release record `01M56P744RYYS9XBHM4NTD0JDZ`). 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
@@ -14,11 +16,16 @@ cleanup and state-publication corrections; exact local context originals; and
 signed operator actions and checked repository changes. It explains the upgrade
 to record format 3 and the policy definitions, writing grant and declarations that
 remain the operator's work after upgrading. The source version is `0.8.0-dev`.
-The set records no 0.8.0 publication, tag, package availability or platform qualification.
 Its references retain build commit `0d9cc5404308f4e73909074069629b05be5510f1`,
 with 141 commands, 99 API operations, 42 record types and 31 required documents.
-Its notes render the estate's records with `--from 0.7.3 --to 0.8.0`. The set is frozen for its
-release build, with every file's checksum in `frozen-sha256.json`.
+Its notes render the estate's records with `--from 0.7.3 --to 0.8.0`. The set was first frozen at
+`462dd57`; after FIX-31 it was prepared again at that fix's merge commit and frozen again, replacing
+only its own checksum entries, which no release asset had contained. It was frozen before publication,
+so its conditional publication and NuGet wording remains historical; every file's checksum is in
+`frozen-sha256.json`. The release also carries CI-02, which retries a failed test once in CI and the
+release workflow and reports the retry, and FIX-33, which pins the release's SBOM tool at a specification
+its components report reads; both followed the freeze and changed no build source, so the set and its
+notes name neither. The estate's release record establishes publication and platform qualification.
 
 The [0.7.3 set](0.7.3/README.md) documents FIX-19, UPDATE-01, FIX-20, FIX-21 and FIX-22 after published 0.7.2:
 independent worker workspace repositories and sandboxed Codex commits; a disclosed, machine-local daily
@@ -28,7 +35,7 @@ attention across surfaces. Its notes render the estate's records with `--from 0.
 The estate's release record establishes publication and platform qualification. Its source build retained
 `0.7.3-dev`; the set and its checksums remain unchanged.
 
-The [0.7.2 set](0.7.2/README.md) documents the previous published release, published on October 17, 2026 at tag `v0.7.2`, commit `d1363d92f3cc5cae84a65787326897929582fce9` (estate release record `01M55S0Q6H5ZFNA4DG3JDBCEE3`), with FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18 after published 0.7.1: ordered identifiers, exact-commit release document checks, grouped notes, settled worker attention, workflow policy checks and a bounded Workbench first screen; inventory-bound export restore (F-01); claimed release dispatch and bounded Git/gh processes; validation before record publication and visible unreadable journals; and the corrected Codex worker path at max effort. Its notes render the estate's records with `--from 0.7.1 --to 0.7.2 --since 2026-10-17T05:25:00Z`, with the operator's approved Security section on F-01 first. The estate's release record establishes publication and qualification; this set does not. Earlier sets and their checksums remain unchanged. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`.
+The [0.7.2 set](0.7.2/README.md) documents an earlier published release, published on October 17, 2026 at tag `v0.7.2`, commit `d1363d92f3cc5cae84a65787326897929582fce9` (estate release record `01M55S0Q6H5ZFNA4DG3JDBCEE3`), with FIX-13, FIX-14, FIX-15, FIX-16 and FIX-18 after published 0.7.1: ordered identifiers, exact-commit release document checks, grouped notes, settled worker attention, workflow policy checks and a bounded Workbench first screen; inventory-bound export restore (F-01); claimed release dispatch and bounded Git/gh processes; validation before record publication and visible unreadable journals; and the corrected Codex worker path at max effort. Its notes render the estate's records with `--from 0.7.1 --to 0.7.2 --since 2026-10-17T05:25:00Z`, with the operator's approved Security section on F-01 first. The estate's release record establishes publication and qualification; this set does not. Earlier sets and their checksums remain unchanged. The set is frozen for its release build, with every file's checksum in `frozen-sha256.json`.
 
 Vericairn's documentation sets start at 0.2.0, one directory per version under `docs/releases/<version>/`; from 0.3.1, every published release also carries its set as a release asset. A set is written for the release it documents and then frozen: nothing in a released set is edited afterwards, and a correction goes into the next version's set with a note that says what it corrects. The maintained documents at `docs/` are the drafts for the next release; the frozen copies in a set record what was prepared for that version, including candidates withdrawn before publication.
 
@@ -44,11 +51,11 @@ The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn befor
 
 ## NuGet publication setup
 
-The 0.7.3 release event's Trusted Publishing run, [run 39099053433](https://github.com/Vericairn/vericairn/actions/runs/39099053433),
-pushed all eight packages, and each lists 0.7.3 on nuget.org:
+The 0.8.0 release event's Trusted Publishing run, [run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377),
+pushed all eight packages, and each lists 0.8.0 on nuget.org:
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
-`Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.7.3 is available. The recovery below belongs to
-0.7.1's first publication, not to the 0.7.2 or 0.7.3 events.
+`Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.0 is available. The recovery below belongs to
+0.7.1's first publication, not to the 0.7.2, 0.7.3 or 0.8.0 events.
 
 On October 17, 2026, [run 39028643979](https://github.com/Vericairn/vericairn/actions/runs/39028643979)
 of `nuget.yml` pushed `dotnet-vc` and the seven Vericairn packages at 0.7.1, with their produced symbol packages,
@@ -70,7 +77,7 @@ and package availability after the first publication. If the release event could
 organization setting refused one of its actions, a person may run it by hand for that published, immutable
 release, `gh workflow run nuget.yml -R Vericairn/vericairn -f release_id=<release id>`, which verifies and pushes
 the same assets. A withdrawn candidate stays off NuGet while its draft remains unpublished. The workflow runs for any published release, including a prerelease, and verifies packages against that release's own `SHA256SUMS`; the operator binds the upload to estate acceptance by publishing exactly the accepted draft. Existing package versions are skipped, never replaced. Details are
-in the [publication draft](../software.md#vericairns-nuget-publication); the [0.7.3 installation guide](0.7.3/install.md#9-nuget-command-line-and-sdk)
+in the [publication draft](../software.md#vericairns-nuget-publication); the [0.8.0 installation guide](0.8.0/install.md#9-nuget-command-line-and-sdk)
 contains the tool and SDK package commands. The NuGet tool remains framework-dependent and includes neither
 the macOS Secure Enclave helper nor Workbench.
 
