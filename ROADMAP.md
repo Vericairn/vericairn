@@ -28,12 +28,17 @@ parallel jobs and no longer depend on real time, and CI runs the release's packa
 ## 0.8.2 — planned
 
 Reusable templates give documents, roadmaps, communication, context, commits and reviews consistent
-sections and checks.
+sections and checks. Saved prompts, each with a title, description, category, placeholders and the roles
+it suits, can be shared across an estate, kept as personal favorites, and used with new agent runs,
+assignments and answers to an agent's questions, from the command line or as prompts in coding agents that
+support them. Vericairn and its packs include built-in prompts, which anyone can hide from their own lists
+and an estate can disable or copy into its own library.
 
 ## 0.9.0 — planned
 
 The Remote companion brings supervision, eligible decisions and readable records to a phone, with
-handoff to the desktop for work that needs it.
+handoff to the desktop for work that needs it. From Workbench or the phone, a saved prompt can be sent to a
+running agent in one step; it steers the agent without widening what the agent may do.
 
 ## Later milestone: coordination, packages and websites — planned
 
