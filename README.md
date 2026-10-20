@@ -1,14 +1,18 @@
 # Vericairn
 
-Vericairn helps a person or a small team build and ship software with coding agents while keeping the
-final say. Work orders, agent attempts, reviews, decisions and releases are records in your own git
-repository, each with a content hash and, from an admitted device, a signature. Agents work from exact
-briefs, their results are checked and reviewed, and a release is published only after you accept it.
+Vericairn is a local-first creation and operations platform. It helps you, alone or as an organization,
+carry work from an intention to a reviewed, delivered and maintained result, with its decisions, sources
+and history kept as records in your own git repository. People and agents do the work, and nothing is
+released until you accept it.
+
+Software is its first domain. Today Vericairn helps you build and ship software with coding agents: agents
+work from exact briefs, their results are checked and reviewed, and each work order, attempt, review,
+decision and release is a record with a content hash and, from an admitted device, a signature. Workflows
+for other kinds of work, starting with books, Unity projects and courses, are planned.
 
 Vericairn's own development runs this way. Its work orders, reviews, decisions and releases are records in a
 Vericairn estate, and every release ships only after its operator accepts it.
 
-Vericairn is a local-first creation and operations platform, and software is the first journey it supports.
 This repository holds the Community edition (Apache-2.0): the record format, the runtime and its daemon, the
 `vericairn` command line, the SDK, the MCP server and the Workbench desktop. The Remote client is not
 implemented here.
@@ -53,6 +57,7 @@ decisions, a work order, an agent's run, its review and acceptance, and a releas
 
 - Remote, the phone client for accepting releases and steering work, in 0.9.0.
 - Separately installed extensions and the package registry, at milestone M4.
+- Workflows for other kinds of work, starting with books, Unity projects and courses, at a later milestone.
 - The [roadmap](ROADMAP.md) gives the order, and [the limitations](docs/limitations-and-platforms.md) give
   the current limits.
 
