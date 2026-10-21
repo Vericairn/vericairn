@@ -20,6 +20,8 @@ public sealed class LocalClientCancellationTests
     [InlineData(true, true)]
     public async Task SilentLoopbackPeerPreservesDeadlineAndCallerCancellation(bool pairing, bool cancel)
     {
+        TestPrerequisites.RequireLoopback();
+        TestPrerequisites.RequireTlsCertificates();
         using var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         string home = Path.Combine(Path.GetTempPath(), "vericairn-client-test-" + Ulid.NewUlid().Value);
@@ -32,20 +34,23 @@ public sealed class LocalClientCancellationTests
             var connection = new RuntimeConnection(Ulid.NewUlid().Value, address, Ulid.NewUlid().Value, null,
                 publicKey, device, publicKey, Ulid.NewUlid().Value, null, ["local-network"], "2026-10-18T00:00:00Z");
             using var stop = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            // Caller cancellation is triggered by acceptance, independently of elapsed startup time.
-            TimeSpan timeout = cancel ? Timeout.InfiniteTimeSpan : TimeSpan.FromMilliseconds(100);
+            var clock = new ClientClock();
+            TimeSpan timeout = TimeSpan.FromSeconds(30);
             Task operation = pairing
-                ? RuntimePairing.PairAsync(address, PairingProtocol.NewCode(), new PairingOptions("Test device") { KeyStore = keys, Timeout = timeout }, stop.Token)
-                : new RuntimeConnections(home, keys).ProbeAsync(connection, timeout, cancellationToken: stop.Token);
+                ? RuntimePairing.PairAsync(address, PairingProtocol.NewCode(), new PairingOptions("Test device") { KeyStore = keys, Timeout = timeout, Clock = clock }, stop.Token)
+                : new RuntimeConnections(home, keys) { Clock = clock }.ProbeAsync(connection, timeout, cancellationToken: stop.Token);
             try
             {
                 using TcpClient? accepted = await SilentPeer.AcceptUntilCompletedAsync(
                     token => listener.AcceptTcpClientAsync(token).AsTask(), operation, TestContext.Current.CancellationToken);
+                Assert.NotNull(accepted);
+                Assert.False(operation.IsCompleted);
                 if (cancel)
                 {
                     Assert.NotNull(accepted);
                     stop.Cancel();
                 }
+                else clock.Elapse(timeout);
                 Exception failure = cancel
                     ? await Assert.ThrowsAsync<ClientCancelledException>(() => operation)
                     : await Assert.ThrowsAsync<ClientTimeoutException>(() => operation);

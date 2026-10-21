@@ -196,21 +196,17 @@ public class LoopbackConcurrencyTests(ITestOutputHelper output)
             }
 
             using var ready = new CountdownEvent(clientsPerRound);
-            var start = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var start = TestTiming.Signal();
             Task[] clients = Enumerable.Range(0, clientsPerRound).Select(async _ =>
             {
                 await using SslStream tls = await ConnectAsync(endpoint, async () =>
                 {
                     if (ready.Signal())
                     {
-                        start.SetResult(Stopwatch.GetTimestamp() + Stopwatch.Frequency / 500);
+                        start.SetResult();
                     }
 
-                    long startAt = await start.Task.WaitAsync(TestContext.Current.CancellationToken);
-                    while (Stopwatch.GetTimestamp() < startAt)
-                    {
-                        Thread.SpinWait(1);
-                    }
+                    await start.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 });
                 Assert.True(tls.IsAuthenticated);
                 Assert.Equal(endpoint.Certificate, RuntimeIdentityScheme.CertificateFingerprint(tls.RemoteCertificate!.GetRawCertData()));
@@ -241,7 +237,7 @@ public class LoopbackConcurrencyTests(ITestOutputHelper output)
     {
         DaemonTestHome.Ensure();
         using var estate = new TestEstate();
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         var connections = new List<SslStream>();
         try
         {
@@ -286,7 +282,7 @@ public class LoopbackConcurrencyTests(ITestOutputHelper output)
     private static async Task<SslStream> ConnectAsync(LoopbackEndpoint endpoint, Func<Task>? beforeClientHello = null)
     {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromSeconds(5));
+        deadline.CancelAfter(TestTiming.HangTimeout);
         var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
         SslStream? tls = null;
         try

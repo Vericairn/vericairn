@@ -96,7 +96,10 @@ public class LoopbackBodyTests
         Task<Problem?> verifying = authenticator.VerifyAsync(context);
         try
         {
-            Problem? problem = await verifying.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+            Assert.False(verifying.IsCompleted);
+            Assert.Equal(TimeSpan.FromSeconds(30), time.Scheduled);
+            time.Elapse(TimeSpan.FromSeconds(30));
+            Problem? problem = await verifying.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.Equal("denied", problem?.Code);
             Assert.Equal(TimeSpan.FromSeconds(30), time.Scheduled);
             Assert.False(context.RequestAborted.IsCancellationRequested);
@@ -153,15 +156,17 @@ public class LoopbackBodyTests
     private sealed class DeadlineTime : TimeProvider
     {
         private readonly DateTimeOffset now = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        private readonly ClientClock timers = new();
 
         public TimeSpan? Scheduled { get; private set; }
 
         public override DateTimeOffset GetUtcNow() => now;
+        internal void Elapse(TimeSpan elapsed) => timers.Elapse(elapsed);
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
             Scheduled = dueTime;
-            return System.CreateTimer(callback, state, TimeSpan.FromMilliseconds(50), period);
+            return timers.CreateTimer(callback, state, dueTime, period);
         }
     }
 }

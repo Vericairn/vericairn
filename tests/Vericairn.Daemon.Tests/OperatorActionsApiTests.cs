@@ -58,7 +58,7 @@ public class OperatorActionsApiTests
     {
         using var estate = new TestEstate(2);
         estate.Add("ask", estate.BuilderId, $$"""{"to":"{{estate.OperatorId}}","question":"Proceed?","recommendation":"Review first.","consequence":"Work waits.","state":"open"}""");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         int before = estate.Load().Records.Count;
         OperatorActionsResponse remote = client.OperatorActions(estate.OperatorId, view: new(Progress: "none", Status: "short"));

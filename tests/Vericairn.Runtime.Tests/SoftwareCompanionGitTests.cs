@@ -152,7 +152,7 @@ public sealed class SoftwareCompanionGitTests : IDisposable
         using Process process = Process.Start(start)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(30_000)) { process.Kill(true); throw new InvalidOperationException("The fixture git operation timed out."); }
+        if (!process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds)) { process.Kill(true); throw new InvalidOperationException("The fixture git operation timed out."); }
         Assert.True(process.ExitCode == 0, error.Result);
         return output.Result.Trim();
     }

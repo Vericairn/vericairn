@@ -19,7 +19,7 @@ public sealed class CompanionApiTests
     {
         using var fixture = new PolicyFixture();
         int count = fixture.Estate.Load().Records.Count;
-        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
         CompanionsResponse coverage = await client.CompanionsAsync(TestContext.Current.CancellationToken);
         Assert.Equal("success", coverage.Status);

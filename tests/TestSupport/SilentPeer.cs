@@ -16,7 +16,7 @@ internal static class SilentPeer
         bool completed = false;
         try
         {
-            await Task.WhenAny(accepting, operation).WaitAsync(TimeSpan.FromSeconds(5), cancellationToken);
+            await Task.WhenAny(accepting, operation).WaitAsync(TestTiming.HangTimeout, cancellationToken);
             completed = true;
         }
         finally

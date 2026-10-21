@@ -56,7 +56,7 @@ public class RunDirectoryTests
                 // Windows cannot replace the open destination even with delete sharing. Let the
                 // reader finish after the failed move, then retry without racing a wall-clock budget.
                 moveAttempted.Set();
-                Assert.True(readerClosed.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+                Assert.True(readerClosed.Wait(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
                 clock.Advance(delay);
             },
         };
@@ -69,13 +69,13 @@ public class RunDirectoryTests
             AfterReadOpen = () =>
             {
                 readerOpened.Set();
-                Assert.True(moveAttempted.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+                Assert.True(moveAttempted.Wait(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
             },
         };
 
         Task publishing = Task.Run(() =>
         {
-            Assert.True(readerOpened.Wait(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+            Assert.True(readerOpened.Wait(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
             try { writer.Write(new RunObservedState { Run = id, Stop = transmitted }); }
             finally { moveAttempted.Set(); }
         }, TestContext.Current.CancellationToken);
@@ -85,7 +85,7 @@ public class RunDirectoryTests
         {
             readerClosed.Set();
             // Observe the writer's own exception; it must never be swallowed by the reader's catch.
-            await publishing.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await publishing.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         }
 
         Assert.Equal(stop, snapshot!.Stop);

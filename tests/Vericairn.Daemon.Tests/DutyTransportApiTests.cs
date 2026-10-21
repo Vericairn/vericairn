@@ -30,7 +30,7 @@ public sealed class DutyTransportApiTests
             fixture.Estate.SetClock(record.AtTime.AddSeconds(-1));
             fixture.Add("admission", new() { ["principal"] = principal, ["status"] = "admitted", ["note"] = "Fixture transport admission." }, subject: record.Reference);
         }
-        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
         var request = new ResultRequest(attempt.Id, attempt.By, PolicyFixture.Element(PolicyFixture.ResultBody(fixture.DutyLink(policy))), attempt.ComputedHash);
         int before = fixture.Estate.Load().Records.Count;

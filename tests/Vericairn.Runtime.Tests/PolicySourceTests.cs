@@ -108,7 +108,7 @@ public sealed class PolicySourceTests
         using Process process = Process.Start(start)!;
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
-        Assert.True(process.WaitForExit(30000));
+        Assert.True(process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds));
         Assert.True(process.ExitCode == 0, error);
         return output;
     }

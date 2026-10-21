@@ -71,7 +71,7 @@ public class SettlementAttentionTests
         var started = run.Start("generic", "generic", run.Report("interrupted-settlement"));
         Assert.True(started.Ok, started.Message);
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
-        Assert.True(SpinWait.SpinUntil(() => directory.Read()?.Problem is not null, TimeSpan.FromSeconds(10)));
+        run.WaitUntil(() => directory.Read()?.Problem is not null, "the interrupted settlement observation");
         Assert.NotNull(pending);
         var settled = run.Row(started.Run);
         var signal = Assert.Single(settled.Signals!);

@@ -244,7 +244,7 @@ public sealed class ContextHistoryTests
         using Process process = Process.Start(info)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(30_000));
+        Assert.True(process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds));
         Assert.True(process.ExitCode == 0, error.GetAwaiter().GetResult());
         return output.GetAwaiter().GetResult();
     }

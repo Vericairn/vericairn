@@ -4,7 +4,6 @@
 using System.Collections;
 using System.Diagnostics;
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -58,10 +57,7 @@ internal static class FakeHarness
         File.Exists(report) ? File.ReadAllLines(report).Where(l => l.Length > 0).Select(l => (JsonObject)JsonNode.Parse(l)!).ToList() : [];
 
     /// <summary>Runs as the stand-in, before the test platform starts, when the process was started with the marker.</summary>
-    [ModuleInitializer]
-#pragma warning disable CA2255 // The test executable is an application: starting it with the marker makes it the stand-in harness.
     internal static void Intercept()
-#pragma warning restore CA2255
     {
         string[] arguments = Environment.GetCommandLineArgs();
         int at = Array.IndexOf(arguments, Marker);
@@ -104,12 +100,7 @@ internal static class FakeHarness
                 File.WriteAllText(countFile, count.ToString(CultureInfo.InvariantCulture));
                 string gate = report + ".version-" + count.ToString(CultureInfo.InvariantCulture);
                 File.WriteAllText(gate, "waiting");
-                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-                while (!File.Exists(gate + ".continue"))
-                {
-                    if (DateTimeOffset.UtcNow >= until) return 2;
-                    Thread.Sleep(10);
-                }
+                WaitForFile(gate + ".continue");
             }
             Console.WriteLine(behavior["version"]?.GetValue<string>() ?? (codex ? "codex-cli 0.159.0-alpha.12.1" : "2.1.296 (Claude Code)"));
             return 0;
@@ -196,14 +187,13 @@ internal static class FakeHarness
         if (behavior["stdin"]?.GetValue<string>() == "eof")
         {
             Task<int> input = Task.Run(Console.In.Read);
-            bool eof = input.Wait(TimeSpan.FromSeconds(2)) && input.Result == -1;
+            bool eof = input.Wait(TestTiming.HangTimeout) && input.Result == -1;
             File.WriteAllText(report + ".stdin", eof ? "eof" : "open");
             return eof ? 0 : 2;
         }
         if (behavior["hold"]?.GetValue<string>() == "exit")
         {
-            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(10);
-            while (!File.Exists(report + ".continue") && DateTimeOffset.UtcNow < until) Thread.Sleep(10);
+            WaitForFile(report + ".continue");
         }
         if (codex && behavior["rollout"]?.GetValue<string>() is string rollout)
         {
@@ -336,7 +326,7 @@ internal static class FakeHarness
         using Process process = Process.Start(info)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(30000))
+        if (!process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds))
         {
             process.Kill(entireProcessTree: true);
             throw new ProviderRefusedException("The stand-in probe did not finish.");
@@ -617,23 +607,18 @@ internal static class FakeHarness
                 return Linger(acknowledge: false);
             case "ack-stop":
                 return Linger(acknowledge: true);
-            case "scope-hang":
-                Thread.Sleep(TimeSpan.FromMinutes(2));
+            case "scope-snapshot":
+                Console.Write(JsonSerializer.Serialize(new Vericairn.Runtime.Workers.WorkspaceSnapshot(new Dictionary<string, string>(StringComparer.Ordinal))));
                 return 0;
-            case "close-output" or "close-output-short":
+            case "scope-hang":
+                WaitForFile(report + ".finish");
+                return 0;
+            case "close-output":
                 Emit("Closing my output and working on.");
                 Console.Out.Close();
                 Console.Error.Close();
-                if (scenario == "close-output")
-                {
-                    File.WriteAllText(report + ".closed", "ready");
-                    WaitForFile(report + ".finish");
-                }
-                else
-                {
-                    Thread.Sleep(TimeSpan.FromSeconds(3)); // Native detached-owner test's eventual exit, not an observation window.
-                }
-
+                File.WriteAllText(report + ".closed", "ready");
+                WaitForFile(report + ".finish");
                 return 0;
             case not null when scenario.StartsWith("mcp:", StringComparison.Ordinal):
                 return Mcp(scenario["mcp:".Length..], arguments);
@@ -698,7 +683,7 @@ internal static class FakeHarness
             },
         });
         mcp.StandardInput.Close();
-        mcp.WaitForExit(30_000);
+        mcp.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds);
         if (result["result"]?["isError"]?.GetValue<bool>() != false)
         {
             Console.Error.WriteLine("stand-in harness: the result was not recorded: " + Text(result));
@@ -727,7 +712,7 @@ internal static class FakeHarness
         using Process git = Process.Start(info) ?? throw new IOException("The stand-in could not start git.");
         Task<string> output = git.StandardOutput.ReadToEndAsync();
         Task<string> error = git.StandardError.ReadToEndAsync();
-        if (!git.WaitForExit(30_000))
+        if (!git.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds))
         {
             git.Kill(entireProcessTree: true);
             throw new IOException("The stand-in git command timed out.");
@@ -741,10 +726,8 @@ internal static class FakeHarness
 
     private static void WaitForFile(string path)
     {
-        if (!SpinWait.SpinUntil(() => File.Exists(path), TimeSpan.FromMinutes(2)))
-        {
-            throw new IOException("The stand-in readiness barrier timed out.");
-        }
+        using var changed = new FileSignal(Path.GetDirectoryName(path)!);
+        changed.Until(() => File.Exists(path), "the stand-in readiness barrier");
     }
 
     private static string Text(JsonObject reply) => reply["result"]?["content"]?[0]?["text"]?.GetValue<string>() ?? reply.ToJsonString();
@@ -770,27 +753,30 @@ internal static class FakeHarness
     private static int Linger(bool acknowledge, bool output = true)
     {
         string? stopFile = Environment.GetEnvironmentVariable("VERICAIRN_STOP_FILE");
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddMinutes(2);
-        while (DateTimeOffset.UtcNow < until)
+        if (output) Emit("working");
+        else Console.Error.WriteLine("stderr activity is not the event stream");
+
+        if (!acknowledge)
         {
-            if (output)
-            {
-                Emit("working");
-            }
-            else
-            {
-                Console.Error.WriteLine("stderr activity is not the event stream");
-            }
-
-            if (acknowledge && (Terminated.IsSet || (stopFile is not null && File.Exists(stopFile))))
-            {
-                Emit("""{"vericairn":"stop-acknowledged"}""");
-                return 0;
-            }
-
-            Thread.Sleep(200);
+            using var held = new ManualResetEventSlim();
+            Assert.True(held.Wait(TestTiming.HangTimeout), "The test did not contain its deliberately uncooperative stand-in.");
+            return 2;
         }
 
+        if (stopFile is null)
+        {
+            Assert.True(Terminated.Wait(TestTiming.HangTimeout), "The test did not signal its stand-in.");
+        }
+        else
+        {
+            using var changed = new FileSignal(Path.GetDirectoryName(stopFile)!);
+            RegisteredWaitHandle terminated = ThreadPool.RegisterWaitForSingleObject(Terminated.WaitHandle,
+                (_, _) => changed.Notify(), null, Timeout.InfiniteTimeSpan, executeOnlyOnce: true);
+            try { changed.Until(() => Terminated.IsSet || File.Exists(stopFile), "the stand-in stop request"); }
+            finally { terminated.Unregister(null); }
+        }
+
+        Emit("""{"vericairn":"stop-acknowledged"}""");
         return 0;
     }
 
@@ -857,7 +843,7 @@ internal sealed class ReportedLauncher(Vericairn.Runtime.Workers.IAgentLauncher 
         info.Environment.Clear();
         foreach ((string name, string value) in context.Environment) info.Environment[name] = value;
         using Process process = Process.Start(info)!;
-        if (!process.WaitForExit(10000))
+        if (!process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds))
         {
             process.Kill(entireProcessTree: true);
             throw new Vericairn.Runtime.Providers.ProviderRefusedException("The stand-in inventory probe did not finish.");

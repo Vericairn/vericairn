@@ -78,7 +78,7 @@ public class ProgressApiTests
         RecordEnvelope first = estate.Add("work-order", estate.OperatorId, """{"key":"W-1","kind":"ordinary","title":"Build the widget","intent":"Progress.","scope":["widget"],"exitQuestion":"Does it build?","inputs":[],"deliverables":["widget"]}""");
         estate.Add("work-order", estate.OperatorId, $$"""{"key":"W-2","kind":"ordinary","title":"Ship the widget","intent":"Progress.","scope":["widget"],"exitQuestion":"Is it shipped?","inputs":[],"deliverables":["widget"],"after":["{{first.Id}}"]}""");
         estate.Add("ask", estate.BuilderId, $$"""{"to":"{{estate.OperatorId}}","question":"Blue?","recommendation":"Yes.","consequence":"It stays grey.","state":"open"}""");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
 
         ProgressResponse remote = client.Progress();

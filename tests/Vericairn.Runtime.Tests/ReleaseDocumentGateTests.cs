@@ -416,7 +416,7 @@ public sealed class ReleaseDocumentGateTests
         using Process process = Process.Start(info)!;
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
-        Assert.True(process.WaitForExit(10000), "Git did not exit.");
+        Assert.True(process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds), "Git did not exit.");
         Assert.True(process.ExitCode == 0, error);
         return output.Trim();
     }

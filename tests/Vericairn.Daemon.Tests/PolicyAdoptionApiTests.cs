@@ -18,10 +18,13 @@ namespace Vericairn.Daemon.Tests;
 public sealed class PolicyAdoptionApiTests
 {
     [Fact]
-    public void CompleteAdoptionTraversesTheMappedApiRoutesWithoutOpeningASocket()
+    public async Task CompleteAdoptionTraversesTheMappedApiRoutesWithoutOpeningASocket()
     {
         DaemonTestHome.Ensure();
-        PolicyAdoptionJourney.Run(api => new RouteSurface(new RouteHandler(api)));
+        // The journey deliberately uses the synchronous SDK. ASP.NET's in-memory delegates must
+        // run without the test's synchronization context, just as they do on a server request thread.
+        await Task.Run(() => PolicyAdoptionJourney.Run(api => new RouteSurface(new RouteHandler(api))), TestContext.Current.CancellationToken)
+            .WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
     }
 
     private sealed class RouteSurface : PolicyAdoptionJourney.Surface
@@ -45,6 +48,7 @@ public sealed class PolicyAdoptionApiTests
             var routes = new FixtureRoutes(services);
             ApiRoutes.Map(routes, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
             endpoints = routes.DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
+            Assert.NotEmpty(endpoints);
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

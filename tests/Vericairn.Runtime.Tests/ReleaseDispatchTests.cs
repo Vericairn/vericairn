@@ -22,24 +22,23 @@ public sealed class ReleaseDispatchTests
         fixture.Provider.OnDispatch = _ =>
         {
             entered.TrySetResult();
-            Assert.True(finish.Wait(TimeSpan.FromSeconds(10)));
+            Assert.True(finish.Wait(TestTiming.HangTimeout));
         };
         using var stop = new CancellationTokenSource();
         IEstateApi api = fixture.Service;
         Task<ReleaseResponse> request = api.ReleaseSubmitAsync(fixture.Request, stop.Token);
         try
         {
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             stop.Cancel();
             ClientCancelledException interrupted = await Assert.ThrowsAsync<ClientCancelledException>(() => request);
             Assert.True(interrupted.OutcomeUnknown);
             fixture.Service.Dispose(); // The client stopped waiting; the service's store must not disappear under the effect.
             await Assert.ThrowsAsync<ObjectDisposedException>(() => api.HealthAsync(TestContext.Current.CancellationToken));
+            using var changed = new FileSignal(fixture.Estate.Root);
             finish.Set();
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-            deadline.CancelAfter(TimeSpan.FromSeconds(5));
-            while (!fixture.Estate.Load().Current("operation").Any(operation => operation.Body.GetProperty("status").GetString() == "dispatched"))
-                await Task.Delay(10, deadline.Token);
+            await changed.UntilAsync(() => fixture.Estate.Load().Current("operation").Any(operation => operation.Body.GetProperty("status").GetString() == "dispatched"),
+                "the dispatch receipt after client cancellation", TestContext.Current.CancellationToken);
             fixture.Reopen();
             ReleaseResponse retry = fixture.Service.ReleaseSubmit(fixture.Request);
             Assert.False(retry.Ok);
@@ -57,22 +56,24 @@ public sealed class ReleaseDispatchTests
     public async Task AnOverlappingSubmissionDispatchesOnceAndDoesNotHoldTheServiceGate(string? previous)
     {
         using var fixture = new ReleaseFixture(previous);
-        using var entered = new ManualResetEventSlim();
+        var entered = TestTiming.Signal();
         using var finish = new ManualResetEventSlim();
         fixture.Provider.OnDispatch = count =>
         {
             if (count == 1)
             {
-                entered.Set();
-                Assert.True(finish.Wait(TimeSpan.FromSeconds(15)));
+                entered.TrySetResult();
+                Assert.True(finish.Wait(TestTiming.HangTimeout));
             }
         };
-        Task<ReleaseResponse> first = Task.Run(() => fixture.Service.ReleaseSubmit(fixture.Request));
+        Task<ReleaseResponse> first = Task.Factory.StartNew(() => fixture.Service.ReleaseSubmit(fixture.Request),
+            CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         try
         {
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
-            await Task.Run(() => fixture.Service.Health()).WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
-            ReleaseResponse second = await Task.Run(() => fixture.Service.ReleaseSubmit(fixture.Request)).WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            await Task.Run(() => fixture.Service.Health()).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            ReleaseResponse second = await Task.Run(() => fixture.Service.ReleaseSubmit(fixture.Request)).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Assert.False(first.IsCompleted, "The first dispatch must still be held while the service answers.");
             Assert.Equal(1, fixture.Provider.Calls);
             Assert.False(second.Ok);
             Assert.Contains("observe and reconcile", second.Message, StringComparison.OrdinalIgnoreCase);
@@ -83,7 +84,7 @@ public sealed class ReleaseDispatchTests
         finally
         {
             finish.Set();
-            await first.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            await first.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         }
 
         Assert.True((await first).Ok, (await first).Message);

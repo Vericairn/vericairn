@@ -22,7 +22,7 @@ public sealed class PolicyApiTests
         using var fixture = new PolicyFixture();
         var policy = fixture.Policy(fixture.PolicyBody(key));
         int before = fixture.Estate.Load().Records.Count;
-        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
         Assert.Equal(policy.Id, Assert.Single(client.Policy(key)!.Policies).Id);
         Assert.Equal(policy.Id, Assert.Single((await client.PolicyAsync(key, TestContext.Current.CancellationToken))!.Policies).Id);
@@ -39,7 +39,7 @@ public sealed class PolicyApiTests
         fixture.Policy();
         var entry = fixture.Add("writing-exception", PolicyFixture.WritingBody());
         int before = fixture.Estate.Load().Records.Count;
-        await using DaemonHost host = await DaemonHost.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(fixture.Estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(DaemonHost.Discover(fixture.Estate.Root)!);
         PolicyResponse response = await client.PolicyEvaluateAsync("2026-10-16T13:00:00Z", cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(1, response.Holds);

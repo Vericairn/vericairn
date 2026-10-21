@@ -120,6 +120,6 @@ public class RequestRevocationTests
         string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
         byte[] digest = localNetwork ? harness.Digest("POST", target, at, body) : RequestSigning.Digest("POST", target, at, body);
         string headers = $"POST {target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n{RequestSigning.DeviceHeader}: {signer.DeviceId}\r\n{RequestSigning.SignedAtHeader}: {at}\r\n{RequestSigning.SignatureHeader}: {Base64Url.EncodeToString(signer.Sign(digest))}\r\n\r\n";
-        return Raw.ExchangeAsync(localNetwork ? harness.Address : $"{harness.Host.Endpoint.Loopback!.Host}:{harness.Host.Endpoint.Loopback.Port}", localNetwork ? credential : null, harness.Host.Endpoint.Loopback!.Certificate, [.. Encoding.ASCII.GetBytes(headers), .. body], TimeSpan.FromSeconds(10));
+        return Raw.ExchangeAsync(localNetwork ? harness.Address : $"{harness.Host.Endpoint.Loopback!.Host}:{harness.Host.Endpoint.Loopback.Port}", localNetwork ? credential : null, harness.Host.Endpoint.Loopback!.Certificate, [.. Encoding.ASCII.GetBytes(headers), .. body], TestTiming.HangTimeout);
     }
 }

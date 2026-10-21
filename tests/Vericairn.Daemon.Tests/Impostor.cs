@@ -65,7 +65,7 @@ internal sealed class Impostor : IAsyncDisposable
             running = [.. handlers];
         }
 
-        await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(10));
+        await Task.WhenAll(running).WaitAsync(TestTiming.HangTimeout);
         stop.Dispose();
     }
 
@@ -98,7 +98,7 @@ internal sealed class Impostor : IAsyncDisposable
             {
                 await using var tls = new SslStream(client.GetStream());
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-                timeout.CancelAfter(TimeSpan.FromSeconds(10));
+                timeout.CancelAfter(TestTiming.HangTimeout);
                 await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = certificate, ClientCertificateRequired = false, AllowTlsResume = false }, timeout.Token);
                 while (await ReadRequestLineAsync(tls, timeout.Token) is string line)
                 {

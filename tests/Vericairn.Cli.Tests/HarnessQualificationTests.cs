@@ -47,6 +47,7 @@ public class HarnessQualificationTests
             environment["HOME"] = user;
             environment["USERPROFILE"] = user;
             environment[launcher == "codex" ? "CODEX_HOME" : "CLAUDE_CONFIG_DIR"] = login;
+            CliHarness.RequireDaemonTransport(tls: false);
             await using DaemonHost host = await DaemonHost.StartAsync(root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
             host.Service.Providers.Register(native);
             host.Service.WorkerOptions = new WorkerOptions { Environment = environment, Vericairn = FakeHarness.Command("native-server", Path.Combine(scratch, "server.jsonl")) };

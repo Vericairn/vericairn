@@ -15,10 +15,13 @@ public class RealRuntimeTests(HeadlessFixture fixture)
     [Fact]
     public async Task OnAFirstLaunchWorkbenchStartsTheDaemonThroughTheCommandLineAndOpensTheEstate()
     {
+        TestPrerequisites.RequireLocalIpc();
+        TestPrerequisites.RequireLoopback();
+        TestPrerequisites.RequireTlsCertificates();
         string root = Seed.Temp("wb-real-runtime");
         Seed.Init(root);
         string cli = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn");
-        Assert.True(File.Exists(cli), cli);
+        Assert.True(File.Exists(cli), "Missing prerequisite: the built vericairn CLI beside the Workbench tests.");
         string? previous = Environment.GetEnvironmentVariable("VERICAIRN_CLI");
         Environment.SetEnvironmentVariable("VERICAIRN_CLI", cli);
         var shell = new ShellViewModel(r => new DaemonConnection(r), new CliRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-real-runtime")));
@@ -27,7 +30,7 @@ public class RealRuntimeTests(HeadlessFixture fixture)
         {
             Assert.Equal(0, Seed.Run("--estate", root, "runtime", "status"));
             Task open = fixture.UiAsync(() => shell.OpenEstateAsync(root, cancellationToken: TestContext.Current.CancellationToken));
-            opened = await Task.WhenAny(open, Task.Delay(TimeSpan.FromSeconds(120), TestContext.Current.CancellationToken)) == open;
+            opened = await TestTiming.CompletesAsync(open, TestContext.Current.CancellationToken);
             Assert.True(opened, $"Workbench did not finish opening the estate within 120 seconds; status: {shell.Status}; activity: {string.Join(" / ", shell.Activity)}");
             await open;
             Assert.True(shell.HasEstate, shell.Status);

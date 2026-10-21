@@ -120,6 +120,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
     /// <summary>A test's hook between device authentication and the operation's write, outside the estate's gate.</summary>
     internal Action? BeforeDeviceWrite { get; set; }
+    internal Action? ConnectionAccepted { get; set; }
 
     /// <summary>The endpoint file of an estate on this machine, beside its live store.</summary>
     public static string EndpointFilePath(string root) => DaemonDiscovery.EndpointFilePath(root);
@@ -285,7 +286,7 @@ public sealed class DaemonHost : IAsyncDisposable
                     // TLS may evaluate a client certificate before any policy applies (macOS's asks its trust service, which fetches), so
                     // the listener speaks TLS 1.2 only, where the certificate travels in the clear, and the screen refuses one that names
                     // an address before the platform's TLS reads it. The chain policy stays as well.
-                    listen.Use(Screen);
+                    listen.Use(host.Screen);
                     listen.UseHttps(new HttpsConnectionAdapterOptions
                     {
                         ServerCertificateSelector = host.SelectCertificate,
@@ -550,7 +551,7 @@ public sealed class DaemonHost : IAsyncDisposable
 
         if (context.Response.StatusCode >= 400)
         {
-            await CompleteRefusalAsync(context, body).ConfigureAwait(false);
+            await CompleteRefusalAsync(context, body, Time).ConfigureAwait(false);
         }
     }
 
@@ -574,21 +575,24 @@ public sealed class DaemonHost : IAsyncDisposable
     }
 
     /// <summary>Completes any HTTP refusal before discarding its unread transport bytes, without parsing or binding them.</summary>
-    internal static async Task CompleteRefusalAsync(HttpContext context, PipeReader body)
+    internal static async Task CompleteRefusalAsync(HttpContext context, PipeReader body, TimeProvider? clock = null)
     {
         await context.Response.CompleteAsync().ConfigureAwait(false);
-        await DrainRefusedBodyAsync(body, RefusedBodyLimit, TimeSpan.FromSeconds(10), context.RequestAborted).ConfigureAwait(false);
+        await DrainRefusedBodyAsync(body, RefusedBodyLimit, TimeSpan.FromSeconds(10), clock ?? TimeProvider.System, context.RequestAborted).ConfigureAwait(false);
     }
 
     /// <summary>The most unread bytes discarded after a refusal, independently of its parsing or request-size limit.</summary>
     internal const long RefusedBodyLimit = 64 * 1024;
 
     /// <summary>Discards a refused body's remainder within byte and time limits, leaving the response and transport live.</summary>
-    internal static async Task<long> DrainRefusedBodyAsync(PipeReader reader, long maximum, TimeSpan limit, CancellationToken aborted)
+    internal static Task<long> DrainRefusedBodyAsync(PipeReader reader, long maximum, TimeSpan limit, CancellationToken aborted) =>
+        DrainRefusedBodyAsync(reader, maximum, limit, TimeProvider.System, aborted);
+
+    internal static async Task<long> DrainRefusedBodyAsync(PipeReader reader, long maximum, TimeSpan limit, TimeProvider clock, CancellationToken aborted)
     {
         long consumed = 0;
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(aborted);
-        deadline.CancelAfter(limit);
+        using var timeout = new CancellationTokenSource(limit, clock);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(aborted, timeout.Token);
         // As in authentication, cancelling the pipe's pending read preserves TLS; cancelling a stream read need not.
         using CancellationTokenRegistration pending = deadline.Token.Register(reader.CancelPendingRead);
         try
@@ -629,7 +633,7 @@ public sealed class DaemonHost : IAsyncDisposable
     /// Reads a local-network connection through the TLS certificate screen, so a client certificate that names an address to fetch
     /// is refused before the platform's TLS sees it.
     /// </summary>
-    private static ConnectionDelegate Screen(ConnectionDelegate next) => async connection =>
+    private ConnectionDelegate Screen(ConnectionDelegate next) => async connection =>
     {
         IDuplexPipe transport = connection.Transport;
         var screen = new TlsScreenStream(transport.Input.AsStream(leaveOpen: true), transport.Output.AsStream(leaveOpen: true), leaveOpen: true);
@@ -651,7 +655,7 @@ public sealed class DaemonHost : IAsyncDisposable
                 // No HTTP or established TLS exists at this point. Complete a fatal TLS handshake_failure alert first, then
                 // discard raw transport bytes: never run rejected certificates or their remainder through the screen again.
                 await transport.Output.WriteAsync(new byte[] { 21, 3, 3, 0, 2, 2, 40 }, connection.ConnectionClosed).ConfigureAwait(false);
-                await DrainRefusedBodyAsync(transport.Input, RefusedBodyLimit, TimeSpan.FromSeconds(10), connection.ConnectionClosed).ConfigureAwait(false);
+                await DrainRefusedBodyAsync(transport.Input, RefusedBodyLimit, TimeSpan.FromSeconds(10), Time, connection.ConnectionClosed).ConfigureAwait(false);
             }
         }
     };
@@ -663,6 +667,7 @@ public sealed class DaemonHost : IAsyncDisposable
         open[connection.ConnectionId] = connection;
         try
         {
+            ConnectionAccepted?.Invoke();
             await next(connection).ConfigureAwait(false);
         }
         catch (Exception exception) when (!connection.Items.ContainsKey(TlsEstablishedMarker))

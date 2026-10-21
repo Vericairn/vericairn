@@ -279,7 +279,7 @@ internal sealed class RunDispatchService(
 
             try
             {
-                asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
+                asked = directory.RequestStop(new StopRequest(RecordParser.FormatTimestamp(WorkerOptions.Clock.GetUtcNow()), request.By, string.IsNullOrWhiteSpace(request.Reason) ? null : request.Reason.Trim(), request.GraceSeconds));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
             {
@@ -405,10 +405,10 @@ internal sealed class RunDispatchService(
     }
 
     /// <summary>True when a worker on this machine observes the run now: its state shows it running, with a recent heartbeat.</summary>
-    private static bool Fresh(RunObservedState? observed) =>
+    private bool Fresh(RunObservedState? observed) =>
         observed is { ExitedAt: null, Settled: null, Heartbeat: string beat }
         && DateTimeOffset.TryParseExact(beat, "yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTimeOffset last)
-        && DateTimeOffset.UtcNow - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
+        && WorkerOptions.Clock.GetUtcNow() - last <= TimeSpan.FromSeconds(Math.Max(3 * observed.HeartbeatSeconds, 2) + 2);
 
     /// <summary>Records one attention ask for a worker-observed stall, without claiming the agent is blocked or notifying anyone.</summary>
     private string? RecordStall(string run, string by, string goalId, RunLiveness liveness)

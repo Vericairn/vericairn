@@ -75,7 +75,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
         var estate = new TestEstate(recordFormat);
         var time = new ManualTime(DateTimeOffset.UtcNow, running: true);
         var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()), Time = systemClock ? TimeProvider.System : time, ReplayCapacity = replayCapacity, Log = log };
-        DaemonHost host = await DaemonHost.StartAsync(
+        DaemonHost host = await DaemonTestHome.StartAsync(
             estate.Root,
             options: options,
             cancellationToken: TestContext.Current.CancellationToken);
@@ -100,7 +100,7 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
     {
         Socket.Dispose();
         await Host.DisposeAsync();
-        Host = await DaemonHost.StartAsync(Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
+        Host = await DaemonTestHome.StartAsync(Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken);
         Socket = new VericairnClient(Host.Endpoint);
     }
 
@@ -118,6 +118,18 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 
     /// <summary>The signer of a paired device, its key held on the second machine.</summary>
     public DeviceRequestSigner Signer(RuntimeConnection connection) => new(DeviceKeys, connection.Device);
+
+    internal Func<Task> WhenReadingBody(Action action)
+    {
+        var entered = TestTiming.Signal();
+        Host.Authenticator.ReadingBody = () => entered.TrySetResult();
+        return async () =>
+        {
+            await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Host.Authenticator.ReadingBody = null;
+            action();
+        };
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -138,15 +150,17 @@ internal sealed class LocalNetworkHarness : IAsyncDisposable
 /// <summary>A clock a test moves by hand; optionally follows the system clock between advances, as SDK clients do.</summary>
 internal sealed class ManualTime(DateTimeOffset start, bool running = false) : TimeProvider
 {
-    private DateTimeOffset now = start;
-    private TimeSpan offset;
+    private readonly ClientClock timers = new(allowPeriodic: true);
 
-    public override DateTimeOffset GetUtcNow() => running ? DateTimeOffset.UtcNow + offset : now;
+    public override DateTimeOffset GetUtcNow() => (running ? DateTimeOffset.UtcNow : start).AddTicks(timers.GetTimestamp());
+    public override long TimestampFrequency => timers.TimestampFrequency;
+    public override long GetTimestamp() => timers.GetTimestamp();
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        timers.CreateTimer(callback, state, dueTime, period);
 
     public void Advance(TimeSpan by)
     {
-        now += by;
-        offset += by;
+        timers.Elapse(by);
     }
 }
 

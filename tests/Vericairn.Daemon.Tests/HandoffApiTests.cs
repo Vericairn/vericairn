@@ -57,7 +57,7 @@ public class HandoffApiTests
     public async Task HandoffIsTheSameThroughTheSdkAndRefusesOverflowWithoutTruncation()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         HandoffResponse local = host.Service.Handoff();
         HandoffResponse remote = client.Handoff();

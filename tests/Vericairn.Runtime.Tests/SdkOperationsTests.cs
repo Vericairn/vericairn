@@ -157,14 +157,14 @@ public sealed class SdkOperationsTests
             await proceed.Task.WaitAsync(token);
             Volatile.Write(ref dispatched, true);
             sent.SetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return true;
         }, () => Volatile.Read(ref dispatched), cancellationToken: stop.Token);
-        await prepared.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await prepared.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         if (confirm)
         {
             proceed.SetResult();
-            await sent.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await sent.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         }
         stop.Cancel();
         ClientCancelledException failure = await Assert.ThrowsAsync<ClientCancelledException>(() => pending);
@@ -219,31 +219,38 @@ public sealed class SdkOperationsTests
         using var client = Client(async (_, token) =>
         {
             entered.SetResult();
-            try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+            try { await TestTiming.UntilCancelled(token); }
             finally { interrupted.TrySetResult(); }
             return Json(new { });
         });
         using var stop = new CancellationTokenSource();
         Task<HealthResponse> request = client.HealthAsync(stop.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         Assert.False(request.IsCompleted);
         stop.Cancel();
         ClientCancelledException failure = await Assert.ThrowsAsync<ClientCancelledException>(() => request);
         Assert.False(failure.OutcomeUnknown);
         Assert.Equal(stop.Token, failure.CancellationToken);
-        await interrupted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await interrupted.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         Assert.Equal("cancelled", ClientFailure.FromException(failure)?.Code);
     }
 
     [Fact]
     public async Task DeadlineIsDistinctFromCallerCancellation()
     {
+        var clock = new ClientClock();
+        var entered = TestTiming.Signal();
         using var client = Client(async (_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            entered.TrySetResult();
+            await TestTiming.UntilCancelled(token);
             return Json(new { });
-        }, TimeSpan.FromMilliseconds(50));
-        ClientTimeoutException failure = await Assert.ThrowsAsync<ClientTimeoutException>(() => client.HealthAsync(TestContext.Current.CancellationToken));
+        }, TimeSpan.FromSeconds(30), clock);
+        Task<HealthResponse> request = client.HealthAsync(TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.False(request.IsCompleted);
+        clock.Elapse(TimeSpan.FromSeconds(30));
+        ClientTimeoutException failure = await Assert.ThrowsAsync<ClientTimeoutException>(() => request);
         Assert.False(failure.OutcomeUnknown);
         Assert.Equal("timed-out", ClientFailure.FromException(failure)?.Code);
     }
@@ -251,10 +258,15 @@ public sealed class SdkOperationsTests
     [Fact]
     public async Task DeadlineCoversAResponseBodyThatStallsAfterHeaders()
     {
+        var clock = new ClientClock();
         using var body = new StalledStream();
-        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) }), TimeSpan.FromMilliseconds(50));
-        await Assert.ThrowsAsync<ClientTimeoutException>(() => client.HealthAsync(TestContext.Current.CancellationToken));
-        await body.Interrupted.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        using var client = Client((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) }), TimeSpan.FromSeconds(30), clock);
+        Task<HealthResponse> request = client.HealthAsync(TestContext.Current.CancellationToken);
+        await body.Entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.False(request.IsCompleted);
+        clock.Elapse(TimeSpan.FromSeconds(30));
+        await Assert.ThrowsAsync<ClientTimeoutException>(() => request);
+        await body.Interrupted.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
     }
 
     [Theory]
@@ -262,19 +274,21 @@ public sealed class SdkOperationsTests
     [InlineData(true)]
     public async Task InterruptedWriteKeepsTheEffectUncertainAndIsNeverRetried(bool cancel)
     {
+        var clock = new ClientClock();
         int effects = 0;
         var effected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var client = Client(async (_, token) =>
         {
             Interlocked.Increment(ref effects);
             effected.SetResult();
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            await TestTiming.UntilCancelled(token);
             return Json(new { });
-        }, cancel ? TimeSpan.FromSeconds(5) : TimeSpan.FromMilliseconds(100));
+        }, TimeSpan.FromSeconds(30), clock);
         using var stop = new CancellationTokenSource();
         Task<WriteOutcome> request = client.AttemptAsync(new("assignment", "contributor", "workspace", "note"), stop.Token);
-        await effected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await effected.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         if (cancel) stop.Cancel();
+        else clock.Elapse(TimeSpan.FromSeconds(30));
         Exception failure = cancel
             ? await Assert.ThrowsAsync<ClientCancelledException>(() => request)
             : await Assert.ThrowsAsync<ClientTimeoutException>(() => request);
@@ -376,7 +390,7 @@ public sealed class SdkOperationsTests
         Task<HealthResponse> health = client.HealthAsync(TestContext.Current.CancellationToken);
         try
         {
-            await Task.WhenAll(checkEntered.Task, healthEntered.Task).WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            await Task.WhenAll(checkEntered.Task, healthEntered.Task).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             // Both requests have started. Force either callback order at the old handler's response time.
             clock.Advance(TimeSpan.FromMilliseconds(150));
             if (deliverDeadlineFirst) clock.FireDueTimers();
@@ -582,19 +596,19 @@ public sealed class SdkOperationsTests
         Task<int> request = ClientOperation.RunSynchronousAsync("Attempt", () =>
         {
             entered.SetResult();
-            finish.Wait(TimeSpan.FromSeconds(5));
+            finish.Wait(TestTiming.HangTimeout);
             effected.SetResult();
             return 1;
         }, true, stop.Token);
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         stop.Cancel();
         Assert.True((await Assert.ThrowsAsync<ClientCancelledException>(() => request)).OutcomeUnknown);
         finish.Set();
-        await effected.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await effected.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
     }
 
-    private static VericairnClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, TimeSpan? timeout = null) =>
-        new(new HttpClient(new Handler(respond)) { BaseAddress = new Uri("http://localhost/") }) { OperationTimeout = _ => timeout };
+    private static VericairnClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond, TimeSpan? timeout = null, TimeProvider? clock = null) =>
+        new(new HttpClient(new Handler(respond)) { BaseAddress = new Uri("http://localhost/") }) { OperationTimeout = _ => timeout, OperationClock = clock ?? new ClientClock() };
 
     private static HttpResponseMessage Json<T>(T value, HttpStatusCode status = HttpStatusCode.OK) => new(status) { Content = JsonContent.Create(value, options: ProtocolJson.Options) };
 
@@ -605,6 +619,7 @@ public sealed class SdkOperationsTests
 
     private sealed class StalledStream : Stream
     {
+        public TaskCompletionSource Entered { get; } = TestTiming.Signal();
         public TaskCompletionSource Interrupted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -618,7 +633,8 @@ public sealed class SdkOperationsTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            Entered.TrySetResult();
+            try { await TestTiming.UntilCancelled(cancellationToken); }
             finally { Interrupted.TrySetResult(); }
             return 0;
         }
