@@ -1,9 +1,9 @@
 {
   "format": "vericairn.docs/1",
   "version": "0.8.1",
-  "commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+  "commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
   "generatedAt": "2026-10-21",
-  "generator": "vericairn-docs generate 0.8.1-dev\u002B1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+  "generator": "vericairn-docs generate 0.8.1-dev\u002B3b6e437dab6e9597419be06a4f0166b6d370e7a6",
   "recordFormat": {
     "reads": [
       1,
@@ -23,7 +23,7 @@
     "inputs": [
       {
         "path": "inputs/commands.json",
-        "hash": "sha256:c27e3e98d20e6efc560c594d3e5582f1f7068a5c9f930586612977051e845b0f",
+        "hash": "sha256:091e702595912e3f09c98a95bfeec4653b5bf33cd9ef5ec2018faef86eb65649",
         "bytes": 92038
       },
       {
@@ -33,7 +33,7 @@
       },
       {
         "path": "inputs/record-types.json",
-        "hash": "sha256:05013e1bf76960263800625317fcef37ab10c1b18ed952d01d07aaded2dfc227",
+        "hash": "sha256:e34c233df50bd5a479935d5bc0cdff244cdfc06e9a297e85635a506e5c53c20c",
         "bytes": 66321
       }
     ],
@@ -43,13 +43,13 @@
         "generator": "vericairn.software/cli-reference",
         "contract": 1,
         "source": "inputs/commands.json",
-        "inputDigest": "sha256:8d5388d1f901cd0884a949875eefd73b30e6c1acaff086ffaf4557453d3cc835",
+        "inputDigest": "sha256:350f83dd65c3411cd43cbf55d17eefeb3b802a956b826973bda316d300a2c4f6",
         "inputs": [
           "inputs/commands.json"
         ],
         "parameters": {
           "audience": "Internal",
-          "build-commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+          "build-commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
           "format": "1",
           "selection": "list",
           "source": "inputs/commands.json"
@@ -60,13 +60,13 @@
         "generator": "vericairn.software/cli-client-outcomes",
         "contract": 1,
         "source": "inputs/commands.json",
-        "inputDigest": "sha256:23a38f0b3899ae2a2fb687b8ee4ff503e8952c0e02c61714dfa2154df778ed6e",
+        "inputDigest": "sha256:bb30201f459c7ee93927cc4d577d85cd55fc19bf04e1bccd7d63f71dd788ad10",
         "inputs": [
           "inputs/commands.json"
         ],
         "parameters": {
           "audience": "Internal",
-          "build-commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+          "build-commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
           "format": "1",
           "selection": "list",
           "source": "inputs/commands.json"
@@ -77,13 +77,13 @@
         "generator": "vericairn.software/record-reference",
         "contract": 1,
         "source": "inputs/record-types.json",
-        "inputDigest": "sha256:7e61472c2e2474a01f05ed561db2a086eba26df33ff4f8131444a35a5fb1484e",
+        "inputDigest": "sha256:a909e6036d833d6b9115094f4fdb71e39f00e61516e39f91d78aac17b4fbe124",
         "inputs": [
           "inputs/record-types.json"
         ],
         "parameters": {
           "audience": "Internal",
-          "build-commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+          "build-commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
           "format": "1",
           "selection": "list",
           "source": "inputs/record-types.json"
@@ -94,13 +94,13 @@
         "generator": "vericairn.software/api-reference",
         "contract": 1,
         "source": "inputs/openapi.json",
-        "inputDigest": "sha256:058d735c5833da73f566a7a15f3247d88b5bed4c0d1421d73f7f1ac42ca602d3",
+        "inputDigest": "sha256:a8c99337850ddf5ef3e660ef180eb8cf85fd10e0c96f3b2dd1202b8a4bd905af",
         "inputs": [
           "inputs/openapi.json"
         ],
         "parameters": {
           "audience": "Internal",
-          "build-commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+          "build-commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
           "format": "1",
           "selection": "list",
           "source": "inputs/openapi.json"
@@ -111,7 +111,7 @@
         "generator": "vericairn.software/reference-index",
         "contract": 1,
         "source": "reference-inventory.json",
-        "inputDigest": "sha256:cfc0affe8250c30f5ce944e1b226cebd3696667e253f0cbf4c26482c6ef8ca36",
+        "inputDigest": "sha256:76f262c7d9fc618a31aa54421c1e70e15f634086535ca0ebec7e77e0bbcd55f6",
         "inputs": [
           "api-reference.md",
           "cli-reference.md",
@@ -120,7 +120,7 @@
         ],
         "parameters": {
           "audience": "Internal",
-          "build-commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+          "build-commit": "3b6e437dab6e9597419be06a4f0166b6d370e7a6",
           "format": "1",
           "register": "none",
           "selection": "list",
@@ -131,22 +131,22 @@
     "referenceInputs": [
       {
         "path": "api-reference.md",
-        "hash": "sha256:67162a9acf545477d5e2374be0bf71b42dc5a037287b0cf5b1b016f83387319e",
+        "hash": "sha256:f8eb78e1192caf64dbc746f6574b8d70f5b507f53d28b985dd85ed7fb46fd6ec",
         "bytes": 411774
       },
       {
         "path": "cli-reference.md",
-        "hash": "sha256:7e8fbb5dc96d77f823fbd17c654f6a243a3900748d145b1e3a721536488444a1",
+        "hash": "sha256:5aa21bee45bc0b9bbe161d34ec5c61392d18f71f5616e6035f0269cfbdca3086",
         "bytes": 86571
       },
       {
         "path": "record-reference.md",
-        "hash": "sha256:677160885676b422305d73c3884f8eaeff9b72447f6e50ccd84bb261fa06cae5",
+        "hash": "sha256:29a590a8922aea0a8f64d976d0e3f024e041cbfa86b13b9cfd16d45946b1cfe2",
         "bytes": 62969
       },
       {
         "path": "reference-inventory.json",
-        "hash": "sha256:bdc0e2ebdcfae86c0f832f1cd5551befc5e52a207ed448668f1a6c9acabd568a",
+        "hash": "sha256:0fc404f880ab7ad23d61a931bf01fe20d6888284c60f7e060421a63ed482ed9e",
         "bytes": 24954
       }
     ]
@@ -486,6 +486,6 @@
   ],
   "notes": {
     "from": "2026-10-19T21:27:28Z",
-    "to": "2026-10-21T10:55:19Z"
+    "to": "2026-10-21T16:12:59Z"
   }
 }

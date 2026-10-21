@@ -18,12 +18,12 @@ Caller cancellation &#40;including Ctrl&#43;C for ordinary requests&#41; and a p
 
 ## Generation basis
 
-Build commit: `1cf1cdd60478d9537c9c05940a04271b70bb66d9`.
+Build commit: `3b6e437dab6e9597419be06a4f0166b6d370e7a6`.
 
 Generator: `vericairn.software/cli-client-outcomes/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:c3997f1a7bfe9d21f850d7887766cc3159a696ef78174357f71746e10a71f55e`.
 
-Input digest: `sha256:23a38f0b3899ae2a2fb687b8ee4ff503e8952c0e02c61714dfa2154df778ed6e`.
+Input digest: `sha256:bb30201f459c7ee93927cc4d577d85cd55fc19bf04e1bccd7d63f71dd788ad10`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;commands&#46;json | `sha256:c27e3e98d20e6efc560c594d3e5582f1f7068a5c9f930586612977051e845b0f` | 92038 |
+| inputs&#47;commands&#46;json | `sha256:091e702595912e3f09c98a95bfeec4653b5bf33cd9ef5ec2018faef86eb65649` | 92038 |

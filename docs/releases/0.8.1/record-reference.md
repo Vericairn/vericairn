@@ -689,12 +689,12 @@ Build version: 0&#46;8&#46;1; provenance instant: 2026&#45;10&#45;21T03&#58;47&#
 
 ## Generation basis
 
-Build commit: `1cf1cdd60478d9537c9c05940a04271b70bb66d9`.
+Build commit: `3b6e437dab6e9597419be06a4f0166b6d370e7a6`.
 
 Generator: `vericairn.software/record-reference/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:c3997f1a7bfe9d21f850d7887766cc3159a696ef78174357f71746e10a71f55e`.
 
-Input digest: `sha256:7e61472c2e2474a01f05ed561db2a086eba26df33ff4f8131444a35a5fb1484e`.
+Input digest: `sha256:a909e6036d833d6b9115094f4fdb71e39f00e61516e39f91d78aac17b4fbe124`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| inputs&#47;record&#45;types&#46;json | `sha256:05013e1bf76960263800625317fcef37ab10c1b18ed952d01d07aaded2dfc227` | 66321 |
+| inputs&#47;record&#45;types&#46;json | `sha256:e34c233df50bd5a479935d5bc0cdff244cdfc06e9a297e85635a506e5c53c20c` | 66321 |

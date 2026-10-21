@@ -56,6 +56,13 @@ framework-dependent and includes neither Workbench nor the macOS Secure Enclave 
 - **FIX-46:** reference coverage reads the reference inventory the selected build produced.
 - **FIX-48:** the writing check skips generated documents, whose text belongs to their source records.
 - **FIX-29:** a release submission's recheck no longer counts a passing second as a changed basis.
+- **FIX-51:** a retained release basis names records, sources and objects by hash, each
+  source file's bytes kept once as an object of its own, so it stays within the estate's
+  8 MiB object limit; 0.8.0's copied basis outgrew it and refused every submission from an
+  estate with more than a few megabytes of records and documents. Reading a basis resolves
+  and verifies every reference; 0.8.0's bases still read.
+- **FIX-49:** the route-level policy adoption journey has a test hang ceiling sized for a
+  whole journey, which a slow Windows runner exceeded.
 - **FIX-32:** the test suites no longer depend on real time; the worker stamps its own
   stop request on its own clock, and on Apple silicon Macs it marks its observation
   pipes closed on launch, so a process started at the same time cannot inherit them.
@@ -86,18 +93,23 @@ published release record and its verified binary is installed, inspect and apply
 0.8.1 the upgrade appends its migration record before it moves the manifest. Restart
 running workers after upgrading: a worker keeps the audit of the release it runs. An
 estate at 0.7.3 or earlier follows 0.8.0's format-3 upgrade and adoption steps, which
-the installation guide retains.
+the installation guide retains. An estate other than Vericairn's own cannot yet pin or upgrade to a
+published Vericairn release, because only the estate that built a release holds its
+release record ([issue 177](https://github.com/Vericairn/vericairn/issues/177)); the
+installation guide gives the workaround.
 
 ## This documentation set
 
 The references and manifest were generated on October 21, 2026 UTC from the Release
-build of `1cf1cdd60478d9537c9c05940a04271b70bb66d9`, whose implementation includes
+build of `3b6e437dab6e9597419be06a4f0166b6d370e7a6`, whose implementation includes
 the product changes listed above. They contain 147 commands, 104 API operations and
 42 record types, with 32 required documents. That commit is
 reference generation provenance, not the later documentation or final release commit.
 The generated files retain the tool's bytes, including their retained inputs, reference
 inventory, reference index and CLI client-outcome excerpt. This generation selected no
-register snapshot; the index says so rather than asserting mappings.
+register snapshot; the index says so rather than asserting mappings. The set was first prepared from
+`1cf1cdd`; after FIX-51 changed a build source it was prepared again at FIX-51's merge, with
+only the references' provenance changing.
 
 The maintained guides are copied byte for byte into this set; `api.md` and
 `api-v1.md` both copy the maintained API v1 guide so their relative links resolve.

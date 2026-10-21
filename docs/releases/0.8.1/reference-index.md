@@ -300,15 +300,15 @@ The categories and exact names below come from this build's retained inventory a
 
 ## Generation basis
 
-Build commit: `1cf1cdd60478d9537c9c05940a04271b70bb66d9`.
+Build commit: `3b6e437dab6e9597419be06a4f0166b6d370e7a6`.
 
 Generator: `vericairn.software/reference-index/1`; implementation: `vericairn.software.companions/1`; source digest: `sha256:c3997f1a7bfe9d21f850d7887766cc3159a696ef78174357f71746e10a71f55e`.
 
-Input digest: `sha256:cfc0affe8250c30f5ce944e1b226cebd3696667e253f0cbf4c26482c6ef8ca36`.
+Input digest: `sha256:76f262c7d9fc618a31aa54421c1e70e15f634086535ca0ebec7e77e0bbcd55f6`.
 
 | Input | SHA-256 | Bytes |
 |---|---|---|
-| api&#45;reference&#46;md | `sha256:67162a9acf545477d5e2374be0bf71b42dc5a037287b0cf5b1b016f83387319e` | 411774 |
-| cli&#45;reference&#46;md | `sha256:7e8fbb5dc96d77f823fbd17c654f6a243a3900748d145b1e3a721536488444a1` | 86571 |
-| record&#45;reference&#46;md | `sha256:677160885676b422305d73c3884f8eaeff9b72447f6e50ccd84bb261fa06cae5` | 62969 |
-| reference&#45;inventory&#46;json | `sha256:bdc0e2ebdcfae86c0f832f1cd5551befc5e52a207ed448668f1a6c9acabd568a` | 24954 |
+| api&#45;reference&#46;md | `sha256:f8eb78e1192caf64dbc746f6574b8d70f5b507f53d28b985dd85ed7fb46fd6ec` | 411774 |
+| cli&#45;reference&#46;md | `sha256:5aa21bee45bc0b9bbe161d34ec5c61392d18f71f5616e6035f0269cfbdca3086` | 86571 |
+| record&#45;reference&#46;md | `sha256:29a590a8922aea0a8f64d976d0e3f024e041cbfa86b13b9cfd16d45946b1cfe2` | 62969 |
+| reference&#45;inventory&#46;json | `sha256:0fc404f880ab7ad23d61a931bf01fe20d6888284c60f7e060421a63ed482ed9e` | 24954 |

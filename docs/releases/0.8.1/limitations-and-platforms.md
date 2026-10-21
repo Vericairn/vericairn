@@ -4,7 +4,8 @@ The estate's release record, written when the candidate is observed and supersed
 
 0.8.1 follows published 0.8.0 with the corrections from 0.8.0's review (FIX-34 through FIX-38), the
 policy and adoption corrections (FIX-39 through FIX-46 and FIX-48), test timing and the release's packaging
-path in CI (FIX-29, FIX-32, CI-01 and CI-03), package registry observations (DIST-02), the package icon
+path in CI (FIX-29, FIX-32, FIX-49, CI-01 and CI-03), the release gate's retained basis by reference
+(FIX-51), package registry observations (DIST-02), the package icon
 (DIST-03), MCP Registry discovery (DIST-04) and exact-byte document pins (DOCS-07).
 It reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
 upgrades from 0.8.0 without a format step. The format-3 upgrade from 0.7.3 preserves historical records
@@ -387,7 +388,11 @@ POLICY-03 combines built-in objections, living-document gates and applicable pol
 can start. Format 3 requires `--commit <exact-commit>`, `--expected <current-product-hash>` and an
 admitted held signing device. A refusal reports all known objections and starts no provider operation.
 Sources, authority, exceptions and deadlines are rechecked after preparation and before dispatch.
-The retained basis is inspectable with `release basis <evidence-hash>`. A preview grants no submission
+The retained basis is inspectable with `release basis <evidence-hash>`. From 0.8.1 (FIX-51) it names records, sources
+and objects by hash instead of copying them, so it no longer outgrows the estate's 8 MiB object limit: 0.8.0's
+copied basis did, which refused every submission from an estate with more than a few megabytes of records and
+documents. Reading a basis needs the estate's records and objects; one whose reference no longer resolves is
+unavailable, and a single source file over the object limit is named but not kept. A preview grants no submission
 authority. An effect already dispatched remains under its original identity if later observation fails;
 a client cancellation does not roll it back. See [estate policies](policies.md).
 
@@ -465,6 +470,15 @@ records. Progress also reads this runtime's worker observations; human status, p
 label additional concerns `Local worker observations`. No reader can infer another machine's unrecorded
 facts. The estate observation's existing status-hash contract is unchanged; these API v1 projections add
 no record fields, CLI commands or permissions.
+
+## Estates other than Vericairn's own (0.8.1)
+
+Only the estate that built and observed a release holds its release record
+([issue 177](https://github.com/Vericairn/vericairn/issues/177)). An estate other than Vericairn's own therefore
+cannot yet pin or upgrade to a published Vericairn release: `estate upgrade --to` refuses there, and its source
+pin does not move. Until a later release adds a supported record of a published Vericairn release that an
+estate depends on, initialize such an estate with `estate init --commit` set to the published release's tag
+commit, run the checksum-verified published binary with `--estate`, and never write a release record by hand.
 
 ## Format 3, policies and adoption
 
