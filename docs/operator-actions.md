@@ -59,7 +59,7 @@ operator command is offered through MCP.
 
 ## Package publication, unlisting and deprecation
 
-The development build after 0.8.0 adds `packages observe`, `packages unlist` and `packages deprecate`.
+Vericairn 0.8.1 adds `packages observe`, `packages unlist` and `packages deprecate`.
 The NuGet provider reads nuget.org's public V3 API without an account or API key. Unlisting and
 deprecation remain the package account holder's acts in the nuget.org website. Vericairn records
 their intent first and their observed outcome afterwards; it never takes a NuGet key or performs
@@ -133,7 +133,7 @@ the existing intent untouched. No registry act or dispatch time is inferred from
 These observations do not accept a release, verify package archive bytes or replace the release
 publication record. The workflow does not call the estate automatically: the post-publication
 observation is an operator step. See the [CLI reference](cli.md#vericairn-packages) for every option,
-JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-development-build) for the read bounds.
+JSON output and API/SDK counterparts, and [limitations](limitations-and-platforms.md#package-registry-observations-081) for the read bounds.
 
 ## Record and merge in one command
 
