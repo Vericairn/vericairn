@@ -116,17 +116,20 @@ jobs:
           RELEASE: ${{ inputs.release }}
         # A release's documentation set must exist, hold every document the product declares, and match this build's commands, API
         # operations and record types before any draft is created; every gap is listed at once. The shipped command line checks the
-        # set; the build tooling (not shipped) compares it with the build it documents. Before release preparation writes a change's
-        # set, and while VersionPrefix still names a released, frozen set, a change compares a provisional set generated from its
-        # own build instead, with the same full history.
+        # set; the build tooling (not shipped) compares it with the build it documents. A release checks its own set whether or not
+        # it is frozen yet, since release preparation freezes it before the release build. Before release preparation writes a
+        # change's set, and while VersionPrefix still names a released, frozen set, a change compares a provisional set generated
+        # from its own build instead, with the same full history.
         run: |
           set -eu
           docs="docs/releases/$VERSION"
-          if [ -d "$docs" ] && ! jq -e --arg v "$VERSION" '.sets | has($v)' docs/releases/frozen-sha256.json > /dev/null; then
-            dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "$docs" --documents docs/releases/documents.json
-          elif [ "$RELEASE" = true ]; then
-            echo "A release needs its own documentation set, docs/releases/$VERSION, not yet frozen." >&2
+          frozen=false
+          jq -e --arg v "$VERSION" '.sets | has($v)' docs/releases/frozen-sha256.json > /dev/null && frozen=true
+          if [ "$RELEASE" = true ] && [ ! -d "$docs" ]; then
+            echo "A release needs its own documentation set, docs/releases/$VERSION." >&2
             exit 1
+          elif [ -d "$docs" ] && { [ "$RELEASE" = true ] || [ "$frozen" = false ]; }; then
+            dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "$docs" --documents docs/releases/documents.json
           else
             docs="artifacts/provisional-docs/$VERSION"
             dotnet run --configuration Release --project tools/Vericairn.DocsTool -- generate --out "$docs" --documents docs/releases/documents.json

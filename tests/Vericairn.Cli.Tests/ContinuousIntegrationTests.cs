@@ -153,10 +153,12 @@ public class ContinuousIntegrationTests
         int history = package.IndexOf("\n          fetch-depth: 0\n", StringComparison.Ordinal);
         int compare = package.IndexOf("--project tools/Vericairn.DocsTool -- compare", StringComparison.Ordinal);
         Assert.True(checkout > 0 && history > checkout && compare > history, "The package job checks out the complete history before it compares the documentation set.");
-        // A release needs its own, unfrozen set; a change compares a provisional set generated from its build.
+        // A release checks its own set, which release preparation freezes before the release build, so frozen or not; a change
+        // compares a provisional set generated from its build once its version's set is frozen or before it exists.
         string docs = Block(package, "- name: Check the documentation set", 6);
         Assert.Contains("docs check \"$docs\" --documents docs/releases/documents.json", docs, StringComparison.Ordinal);
-        Assert.Contains("elif [ \"$RELEASE\" = true ]; then", docs, StringComparison.Ordinal);
+        Assert.Contains("if [ \"$RELEASE\" = true ] && [ ! -d \"$docs\" ]; then", docs, StringComparison.Ordinal);
+        Assert.Contains("elif [ -d \"$docs\" ] && { [ \"$RELEASE\" = true ] || [ \"$frozen\" = false ]; }; then", docs, StringComparison.Ordinal);
         Assert.Contains("-- generate --out \"$docs\"", docs, StringComparison.Ordinal);
     }
 
