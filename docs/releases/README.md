@@ -19,7 +19,8 @@ with 147 commands, 104 API operations, 42 record types and 32 required documents
 Its notes render the estate's records with `--from 0.8.0 --to 0.8.1` and open with the operator's
 approved Security section. The set was first frozen at `baa1e9c`; after FIX-51 changed a build
 source it was prepared again at that fix's merge commit, replacing only its own checksum entries, which no
-release asset had contained. It has no entry in `frozen-sha256.json` until it freezes again.
+release asset had contained, and frozen again for its release build, with every file's checksum in
+`frozen-sha256.json`.
 
 The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
 CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, FIX-30, FIX-31, OPS-01 and
