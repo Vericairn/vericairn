@@ -36,7 +36,11 @@ support them. Vericairn and its packs include built-in prompts, which anyone can
 and an estate can disable or copy into its own library. A first estate needs no hand-written JSON:
 `estate init` pins the build you run, and a new command creates a work order from its options. An optional
 efficiency adapter helps reduce eligible agent context, once the agent hook it uses is designed and
-qualified.
+qualified. A design document's revision lines are generated from the revisions the estate records, so two
+branches never number one revision twice. This release's cycle also settles the design of release lines
+and channels: long-term support lines with an end of support, prerelease and nightly channels, release
+cadences, and keeping a fix's public description until its release. None of it is built before that design
+is accepted.
 
 ## 0.9.0 — planned
 
