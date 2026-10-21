@@ -11,6 +11,11 @@ internal static class TestTiming
     internal const int HangTimeoutMilliseconds = 120_000;
     internal static readonly TimeSpan HangTimeout = TimeSpan.FromMilliseconds(HangTimeoutMilliseconds);
 
+    /// <summary>The ceiling for a whole journey of many signed writes and Git commands. Such a journey takes about forty
+    /// seconds on a fast machine and more than two minutes on a loaded Windows runner, so the ordinary ceiling would stop a
+    /// slow journey rather than a hung one.</summary>
+    internal static readonly TimeSpan JourneyHangTimeout = TimeSpan.FromMinutes(10);
+
     internal static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     internal static async Task<bool> CompletesAsync(Task task, CancellationToken token)
