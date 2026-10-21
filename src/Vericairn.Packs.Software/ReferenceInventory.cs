@@ -59,8 +59,17 @@ internal static class ReferenceInventory
             using JsonDocument document = JsonDocument.Parse(PolicyInputs.Read(manifest), new JsonDocumentOptions { MaxDepth = 16 });
             JsonElement root = document.RootElement;
             Shape(root, ["format", "commit", "references", "items"]);
-            if (String(root, "format") != Contract || String(root, "commit") != expectedCommit)
+            string sourceCommit = String(root, "commit");
+            if (String(root, "format") != Contract || !Patterns.Commit.IsMatch(sourceCommit))
                 throw new PolicyInputException("The reference inventory version or build commit differs from the selected source.");
+            if (sourceCommit != expectedCommit)
+            {
+                PolicyTreeComparison[] comparisons = repository.TreeComparisons.Where(c => c.SourceCommit == sourceCommit && c.SelectedCommit == expectedCommit &&
+                    c.Paths.SequenceEqual(BuildSourcePaths.All, StringComparer.Ordinal)).ToArray();
+                if (comparisons.Length != 1 || !comparisons[0].Complete || !ContentHash.IsValid(comparisons[0].SourceTree) ||
+                    comparisons[0].SourceTree != comparisons[0].SelectedTree)
+                    throw new PolicyInputException("The inventory's source commit lacks a complete matching build-tree observation at the selected commit.");
+            }
             JsonElement[] references = Array(root, "references");
             if (references.Length != ReferencePaths.Count) throw new PolicyInputException("The inventory must bind all three reference categories exactly once.");
             var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -89,10 +98,28 @@ internal static class ReferenceInventory
             ValidateItems(items);
             ValidateItems(headings);
             if (!items.ToHashSet().SetEquals(headings)) throw new PolicyInputException("The inventory does not exactly cover its generated reference headings.");
-            return new(expectedCommit, items.OrderBy(i => i.Category, StringComparer.Ordinal).ThenBy(i => i.Name, StringComparer.Ordinal).ToImmutableArray());
+            return new(sourceCommit, items.OrderBy(i => i.Category, StringComparer.Ordinal).ThenBy(i => i.Name, StringComparer.Ordinal).ToImmutableArray());
         }
         catch (JsonException) { throw new PolicyInputException("The reference inventory is malformed JSON."); }
         catch (PolicyParameterException error) { throw new PolicyInputException("The reference inventory is malformed: " + error.Message); }
+    }
+
+    // Source acquisition reads only the bounded, hash-checked manifest to request a local observation.
+    // Evaluation independently validates the whole set, including this manifest and the captured observation.
+    internal static string SourceCommit(PolicyRepository repository, string manifestPath)
+    {
+        PolicyFile[] files = repository.Files.Where(f => f.Path == manifestPath).ToArray();
+        if (files.Length != 1 || files[0].IsLink || files[0].Bytes.Length > 32 * 1024 * 1024) throw new PolicyInputException("The reference inventory is missing or unavailable.");
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(PolicyInputs.Read(files[0]), new JsonDocumentOptions { MaxDepth = 16 });
+            JsonElement root = document.RootElement;
+            Shape(root, ["format", "commit", "references", "items"]);
+            string commit = String(root, "commit");
+            if (String(root, "format") != Contract || !Patterns.Commit.IsMatch(commit)) throw new PolicyInputException("The reference inventory generation commit is unavailable.");
+            return commit;
+        }
+        catch (JsonException) { throw new PolicyInputException("The reference inventory is malformed JSON."); }
     }
 
     private static IEnumerable<ReferenceItem> Headings(string category, string text)

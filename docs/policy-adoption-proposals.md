@@ -1,6 +1,6 @@
 # First-party policy and duty adoption proposals
 
-Revision 3, October 20, 2026. Clarify settled parallel results and prospective work-state consistency for adoption.
+Revision 4, October 20, 2026. Clarify settled parallel results and prospective work-state consistency for adoption, and the release-set location of the unchanged register-coverage parameters.
 
 These are proposed definitions for the builder and POLICY-04. Adoption belongs to the operator's exact signed decision and authorized declarations after ESTATE-01 reconciliation. D18-4 is decision `01M54ZFDD1MG1GS49CQA56J6QW` at `sha256:086843a4140121cea86c686b496517c5f0058e82faf9bc7822fbefed3af0f3bc`; it selects the levels, builder ownership, 30-day exception limit and publication cohort. The adoption decision must also identify the accepted ESTATE-01 result and DESIGN-18 acceptance.
 
@@ -56,7 +56,7 @@ This body is conditional: `after-declaration` covers 0.8.0 only if its first rec
 
 ## Proposed register-coverage body
 
-The product repository resource is `01M4TRNE1GB7CYB7DND8GBTTM1`. The register belongs to estate repository `01M4TRNF0RZE2VEZQYP9WK3GA4`, at `design/vocabulary.md`. The source adapter supplies the retained documentation-set members under `reference-inventory.json` in the product repository snapshot namespace, with the exact selected build commit. It supplies the inventory and all three generated reference files together. At status this is the estate-pinned release; at submission it is the candidate's target commit. POLICY-03 provides that source collection and gate wiring. The mappings below must be reconciled again against the build actually adopted.
+The product repository resource is `01M4TRNE1GB7CYB7DND8GBTTM1`. The register belongs to estate repository `01M4TRNF0RZE2VEZQYP9WK3GA4`, at `design/vocabulary.md`. The unchanged `referenceManifest: reference-inventory.json` parameter is relative to `docs/releases/<version>/` at the selected product commit. The adapter reads that inventory and all three sibling generated references together. At status, version and commit come from the estate-pinned publication; at submission they come from the candidate. The inventory's named generation commit must be locally available with identical build source trees, as described in [Policy evaluator](policy-evaluator.md). The mappings below must be reconciled again against the build actually adopted.
 
 ```json
 {

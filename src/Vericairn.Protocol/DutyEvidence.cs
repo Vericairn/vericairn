@@ -47,7 +47,11 @@ public sealed record ReleaseBasisEvidence(string Format, PolicyBasisDto Basis, I
     IReadOnlyList<string> Documents, IReadOnlyList<PolicyRecordReference> ExcludedOperationRevisions);
 
 /// <summary>Exact repository bytes used at admission, including separately identified historical completion sources.</summary>
-public sealed record ReleaseBasisRepository(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<ReleaseBasisFile> Files, bool Evidence = false);
+public sealed record ReleaseBasisRepository(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<ReleaseBasisFile> Files, bool Evidence = false)
+{
+    /// <summary>The exact local tree comparisons used by the retained evaluation.</summary>
+    public IReadOnlyList<PolicyTreeComparisonDto> TreeComparisons { get; init; } = [];
+}
 
 /// <summary>One retained source file, with its hash, original bytes and availability.</summary>
 public sealed record ReleaseBasisFile(string Path, string Hash, IReadOnlyList<byte> Bytes, bool Available, bool IsLink);

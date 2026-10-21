@@ -113,4 +113,41 @@ public class ReferenceInventoryTests
         references["api-reference.md"] = Encoding.UTF8.GetBytes("# API\n~~~\n## `GET /v1/status`\n~~~\n");
         Assert.Throws<PolicyInputException>(() => ReferenceInventory.Generate(Commit, Items, references));
     }
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("incomplete")]
+    [InlineData("different")]
+    [InlineData("missing")]
+    [InlineData("source")]
+    [InlineData("selected")]
+    [InlineData("paths")]
+    [InlineData("duplicate")]
+    [InlineData("invalid-hash")]
+    public void RetainedInventoryRequiresOneCompleteComparisonOfBothCommitsAndAllBuildPaths(string observation)
+    {
+        string selected = new('b', 40);
+        string tree = PolicyBasis.Hash("identical build trees");
+        var comparison = new PolicyTreeComparison(Commit, selected, BuildSourcePaths.All, true, tree, tree);
+        comparison = observation switch
+        {
+            "incomplete" => comparison with { Complete = false },
+            "different" => comparison with { SelectedTree = PolicyBasis.Hash("different build trees") },
+            "source" => comparison with { SourceCommit = new string('c', 40) },
+            "selected" => comparison with { SelectedCommit = new string('c', 40) },
+            "paths" => comparison with { Paths = ["src"] },
+            "invalid-hash" => comparison with { SourceTree = "unavailable", SelectedTree = "unavailable" },
+            _ => comparison,
+        };
+        PolicyRepository source = Repository("docs/releases/0.8.0/") with { Revision = selected,
+            TreeComparisons = observation == "missing" ? [] : observation == "duplicate" ? [comparison, comparison] : [comparison] };
+        const string path = "docs/releases/0.8.0/reference-inventory.json";
+        if (observation == "valid")
+        {
+            RetainedReferenceInventory inventory = ReferenceInventory.Read(source, path, selected);
+            Assert.Equal(Commit, inventory.Commit);
+            Assert.Equal(3, inventory.Items.Length);
+        }
+        else Assert.Throws<PolicyInputException>(() => ReferenceInventory.Read(source, path, selected));
+    }
 }

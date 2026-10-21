@@ -4,6 +4,7 @@
 using System.Text.Json;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Types;
 using Vericairn.Runtime.Policies;
 using static Vericairn.Runtime.Policies.PolicyInputs;
 
@@ -14,7 +15,7 @@ internal static class ReferenceCoverage
     internal const string Kind = "vericairn.software/reference-coverage";
 
     internal static PolicyKindRegistration Registration(string implementationDigest) => new(Kind, 1, implementationDigest,
-        ["estate", "product", "repository"], [PolicyBasis.RepositoryContract], 100000, ReferenceInventory.MaximumItems + 1, Validate, Evaluate);
+        ["estate", "product", "repository"], [PolicyBasis.RepositoryContract], 100000, ReferenceInventory.MaximumItems + 1, Validate, Evaluate, ObserveTrees);
 
     private static void Validate(PolicyRuleContext context)
     {
@@ -49,8 +50,8 @@ internal static class ReferenceCoverage
             Text(destination, "provider") == "github-releases" && Text(Get(destination, "settings"), "repository") is { } named && named == Text(Get(resource.Body, "location"), "github");
         if (EstateModel.BodyString(resource, "kind") != "repository" || !related) throw new PolicyInputException("The reference repository lacks the declared typed product relation.");
         PolicyRepository repository = Repository(context.Basis, repositoryId);
-        (string commit, RecordEnvelope? release) = SelectedCommit(context, repository, resource, product);
-        RetainedReferenceInventory inventory = ReferenceInventory.Read(repository, String(context.Parameters, "referenceManifest"), commit);
+        (string commit, string version, RecordEnvelope? release) = SelectedRelease(context.Model, context.Basis.Submission, resource, product);
+        RetainedReferenceInventory inventory = ReferenceInventory.Read(repository, ManifestPath(version, String(context.Parameters, "referenceManifest")), commit);
         string registerId = String(context.Parameters, "registerRepository");
         if (!context.Model.ById.TryGetValue(registerId, out RecordEnvelope? registerSource) || registerSource.Type != "estate" &&
             (registerSource.Type != "resource" || EstateModel.BodyString(registerSource, "kind") != "repository")) throw new PolicyInputException("The register repository identity is unavailable.");
@@ -85,23 +86,37 @@ internal static class ReferenceCoverage
         return findings;
     }
 
-    private static (string Commit, RecordEnvelope? Release) SelectedCommit(PolicyRuleContext context, PolicyRepository repository, RecordEnvelope resource, string product)
+    private static IEnumerable<PolicyTreeRequest> ObserveTrees(EstateModel model, PolicySubmission? submission, JsonElement parameters, PolicyRepository repository)
     {
-        if (context.Basis.Submission is { } submission)
+        if (Text(parameters, "repository") != repository.Identity || !model.ById.TryGetValue(repository.Identity, out RecordEnvelope? resource)) return [];
+        (string commit, string version, _) = SelectedRelease(model, submission, model.Latest(resource), String(parameters, "product"));
+        if (!repository.Complete || repository.Revision != commit) return [];
+        string source = ReferenceInventory.SourceCommit(repository, ManifestPath(version, String(parameters, "referenceManifest")));
+        return [new(source, BuildSourcePaths.All)];
+    }
+
+    private static string ManifestPath(string version, string relative)
+    {
+        if (!Patterns.SemanticVersion.IsMatch(version) || !Path(relative)) throw new PolicyInputException("The release documentation-set path is unavailable.");
+        return "docs/releases/" + version + "/" + relative;
+    }
+
+    private static (string Commit, string Version, RecordEnvelope? Release) SelectedRelease(EstateModel model, PolicySubmission? submission, RecordEnvelope resource, string product)
+    {
+        if (submission is not null)
         {
             if (submission.Product != product) throw new PolicyInputException("The supplied submission targets a different product.");
-            return (submission.Commit, null);
+            return (submission.Commit, submission.Version, null);
         }
-        if (context.Basis.Origin == PolicyTimeOrigin.Preview) return (repository.Revision, null);
-        EstateManifest? pin = context.Model.Manifest;
+        EstateManifest? pin = model.Manifest;
         string? location = Text(Get(resource.Body, "location"), "github");
         if (pin is null || pin.Mode != "release" || pin.Repository != location || pin.Version is null)
-            throw new PolicyInputException("Recorded-time reference coverage requires the estate's pinned product release.");
-        RecordEnvelope[] publications = context.Model.OfType("release").Where(r => ReleaseMatchesProduct(context.Model, r, product) &&
+            throw new PolicyInputException("Reference coverage requires the estate's pinned product release or an explicit candidate.");
+        RecordEnvelope[] publications = model.OfType("release").Where(r => ReleaseMatchesProduct(model, r, product) &&
             EstateModel.BodyString(r, "status") == "published" && EstateModel.BodyString(r, "version") == pin.Version && EstateModel.BodyString(r, "repository") == pin.Repository).ToArray();
         string[] commits = publications.Select(r => EstateModel.BodyString(r, "commit") ?? "").Distinct(StringComparer.Ordinal).ToArray();
         if (commits.Length != 1) throw new PolicyInputException("The pinned release commit is missing or ambiguous.");
-        return (commits[0], publications.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).First());
+        return (commits[0], pin.Version, publications.OrderBy(r => r.At, StringComparer.Ordinal).ThenBy(r => r.Id, StringComparer.Ordinal).First());
     }
 
     private static string Key(ReferenceItem item) => item.Category + ":" + item.Name;

@@ -1,6 +1,6 @@
 # Estate policies, writing exceptions and release admission
 
-Revision 10, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, which authored text the writing scan checks, parallel results, settled review waits and prospective work-state consistency.
+Revision 11, October 20, 2026. Describe policy implementations by their compilation identity, policy definition hashing across the CLI, API and SDK, which authored text the writing scan checks, parallel results, settled review waits and prospective work-state consistency, and locate reference coverage in the selected release's documentation set with its build binding.
 
 An estate policy declares a rule, owner, selection and level. The runtime evaluates it from validated records, retained proof objects and locally available repository bytes. Reading a policy creates no record. It starts no build, fetch, worker or provider operation.
 
@@ -33,6 +33,10 @@ Work policies resolve the latest attempt and its current result separately for e
 `review-wait` checks unreviewed results only while their work order remains unaccepted and unretired. Acceptance settles every parallel result's wait; it does not create a review or change the brief's review obligations. Unaccepted results still age from their submission time under the declared review requirement.
 
 Work-state consistency warns prospectively. Its boundary is the policy identity's first declaration time, preserved across policy revisions and independent of `startsAt`. An explicit open status contradicting exact acceptance or publication is selected when either that status or that fact was recorded at or after the boundary. Contradictions whose two records precede the boundary raise no finding. This uses the existing version-1 `cases` parameter and work-status vocabulary; acceptance remains derived from its own records.
+
+Reference coverage reads `referenceManifest` relative to `docs/releases/<version>/` in the product repository at the selected commit. With `referenceManifest: reference-inventory.json`, it reads that inventory and its three sibling references, `cli-reference.md`, `record-reference.md` and `api-reference.md`. Status and previews without a release target select the estate's pinned publication's version and commit. A submission or named release preview selects the candidate's version and commit.
+
+The inventory names the source commit used to generate the references. A later documentation commit may retain that set only when both commits are locally available and their complete build source trees agree: `src`, `tools`, `Directory.Build.props`, `Directory.Build.targets`, `Directory.Packages.props`, `global.json`, `Vericairn.slnx`, `.gitattributes` and `NuGet.Config`. The Git source captures this comparison before evaluation, without fetching or building. Missing source commits, changed build trees, incomplete observations or inconsistent reference bytes make coverage unavailable, with no partial item count.
 
 Recurring-duty findings preserve the occurrence, originating policy revision, examined subject revision, due time, grace deadline, completion flag and time, missed history, late duration and exact result, review and proof references. A scheduled or within-grace occurrence has not been completed. An excepted occurrence retains its unmet verdict and its debt. Exception history includes expiry, revocations and the exact submission restrictions.
 

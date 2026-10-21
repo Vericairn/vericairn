@@ -13,6 +13,9 @@ namespace Vericairn.Runtime.Policies;
 internal interface IPolicyRepositorySource
 {
     PolicyRepository Read(EstateModel model, RecordEnvelope repository, string? commit);
+
+    PolicyTreeComparison CompareTrees(EstateModel model, RecordEnvelope repository, string selectedCommit, PolicyTreeRequest request) =>
+        new(request.SourceCommit, selectedCommit, request.Paths, false);
 }
 
 internal static class PolicySources
@@ -38,6 +41,32 @@ internal static class PolicySources
     internal static PolicyKindRegistry Registry()
     {
         lock (Gate) return new(PolicyKindRegistry.Foundation(FoundationDigest.Value).Registrations.Concat(Kinds.Values));
+    }
+
+    // Installed kinds select observations here, before the immutable evaluation basis is constructed.
+    internal static PolicyRepository ObserveTrees(EstateModel model, PolicyKindRegistry registry, PolicySubmission? submission,
+        RecordEnvelope resource, PolicyRepository repository)
+    {
+        var requests = new SortedDictionary<string, PolicyTreeRequest>(StringComparer.Ordinal);
+        foreach (RecordEnvelope policy in model.Current("estate-policy"))
+        foreach (System.Text.Json.JsonElement rule in PolicyInputs.Items(PolicyInputs.Get(policy.Body, "rules")))
+        {
+            PolicyKindRegistration[] kinds = registry.Registrations.Where(k => k.Kind == PolicyInputs.Text(rule, "kind") &&
+                PolicyInputs.Get(rule, "version").ValueKind == System.Text.Json.JsonValueKind.Number &&
+                PolicyInputs.Get(rule, "version").TryGetInt32(out int version) && k.Version == version).ToArray();
+            if (kinds.Length != 1 || kinds[0].RepositoryTrees is not { } select) continue;
+            try
+            {
+                foreach (PolicyTreeRequest request in select(model, submission, PolicyInputs.Get(rule, "parameters"), repository))
+                    requests.TryAdd(PolicyBasis.Canonical(request), request);
+            }
+            catch (Exception error) when (error is PolicyInputException or PolicyParameterException)
+            {
+                // The evaluator reports the malformed or unavailable input; it never gets a partial comparison.
+            }
+        }
+        return repository with { TreeComparisons = [.. requests.Values.Select(request => RepositorySource?.CompareTrees(model, resource, repository.Revision, request)
+            ?? new(request.SourceCommit, repository.Revision, request.Paths, false))] };
     }
 
     internal static PolicyRepository Estate(EstateModel model)

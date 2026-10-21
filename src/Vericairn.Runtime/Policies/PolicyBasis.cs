@@ -13,7 +13,12 @@ using Vericairn.Records.Types;
 namespace Vericairn.Runtime.Policies;
 
 internal sealed record PolicyFile(string Path, string Hash, ImmutableArray<byte> Bytes, bool Available = true, bool IsLink = false);
-internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files, bool Evidence = false);
+internal sealed record PolicyRepository(string Identity, string Revision, string Contract, bool Complete, ImmutableArray<PolicyFile> Files, bool Evidence = false)
+{
+    public ImmutableArray<PolicyTreeComparison> TreeComparisons { get; init; } = [];
+}
+internal sealed record PolicyTreeRequest(string SourceCommit, ImmutableArray<string> Paths);
+internal sealed record PolicyTreeComparison(string SourceCommit, string SelectedCommit, ImmutableArray<string> Paths, bool Complete, string? SourceTree = null, string? SelectedTree = null);
 internal sealed record PolicyObject(string Hash, ImmutableArray<byte> Bytes, bool Available = true);
 internal sealed record PolicyImplementation(string Kind, int Version, string Digest);
 internal sealed record PolicySubmission(RecordReference? Release, string Product, string Version, string Commit,
@@ -49,10 +54,10 @@ internal sealed class PolicyBasis
             Repository = manifest.Repository, Commit = manifest.Commit, Version = manifest.Version,
             Artifacts = manifest.Artifacts?.ToImmutableSortedDictionary(StringComparer.Ordinal),
         };
-        Repositories = (repositories ?? []).Select(r => r with { Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
+        Repositories = (repositories ?? []).Select(r => r with { TreeComparisons = r.TreeComparisons.OrderBy(Canonical, StringComparer.Ordinal).ToImmutableArray(), Files = r.Files.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Hash, StringComparer.Ordinal)
                 .ThenBy(f => f.Available).ThenBy(f => f.IsLink).ThenBy(f => ContentHash.Sha256(f.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray() })
             .OrderBy(r => r.Identity, StringComparer.Ordinal).ThenBy(r => r.Revision, StringComparer.Ordinal).ThenBy(r => r.Contract, StringComparer.Ordinal).ThenBy(r => r.Complete)
-            .ThenBy(r => r.Evidence).ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ToImmutableArray();
+            .ThenBy(r => r.Evidence).ThenBy(r => Hash(r.Files), StringComparer.Ordinal).ThenBy(r => Hash(r.TreeComparisons), StringComparer.Ordinal).ToImmutableArray();
         Objects = (objects ?? []).OrderBy(o => o.Hash, StringComparer.Ordinal).ThenBy(o => o.Available).ThenBy(o => ContentHash.Sha256(o.Bytes.AsSpan()), StringComparer.Ordinal).ToImmutableArray();
         Implementations = (implementations ?? []).OrderBy(i => i.Kind, StringComparer.Ordinal).ThenBy(i => i.Version).ThenBy(i => i.Digest, StringComparer.Ordinal).ToImmutableArray();
         AsOf = asOf;
@@ -67,6 +72,12 @@ internal sealed class PolicyBasis
             repositories = Repositories.Select(r => new { r.Identity, r.Revision, r.Contract, r.Complete, r.Evidence, files = r.Files.Select(f => new { f.Path, f.Hash, f.Available, f.IsLink, actualHash = ContentHash.Sha256(f.Bytes.AsSpan()) }) }),
             objects = Objects.Select(o => new { o.Hash, o.Available, actualHash = ContentHash.Sha256(o.Bytes.AsSpan()) }),
             implementations = Implementations,
+        });
+        // Preserve the existing basis for sources without tree observations; retained build bindings extend only their own snapshots.
+        if (Repositories.Any(r => !r.TreeComparisons.IsEmpty)) Digest = Hash(new
+        {
+            snapshot = Digest,
+            repositoryTrees = Repositories.Where(r => !r.TreeComparisons.IsEmpty).Select(r => new { r.Identity, r.Revision, r.TreeComparisons }),
         });
         if (Model.Manifest is not null) Digest = Hash(new { snapshot = Digest, manifest = Model.Manifest });
         unavailable = CheckUnavailable();

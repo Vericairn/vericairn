@@ -148,12 +148,28 @@ public sealed class GitFileSource : IDocumentSource
     private static string? Text(string clone, params string[] arguments) =>
         Run(clone, out byte[] output, arguments) == 0 && Encoding.UTF8.GetString(output).Trim() is { Length: > 0 } text ? text : null;
 
-    internal static int Run(string clone, out byte[] output, params string[] arguments)
+    internal static int Run(string clone, out byte[] output, params string[] arguments) => Run(clone, out output, false, arguments);
+
+    internal static int RunIsolated(string clone, out byte[] output, params string[] arguments) => Run(clone, out output, true, arguments);
+
+    private static int Run(string clone, out byte[] output, bool isolated, string[] arguments)
     {
         var info = new ProcessStartInfo("git") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true, WorkingDirectory = clone };
         info.ArgumentList.Add("--no-replace-objects");
         info.ArgumentList.Add("-c");
         info.ArgumentList.Add("core.quotepath=off");
+        if (isolated)
+        {
+            info.ArgumentList.Add("-c");
+            info.ArgumentList.Add("protocol.allow=never");
+            // Match the adapter's local history observations: ambient Git routing and configuration cannot select another source.
+            foreach (string variable in new[] { "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_INDEX_FILE", "GIT_NAMESPACE", "GIT_SHALLOW_FILE", "GIT_CONFIG_PARAMETERS", "GIT_GLOB_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_LITERAL_PATHSPECS", "GIT_ICASE_PATHSPECS" })
+                info.Environment.Remove(variable);
+            info.Environment["GIT_CONFIG_COUNT"] = "0";
+            info.Environment["GIT_CONFIG_NOSYSTEM"] = "1";
+            info.Environment["GIT_CONFIG_GLOBAL"] = string.Empty;
+            info.Environment["GIT_TERMINAL_PROMPT"] = "0";
+        }
         foreach (string argument in arguments)
         {
             info.ArgumentList.Add(argument);

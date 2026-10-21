@@ -22,8 +22,7 @@ internal static partial class ReferenceSet
 {
     private const string CompanionFormat = "vericairn.software-companions/1";
     private const string RegisterPath = "inputs/reference-register.md";
-    private static readonly string[] BuildPaths =
-    ["src", "tools", "Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props", "global.json", "Vericairn.slnx", ".gitattributes", "NuGet.Config"];
+    private static ImmutableArray<string> BuildPaths => BuildSourcePaths.All;
     private static string BuildRoot
     {
         get

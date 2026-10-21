@@ -133,7 +133,7 @@ public sealed partial class EstateService
             string? commit = RepositoryCommit(model, resource, submission);
             PolicyRepository inventory = PolicySources.RepositorySource?.Read(model, resource, commit)
                 ?? new(identity, commit ?? "unavailable", PolicyBasis.RepositoryContract, false, []);
-            repositories.Add(inventory);
+            repositories.Add(PolicySources.ObserveTrees(model, registry, submission, resource, inventory));
         }
         // Completion evidence keeps its own exact historical commits, independently of live release inputs.
         foreach (JsonElement source in model.OfType("result").SelectMany(r => PolicyInputs.Items(PolicyInputs.Get(r.Body, "duties")))
@@ -225,5 +225,6 @@ public sealed partial class EstateService
     private static FindingDto PolicyDiagnostic(Finding finding) => new(finding.Severity.ToString().ToLowerInvariant(), finding.Code, finding.Location, finding.Message);
     private static PolicyBasisDto BasisView(PolicyBasis basis) => new(basis.Digest, basis.RecordDigest, basis.AsOf, basis.Origin.ToString().ToLowerInvariant(),
         basis.Submission is null ? null : ConvertPolicy<PolicySubmissionDto>(basis.Submission), basis.Repositories.Select(r => new PolicyRepositoryDto(r.Identity, r.Revision, r.Contract, r.Complete,
-            r.Files.Select(f => new PolicyFileDto(f.Path, f.Hash, f.Available, f.IsLink)).ToArray(), r.Evidence)).ToArray(), basis.Objects.Select(o => o.Hash).ToArray(), basis.Implementations.Select(ConvertPolicy<PolicyImplementationDto>).ToArray());
+            r.Files.Select(f => new PolicyFileDto(f.Path, f.Hash, f.Available, f.IsLink)).ToArray(), r.Evidence)
+            { TreeComparisons = r.TreeComparisons.Select(ConvertPolicy<PolicyTreeComparisonDto>).ToArray() }).ToArray(), basis.Objects.Select(o => o.Hash).ToArray(), basis.Implementations.Select(ConvertPolicy<PolicyImplementationDto>).ToArray());
 }
