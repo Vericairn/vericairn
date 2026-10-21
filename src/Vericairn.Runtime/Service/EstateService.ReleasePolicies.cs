@@ -43,6 +43,9 @@ internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluati
 
 public sealed partial class EstateService
 {
+    private const string CopiedBasisFormat = "vericairn.release-basis/1";
+    private const string ReferencedBasisFormat = "vericairn.release-basis/2";
+
     /// <inheritdoc />
     public ReleaseBasisResponse? ReleaseBasis(string hash)
     {
@@ -51,13 +54,76 @@ public sealed partial class EstateService
         if (bytes is null) return null;
         try
         {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            string? format = document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("format", out JsonElement value) &&
+                value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+            if (format == ReferencedBasisFormat) return ResolveReleaseBasis(hash, bytes);
             ReleaseBasisEvidence? evidence = JsonSerializer.Deserialize<ReleaseBasisEvidence>(bytes, ProtocolJson.Options);
-            return evidence is { Format: "vericairn.release-basis/1", Basis: not null, Policies: not null,
+            return evidence is { Format: CopiedBasisFormat, Basis: not null, Policies: not null,
                 Records: not null, Repositories: not null, Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }
                 ? new(hash, evidence) : null;
         }
         catch (JsonException) { return null; }
     }
+
+    // A referenced basis resolves to the same evidence a copied one carries: every record from the estate's own records, and every
+    // source file and object from the object store, each checked against the hash the basis names. Anything that no longer resolves
+    // exactly makes the basis unavailable rather than partly answered.
+    private ReleaseBasisResponse? ResolveReleaseBasis(string hash, byte[] bytes)
+    {
+        StoredReleaseBasis? stored = JsonSerializer.Deserialize<StoredReleaseBasis>(bytes, ProtocolJson.Options);
+        if (stored is not { Format: ReferencedBasisFormat, Basis: not null, Policies: not null, Records: not null, Repositories: not null,
+            Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }) return null;
+        EstateModel model;
+        lock (gate) model = session.Load();
+        List<JsonElement> records = [];
+        foreach (StoredRecord reference in stored.Records)
+        {
+            if (!model.ById.TryGetValue(reference.Id, out RecordEnvelope? r) || r.Type != reference.Type || r.ComputedHash != reference.Hash) return null;
+            records.Add(JsonSerializer.SerializeToElement(new RecordEnvelope(r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body.Clone(),
+                r.DeclaredHash, r.ComputedHash, r.Signatures.ToImmutableArray(), r.Format), ProtocolJson.Options));
+        }
+        List<ReleaseBasisRepository> repositories = [];
+        foreach (StoredRepository repository in stored.Repositories)
+        {
+            List<ReleaseBasisFile> files = [];
+            foreach (StoredFile file in repository.Files)
+            {
+                byte[]? content = null;
+                if (file.Available && (content = Retained(file.Hash)) is null) return null;
+                files.Add(new(file.Path, file.Hash, content ?? [], file.Available, file.IsLink));
+            }
+            repositories.Add(new(repository.Identity, repository.Revision, repository.Contract, repository.Complete, files, repository.Evidence)
+            { TreeComparisons = repository.TreeComparisons ?? [] });
+        }
+        List<ReleaseBasisObject> objects = [];
+        foreach (StoredObject retained in stored.Objects)
+        {
+            byte[]? content = null;
+            if (retained.Available && (content = Retained(retained.Hash)) is null) return null;
+            objects.Add(new(retained.Hash, content ?? [], retained.Available));
+        }
+        return new(hash, new(stored.Format, stored.Basis, records, repositories, objects, stored.Policies, stored.Documents, stored.ExcludedOperationRevisions));
+
+        byte[]? Retained(string objectHash)
+        {
+            try { return Vericairn.Records.Hashing.ContentHash.IsValid(objectHash) ? session.Objects.Read(objectHash) : null; }
+            catch (Vericairn.Runtime.Objects.ObjectCorruptedException) { return null; }
+        }
+    }
+
+    private sealed record StoredReleaseBasis(string Format, PolicyBasisDto Basis, IReadOnlyList<StoredRecord> Records,
+        IReadOnlyList<StoredRepository> Repositories, IReadOnlyList<StoredObject> Objects, PolicyResponse Policies,
+        IReadOnlyList<string> Documents, IReadOnlyList<PolicyRecordReference> ExcludedOperationRevisions);
+
+    private sealed record StoredRecord(string Type, string Id, string Hash);
+
+    private sealed record StoredRepository(string Identity, string Revision, string Contract, bool Complete, IReadOnlyList<StoredFile> Files, bool Evidence,
+        IReadOnlyList<PolicyTreeComparisonDto>? TreeComparisons);
+
+    private sealed record StoredFile(string Path, string Hash, bool Available, bool IsLink);
+
+    private sealed record StoredObject(string Hash, bool Available);
 
     // Tests can change the clock or sources at an actual boundary; no production caller supplies an evaluation verdict.
     internal Action<string>? ReleaseBoundary { get; set; }
@@ -94,11 +160,26 @@ public sealed partial class EstateService
 
     private string RetainReleaseBasis(ReleasePolicyAssessment assessment, IReadOnlyList<string> documents, IReadOnlyList<RecordReference> excluded)
     {
-        // Ordinary operation evidence points to a retained object; no record field or record type is added.
+        // Ordinary operation evidence points to a retained object; no record field or record type is added. Records and objects are
+        // already immutable and content-addressed, so the basis names them by hash instead of copying them, and stays within the
+        // estate's object limit however many records the estate holds. Each source file's exact bytes are kept as an object of their
+        // own: identical bytes are stored once, and a file changed after this evaluation still resolves to the bytes it read.
+        var repositories = assessment.Basis.Repositories.Select(repository => new
+        {
+            repository.Identity, repository.Revision, repository.Contract, repository.Complete,
+            files = repository.Files.Select(file =>
+            {
+                // A single file larger than the estate's object limit stays named by its hash; its basis then reads as unavailable.
+                if (file.Available && file.Bytes.Length <= EstateLayout.MaxObjectBytes) session.Objects.Put(file.Bytes.AsSpan());
+                return new { file.Path, file.Hash, file.Available, file.IsLink };
+            }).ToArray(),
+            repository.Evidence, repository.TreeComparisons,
+        }).ToArray();
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(PolicyBasis.Canonical(JsonSerializer.SerializeToElement(new
         {
-            format = "vericairn.release-basis/1", basis = assessment.View.Basis, records = assessment.Basis.Records,
-            repositories = assessment.Basis.Repositories, objects = assessment.Basis.Objects, policies = assessment.View,
+            format = ReferencedBasisFormat, basis = assessment.View.Basis,
+            records = assessment.Basis.Records.Select(r => new { r.Type, r.Id, hash = r.ComputedHash }).ToArray(),
+            repositories, objects = assessment.Basis.Objects.Select(o => new { o.Hash, o.Available }).ToArray(), policies = assessment.View,
             documents, excludedOperationRevisions = excluded,
         }, ProtocolJson.Options)));
         return session.Objects.Put(bytes);

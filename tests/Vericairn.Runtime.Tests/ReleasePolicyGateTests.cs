@@ -482,6 +482,67 @@ public sealed class ReleasePolicyGateTests
     }
 
     [Fact]
+    public void TheRetainedBasisNamesRecordsAndSourcesByHashSoALargeEstateStaysWithinTheObjectLimit()
+    {
+        using var f = new Fixture();
+        f.Duty();
+        // A basis that copied these sources, as 0.8.0's did, would exceed the estate's object limit and refuse every submission.
+        string docs = Path.Combine(f.Records.Estate.Root, "docs");
+        Directory.CreateDirectory(docs);
+        string page = new string('x', 512 * 1024) + "\n";
+        for (int i = 0; i < 6; i++) File.WriteAllText(Path.Combine(docs, $"large-{i}.md"), i + page);
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.True(response.Ok, response.Message);
+        string hash = Assert.Single(response.BasisEvidence!);
+        byte[] stored = f.Api.Session.Objects.Read(hash)!;
+        Assert.True(stored.Length < 1024 * 1024, $"The retained basis is {stored.Length} bytes.");
+        using JsonDocument document = JsonDocument.Parse(stored);
+        Assert.All(document.RootElement.GetProperty("records").EnumerateArray(),
+            r => Assert.Equal(["hash", "id", "type"], r.EnumerateObject().Select(p => p.Name).Order(StringComparer.Ordinal)));
+        Assert.Equal(0, f.Api.Validate().Errors);
+        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(hash)!.Evidence;
+        Assert.All(retained.Records, r => Assert.True(r.TryGetProperty("body", out _)));
+        ReleaseBasisFile large = Assert.Single(retained.Repositories.SelectMany(r => r.Files), file => file.Path == "docs/large-3.md");
+        Assert.Equal("3" + page, System.Text.Encoding.UTF8.GetString(large.Bytes.ToArray()));
+    }
+
+    [Fact]
+    public void ACopiedBasisFromAnEarlierReleaseStillReads()
+    {
+        using var f = new Fixture();
+        f.Duty();
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+        Assert.True(response.Ok, response.Message);
+        ReleaseBasisEvidence copied = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence with { Format = "vericairn.release-basis/1" };
+
+        string hash = f.Api.Session.Objects.Put(JsonSerializer.SerializeToUtf8Bytes(copied, ProtocolJson.Options));
+
+        Assert.Equal(JsonSerializer.Serialize(copied, ProtocolJson.Options), JsonSerializer.Serialize(f.Api.ReleaseBasis(hash)!.Evidence, ProtocolJson.Options));
+    }
+
+    [Fact]
+    public void AReferencedBasisReadsAsUnavailableWhenASourceItNamesIsGone()
+    {
+        using var f = new Fixture();
+        f.Duty();
+        Directory.CreateDirectory(Path.Combine(f.Records.Estate.Root, "docs"));
+        File.WriteAllText(Path.Combine(f.Records.Estate.Root, "docs", "evidence.md"), "Read only by this basis.\n");
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+        Assert.True(response.Ok, response.Message);
+        string hash = Assert.Single(response.BasisEvidence!);
+        Assert.NotNull(f.Api.ReleaseBasis(hash));
+        string source = Vericairn.Records.Hashing.ContentHash.Sha256(System.Text.Encoding.UTF8.GetBytes("Read only by this basis.\n"));
+        string path = Path.Combine(f.Records.Estate.Root, EstateLayout.ObjectsDirectory, source[Vericairn.Records.Hashing.ContentHash.Prefix.Length..]);
+        Assert.True(File.Exists(path), path);
+
+        File.Delete(path);
+
+        Assert.Null(f.Api.ReleaseBasis(hash));
+    }
+
+    [Fact]
     public async Task APassingSubmissionRetainsExactInputsAndRechecksWithoutHashingItsOwnIntent()
     {
         using var f = new Fixture();
@@ -497,7 +558,11 @@ public sealed class ReleasePolicyGateTests
         RecordEnvelope intent = f.Api.Session.Load().OfType("operation").Single(o => EstateModel.BodyString(o, "status") == "not-started");
         using JsonDocument evidence = JsonDocument.Parse(f.Api.Session.Objects.Read(hash)!);
         JsonElement root = evidence.RootElement;
-        Assert.Equal("vericairn.release-basis/1", root.GetProperty("format").GetString());
+        Assert.Equal("vericairn.release-basis/2", root.GetProperty("format").GetString());
+        // Records and sources are named by hash; the evidence below resolves them to their exact bytes.
+        Assert.All(root.GetProperty("records").EnumerateArray(), r => Assert.False(r.TryGetProperty("body", out _)));
+        Assert.All(root.GetProperty("repositories").EnumerateArray().SelectMany(r => r.GetProperty("files").EnumerateArray()),
+            file => Assert.False(file.TryGetProperty("bytes", out _)));
         JsonElement basis = root.GetProperty("basis");
         Assert.Equal(Fixture.Commit, basis.GetProperty("submission").GetProperty("commit").GetString());
         Assert.Equal("submission", basis.GetProperty("origin").GetString());
