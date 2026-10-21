@@ -49,7 +49,7 @@ public sealed class OperationType : IRecordType
         new("intent", "string", true, "The intended effect, in a sentence."),
         new("target", "object", true, "Where the effect lands: repository, workflow, ref, version, product; for an agent run, its assignment, its principal, its workspace (a repository and branch, never a machine path), the goal it is charged to, the worker contract and, for a run launched under it, the sponsor's custody exception (custodyException); string values only."),
         new("status", string.Join('|', Statuses), true, "not-started, dispatched, observed-success, known-failure, canceled or uncertain."),
-        new("dispatchedAt", "timestamp", false, "When the dispatch was made; required once dispatched."),
+        new("dispatchedAt", "timestamp", false, "When the dispatch was made; required once dispatched. Account-holder package actions never claim a dispatch and omit this field."),
         new("observed", "object", false, "summary, at, optional url and reference: what was observed; required for observed-success and known-failure."),
         new("reconciliation", "string", false, "How an uncertain or failed outcome was settled before a retry; required when a retry is dispatched."),
         new("evidence", "object[]", true, "summary, optional hash and location; may be empty."),
@@ -361,7 +361,8 @@ public sealed class OperationType : IRecordType
         }
 
         string? status = body.Enum("status", true, Statuses);
-        string? dispatchedAt = body.Timestamp("dispatchedAt", status is "dispatched" or "observed-success" or "uncertain");
+        bool accountAction = PackageRecordRules.IsAction(context.Record);
+        string? dispatchedAt = body.Timestamp("dispatchedAt", !accountAction && status is "dispatched" or "observed-success" or "uncertain");
         BodyReader? observed = body.Nested("observed", status is "observed-success" or "known-failure");
         if (observed is not null)
         {
@@ -456,6 +457,7 @@ public sealed class OperationType : IRecordType
         }
 
         ChangeOperationRules.Read(context);
+        PackageRecordRules.Operation(context);
         ExecutionRecord.Read(context, status);
         body.NoOtherKeys();
         if (context.Format >= 2)
@@ -517,7 +519,8 @@ public sealed class OperationType : IRecordType
             {
                 context.Error("operation.identity", "A revision keeps the operation's identity and provider; a different effect is a different operation.");
             }
-            else if (!Transitions.TryGetValue(previousStatus, out string[]? allowed) || Array.IndexOf(allowed, status) < 0)
+            else if (!(accountAction && previousStatus == "not-started" && status == "observed-success")
+                && (!Transitions.TryGetValue(previousStatus, out string[]? allowed) || Array.IndexOf(allowed, status) < 0))
             {
                 context.Error("operation.transition", $"An operation does not go from {previousStatus} to {status}.");
             }

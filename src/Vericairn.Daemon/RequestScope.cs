@@ -116,10 +116,11 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
             WorkProgressResponse { Ok: true, Written: RecordWritten record } => record,
             TakeoverResponse { Ok: true, Assignment: RecordWritten assignment } => assignment,
             OperatorRecordResponse { Record: RecordWritten record } => record,
+            PackagesResponse packages => packages.Operation ?? (packages.Packages.Count > 0 ? packages.Packages[^1].Observation : packages.Intent),
             _ => null,
         };
         string? run = value is RunStopResponse { Ok: true } stop ? stop.Run : null;
-        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false };
+        bool done = !failed && status < 300 && value is not WriteOutcome { Ok: false } and not WorkProgressResponse { Ok: false } and not RunStopResponse { Ok: false } and not TakeoverResponse { Ok: false } and not OperatorRecordResponse { Ok: false } and not PackagesResponse { Ok: false };
         try
         {
             ledger.Settle(new LocalNetworkWrite(at, device.Identity, device.Principal, operation, written?.Id ?? run, written?.Hash, written?.Path, id, done ? "written" : "failed"));
@@ -223,6 +224,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         ["POST /v1/changes/open"] = typeof(ChangesOpenRequest),
         ["POST /v1/changes/merge"] = typeof(ChangesMergeRequest),
         ["POST /v1/changes/observe"] = typeof(ChangesObserveRequest),
+        ["POST /v1/packages/observe"] = typeof(PackagesObserveRequest),
+        ["POST /v1/packages/unlist"] = typeof(PackagesUnlistRequest),
+        ["POST /v1/packages/deprecate"] = typeof(PackagesDeprecateRequest),
 
         ["POST /v1/estate/upgrade"] = typeof(UpgradeRequest),
         ["POST /v1/estate/export"] = typeof(ExportRequest),
@@ -299,6 +303,9 @@ internal sealed class RequestScope(EstateService service, LocalNetworkLedger led
         [typeof(ChangesOpenRequest)] = (_, r, d) => Acting(((ChangesOpenRequest)r).By, d),
         [typeof(ChangesMergeRequest)] = (_, r, d) => Acting(((ChangesMergeRequest)r).By, d),
         [typeof(ChangesObserveRequest)] = (_, r, d) => Acting(((ChangesObserveRequest)r).By, d),
+        [typeof(PackagesObserveRequest)] = (_, r, d) => Acting(((PackagesObserveRequest)r).By, d),
+        [typeof(PackagesUnlistRequest)] = (_, r, d) => Acting(((PackagesUnlistRequest)r).By, d),
+        [typeof(PackagesDeprecateRequest)] = (_, r, d) => Acting(((PackagesDeprecateRequest)r).By, d),
 
         [typeof(UpgradeRequest)] = (_, r, d) => ((UpgradeRequest)r).Check ? Optional(((UpgradeRequest)r).By, d) : Acting(((UpgradeRequest)r).By, d) ?? Upgrade(d),
         [typeof(ExportRequest)] = (scope, r, d) => Acting(((ExportRequest)r).By, d) ?? scope.Administrator("An export writes the whole estate to a path on the runtime's machine", d),

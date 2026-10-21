@@ -41,6 +41,8 @@
     <ProjectReference Include="../Vericairn.Sdk/Vericairn.Sdk.csproj" />
     <ProjectReference Include="../Vericairn.Mcp/Vericairn.Mcp.csproj" />
     <ProjectReference Include="../Vericairn.Providers.GitHub/Vericairn.Providers.GitHub.csproj" />
+    <!-- A bundled implementation detail, not an additional dependency of projects consuming the command tree. -->
+    <ProjectReference Include="../Vericairn.Providers.NuGet/Vericairn.Providers.NuGet.csproj" PrivateAssets="all" />
     <ProjectReference Include="../Vericairn.Providers.GitHub.Releases/Vericairn.Providers.GitHub.Releases.csproj" />
     <ProjectReference Include="../Vericairn.Adapters.Git/Vericairn.Adapters.Git.csproj" />
     <ProjectReference Include="../Vericairn.Packs.Software/Vericairn.Packs.Software.csproj" />

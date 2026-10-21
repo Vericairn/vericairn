@@ -15,6 +15,7 @@ public class ContinuousIntegrationTests
     // gitleaks_8.30.1_linux_x64.tar.gz in gitleaks_8.30.1_checksums.txt of the v8.30.1 release on GitHub.
     private const string GitleaksVersion = "8.30.1";
     private const string GitleaksSha256 = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb";
+    private static readonly string[] ProjectDirectories = ["src", "tests", "tools"];
 
     [Fact]
     public void PullRequestsCheckAllowedActionsAndTheirFullCommitPins()
@@ -170,6 +171,20 @@ public class ContinuousIntegrationTests
         Assert.Contains("src/Vericairn.Workbench/Vericairn.Workbench.csproj", publish, StringComparison.Ordinal);
         Assert.Contains("git checkout -- $(git ls-files '*packages.lock.json')", publish, StringComparison.Ordinal);
         Assert.DoesNotContain("continue-on-error", publish, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EveryProjectIsInTheSolutionContinuousIntegrationBuilds()
+    {
+        // A project outside the solution builds only as a reference, in its default configuration, so a Release pack without a
+        // build could not find it; DIST-02's registry provider first met this.
+        string root = RepositoryRoot();
+        string solution = Read(Path.Combine(root, "Vericairn.slnx"));
+        string[] projects = ProjectDirectories.SelectMany(directory => Directory.EnumerateFiles(Path.Combine(root, directory), "*.csproj", SearchOption.AllDirectories))
+            .Select(path => Path.GetRelativePath(root, path).Replace('\\', '/')).Order(StringComparer.Ordinal).ToArray();
+        Assert.NotEmpty(projects);
+        string[] missing = projects.Where(project => !solution.Contains($"Path=\"{project}\"", StringComparison.Ordinal)).ToArray();
+        Assert.True(missing.Length == 0, "Not in Vericairn.slnx: " + string.Join(", ", missing));
     }
 
     [Fact]

@@ -1338,6 +1338,10 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     public IReadOnlyList<ProviderRow> ProviderRows()
     {
         var rows = new List<ProviderRow>();
+        foreach (IPackageRegistryProvider provider in Providers.PackageRegistries)
+        {
+            rows.Add(Row(provider.Provider, "package-registry", provider.Descriptor));
+        }
         foreach (IReleaseProvider provider in Providers.ReleaseProviders)
         {
             rows.Add(Row(provider.Provider, "release", provider.Descriptor));

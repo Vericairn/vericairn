@@ -102,6 +102,9 @@ public static class OpenApiDocument
         ("POST", "/v1/changes/open"),
         ("POST", "/v1/changes/merge"),
         ("POST", "/v1/changes/observe"),
+        ("POST", "/v1/packages/observe"),
+        ("POST", "/v1/packages/unlist"),
+        ("POST", "/v1/packages/deprecate"),
 
         ("POST", "/v1/estate/upgrade"),
         ("POST", "/v1/estate/export"),
@@ -326,6 +329,11 @@ public static class OpenApiDocument
         {
             DaemonResponses(path, responses);
         }
+        else if (method == "POST" && path.StartsWith("/v1/packages/", StringComparison.Ordinal))
+        {
+            responses["200"] = new JsonObject { ["description"] = "PackagesResponse: exact registry observations, or the original account-holder intent with its latest outcome and manual step.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/PackagesResponse" } } } };
+        }
         else if (method == "POST" && path.StartsWith("/v1/changes/", StringComparison.Ordinal))
         {
             responses["200"] = new JsonObject { ["description"] = "ChangeResponse: recorded intent, observed effect and exact-head evidence; uncertainty never authorizes retry.",
@@ -509,6 +517,10 @@ public static class OpenApiDocument
             ["ChangesOpenRequest"] = Object(("product", "string"), ("branch", "string"), ("head", "string"), ("title", "string"), ("body", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesMergeRequest"] = Object(("product", "string"), ("pullRequest", "string"), ("head", "string"), ("by", "string"), ("reconciliation", "string")),
             ["ChangesObserveRequest"] = Object(("operation", "string"), ("by", "string"), ("cancel", "string")),
+            ["PackagesObserveRequest"] = Object(("by", "string"), ("product", "string"), ("version", "string"), ("operation", "string")),
+            ["PackagesUnlistRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string")),
+            ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string")),
+            ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
             ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
@@ -580,6 +592,9 @@ public static class OpenApiDocument
         "/v1/changes/open" => "ChangesOpenRequest",
         "/v1/changes/merge" => "ChangesMergeRequest",
         "/v1/changes/observe" => "ChangesObserveRequest",
+        "/v1/packages/observe" => "PackagesObserveRequest",
+        "/v1/packages/unlist" => "PackagesUnlistRequest",
+        "/v1/packages/deprecate" => "PackagesDeprecateRequest",
 
         "/v1/estate/upgrade" => "UpgradeRequest",
         "/v1/estate/export" => "ExportRequest",
@@ -683,6 +698,9 @@ public static class OpenApiDocument
         ("POST", "/v1/changes/open") => "Record intent and open a pull request from an exact head with a recorded successful scanned push.",
         ("POST", "/v1/changes/merge") => "Record intent and checks, refuse missing or unsuccessful checks, merge pinned to the head, and observe the target run. A failure raises an operator ask.",
         ("POST", "/v1/changes/observe") => "Record an observation under an original change's provider and head; incomplete or uncertain outcomes remain uncertain.",
+        ("POST", "/v1/packages/observe") => "Record nuget.org public API state and response digests for a product's packages or an original account-holder intent. An absent version is not found, never unlisted.",
+        ("POST", "/v1/packages/unlist") => "Record unlisting intent and return the exact nuget.org step for the account holder. An identical rerun keeps the original intent; no registry write or API key is used.",
+        ("POST", "/v1/packages/deprecate") => "Record exact deprecation intent and return the account holder's nuget.org step. Observe the original operation afterwards to record the outcome.",
         ("POST", "/v1/releases/observe") => "Observe a release's run, draft and publication and record what settled (the operation revision, the candidate, the observed publication); or cancel an intent that had no effect.",
         ("POST", "/v1/estate/upgrade") => "Plan or apply an upgrade to a published release.",
         ("POST", "/v1/estate/export") => "Write a verified export to a path on the runtime's machine; no keys or authority travel with it.",

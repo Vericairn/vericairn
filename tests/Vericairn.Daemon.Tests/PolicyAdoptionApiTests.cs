@@ -2,12 +2,10 @@
 // Copyright (c) 2026 Jason Furr
 
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Template;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using Vericairn.Protocol;
 using Vericairn.Runtime.Service;
@@ -41,25 +39,22 @@ public sealed class PolicyAdoptionApiTests
     // is no transport fallback: an unexpected route fails this test instead of reaching a network.
     internal sealed class RouteHandler : HttpMessageHandler
     {
-        private readonly WebApplication app;
+        private readonly ServiceProvider services;
         private readonly RouteEndpoint[] endpoints;
         internal RouteHandler(IEstateApi api)
         {
-            // Route binding needs server services, but no configuration files or change watchers.
-            WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
-            builder.WebHost.UseKestrel();
-            builder.Services.AddRouting();
-            builder.Logging.ClearProviders();
-            app = builder.Build();
-            ApiRoutes.Map(app, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
-            endpoints = ((IEndpointRouteBuilder)app).DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
+            // Route binding needs routing and logging services, not a host, configuration files or file watchers.
+            services = new ServiceCollection().AddLogging().AddRouting().BuildServiceProvider();
+            var routes = new FixtureRoutes(services);
+            ApiRoutes.Map(routes, api, () => throw new InvalidOperationException("The fixture cannot shut down a host."));
+            endpoints = routes.DataSources.SelectMany(s => s.Endpoints).OfType<RouteEndpoint>().ToArray();
             Assert.NotEmpty(endpoints);
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Uri uri = request.RequestUri!;
-            var context = new DefaultHttpContext { RequestServices = app.Services, RequestAborted = cancellationToken };
+            var context = new DefaultHttpContext { RequestServices = services, RequestAborted = cancellationToken };
             context.Request.Method = request.Method.Method;
             context.Request.Path = uri.AbsolutePath;
             context.Request.QueryString = new QueryString(uri.Query);
@@ -82,12 +77,18 @@ public sealed class PolicyAdoptionApiTests
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) app.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            if (disposing) services.Dispose();
             base.Dispose(disposing);
         }
         private sealed class BodyFeature(bool canHaveBody) : IHttpRequestBodyDetectionFeature
         {
             public bool CanHaveBody => canHaveBody;
+        }
+        private sealed class FixtureRoutes(IServiceProvider services) : IEndpointRouteBuilder
+        {
+            public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
+            public IServiceProvider ServiceProvider { get; } = services;
+            public ICollection<EndpointDataSource> DataSources { get; } = new List<EndpointDataSource>();
         }
     }
 }

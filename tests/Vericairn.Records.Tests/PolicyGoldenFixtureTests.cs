@@ -14,21 +14,24 @@ namespace Vericairn.Records.Tests;
 public class PolicyGoldenFixtureTests
 {
     [Fact]
-    public void TheGoldenEstateValidatesAndEveryNewRecordAndFieldRoundTripsWithoutLosingBytes()
+    public void TheGoldenAndPackageEstatesValidateAndEveryNewRecordAndFieldRoundTripsWithoutLosingBytes()
     {
         string root = FixtureRoot();
         EstateModel model = EstateLoader.Load(root);
         Assert.False(model.Findings.HasErrors, string.Join('\n', model.Findings));
         Assert.Equal(3, model.Manifest!.RecordFormat);
+        // Keep the signed policy golden bytes intact; later package fields have their own recorded-response fixture.
+        using TestEstate packages = PackageRecordsTests.RecordedFixture();
+        EstateModel packageModel = packages.Load();
         Assert.Contains(model.OfType("estate-policy"), r => r.Body.GetProperty("rules").EnumerateArray().Any(rule => rule.GetProperty("kind").GetString() == "example.policy/age"));
         foreach (IRecordType type in RecordTypeRegistry.All)
         {
             foreach (FieldDescription field in type.Fields.Where(f => f.SinceFormat == 3))
-                Assert.Contains(model.OfType(type.Name), r => r.Body.TryGetProperty(field.Name, out _));
+                Assert.Contains(model.OfType(type.Name).Concat(packageModel.OfType(type.Name)), r => r.Body.TryGetProperty(field.Name, out _));
         }
-        foreach (RecordEnvelope record in model.Records)
+        foreach ((RecordEnvelope record, string directory) in model.Records.Select(r => (r, root)).Concat(packageModel.Records.Select(r => (r, packages.Root))))
         {
-            byte[] original = File.ReadAllBytes(Path.Combine(root, record.ExpectedPath));
+            byte[] original = File.ReadAllBytes(Path.Combine(directory, record.ExpectedPath));
             Assert.Equal(original, RecordAuthor.Format(original));
             var findings = new FindingList();
             RecordEnvelope parsed = Assert.IsType<RecordEnvelope>(RecordParser.Parse(original, record.ExpectedPath, findings));
