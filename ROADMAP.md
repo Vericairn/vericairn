@@ -46,6 +46,13 @@ running agent in one step; it steers the agent without widening what the agent m
 A public example estate and app show the whole loop on GitHub, from a work order through an agent's
 recorded run, review and acceptance to a release, and every release upgrades them.
 
+## Later milestones: hosted storage — planned
+
+Today an estate's records live in a git repository beside your work, or in a store on one machine. Four
+hosted options are planned, each built and qualified on its own before it is offered: a runtime on one of
+your own machines, reached over your network; a runtime hosted with your Vericairn account; a shared
+runtime an organization operates for its members; and managed hosting from a provider you choose.
+
 ## Later milestone: coordination, packages and websites — planned
 
 Coordination and scheduling across work, extension packages and foundations for a package registry.
