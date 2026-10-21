@@ -10,13 +10,13 @@ attempt hash, at `POST /v1/work/result`. `POST /v1/work/review` takes `ResultRev
 `by`, `body` and `expected`, the current result hash. It signs an ordinary result review with its exact
 `read` evidence; it records no acceptance. `GET /v1/release-bases/{hash}` returns `ReleaseBasisResponse`
 with the retained original basis, bytes and findings, or 404 for a missing or unsupported object. From
-0.8.1 (FIX-51) the stored basis names its records, sources and objects by hash, and the response resolves
+0.8.2 (FIX-51) the stored basis names its records, sources and objects by hash, and the response resolves
 them to the same complete evidence; a basis whose reference no longer resolves exactly answers 404. From
 0.8.2 (FIX-54) so does one whose records, signatures included, differ from those its record digest covers.
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 
-This document describes 0.8.1. It adds `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
+This document describes 0.8.2. It adds `POST /v1/estate-policies/hash` (FIX-45), `POST /v1/documents/pin`
 (DOCS-07) and `POST /v1/packages/observe`, `/unlist` and `/deprecate` (DIST-02), with their SDK methods
 and asynchronous counterparts, and over the daemon a record stored while its companion publication was
 interrupted answers as stored, with its recovery problem beside it (FIX-39). 0.8.0 added policy and
@@ -24,12 +24,12 @@ writing-exception authoring, typed duty evidence, readable companions, checked r
 operator's signed record action. Every
 `IEstateApi` operation has a cancellable asynchronous counterpart; the synchronous contracts remain.
 See [client operations](client-operations.md) for deadlines, definite refusals and uncertain effects,
-and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, and [for 0.8.1](api-compatibility-0.8.1.md), for the two interfaces that change.
+and API compatibility [for 0.8.0](api-compatibility-0.8.0.md), for the shared-value and option ownership changes, and [for 0.8.2](api-compatibility-0.8.2.md), for the two interfaces that change.
 The runtime explicitly composes admission, dispatch and release coordination behind `EstateService`.
 The API remains version 1; record format 3 supplies the schema and older-reader refusal boundary.
 Installing a client does not upgrade an estate or adopt policies. The earlier export-restore,
 record-publication, certificate and attention corrections remain. Release notices add no estate
-API route and ordinary SDK calls do not initiate the daily release check. 0.8.1 package availability
+API route and ordinary SDK calls do not initiate the daily release check. 0.8.2 package availability
 requires operator publication and a successful package workflow.
 
 One versioned API that every client uses. `Vericairn.Protocol` is its single definition: the operations
@@ -728,7 +728,7 @@ FIX-12's credential scan still exempts only validated device `body.publicKey` an
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.8.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -1189,7 +1189,7 @@ Codex and Claude Code qualify only for the exact versions and isolation evidence
 the generic launcher and versions without such admission refuse. Automated contract tests use stand-ins; the software guide
 records all seven live Codex observations and their limits, including FIX-19's successful macOS commit
 and guarded branch retention for 0.7.3.
-The efficiency Adapter is unsupported (EFF-01, 0.8.2); only `disabled` is allowed. Remote is not built.
+The efficiency Adapter is unsupported (EFF-01, 0.8.3); only `disabled` is allowed. Remote is not built.
 These execution additions preserve API v1, existing authority checks and local-only dispatch. Their fields are available from record format 2 and remain available at format 3.
 See [the software guide](software.md#explicit-execution-and-environment-admission-run-01-070).
 

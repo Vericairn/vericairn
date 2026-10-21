@@ -117,7 +117,7 @@ the macOS Secure Enclave helper nor Workbench.
 | `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
-| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.1.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.1, also that release's interface changes |
+| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.2.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.2, also that release's interface changes, which the withdrawn 0.8.1 set lists as `api-compatibility-0.8.1.md` |
 | `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
 | `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
 | `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |

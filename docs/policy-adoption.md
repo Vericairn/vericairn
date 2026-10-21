@@ -29,7 +29,7 @@ vericairn policies hash --body policy.json
 vericairn policies hash --body duty.json --json
 ```
 
-The command added in 0.8.1 reads only the prepared file, opens no estate and writes nothing. Plain output is the hash; JSON returns it as `definitionHash`. The value hashes the canonical body with only top-level `basis` omitted, using the same calculation as `policies declare`. See the [CLI reference](cli.md) for every option and invalid-input behavior.
+The command added in 0.8.2 reads only the prepared file, opens no estate and writes nothing. Plain output is the hash; JSON returns it as `definitionHash`. The value hashes the canonical body with only top-level `basis` omitted, using the same calculation as `policies declare`. See the [CLI reference](cli.md) for every option and invalid-input behavior.
 
 Put that value in the operator's signed decision's `policies` requirement as `definitionHash`. The requirement names the action and policy; revision and retirement also name the prior hash. Add the exact decision and requirement to the body's `basis`, then run `policies hash` again to confirm the value is unchanged. Any change outside `basis` needs the hash of the changed definition. A manager's authority and the operator's definition approval are separate requirements.
 

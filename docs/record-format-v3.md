@@ -161,7 +161,7 @@ changes or removes it (`product.changes-author`), and only they move a format-3 
 existing identity and intent/effect lifecycle and add `checks`, `requiredChecks`
 and `scan`, also gated at format 3. Checks bind each reported name, head, status
 and optional conclusion. A push scan retains only the tool, version, range,
-verdict and optional finding count, never matched text or raw output. From 0.8.1
+verdict and optional finding count, never matched text or raw output. From 0.8.2
 the version also names the scan configuration's SHA-256.
 
 The runtime requires repository-write authority and exact source revisions;

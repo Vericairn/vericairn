@@ -16,9 +16,10 @@ which 0.7.3 refuses, so every machine that writes to it upgrades together. Its
 [release notes](docs/releases/0.8.0/release-notes.md) and [documentation set](docs/releases/0.8.0/README.md)
 describe what shipped and its limits.
 
-## 0.8.1 — planned
+## 0.8.2 — planned
 
-Commands record exact document revisions and observe NuGet publication, listing and deprecation, and the
+The 0.8.1 candidate was withdrawn before publication, and 0.8.2 carries its changes with a correction that
+lets the macOS and Linux command lines start other programs again. Commands record exact document revisions and observe NuGet publication, listing and deprecation, and the
 packages carry the cairn mark as their icon. Every client reports a record as stored, not refused, when
 publishing its readable companions was interrupted; the policy guides describe policy implementation identity accurately; and the estate check
 ignores top-level files the repository's own ignore rules exclude. The test suites run split across
@@ -26,7 +27,7 @@ parallel jobs and no longer depend on real time, and CI runs the release's packa
 Vericairn's MCP server is listed in the official MCP Registry and among nuget.org's MCP servers, where
 coding agents' users look for servers.
 
-## 0.8.2 — planned
+## 0.8.3 — planned
 
 Reusable templates give documents, roadmaps, communication, context, commits and reviews consistent
 sections and checks. Saved prompts, each with a title, description, category, placeholders and the roles
