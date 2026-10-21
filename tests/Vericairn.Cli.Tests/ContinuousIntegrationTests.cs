@@ -214,6 +214,22 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void ThePackageJobRunsItsPublishedSingleFileCommandLineOnACommandThatStartsAProcess()
+    {
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml")), "package:", 2);
+
+        // The tests run framework-dependent code, which resolves native libraries that a self-contained single-file build does not:
+        // 0.8.1's candidate passed them all and its macOS and Linux command lines could start no process. Only the published build shows it.
+        int publish = package.IndexOf("- name: Publish self-contained distributables", StringComparison.Ordinal);
+        int run = package.IndexOf("- name: Run the published single-file command line", StringComparison.Ordinal);
+        Assert.True(publish > 0 && run > publish, "The package job runs the command line it has just published.");
+        Assert.Contains("\n    runs-on: ubuntu-latest\n", package, StringComparison.Ordinal);
+        string step = Block(package, "- name: Run the published single-file command line", 6);
+        Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
+        Assert.Contains("out/linux-x64/bin/vericairn sources inspect \"$GITHUB_WORKSPACE\"\n", step, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryCheckoutKeepsNoCredentialsAndOnlyTheDraftStepCanWrite()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");

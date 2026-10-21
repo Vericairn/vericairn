@@ -475,7 +475,8 @@ internal sealed class ContainedProcess
                 foreach (int descriptor in pair)
                 {
                     // fcntl is variadic: its third argument is passed on the stack on Darwin Arm64.
-                    // The runtime's fixed-signature wrapper applies that platform ABI. Only dup2's
+                    // The runtime's fixed-signature wrapper applies that platform ABI; it is imported by its
+                    // file name, the only one a self-contained single-file build resolves. Only dup2's
                     // explicit standard-output targets may survive exec, never these observation pipes.
                     if (SetDescriptorFlags(descriptor, 1) != 0) // FD_CLOEXEC
                     {
@@ -685,7 +686,7 @@ internal sealed class ContainedProcess
     [DllImport("libc", SetLastError = true)] private static extern int waitid(int kind, uint pid, [Out] byte[] info, int options);
     [DllImport("libc", SetLastError = true)] private static extern int waitpid(int pid, out int status, int options);
     [DllImport("libc", SetLastError = true)] private static extern int pipe([Out] int[] pair);
-    [DllImport("System.Native", EntryPoint = "SystemNative_FcntlSetFD", SetLastError = true)] private static extern int SetDescriptorFlags(int descriptor, int flags);
+    [DllImport("libSystem.Native", EntryPoint = "SystemNative_FcntlSetFD", SetLastError = true)] private static extern int SetDescriptorFlags(int descriptor, int flags);
     [DllImport("libc")] private static extern int close(int descriptor);
     [DllImport("libc")] private static extern int posix_spawnattr_init(nint attributes);
     [DllImport("libc")] private static extern int posix_spawnattr_destroy(nint attributes);

@@ -179,6 +179,15 @@ jobs:
               *) tar -C "out/$rid" -czf "dist/vericairn-$VERSION-$rid.tar.gz" . ;;
             esac
           done
+      - name: Run the published single-file command line
+        # The distributables are self-contained single-file builds, which resolve the runtime's own native libraries differently
+        # from the framework-dependent test runs. 0.8.1's candidate named one only those runs resolve, so its macOS and Linux command
+        # lines could start no process. This runner's build inspects the checkout, which starts git through the worker's process code.
+        shell: bash
+        run: |
+          set -eu
+          out/linux-x64/bin/vericairn --version
+          out/linux-x64/bin/vericairn sources inspect "$GITHUB_WORKSPACE"
       - name: Publish Workbench distributables
         shell: bash
         # The desktop ships per platform as an unsigned developer build beside the command line it drives (Workbench finds vericairn
