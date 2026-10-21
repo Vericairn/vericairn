@@ -24,7 +24,7 @@ public sealed class PolicyAdoptionApiTests
         // The journey deliberately uses the synchronous SDK. ASP.NET's in-memory delegates must
         // run without the test's synchronization context, just as they do on a server request thread.
         await Task.Run(() => PolicyAdoptionJourney.Run(api => new RouteSurface(new RouteHandler(api))), TestContext.Current.CancellationToken)
-            .WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            .WaitAsync(TestTiming.JourneyHangTimeout, TestContext.Current.CancellationToken);
     }
 
     private sealed class RouteSurface : PolicyAdoptionJourney.Surface
