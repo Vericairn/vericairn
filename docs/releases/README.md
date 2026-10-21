@@ -16,8 +16,9 @@ format step. The source version is `0.8.1-dev`.
 The set records no 0.8.1 publication, tag, package availability or platform qualification.
 Its references retain build commit `1cf1cdd60478d9537c9c05940a04271b70bb66d9`,
 with 147 commands, 104 API operations, 42 record types and 32 required documents.
-The builder renders its notes from the estate's records with `--from 0.8.0 --to 0.8.1`
-and then freezes the complete set. It has no entry in `frozen-sha256.json` until that freeze.
+Its notes render the estate's records with `--from 0.8.0 --to 0.8.1` and open with the operator's
+approved Security section. The set is frozen for its release build, with every file's checksum in
+`frozen-sha256.json`.
 
 The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
 CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, FIX-30, FIX-31, OPS-01 and
