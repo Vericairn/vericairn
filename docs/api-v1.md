@@ -11,7 +11,8 @@ attempt hash, at `POST /v1/work/result`. `POST /v1/work/review` takes `ResultRev
 `read` evidence; it records no acceptance. `GET /v1/release-bases/{hash}` returns `ReleaseBasisResponse`
 with the retained original basis, bytes and findings, or 404 for a missing or unsupported object. From
 0.8.1 (FIX-51) the stored basis names its records, sources and objects by hash, and the response resolves
-them to the same complete evidence; a basis whose reference no longer resolves exactly answers 404.
+them to the same complete evidence; a basis whose reference no longer resolves exactly answers 404. From
+0.8.2 (FIX-54) so does one whose records, signatures included, differ from those its record digest covers.
 The SDK exposes `ReviewResult` and `ReleaseBasis`, their asynchronous counterparts and typed duty
 and release-evidence values. See [policy and duty transport](policies.md) for the full surface map.
 

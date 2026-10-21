@@ -392,7 +392,8 @@ The retained basis is inspectable with `release basis <evidence-hash>`. From 0.8
 and objects by hash instead of copying them, so it no longer outgrows the estate's 8 MiB object limit: 0.8.0's
 copied basis did, which refused every submission from an estate with more than a few megabytes of records and
 documents. Reading a basis needs the estate's records and objects; one whose reference no longer resolves is
-unavailable, and a single source file over the object limit is named but not kept. A preview grants no submission
+unavailable, as is one whose records, signatures included, differ from those its stored record digest covers
+(FIX-54, 0.8.2), and a single source file over the object limit is named but not kept. A preview grants no submission
 authority. An effect already dispatched remains under its original identity if later observation fails;
 a client cancellation does not roll it back. See [estate policies](policies.md).
 

@@ -76,13 +76,17 @@ public sealed partial class EstateService
             Objects: not null, Documents: not null, ExcludedOperationRevisions: not null }) return null;
         EstateModel model;
         lock (gate) model = session.Load();
-        List<JsonElement> records = [];
+        List<RecordEnvelope> resolved = [];
         foreach (StoredRecord reference in stored.Records)
         {
             if (!model.ById.TryGetValue(reference.Id, out RecordEnvelope? r) || r.Type != reference.Type || r.ComputedHash != reference.Hash) return null;
-            records.Add(JsonSerializer.SerializeToElement(new RecordEnvelope(r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body.Clone(),
-                r.DeclaredHash, r.ComputedHash, r.Signatures.ToImmutableArray(), r.Format), ProtocolJson.Options));
+            resolved.Add(new RecordEnvelope(r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body.Clone(), r.DeclaredHash, r.ComputedHash,
+                r.Signatures.ToImmutableArray(), r.Format));
         }
+        // A record's hash leaves out its signatures, which the stored record digest covers: the records read back must be exactly
+        // those the gate judged, signatures included.
+        if (PolicyBasis.DigestOf(resolved) != stored.Basis.RecordDigest) return null;
+        List<JsonElement> records = resolved.Select(r => JsonSerializer.SerializeToElement(r, ProtocolJson.Options)).ToList();
         List<ReleaseBasisRepository> repositories = [];
         foreach (StoredRepository repository in stored.Repositories)
         {
