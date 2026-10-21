@@ -1,0 +1,1195 @@
+{
+  "format": "vericairn.reference-inventory/1",
+  "commit": "1cf1cdd60478d9537c9c05940a04271b70bb66d9",
+  "references": [
+    {
+      "category": "api-operation",
+      "path": "api-reference.md",
+      "hash": "sha256:67162a9acf545477d5e2374be0bf71b42dc5a037287b0cf5b1b016f83387319e"
+    },
+    {
+      "category": "command",
+      "path": "cli-reference.md",
+      "hash": "sha256:7e8fbb5dc96d77f823fbd17c654f6a243a3900748d145b1e3a721536488444a1"
+    },
+    {
+      "category": "record-type",
+      "path": "record-reference.md",
+      "hash": "sha256:677160885676b422305d73c3884f8eaeff9b72447f6e50ccd84bb261fa06cae5"
+    }
+  ],
+  "items": [
+    {
+      "category": "api-operation",
+      "name": "GET /v1/asks"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/check"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/communication"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/companions"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/companions/compare"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/companions/render"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/companions/sources"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/context/original/{pin}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/context/work/{key}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/context/work/{key}/brief"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/context/{manifest}/sources/{source}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/decisions"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/decisions/{id}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/devices"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/documents"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/estate-policies"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/estate-policies/access"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/estate-policies/evaluate"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/estate-policies/kinds"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/estate-policies/{key}/view"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/goals"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/goals/{id}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/goals/{id}/next"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/handoff"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/health"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/launchers"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/objects"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/objects/verify"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/objects/{hash}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/operator/actions"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/progress"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/providers"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/reconcile"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/records"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/records/{id}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/recover/inspect"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/release-bases/{hash}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/releases"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/runs"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/runtime/identity"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/status"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/validate"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/work/{key}"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/work/{key}/brief"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/writing-exceptions"
+    },
+    {
+      "category": "api-operation",
+      "name": "GET /v1/writing-exceptions/{id}"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/changes/merge"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/changes/observe"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/changes/open"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/changes/push"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/communication"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/communication/delegations"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices/admit"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices/recovery"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices/rename"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices/revoke"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/devices/rotate"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/documents/pin"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/documents/{id}/reviews"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies/hash"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies/{key}/exceptions"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies/{key}/exceptions/{id}/revoke"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies/{key}/retire"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate-policies/{key}/revisions"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate/export"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/estate/upgrade"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/accept"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/activate"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/evaluate"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/pause"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/resume"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/step"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/goals/{id}/stop"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/harness-qualifications"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/objects"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/operator/record"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/packages/deprecate"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/packages/observe"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/packages/unlist"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/pairing/confirm"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/pairing/hello"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/pairings"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/records"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/releases/observe"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/releases/submit"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/resume"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/runs"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/runs/{id}/stop"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/runtime/certificate"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/shutdown"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/status/observations"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/amend"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/assign"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/attempt"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/progress"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/result"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/review"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/takeover"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/work/{key}/placement"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/writing-exceptions"
+    },
+    {
+      "category": "api-operation",
+      "name": "POST /v1/writing-exceptions/{id}/remove"
+    },
+    {
+      "category": "command",
+      "name": "vericairn ask"
+    },
+    {
+      "category": "command",
+      "name": "vericairn changes"
+    },
+    {
+      "category": "command",
+      "name": "vericairn changes merge"
+    },
+    {
+      "category": "command",
+      "name": "vericairn changes observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn changes open"
+    },
+    {
+      "category": "command",
+      "name": "vericairn changes push"
+    },
+    {
+      "category": "command",
+      "name": "vericairn check"
+    },
+    {
+      "category": "command",
+      "name": "vericairn check observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn check run"
+    },
+    {
+      "category": "command",
+      "name": "vericairn communication"
+    },
+    {
+      "category": "command",
+      "name": "vericairn communication delegate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn communication reset"
+    },
+    {
+      "category": "command",
+      "name": "vericairn communication set"
+    },
+    {
+      "category": "command",
+      "name": "vericairn communication show"
+    },
+    {
+      "category": "command",
+      "name": "vericairn connections"
+    },
+    {
+      "category": "command",
+      "name": "vericairn connections add"
+    },
+    {
+      "category": "command",
+      "name": "vericairn connections list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn connections remove"
+    },
+    {
+      "category": "command",
+      "name": "vericairn context"
+    },
+    {
+      "category": "command",
+      "name": "vericairn context catalogue"
+    },
+    {
+      "category": "command",
+      "name": "vericairn context prepare"
+    },
+    {
+      "category": "command",
+      "name": "vericairn context read"
+    },
+    {
+      "category": "command",
+      "name": "vericairn decisions"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices admit"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices create"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices pair"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices recovery"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices rename"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices revoke"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices rotate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn devices writes"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs check"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs companions"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs declare"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs living"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs notes"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs pin"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs regenerate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs render"
+    },
+    {
+      "category": "command",
+      "name": "vericairn docs review"
+    },
+    {
+      "category": "command",
+      "name": "vericairn doctor"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate check"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate export"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate init"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate reconcile"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate restore"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate upgrade"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate writing-exceptions"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate writing-exceptions add"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate writing-exceptions list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate writing-exceptions remove"
+    },
+    {
+      "category": "command",
+      "name": "vericairn estate writing-exceptions show"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal accept"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal activate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal custody-exception"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal evaluate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal next"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal pause"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal propose"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal resume"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal show"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal step"
+    },
+    {
+      "category": "command",
+      "name": "vericairn goal stop"
+    },
+    {
+      "category": "command",
+      "name": "vericairn handoff"
+    },
+    {
+      "category": "command",
+      "name": "vericairn mcp"
+    },
+    {
+      "category": "command",
+      "name": "vericairn mcp orientation"
+    },
+    {
+      "category": "command",
+      "name": "vericairn mcp serve"
+    },
+    {
+      "category": "command",
+      "name": "vericairn objects"
+    },
+    {
+      "category": "command",
+      "name": "vericairn objects list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn objects put"
+    },
+    {
+      "category": "command",
+      "name": "vericairn objects verify"
+    },
+    {
+      "category": "command",
+      "name": "vericairn operator"
+    },
+    {
+      "category": "command",
+      "name": "vericairn operator list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn operator record"
+    },
+    {
+      "category": "command",
+      "name": "vericairn packages"
+    },
+    {
+      "category": "command",
+      "name": "vericairn packages deprecate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn packages observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn packages unlist"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies check"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies declare"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies except"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies hash"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies kinds"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies retire"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies revise"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies revoke-exception"
+    },
+    {
+      "category": "command",
+      "name": "vericairn policies show"
+    },
+    {
+      "category": "command",
+      "name": "vericairn progress"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records describe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records format"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records hash"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records new"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records show"
+    },
+    {
+      "category": "command",
+      "name": "vericairn records validate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn recover"
+    },
+    {
+      "category": "command",
+      "name": "vericairn recover compare"
+    },
+    {
+      "category": "command",
+      "name": "vericairn recover inspect"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release basis"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release list"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release providers"
+    },
+    {
+      "category": "command",
+      "name": "vericairn release submit"
+    },
+    {
+      "category": "command",
+      "name": "vericairn resume"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime configure"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime install"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime rotate"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime serve"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime start"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime status"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime stop"
+    },
+    {
+      "category": "command",
+      "name": "vericairn runtime uninstall"
+    },
+    {
+      "category": "command",
+      "name": "vericairn sources"
+    },
+    {
+      "category": "command",
+      "name": "vericairn sources adopt"
+    },
+    {
+      "category": "command",
+      "name": "vericairn sources clone"
+    },
+    {
+      "category": "command",
+      "name": "vericairn sources inspect"
+    },
+    {
+      "category": "command",
+      "name": "vericairn sources observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn status"
+    },
+    {
+      "category": "command",
+      "name": "vericairn updates"
+    },
+    {
+      "category": "command",
+      "name": "vericairn updates configure"
+    },
+    {
+      "category": "command",
+      "name": "vericairn version"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work amend"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work assign"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work attempt"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work brief"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work observe"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work place"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work result"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work review"
+    },
+    {
+      "category": "command",
+      "name": "vericairn work takeover"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker configure"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker launchers"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker qualify"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker run"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker runs"
+    },
+    {
+      "category": "command",
+      "name": "vericairn worker stop"
+    },
+    {
+      "category": "record-type",
+      "name": "acceptance"
+    },
+    {
+      "category": "record-type",
+      "name": "admission"
+    },
+    {
+      "category": "record-type",
+      "name": "amendment"
+    },
+    {
+      "category": "record-type",
+      "name": "ask"
+    },
+    {
+      "category": "record-type",
+      "name": "assignment"
+    },
+    {
+      "category": "record-type",
+      "name": "attempt"
+    },
+    {
+      "category": "record-type",
+      "name": "authority"
+    },
+    {
+      "category": "record-type",
+      "name": "communication-delegation"
+    },
+    {
+      "category": "record-type",
+      "name": "communication-setting"
+    },
+    {
+      "category": "record-type",
+      "name": "credential-reference"
+    },
+    {
+      "category": "record-type",
+      "name": "custody-exception"
+    },
+    {
+      "category": "record-type",
+      "name": "decision"
+    },
+    {
+      "category": "record-type",
+      "name": "device"
+    },
+    {
+      "category": "record-type",
+      "name": "discharge"
+    },
+    {
+      "category": "record-type",
+      "name": "document-review"
+    },
+    {
+      "category": "record-type",
+      "name": "document-revision"
+    },
+    {
+      "category": "record-type",
+      "name": "estate"
+    },
+    {
+      "category": "record-type",
+      "name": "estate-policy"
+    },
+    {
+      "category": "record-type",
+      "name": "goal"
+    },
+    {
+      "category": "record-type",
+      "name": "goal-status"
+    },
+    {
+      "category": "record-type",
+      "name": "harness-qualification"
+    },
+    {
+      "category": "record-type",
+      "name": "living-document"
+    },
+    {
+      "category": "record-type",
+      "name": "migration"
+    },
+    {
+      "category": "record-type",
+      "name": "observation"
+    },
+    {
+      "category": "record-type",
+      "name": "operation"
+    },
+    {
+      "category": "record-type",
+      "name": "policy-exception"
+    },
+    {
+      "category": "record-type",
+      "name": "possibility"
+    },
+    {
+      "category": "record-type",
+      "name": "principal"
+    },
+    {
+      "category": "record-type",
+      "name": "product"
+    },
+    {
+      "category": "record-type",
+      "name": "qualification"
+    },
+    {
+      "category": "record-type",
+      "name": "reconciliation"
+    },
+    {
+      "category": "record-type",
+      "name": "release"
+    },
+    {
+      "category": "record-type",
+      "name": "resource"
+    },
+    {
+      "category": "record-type",
+      "name": "result"
+    },
+    {
+      "category": "record-type",
+      "name": "retirement"
+    },
+    {
+      "category": "record-type",
+      "name": "review"
+    },
+    {
+      "category": "record-type",
+      "name": "roster"
+    },
+    {
+      "category": "record-type",
+      "name": "verification"
+    },
+    {
+      "category": "record-type",
+      "name": "work-order"
+    },
+    {
+      "category": "record-type",
+      "name": "work-progress"
+    },
+    {
+      "category": "record-type",
+      "name": "work-status"
+    },
+    {
+      "category": "record-type",
+      "name": "writing-exception"
+    }
+  ]
+}

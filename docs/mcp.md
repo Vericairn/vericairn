@@ -136,10 +136,10 @@ contracts; a companion does not replace required original evidence.
 
 ## Running it
 
-After 0.8.0 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
+After 0.8.1 is published and its NuGet publication workflow succeeds, with the .NET 10 SDK installed:
 
 ```sh
-dotnet tool install --global dotnet-vc --version 0.8.0
+dotnet tool install --global dotnet-vc --version 0.8.1
 dotnet vc --estate <estate root> mcp serve --as <principal id>
 ```
 

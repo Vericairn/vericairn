@@ -32,12 +32,12 @@ not-applicable portions of the same design case are separate rows.
 | D08-C: measured omission | Passed | A large multibyte optional original is withheld under a byte allocation. CLI and MCP preparation agree with the API; the generated CLI retrieval command and authenticated SDK retrieval return the pinned bytes. Original and derivative hashes are distinct. Editing the file makes the old pin unavailable and changes the prepared package; an unverified size becomes unknown. Final UTF-8 accounting includes the manifest, withheld entries, wrappers and accounting itself. Mandatory overflow returns no package. |
 | D08-C: Workbench context controls | Not applicable | Workbench has no context-allocation editor or pinned-original retrieval control. Its existing work and assignment routes are tested for complete context refusals. A future control needs CONTEXT-01 follow-up implementation and COMMS-02 qualification; API tests are not a claim that the control exists. |
 | D08-D: bounded run, adapter disabled | Passed | Round two exercises both native launcher adapters with stand-in executables at all three depths. The saved intent precedes dispatch and pins explicit model/effort, provenance, disabled adapter, admitted inventory, retained context hash and byte/token allocations. Observations keep reported model/effort separate from unknown facts; absent token usage reserves the full cap. All run revisions, retained context and canonical runs/status/progress/hand-over output remain byte-identical across view depths. Adapter requests, unallowlisted hooks, tools and environment needs, unsupported effort and model/provider/route fallback are refused before intent or dispatch. |
-| D08-D: adapter optimization | Deferred | EFF-01 in 0.8.1 owns eligible-text reduction, protected payload/tool-argument bypass, telemetry and routing controls, adapter failure/removal, and model/tokenizer qualification. Only the disabled path is passed here. |
+| D08-D: adapter optimization | Deferred | EFF-01 in 0.8.2 owns eligible-text reduction, protected payload/tool-argument bypass, telemetry and routing controls, adapter failure/removal, and model/tokenizer qualification. Only the disabled path is passed here. |
 | D08-E: recorded interruption and lossy continuation | Passed | A successor uses saved hand-over bytes after the previous service ends and after an estate copy or daemon restart. Decisions, failed and unperformed checks, original operation identities and exact record bytes survive. CLI, SDK and Workbench resume expose changed record sources and preserve the retained basis. CLI/API/MCP context reads keep missing originals, unknown sizes, unknown tokens and irreversible loss explicit. Revoked MCP and authenticated API readers receive no omission identities, paths, hashes or sizes, including for a previously issued pin. |
 | D08-E: interrupted execution and inventory changes | Passed | Stand-in dispatch is interrupted both before and after its dispatch record is saved. A successor retains the original identity, context and reservation, records uncertainty, refuses retries on both branches, and reconciles that operation before admitting a fresh run. Both native launchers refuse an inventory changed after admission, preserve the failed intent and require fresh admission. Reported model mismatches stay critical at every depth, with requested and observed values separate. |
-| D08-E: compaction and tokenizer/model semantics | Deferred | Follow-up COMMS-02 harness qualification must exercise actual compaction and provider-conversation recovery. EFF-01 in 0.8.1 owns tokenizer/model-fit qualification. Stand-ins report model facts but perform no inference, compaction or tokenization; exact model revision, token counts and model fit stay unknown or unclaimed. |
+| D08-E: compaction and tokenizer/model semantics | Deferred | Follow-up COMMS-02 harness qualification must exercise actual compaction and provider-conversation recovery. EFF-01 in 0.8.2 owns tokenizer/model-fit qualification. Stand-ins report model facts but perform no inference, compaction or tokenization; exact model revision, token counts and model fit stay unknown or unclaimed. |
 | D08-F: concise reviews and artifacts | Passed | Short work observations and Workbench reviews retain every finding and every unperformed check, including their explanations. CLI/MCP exports and API/SDK reads preserve canonical original records and decision words. Commits describe the behavior and validation without requiring the chat; independent assessment of their meaning remains outstanding. |
-| D08-F: template protection and old instances | Deferred | TPL-COMMS-01, 0.8.0 or later: generated and quoted fields, locked sections, versioned instances and no silent upgrade. No template check is reported passed. |
+| D08-F: template protection and old instances | Deferred | TPL-COMMS-01, 0.8.2: generated and quoted fields, locked sections, versioned instances and no silent upgrade. No template check is reported passed. |
 | HANDOFF-01 unchanged | Passed | All 12 combinations of three depths and four frequencies retain hand-over refusal, no overwrite, mandatory overflow, invalid-package rejection and resume changes. Reads create no observations, operations or acceptances. |
 | WATCH-01 unchanged | Passed | All 12 combinations retain worker-observed repetition counts, warning/critical signals, attention asks, containment and original operation records across reopening. Only the test stand-in is launched. Workbench summaries retain worker signals and pending-attention limits at every combination while optional claims may be quiet. |
 
@@ -231,7 +231,7 @@ extracted for reuse.
 
 ## Remaining gaps and next step
 
-1. **Adapter behavior — EFF-01, 0.8.1, with follow-up COMMS-02 qualification.**
+1. **Adapter behavior — EFF-01, 0.8.2, with follow-up COMMS-02 qualification.**
    The disabled path is passed. Eligible-text reduction, protected payload and
    tool-argument bypass, telemetry/extra-routing controls, adapter failure/removal,
    changed model/tokenizer behavior and percentage savings remain deferred.
@@ -248,7 +248,7 @@ extracted for reuse.
    phone full-evidence display or phone hand-off is claimed. Requalify through
    COMMS-02 with the Remote implementation and return this exclusion to the
    operator.
-4. **Templates — TPL-COMMS-01, 0.8.0 or later.** Generated/quoted fields, locked
+4. **Templates — TPL-COMMS-01, 0.8.2.** Generated/quoted fields, locked
    sections, versioned instances and protection against silent migration remain
    deferred; no template check is counted as passed.
 5. **Workbench context controls — not applicable while absent.** There is no

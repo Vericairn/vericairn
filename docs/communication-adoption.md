@@ -40,7 +40,7 @@ The runtime records the exact source hash and checks the recipient, authorship,
 delegation and format before it writes. Readers, builds and previews author
 nothing and do not infer personal settings from prose or defaults.
 
-Deployment boundary: these record types require a reader from 0.7.1 or later and an estate at record format 2 or later. Use a 0.8.0 reader for an estate upgraded to format 3;
+Deployment boundary: these record types require a reader from 0.7.1 or later and an estate at record format 2 or later. Use a reader from 0.8.0 or later for an estate upgraded to format 3;
 a 0.6.1 reader does not recognize these record types. The commands are a tested adoption procedure,
 not evidence that a typed preference was written to the first-party estate. Inspect its current records
 before acting: `--expected absent` deliberately refuses an existing setting, including a reset.
