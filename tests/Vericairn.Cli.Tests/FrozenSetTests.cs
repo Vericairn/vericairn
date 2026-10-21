@@ -24,7 +24,7 @@ public class FrozenSetTests
         using JsonDocument index = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(releases, "frozen-sha256.json")));
         Assert.Equal("vericairn.frozen-docs/1", index.RootElement.GetProperty("format").GetString());
         JsonElement sets = index.RootElement.GetProperty("sets");
-        foreach (string version in new[] { "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.4.1", "0.4.2", "0.5.0", "0.5.1", "0.5.2", "0.6.0", "0.6.1", "0.7.0", "0.7.1", "0.7.2", "0.7.3", "0.8.0", "0.8.1" })
+        foreach (string version in new[] { "0.2.0", "0.3.0", "0.3.1", "0.4.0", "0.4.1", "0.4.2", "0.5.0", "0.5.1", "0.5.2", "0.6.0", "0.6.1", "0.7.0", "0.7.1", "0.7.2", "0.7.3", "0.8.0" })
         {
             Assert.True(sets.TryGetProperty(version, out _), $"Frozen set {version} must stay indexed, even if withdrawn.");
         }

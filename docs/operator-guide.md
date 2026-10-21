@@ -4,7 +4,8 @@ This guide walks the journeys an operator and the agents working for them perfor
 
 0.8.1 follows published 0.8.0 with the corrections from 0.8.0's review (FIX-34 through FIX-38), the
 policy and adoption corrections (FIX-39 through FIX-46 and FIX-48), test timing and the release's packaging
-path in CI (FIX-29, FIX-32, CI-01 and CI-03), package registry observations (DIST-02), the package icon
+path in CI (FIX-29, FIX-32, FIX-49, CI-01 and CI-03), the release gate's retained basis by reference
+(FIX-51), package registry observations (DIST-02), the package icon
 (DIST-03), MCP Registry discovery (DIST-04) and exact-byte document pins (DOCS-07).
 It reads record formats 1, 2 and 3 and writes the estate's own format, at most 3; an estate at format 3
 upgrades from 0.8.0 without a format step. The format-3 upgrade from 0.7.3 preserves historical records
