@@ -7,6 +7,18 @@ at 05:00:34 UTC with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
 (estate release record `01M56P744RYYS9XBHM4NTD0JDZ`). 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
+The [0.8.1 set](0.8.1/README.md) documents FIX-34 through FIX-38 and CI-03, the corrections from
+0.8.0's security review; FIX-39 through FIX-46 and FIX-48, found while adopting estate policies;
+FIX-29, FIX-32 and CI-01 for test timing and CI; DIST-02, DIST-03 and DIST-04 for package registry
+observations, the package icon and MCP Registry discovery; DOCS-07's exact-byte document pins; and
+BRAND-02's README openings, after published 0.8.0. An estate at format 3 upgrades to it without a
+format step. The source version is `0.8.1-dev`.
+The set records no 0.8.1 publication, tag, package availability or platform qualification.
+Its references retain build commit `1cf1cdd60478d9537c9c05940a04271b70bb66d9`,
+with 147 commands, 104 API operations, 42 record types and 32 required documents.
+The builder renders its notes from the estate's records with `--from 0.8.0 --to 0.8.1`
+and then freezes the complete set. It has no entry in `frozen-sha256.json` until that freeze.
+
 The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
 CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, FIX-30, FIX-31, OPS-01 and
 MERGE-01 after published 0.7.3: estate policies and recurring duties, the combined
@@ -102,7 +114,7 @@ the macOS Secure Enclave helper nor Workbench.
 | `required-attention.md` | a person, frozen copy | Included from 0.7.3 and required from 0.8.0: exact resolution rules, portable status and local worker observations, including unknown cases |
 | `communication-adoption.md` | a person, frozen copy | The first-party operator's explicit personal-setting adoption procedure (declared from 0.7.0) |
 | `communication-qualification.md` | a person, frozen copy | The tested communication/context surfaces and deferred qualifications (declared from 0.7.0) |
-| `client-operations.md`, `api-compatibility-0.8.0.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes |
+| `client-operations.md`, `api-compatibility-0.8.0.md`, `api-compatibility-0.8.1.md` | a person, frozen copies | From 0.8.0, cancellation, deadlines, uncertain writes and source/binary compatibility changes; from 0.8.1, also that release's interface changes |
 | `cli-client-outcomes.md` | the build | From 0.8.0, the generated interrupted-request excerpt with retained input provenance |
 | `policies.md`, `policy-evaluator.md` | a person, frozen copies | From 0.8.0, declarations, writing exceptions, recurring duties, evaluation and release admission |
 | `policy-adoption.md`, `policy-adoption-proposals.md` | a person, frozen copies | From 0.8.0, explicit adoption, exact proposed definitions and unresolved operator inputs |
