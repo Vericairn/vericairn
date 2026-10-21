@@ -505,7 +505,7 @@ public class GoalJourneyTests
 
         using Process process = Process.Start(info)!;
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
     }
 

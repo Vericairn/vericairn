@@ -22,7 +22,7 @@ public class GoalApiTests
     public async Task AGoalGoesFromProposalToItsSponsorsAcceptanceThroughTheApi()
     {
         using var estate = new TestEstate(recordFormat: 2);
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, cancellationToken: TestContext.Current.CancellationToken);
         using var api = new VericairnClient(DaemonHost.Discover(estate.Root)!);
         string op = estate.OperatorId;
         string builder = estate.BuilderId;

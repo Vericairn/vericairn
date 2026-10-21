@@ -218,30 +218,31 @@ public sealed class WorkerJourneyTests : IDisposable
             (string op, string builder, _, string assignment, string resource) = Estate(root, scratch);
             string report = Path.Combine(scratch, "lingering.jsonl");
             string run;
+            RunDirectory directory;
             using (EstateService service = EstateService.Open(root))
             {
                 service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100) };
                 RunResponse started = service.RunStart(new RunStartRequest(assignment, "generic", builder, op, resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("ack-stop", report) }));
                 Assert.True(started.Ok, started.Message);
                 run = started.Run;
-                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-                while (!File.Exists(report))
-                {
-                    Assert.True(DateTimeOffset.UtcNow < until, "The stand-in did not start.");
-                    Thread.Sleep(50);
-                }
+                directory = new RunDirectory(service.Session.Manifest.Estate, run);
+                using var changed = new FileSignal(scratch);
+                changed.Until(() => File.Exists(report), "the stand-in to start", TestContext.Current.CancellationToken);
+                Assert.True(File.Exists(report), "The stand-in did not start.");
 
                 harness = FakeHarness.Reports(report)[0]["process"]!.GetValue<int>();
             }
 
+            // The CLI is a separate process. Arrange its persisted observation as stale only after
+            // the owning supervisor has been disposed; no sleeping ages the fixture on its behalf.
+            RunObservedState state = Assert.IsType<RunObservedState>(directory.Read());
+            Assert.NotNull(state.Heartbeat);
+            state.Heartbeat = "2000-01-01T00:00:00Z";
+            directory.Write(state);
             using (EstateService observer = EstateService.Open(root))
             {
-                DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-                while (Assert.Single(observer.Runs().Runs, row => row.Run == run).Observed)
-                {
-                    Assert.True(DateTimeOffset.UtcNow < until, "The disposed supervisor remained observed.");
-                    Thread.Sleep(50);
-                }
+                Assert.False(Assert.Single(observer.Runs().Runs, row => row.Run == run).Observed,
+                    "The disposed supervisor remained observed.");
             }
 
             CliHarness.Outcome stopped = CliHarness.Ok("--estate", root, "worker", "stop", run, "--by", op, "--reason", "Nobody watches it.");
@@ -305,7 +306,7 @@ public sealed class WorkerJourneyTests : IDisposable
 
         using Process process = Process.Start(info)!;
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
     }
 }

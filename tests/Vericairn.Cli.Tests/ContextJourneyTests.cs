@@ -104,7 +104,7 @@ public class ContextJourneyTests
         ContextAssembly.Source source = Document(estate, "docs/binary.dat", original);
         ContextPackage package = ContextAssembly.Build(new JsonObject { ["estate"] = estate.Load().Manifest!.Estate }, [source], "lead");
         string command = package.Payload.GetProperty("withheld")[0].GetProperty("retrieve").GetString()!;
-        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"))
+        var info = new ProcessStartInfo(CliHarness.BuiltExecutable)
         {
             UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
         };
@@ -117,8 +117,15 @@ public class ContextJourneyTests
         using var output = new MemoryStream();
         Task copied = process.StandardOutput.BaseStream.CopyToAsync(output, TestContext.Current.CancellationToken);
         Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
-        await process.WaitForExitAsync(TestContext.Current.CancellationToken);
-        await copied;
+        try
+        {
+            await Task.WhenAll(process.WaitForExitAsync(TestContext.Current.CancellationToken), copied, error)
+                .WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
         Assert.Equal(string.Empty, await error);
         Assert.Equal(0, process.ExitCode);
         Assert.Equal(original, output.ToArray());
@@ -224,7 +231,7 @@ public class ContextJourneyTests
         using Process process = Process.Start(info)!;
         Task<string> output = process.StandardOutput.ReadToEndAsync();
         Task<string> error = process.StandardError.ReadToEndAsync();
-        Assert.True(process.WaitForExit(30_000));
+        Assert.True(process.WaitForExit((int)TestTiming.HangTimeout.TotalMilliseconds));
         Assert.True(process.ExitCode == 0, error.GetAwaiter().GetResult());
         _ = output.GetAwaiter().GetResult();
     }

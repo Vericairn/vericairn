@@ -403,22 +403,23 @@ public sealed class ChangesFlowTests
     {
         using var f = new Fixture();
         f.SeedPull();
-        using var entered = new ManualResetEventSlim();
+        var entered = TestTiming.Signal();
         using var finish = new ManualResetEventSlim();
-        f.Provider.BeforeEffect = _ => { entered.Set(); Assert.True(finish.Wait(TimeSpan.FromSeconds(10))); };
-        Task<ChangeResponse> first = Task.Run(() => f.Service.ChangesMerge(f.Merge));
+        f.Provider.BeforeEffect = _ => { entered.SetResult(); Assert.True(finish.Wait(TestTiming.HangTimeout)); };
+        Task<ChangeResponse> first = Task.Factory.StartNew(() => f.Service.ChangesMerge(f.Merge), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
         try
         {
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
-            await Task.Run(() => f.Service.Health()).WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
-            ChangeResponse overlapping = await Task.Run(() => f.Service.ChangesMerge(f.Merge)).WaitAsync(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+            await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            await Task.Run(() => f.Service.Health()).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            ChangeResponse overlapping = await Task.Run(() => f.Service.ChangesMerge(f.Merge)).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Assert.False(first.IsCompleted, "The first effect must still be held while the service answers.");
             Assert.False(overlapping.Ok);
             Assert.False(f.Service.ChangesObserve(new(f.Current("change-merge").Id, f.Estate.OperatorId)).Ok);
         }
         finally
         {
             finish.Set();
-            await first.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            await first.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         }
         Assert.True((await first).Ok);
         Assert.Equal(1, f.Provider.Memory.Effects);

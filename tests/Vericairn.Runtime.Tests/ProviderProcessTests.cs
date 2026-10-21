@@ -121,8 +121,11 @@ public sealed class ProviderProcessTests
     public void ASilentDispatchUsesTheBoundedRunnerAndRemainsUncertain()
     {
         int calls = 0;
+        using var child = new ProcessHarness.Scenario("silent");
+        var clock = new WorkerClock();
         var provider = new GitHubReleaseProvider(_ => ++calls == 1 ? Success()
-            : BoundedProcess.Run(ProcessHarness.Command("silent"), TimeSpan.FromMilliseconds(300), cancellationToken: TestContext.Current.CancellationToken));
+            : BoundedProcess.Run(child.Command, TimeSpan.FromMilliseconds(300), cancellationToken: TestContext.Current.CancellationToken,
+                clock: clock, launched: () => child.WhenReady(() => clock.Advance(TimeSpan.FromMilliseconds(300)))));
         ProviderUncertainException uncertain = Assert.Throws<ProviderUncertainException>(() => provider.Dispatch(Request()));
         Assert.Contains("deadline", uncertain.Message, StringComparison.Ordinal);
         Assert.Equal(2, calls);

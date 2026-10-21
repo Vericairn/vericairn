@@ -79,7 +79,7 @@ public sealed class LocalPushTests : IDisposable
         foreach (string value in new[] { "user.name=Test", "user.email=test@example.invalid", "commit.gpgsign=false", "core.hooksPath=" + hooks })
         { info.ArgumentList.Add("-c"); info.ArgumentList.Add(value); }
         foreach (string argument in arguments) info.ArgumentList.Add(argument);
-        return BoundedProcess.Run(info, TimeSpan.FromSeconds(15));
+        return BoundedProcess.Run(info, TestTiming.HangTimeout);
     }
 
     public void Dispose() => WorkspaceCleanup.Delete(directory);

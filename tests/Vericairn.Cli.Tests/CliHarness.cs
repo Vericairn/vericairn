@@ -21,6 +21,27 @@ internal static class CliHarness
         // Live stores and keys of test estates never touch the developer's real per-user state.
         Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, TempDirectory("cli-tests-home"));
         new ReleaseUpdateStore().Configure(false);
+        TestPrerequisites.RequireGit();
+    }
+
+    internal static string BuiltExecutable
+    {
+        get
+        {
+            string executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn");
+            Assert.True(File.Exists(executable), "Missing prerequisite: the built vericairn CLI executable must be beside the CLI test assembly.");
+            return executable;
+        }
+    }
+
+    internal static void RequireDaemonTransport(bool tls = true)
+    {
+        TestPrerequisites.RequireLocalIpc();
+        if (tls)
+        {
+            TestPrerequisites.RequireLoopback();
+            TestPrerequisites.RequireTlsCertificates();
+        }
     }
 
     public sealed record Outcome(int Code, string Out, string Err)

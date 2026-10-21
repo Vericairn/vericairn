@@ -31,6 +31,7 @@ public sealed class HeadlessFixture : IDisposable
     {
         Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, Seed.Temp("workbench-tests-home"));
         new ReleaseUpdateStore().Configure(false);
+        TestPrerequisites.RequireGit();
     }
 
     /// <summary>The session.</summary>

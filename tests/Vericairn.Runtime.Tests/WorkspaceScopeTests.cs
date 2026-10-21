@@ -38,14 +38,14 @@ public class WorkspaceScopeTests
         Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(preparing, reference))!);
         File.WriteAllText(Path.Combine(preparing, reference), "reference history\n");
 
-        WorkspaceSnapshot before = WorkspaceScopeProbe.Capture(preparing, TimeSpan.FromSeconds(10), FakeHarness.ScopeCommand(), includeGit: true);
+        WorkspaceSnapshot before = WorkspaceScopeProbe.Capture(preparing, TestTiming.HangTimeout, FakeHarness.ScopeCommand(), includeGit: true);
 
         Assert.Null(before.Problem);
         Assert.NotNull(before.Identity);
         Assert.Contains(reference.Replace(Path.DirectorySeparatorChar, '/'), before.Files.Keys);
         string published = Path.Combine(run.Scratch, "published");
         Directory.Move(preparing, published);
-        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(published, TimeSpan.FromSeconds(10), FakeHarness.ScopeCommand(), includeGit: true);
+        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(published, TestTiming.HangTimeout, FakeHarness.ScopeCommand(), includeGit: true);
         Assert.Null(after.Problem);
         Assert.Equal(before.Identity, after.Identity);
         Assert.Equal(before.Files.OrderBy(f => f.Key, StringComparer.Ordinal), after.Files.OrderBy(f => f.Key, StringComparer.Ordinal));
@@ -149,7 +149,7 @@ public class WorkspaceScopeTests
         try
         {
             Task<Protocol.RunScope> audit = Task.Run(() => provider.CheckScope(workspace, before, ["**"]), TestContext.Current.CancellationToken);
-            Assert.NotNull((await audit.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken)).Problem);
+            Assert.NotNull((await audit.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken)).Problem);
         }
         finally
         {
@@ -247,13 +247,13 @@ public class WorkspaceScopeTests
         string path = Path.Combine(workspace.Path, "README.md");
         File.Delete(path);
         Assert.Equal(0, mkfifo(path, 384));
-        Task<WorkspaceSnapshot> audit = Task.Run(() => WorkspaceScopeAudit.CaptureLocal(workspace.Path, TimeSpan.FromSeconds(10)), TestContext.Current.CancellationToken);
+        Task<WorkspaceSnapshot> audit = Task.Run(() => WorkspaceScopeAudit.CaptureLocal(workspace.Path, TestTiming.HangTimeout), TestContext.Current.CancellationToken);
         bool completed = false;
         try
         {
             try
             {
-                _ = await audit.WaitAsync(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
+                _ = await audit.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 completed = true;
             }
             catch (TimeoutException)
@@ -264,7 +264,7 @@ public class WorkspaceScopeTests
                 _ = close(descriptor);
             }
 
-            WorkspaceSnapshot snapshot = await audit.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            WorkspaceSnapshot snapshot = await audit.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.True(completed, "A FIFO was opened and waited for a writer.");
             Assert.NotNull(snapshot.Problem);
         }
@@ -274,15 +274,47 @@ public class WorkspaceScopeTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ACompletedScopeSnapshotCannotBeAcceptedAfterItsWholeDeadline(bool deliverTimer)
+    {
+        using var run = new RunEstate();
+        string report = run.Report("completed-observer");
+        var clock = new ClientClock();
+        WorkspaceSnapshot snapshot = WorkspaceScopeProbe.Capture(run.Scratch, TimeSpan.FromDays(1), FakeHarness.Command("scope-snapshot", report),
+            clock: clock, launched: () =>
+            {
+                run.WaitUntil(() => File.Exists(report), "the scope observer to start");
+                int pid = Assert.Single(FakeHarness.Reports(report))["process"]!.GetValue<int>();
+                try
+                {
+                    using System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(pid);
+                    Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds));
+                }
+                catch (ArgumentException) { /* It exited and was already reaped. */ }
+                clock.Advance(TimeSpan.FromDays(1));
+                if (deliverTimer) clock.FireDueTimers();
+            });
+        Assert.NotNull(snapshot.Problem);
+        Assert.Contains("deadline", snapshot.Problem, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TheScopeDeadlineTerminatesAStuckObserverInsteadOfLeavingABlockedWorkerThread()
     {
         using var run = new RunEstate();
         string report = run.Report("stuck-observer");
-        WorkspaceSnapshot snapshot = WorkspaceScopeProbe.Capture(run.Scratch, TimeSpan.FromSeconds(2), FakeHarness.Command("scope-hang", report));
+        var clock = new ClientClock();
+        WorkspaceSnapshot snapshot = WorkspaceScopeProbe.Capture(run.Scratch, TimeSpan.FromSeconds(30), FakeHarness.Command("scope-hang", report),
+            clock: clock, launched: () =>
+            {
+                run.WaitUntil(() => File.Exists(report), "the scope observer to start");
+                clock.Elapse(TimeSpan.FromSeconds(30));
+            });
         Assert.NotNull(snapshot.Problem);
         Assert.Contains("deadline", snapshot.Problem, StringComparison.Ordinal);
-        foreach (System.Text.Json.Nodes.JsonObject given in FakeHarness.Reports(report))
+        foreach (System.Text.Json.Nodes.JsonObject given in new[] { Assert.Single(FakeHarness.Reports(report)) })
         {
             int pid = given["process"]!.GetValue<int>();
             try
@@ -332,7 +364,7 @@ public class WorkspaceScopeTests
         try
         {
             Task<WorkspaceSnapshot> audit = Task.Run(() => provider.Capture(workspace), TestContext.Current.CancellationToken);
-            WorkspaceSnapshot snapshot = await audit.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
+            WorkspaceSnapshot snapshot = await audit.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
             Assert.NotNull(snapshot.Problem);
         }
         finally

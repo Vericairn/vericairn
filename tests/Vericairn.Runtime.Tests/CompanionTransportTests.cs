@@ -77,11 +77,14 @@ public sealed class CompanionTransportTests
     [InlineData("compare")]
     public async Task EverySdkReadHasADeadlineAndCancellationWithoutWriteUncertainty(string operation)
     {
+        var clock = new ClientClock();
+        var entered = TestTiming.Signal();
         using var client = new VericairnClient(new HttpClient(new Handler(async (_, token) =>
         {
-            await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            entered.TrySetResult();
+            await TestTiming.UntilCancelled(token);
             return new(HttpStatusCode.OK);
-        })) { BaseAddress = new Uri("https://fixture.invalid") }) { OperationTimeout = _ => TimeSpan.FromMilliseconds(50) };
+        })) { BaseAddress = new Uri("https://fixture.invalid") }) { OperationTimeout = _ => TimeSpan.FromSeconds(30), OperationClock = clock };
         async Task Read(CancellationToken token)
         {
             switch (operation)
@@ -92,7 +95,11 @@ public sealed class CompanionTransportTests
                 default: await client.CompanionCompareAsync(new("fixture"), token); break;
             }
         }
-        ClientTimeoutException timeout = await Assert.ThrowsAsync<ClientTimeoutException>(() => Read(TestContext.Current.CancellationToken));
+        Task pending = Read(TestContext.Current.CancellationToken);
+        await entered.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+        Assert.False(pending.IsCompleted);
+        clock.Elapse(TimeSpan.FromSeconds(30));
+        ClientTimeoutException timeout = await Assert.ThrowsAsync<ClientTimeoutException>(() => pending);
         Assert.Equal(ClientFailure.FromException(new ClientTimeoutException(false))!.Message, ClientFailure.FromException(timeout)!.Message);
         using var stopped = new CancellationTokenSource();
         stopped.Cancel();

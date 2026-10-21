@@ -22,7 +22,7 @@ public class SecretServiceKeyStoreTests : IDisposable
     {
         if (!OperatingSystem.IsLinux() || !SecretServiceKeyStore.Available())
         {
-            Assert.False(Environment.GetEnvironmentVariable("VERICAIRN_EXPECT_SECRET_SERVICE") == "1", "A secret service was expected here, and none answers.");
+            Assert.False(Environment.GetEnvironmentVariable("VERICAIRN_EXPECT_SECRET_SERVICE") == "1", "Missing prerequisite: Linux secret-tool and an unlocked Secret Service session (such as GNOME Keyring), required by VERICAIRN_EXPECT_SECRET_SERVICE.");
             Assert.Skip("Secret-service custody needs Linux with a running secret service and secret-tool.");
         }
 

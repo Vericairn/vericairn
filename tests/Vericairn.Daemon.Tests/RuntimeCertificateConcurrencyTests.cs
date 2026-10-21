@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Reflection;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -19,6 +18,7 @@ public class RuntimeCertificateConcurrencyTests(ITestOutputHelper output)
     [InlineData(true)]
     public async Task ConcurrentFirstServerAuthenticationChecksSucceed(bool replace)
     {
+        TestPrerequisites.RequireTlsCertificates();
         // Call the installed Kestrel's actual check, including its treatment of an absent EKU extension.
         Type loader = typeof(KestrelServerOptions).Assembly.GetType("Microsoft.AspNetCore.Server.Kestrel.Https.CertificateLoader", throwOnError: true)!;
         var allowed = loader.GetMethod("IsCertificateAllowedForServerAuth", BindingFlags.Static | BindingFlags.NonPublic)!
@@ -31,16 +31,9 @@ public class RuntimeCertificateConcurrencyTests(ITestOutputHelper output)
         using var estate = new TestEstate();
         string directory = Path.Combine(estate.Root, "certificates");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        deadline.CancelAfter(TimeSpan.FromMinutes(2));
-        long startAt = 0;
-        using var barrier = new Barrier(readers + 1, phase =>
-        {
-            if (phase.CurrentPhaseNumber % 2 == 0)
-            {
-                // Let the dedicated readers wake before a shared start time; barrier wake-up order alone hides the race.
-                startAt = Stopwatch.GetTimestamp() + Stopwatch.Frequency / 500;
-            }
-        });
+        deadline.CancelAfter(TestTiming.HangTimeout);
+        using var barrier = new Barrier(readers + 1);
+        using var ready = new Barrier(readers + 1);
         var failures = new ConcurrentQueue<string>();
         var failedReads = new int[rounds];
         X509Certificate2? current = null;
@@ -51,10 +44,7 @@ public class RuntimeCertificateConcurrencyTests(ITestOutputHelper output)
                 for (int round = 0; round < rounds; round++)
                 {
                     barrier.SignalAndWait(deadline.Token);
-                    while (Stopwatch.GetTimestamp() < startAt)
-                    {
-                        Thread.SpinWait(1);
-                    }
+                    ready.SignalAndWait(deadline.Token);
 
                     try
                     {
@@ -89,6 +79,7 @@ public class RuntimeCertificateConcurrencyTests(ITestOutputHelper output)
                 Assert.Single(certificate.Extensions.OfType<X509EnhancedKeyUsageExtension>());
                 current = certificate;
                 barrier.SignalAndWait(deadline.Token);
+                ready.SignalAndWait(deadline.Token);
                 barrier.SignalAndWait(deadline.Token);
             }
         }

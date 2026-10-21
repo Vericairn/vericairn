@@ -49,7 +49,7 @@ public class RequestRestartTests
 
         Task<string> SendAsync(byte[] payload) => Raw.ExchangeAsync(
             localNetwork ? harness.Address : $"{harness.Host.Endpoint.Loopback!.Host}:{harness.Host.Endpoint.Loopback.Port}",
-            credential, harness.Host.Endpoint.Loopback!.Certificate, payload, TimeSpan.FromSeconds(5));
+            credential, harness.Host.Endpoint.Loopback!.Certificate, payload, TestTiming.HangTimeout);
     }
 
     [Theory]

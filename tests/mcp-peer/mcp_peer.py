@@ -4,11 +4,16 @@
 subset end to end. Read-only: it never calls a write tool. Usage: mcp_peer.py <vericairn binary or vericairn.dll> <estate root> [--as id]
 Any estate will do: the brief check reads work order MCP-01 where the estate holds it, as Vericairn's does, and otherwise the
 first work order the estate's status lists; in an estate without work orders it is skipped, and the output says which."""
-import json, subprocess, sys, time
+import json, shutil, subprocess, sys, time
+from pathlib import Path
 
 def main():
     binary, estate = sys.argv[1], sys.argv[2]
     extra = sys.argv[3:]
+    if not Path(binary).is_file() and shutil.which(binary) is None:
+        raise SystemExit("Missing prerequisite: the built vericairn MCP executable.")
+    if binary.endswith('.dll') and shutil.which('dotnet') is None:
+        raise SystemExit("Missing prerequisite: dotnet to run the MCP assembly.")
     command = ['dotnet', binary] if binary.endswith('.dll') else [binary]
     proc = subprocess.Popen([*command, '--estate', estate, 'mcp', 'serve', *extra], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
     n = 0
@@ -30,7 +35,7 @@ def main():
         checks.append((name, ok, detail)); print(("PASS " if ok else "FAIL ") + name + (": " + detail if detail else ""))
     def skip(name, why):
         skipped.append(name); print("SKIP " + name + ": " + why)
-    t0 = time.time()
+    t0 = time.monotonic()
     init = call("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "mcp_peer.py", "version": "1"}})
     check("initialize negotiates 2025-06-18", init["result"]["protocolVersion"] == "2025-06-18", init["result"]["serverInfo"]["version"])
     check("instructions are descriptive", "must" not in init["result"]["instructions"].lower())
@@ -59,12 +64,13 @@ def main():
     check("unknown method is -32601", nf.get("error", {}).get("code") == -32601)
     rel = call("tools/call", {"name": "releases_list", "arguments": {}})["result"]
     check("releases_list returns rows", (not rel.get("isError")) and isinstance(json.loads(rel["content"][0]["text"]), list))
-    proc.stdin.close(); proc.wait(timeout=30)
+    # EOF requests shutdown; the process wait is only a hang guard.
+    proc.stdin.close(); proc.wait(timeout=120)
     check("server exits when the input ends", proc.returncode == 0, f"exit {proc.returncode}")
     err = proc.stderr.read()
     check("diagnostics go to stderr only", "vericairn mcp: serving" in err)
     failed = [c for c in checks if not c[1]]
-    print(f"{len(checks) - len(failed)} of {len(checks)} checks passed" + (f", {len(skipped)} skipped" if skipped else "") + f" in {time.time() - t0:.1f}s")
+    print(f"{len(checks) - len(failed)} of {len(checks)} checks passed" + (f", {len(skipped)} skipped" if skipped else "") + f" in {time.monotonic() - t0:.1f}s")
     sys.exit(1 if failed else 0)
 
 main()

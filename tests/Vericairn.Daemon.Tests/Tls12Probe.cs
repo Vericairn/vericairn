@@ -44,21 +44,32 @@ internal sealed class Tls12Probe : IDisposable
     public static async Task<Tls12Probe> ConnectAsync(string host, int port)
     {
         var probe = new Tls12Probe();
-        await probe.client.ConnectAsync(host, port);
-        probe.stream = probe.client.GetStream();
-        await probe.HandshakeAsync();
-        return probe;
+        using var guard = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        guard.CancelAfter(TestTiming.HangTimeout);
+        try
+        {
+            await probe.client.ConnectAsync(host, port, guard.Token);
+            probe.stream = probe.client.GetStream();
+            await probe.HandshakeAsync(guard.Token);
+            return probe;
+        }
+        catch
+        {
+            probe.Dispose();
+            throw;
+        }
     }
 
     /// <summary>
     /// Sends, sealed, a new ClientHello as a renegotiating client does, then lists the types of the records the server answers with
-    /// until it closes the connection or the wait ends. A handshake record (22) among them is a new handshake under way.
+    /// until it closes the connection. A handshake record (22) among them is a new handshake under way; a hung peer fails the test.
     /// </summary>
     public async Task<IReadOnlyList<byte>> RenegotiateAsync(TimeSpan wait)
     {
-        await WriteSealedAsync(Handshake, ClientHello(RandomNumberGenerator.GetBytes(32), ClientVerifyData));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        timeout.CancelAfter(wait);
+        await WriteSealedAsync(Handshake, ClientHello(RandomNumberGenerator.GetBytes(32), ClientVerifyData), timeout.Token);
         var answered = new List<byte>();
-        using var timeout = new CancellationTokenSource(wait);
         try
         {
             while (true)
@@ -67,7 +78,7 @@ internal sealed class Tls12Probe : IDisposable
                 answered.Add(type);
             }
         }
-        catch (Exception exception) when (exception is EndOfStreamException or IOException or OperationCanceledException or SocketException)
+        catch (Exception exception) when (exception is EndOfStreamException or IOException or SocketException)
         {
         }
 
@@ -77,9 +88,11 @@ internal sealed class Tls12Probe : IDisposable
     /// <summary>Sends a record sealed under the session's keys, as the rest of a renegotiation would be; false when the server has closed.</summary>
     public async Task<bool> TrySendSealedAsync(byte type, byte[] plaintext)
     {
+        using var guard = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
+        guard.CancelAfter(TestTiming.HangTimeout);
         try
         {
-            await WriteSealedAsync(type, plaintext);
+            await WriteSealedAsync(type, plaintext, guard.Token);
             return true;
         }
         catch (Exception exception) when (exception is IOException or SocketException or ObjectDisposedException)
@@ -138,18 +151,18 @@ internal sealed class Tls12Probe : IDisposable
         return [1, .. Length24(body.Length), .. body];
     }
 
-    private async Task HandshakeAsync()
+    private async Task HandshakeAsync(CancellationToken cancellationToken)
     {
         byte[] hello = ClientHello(clientRandom, []);
         transcript.AddRange(hello);
-        await WritePlainAsync(Handshake, hello);
+        await WritePlainAsync(Handshake, hello, cancellationToken);
 
         // ServerHello, Certificate, ServerKeyExchange, CertificateRequest, ServerHelloDone.
         byte[]? serverPoint = null;
         bool done = false;
         while (!done)
         {
-            foreach (byte[] message in await ReadMessagesAsync())
+            foreach (byte[] message in await ReadMessagesAsync(cancellationToken))
             {
                 transcript.AddRange(message);
                 switch (message[0])
@@ -180,7 +193,7 @@ internal sealed class Tls12Probe : IDisposable
         byte[] keyExchange = [16, .. Length24(1 + point.Length), (byte)point.Length, .. point];
         transcript.AddRange(certificate);
         transcript.AddRange(keyExchange);
-        await WritePlainAsync(Handshake, [.. certificate, .. keyExchange]);
+        await WritePlainAsync(Handshake, [.. certificate, .. keyExchange], cancellationToken);
 
         using ECDiffieHellman server = ECDiffieHellman.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = serverPoint![1..33], Y = serverPoint[33..65] } });
         byte[] premaster = ecdh.DeriveRawSecretAgreement(server.PublicKey);
@@ -191,19 +204,19 @@ internal sealed class Tls12Probe : IDisposable
         clientIv = block[32..36];
         serverIv = block[36..40];
 
-        await WritePlainAsync(ChangeCipherSpec, [1]);
+        await WritePlainAsync(ChangeCipherSpec, [1], cancellationToken);
         ClientVerifyData = Prf(master, "client finished", SHA256.HashData([.. transcript]), 12);
         byte[] finished = [20, 0, 0, 12, .. ClientVerifyData];
         transcript.AddRange(finished);
-        await WriteSealedAsync(Handshake, finished);
+        await WriteSealedAsync(Handshake, finished, cancellationToken);
 
-        (byte type, byte[] fragment) = await ReadRecordAsync(CancellationToken.None);
+        (byte type, byte[] fragment) = await ReadRecordAsync(cancellationToken);
         if (type != ChangeCipherSpec)
         {
             throw new IOException($"The server answered the client's Finished with a record of type {type}, not a change of cipher spec.");
         }
 
-        (type, fragment) = await ReadRecordAsync(CancellationToken.None);
+        (type, fragment) = await ReadRecordAsync(cancellationToken);
         byte[] serverFinished = Open(type, fragment);
         byte[] expected = Prf(master, "server finished", SHA256.HashData([.. transcript]), 12);
         if (type != Handshake || serverFinished[0] != 20 || !serverFinished.AsSpan(4).SequenceEqual(expected))
@@ -237,12 +250,12 @@ internal sealed class Tls12Probe : IDisposable
     }
 
     /// <summary>Reads plain handshake records until at least one whole message is in, and returns the whole ones.</summary>
-    private async Task<List<byte[]>> ReadMessagesAsync()
+    private async Task<List<byte[]>> ReadMessagesAsync(CancellationToken cancellationToken)
     {
         var messages = new List<byte[]>();
         while (messages.Count == 0)
         {
-            (byte type, byte[] fragment) = await ReadRecordAsync(CancellationToken.None);
+            (byte type, byte[] fragment) = await ReadRecordAsync(cancellationToken);
             if (type == Alert)
             {
                 throw new IOException($"The server sent an alert during the handshake: level {fragment[0]}, description {fragment[1]}.");
@@ -274,14 +287,14 @@ internal sealed class Tls12Probe : IDisposable
         return (header[0], fragment);
     }
 
-    private async Task WritePlainAsync(byte type, byte[] fragment)
+    private async Task WritePlainAsync(byte type, byte[] fragment, CancellationToken cancellationToken)
     {
-        await stream!.WriteAsync(Record(type, fragment));
-        await stream.FlushAsync();
+        await stream!.WriteAsync(Record(type, fragment), cancellationToken);
+        await stream.FlushAsync(cancellationToken);
     }
 
     /// <summary>AES-128-GCM sealing: an explicit nonce of the sequence number, and the sequence, type, version and length as data.</summary>
-    private async Task WriteSealedAsync(byte type, byte[] plaintext)
+    private async Task WriteSealedAsync(byte type, byte[] plaintext, CancellationToken cancellationToken)
     {
         byte[] explicitNonce = new byte[8];
         BinaryPrimitives.WriteUInt64BigEndian(explicitNonce, clientSequence);
@@ -300,7 +313,7 @@ internal sealed class Tls12Probe : IDisposable
         }
 
         clientSequence++;
-        await WritePlainAsync(type, [.. explicitNonce, .. sealedText, .. tag]);
+        await WritePlainAsync(type, [.. explicitNonce, .. sealedText, .. tag], cancellationToken);
     }
 
     private byte[] Open(byte type, byte[] fragment)

@@ -521,7 +521,7 @@ public class LivingDocumentJourneyTests
         using Process process = Process.Start(info)!;
         output = process.StandardOutput.ReadToEnd();
         process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         return process.ExitCode;
     }
 }

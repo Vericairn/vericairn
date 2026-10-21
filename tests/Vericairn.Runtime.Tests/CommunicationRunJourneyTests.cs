@@ -72,7 +72,7 @@ public class CommunicationRunJourneyTests
         Assert.True(started.Ok, started.Message);
         Assert.Equal(intentId, started.Run);
         RunRow settled = run.Settled(started.Run);
-        WaitUntil(() => Assert.Single(run.Service.Runs().Goals).Status == "budget-limited");
+        run.WaitUntil(() => Assert.Single(run.Service.Runs().Goals).Status == "budget-limited");
         Assert.Equal("observed-success", settled.Status);
         JsonElement observation = settled.ExecutionObserved!.Value;
         JsonElement reported = Assert.Single(observation.GetProperty("reports").EnumerateArray());
@@ -152,10 +152,4 @@ public class CommunicationRunJourneyTests
 
     internal static byte[] Canonical<T>(T value) => CanonicalJson.SerializeUtf8(JsonSerializer.SerializeToElement(value, ProtocolJson.Options));
 
-    internal static void WaitUntil(Func<bool> condition)
-    {
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(20);
-        while (!condition() && DateTimeOffset.UtcNow < until) Thread.Sleep(50);
-        Assert.True(condition(), "The worker did not reach the expected state within twenty seconds.");
-    }
 }

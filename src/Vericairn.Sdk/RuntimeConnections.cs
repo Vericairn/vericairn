@@ -25,6 +25,7 @@ public sealed class RuntimeConnections
 
     private readonly string directory;
     private readonly IDeviceKeyStore? keys;
+    internal TimeProvider Clock { get; init; } = TimeProvider.System;
 
     /// <summary>The connections kept under a home (the Vericairn home by default), with device keys in a given store or in this machine's stores.</summary>
     public RuntimeConnections(string? home = null, IDeviceKeyStore? keys = null)
@@ -151,7 +152,7 @@ public sealed class RuntimeConnections
         {
             try
             {
-                using VericairnClient client = VericairnClient.LocalNetwork(connection, signer, timeout ?? DefaultTimeout);
+                using VericairnClient client = VericairnClient.LocalNetwork(connection, signer, timeout ?? DefaultTimeout, Clock);
                 HealthResponse health = preserveInterruption ? await client.HealthAsync(cancellationToken).ConfigureAwait(false) : client.Health();
                 answered = true;
                 message = $"Vericairn {health.Vericairn} serving {connection.EstateName ?? health.Estate} at {connection.Address}; the runtime proved its identity.";

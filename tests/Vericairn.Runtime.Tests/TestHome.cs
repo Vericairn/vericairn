@@ -24,6 +24,7 @@ public sealed class TestHome : IDisposable
         created = Path.Combine(Path.GetTempPath(), "vericairn-runtime-tests-home-" + Ulid.NewUlid().Value);
         Directory.CreateDirectory(created);
         Environment.SetEnvironmentVariable(VericairnHome.EnvironmentVariable, created);
+        TestPrerequisites.RequireGit();
     }
 
     /// <summary>Removes the home this fixture created, once every test has finished.</summary>

@@ -194,12 +194,7 @@ public class GoalStepTests
         string op = run.Estate.OperatorId;
         GoalStepResponse step = Step(run, "lingering", "ack-stop");
         Assert.True(step.Ok, step.Message);
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (!run.Row(step.Run!.Run).Observed || !File.Exists(run.Report("lingering")))
-        {
-            Assert.True(DateTimeOffset.UtcNow < until, "The run was not observed in time.");
-            Thread.Sleep(50);
-        }
+        run.WaitUntil(() => run.Row(step.Run!.Run).Observed && File.Exists(run.Report("lingering")), "the run and its stand-in to be ready");
 
         // The operator takes W-1 over: a new assignment carries the builder's brief and names its assignment, and the run is stopped.
         TakeoverResponse taken = run.Service.WorkTakeover(new TakeoverRequest(run.Assignment, op));

@@ -60,11 +60,11 @@ public class SecondReviewTests
         byte[] body = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.BuilderId + "\",\"body\":" + Order("W-C1") + "}");
         string at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         byte[] head = Head("POST", "/v1/records", body, at, signer, harness.Digest("POST", "/v1/records", at, body));
-        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, .. body], TimeSpan.FromSeconds(5)), StringComparison.Ordinal);
+        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, .. body], TestTiming.HangTimeout), StringComparison.Ordinal);
 
         // A copy whose head arrives within its five minutes and whose body after them, on the runtime's clock: refused as stale, and
         // never accepted as a new write once what remembered the first copy could have forgotten it.
-        string late = await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, body[0]], TimeSpan.FromSeconds(5), trickle: body[1..], meanwhile: () => harness.Time.Advance(TimeSpan.FromMinutes(6)));
+        string late = await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, body[0]], TestTiming.HangTimeout, trickle: body[1..], meanwhile: harness.WhenReadingBody(() => harness.Time.Advance(TimeSpan.FromMinutes(6))));
         Say(late);
         Assert.StartsWith("HTTP/1.1 401", late, StringComparison.Ordinal);
         Assert.Contains("five minutes", late, StringComparison.Ordinal);
@@ -74,7 +74,7 @@ public class SecondReviewTests
         byte[] second = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.BuilderId + "\",\"body\":" + Order("W-C1B") + "}");
         at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         head = Head("POST", "/v1/records", second, at, signer, harness.Digest("POST", "/v1/records", at, second));
-        string revoked = await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, second[0]], TimeSpan.FromSeconds(5), trickle: second[1..], meanwhile: () => Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(connection.Device, harness.Estate.OperatorId, "Lost while it wrote.")).Ok));
+        string revoked = await Raw.ExchangeAsync(harness.Address, credential, pinned, [.. head, second[0]], TestTiming.HangTimeout, trickle: second[1..], meanwhile: harness.WhenReadingBody(() => Assert.True(harness.Socket.DeviceRevoke(new RevokeRequest(connection.Device, harness.Estate.OperatorId, "Lost while it wrote.")).Ok)));
         Say(revoked);
         Assert.StartsWith("HTTP/1.1 401", revoked, StringComparison.Ordinal);
         Assert.Contains("revoked", revoked, StringComparison.Ordinal);
@@ -85,7 +85,7 @@ public class SecondReviewTests
         byte[] third = Encoding.UTF8.GetBytes("{\"type\":\"work-order\",\"by\":\"" + harness.Estate.OperatorId + "\",\"body\":" + Order("W-C1C") + "}");
         at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         head = Head("POST", "/v1/records", third, at, operatorDevice, RequestSigning.Digest("POST", "/v1/records", at, third));
-        string loopback = await Raw.ExchangeAsync(LoopbackAddress(harness), null, pinned, [.. head, third[0]], TimeSpan.FromSeconds(5), trickle: third[1..], meanwhile: () => harness.Time.Advance(TimeSpan.FromMinutes(6)));
+        string loopback = await Raw.ExchangeAsync(LoopbackAddress(harness), null, pinned, [.. head, third[0]], TestTiming.HangTimeout, trickle: third[1..], meanwhile: harness.WhenReadingBody(() => harness.Time.Advance(TimeSpan.FromMinutes(6))));
         Say(loopback);
         Assert.StartsWith("HTTP/1.1 401", loopback, StringComparison.Ordinal);
         Assert.Contains("five minutes", loopback, StringComparison.Ordinal);
@@ -109,7 +109,7 @@ public class SecondReviewTests
     public async Task N1_AReplayWhoseBodyArrivesAfterItsSignatureIsStaleIsRefused(bool loopback)
     {
         // Accept a request signed since startup, then move the runtime's clock until it is five seconds from stale. Its replay's
-        // body is trickled past the real read deadline; pre-startup signatures are no longer accepted even inside five minutes.
+        // body is held until the controlled read deadline; pre-startup signatures are no longer accepted even inside five minutes.
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         DeviceRequestSigner signer = loopback ? DeviceRequestSigner.Find(harness.OperatorDevice)! : harness.Signer(connection);
@@ -120,10 +120,10 @@ public class SecondReviewTests
         string at = RequestSigning.FormatTime(harness.Time.GetUtcNow());
         byte[] digest = loopback ? RequestSigning.Digest("GET", "/v1/status", at, body) : harness.Digest("GET", "/v1/status", at, body);
         byte[] head = Head("GET", "/v1/status", body, at, signer, digest, "text/plain");
-        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(address, credential, pinned, [.. head, .. body], TimeSpan.FromSeconds(5)), StringComparison.Ordinal);
+        Assert.StartsWith("HTTP/1.1 200", await Raw.ExchangeAsync(address, credential, pinned, [.. head, .. body], TestTiming.HangTimeout), StringComparison.Ordinal);
 
         harness.Time.Advance(TimeSpan.FromSeconds(295));
-        string replay = await Raw.ExchangeAsync(address, credential, pinned, head, TimeSpan.FromSeconds(15), trickle: body, chunkSize: 360, delay: TimeSpan.FromSeconds(1));
+        string replay = await Raw.ExchangeAsync(address, credential, pinned, head, TestTiming.HangTimeout, trickle: body, chunkSize: 360, meanwhile: harness.WhenReadingBody(() => harness.Time.Advance(TimeSpan.FromSeconds(6))));
         Say(replay);
         Assert.StartsWith("HTTP/1.1 401", replay, StringComparison.Ordinal);
         Assert.Contains("five minutes", replay, StringComparison.Ordinal);
@@ -141,7 +141,7 @@ public class SecondReviewTests
         byte[] bytes = Encoding.Latin1.GetBytes("café au lait");
         string at = RequestSigning.FormatTime(DateTimeOffset.UtcNow);
         byte[] head = Head("POST", "/v1/objects", bytes, at, operatorDevice, RequestSigning.Digest("POST", "/v1/objects", at, bytes), "text/plain; charset=iso-8859-1");
-        string stored = await Raw.ExchangeAsync(LoopbackAddress(harness), null, pinned, [.. head, .. bytes], TimeSpan.FromSeconds(5));
+        string stored = await Raw.ExchangeAsync(LoopbackAddress(harness), null, pinned, [.. head, .. bytes], TestTiming.HangTimeout);
         Say(stored);
         Assert.StartsWith("HTTP/1.1 200", stored, StringComparison.Ordinal);
         string hash = Records.Hashing.ContentHash.Sha256(bytes);
@@ -346,7 +346,7 @@ public class SecondReviewTests
         registry.Register(new ReportedLauncher(new RunApiTests.StandInLauncher()));
         registry.Register(new RunApiTests.DirectoryWorkspaces());
         harness.Host.Service.Providers = registry;
-        harness.Host.Service.WorkerOptions = new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), StopWait = TimeSpan.FromSeconds(2) };
+        harness.Host.Service.WorkerOptions = new WorkerOptions { Clock = harness.Time, Heartbeat = TimeSpan.FromMilliseconds(100), Grace = TimeSpan.FromSeconds(1), StopWait = TimeSpan.Zero };
         Assert.True(api.DeviceAdmit(new AdmitRequest(api.DeviceCreate(new DeviceCreateRequest(builder, "Builder's device", "file")).Written!.Id, op, "The builder's.")).Ok);
         devices();
         new FileKeyStore(VericairnHome.Path()).Remove(harness.OperatorDevice);
@@ -358,12 +358,9 @@ public class SecondReviewTests
         RepositoryClones.Register(harness.Host.Service.Session.Manifest.Estate, resource, scratch);
         RunResponse started = api.RunStart(new RunStartRequest(assignment, "stand-in", builder, op, resource, Settings: new Dictionary<string, string>(StringComparer.Ordinal) { ["command"] = FakeHarness.Setting("ignore-stop", Path.Combine(scratch, "report.jsonl")) }));
         Assert.True(started.Ok, started.Message);
-        DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-        while (!api.Runs().Runs.Single(r => r.Run == started.Run).Observed || !File.Exists(Path.Combine(scratch, "report.jsonl")))
-        {
-            Assert.True(DateTimeOffset.UtcNow < until, "The run was never observed ready to receive a stop.");
-            await Task.Delay(100, TestContext.Current.CancellationToken);
-        }
+        using var changed = new FileSignal(harness.Estate.Root, scratch, new RunDirectory(harness.Host.Service.Session.Manifest.Estate, started.Run).Path);
+        await changed.UntilAsync(() => api.Runs().Runs.Single(r => r.Run == started.Run).Observed && File.Exists(Path.Combine(scratch, "report.jsonl")),
+            "the run ready to receive a stop", TestContext.Current.CancellationToken);
 
         return started.Run;
     }
@@ -392,7 +389,8 @@ public class SecondReviewTests
             });
 
             // Over the local network and over loopback, the bystander's devices are refused at once, and the run goes on.
-            var clock = System.Diagnostics.Stopwatch.StartNew();
+            TimeProvider clock = harness.Time;
+            long began = clock.GetTimestamp();
             using (VericairnClient lan = VericairnClient.LocalNetwork(laptop, harness.Signer(laptop)))
             {
                 RunStopResponse refused = lan.RunStop(run, new RunStopRequest(bystander, "Because I can.", 8));
@@ -409,24 +407,24 @@ public class SecondReviewTests
 
             // The run's own agent did not start it and decides nothing for its goal: refused as well, on the local socket too.
             Assert.Equal("refused", harness.Socket.RunStop(run, new RunStopRequest(builder, "Mine.", 8)).Problem!.Code);
-            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"The refusals took {clock.Elapsed}.");
+            Assert.True(clock.GetElapsedTime(began) < TimeSpan.FromSeconds(8), $"The refusals took {clock.GetElapsedTime(began)}.");
             Assert.Equal("dispatched", harness.Socket.Runs().Runs.Single(r => r.Run == run).Status);
 
             // The operator, who started it, stops it: the answer comes within the stop wait, not after the eight seconds of grace.
-            clock.Restart();
+            began = clock.GetTimestamp();
             RunStopResponse stopped = harness.Socket.RunStop(run, new RunStopRequest(op, "Replaced.", 8));
-            Say($"{stopped.State} after {clock.Elapsed.TotalSeconds:F1} s: {stopped.Message}");
+            Say($"{stopped.State} after {clock.GetElapsedTime(began).TotalSeconds:F1} s: {stopped.Message}");
             Assert.True(stopped.Ok, stopped.Message);
-            Assert.True(clock.Elapsed < TimeSpan.FromSeconds(8), $"The stop was held for {clock.Elapsed}.");
+            Assert.True(clock.GetElapsedTime(began) < TimeSpan.FromSeconds(8), $"The stop was held for {clock.GetElapsedTime(began)}.");
             Assert.NotEqual("contained", stopped.State);
 
             // The worker still escalates after the grace and the settlement records it.
-            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(40);
-            while (harness.Socket.Runs().Runs.Single(r => r.Run == run).Status == "dispatched")
-            {
-                Assert.True(DateTimeOffset.UtcNow < until, "The run never settled.");
-                await Task.Delay(200, TestContext.Current.CancellationToken);
-            }
+            using var changed = new FileSignal(harness.Estate.Root, scratch, new RunDirectory(harness.Host.Service.Session.Manifest.Estate, run).Path);
+            await changed.UntilAsync(() => harness.Socket.Runs().Runs.Single(r => r.Run == run).Stop?.TransmittedAt is not null,
+                "the transmitted stop before advancing grace", TestContext.Current.CancellationToken);
+            harness.Time.Advance(TimeSpan.FromSeconds(8));
+            await changed.UntilAsync(() => harness.Socket.Runs().Runs.Single(r => r.Run == run).Status != "dispatched",
+                "the run to settle after grace", TestContext.Current.CancellationToken);
         }
         finally
         {
@@ -575,7 +573,7 @@ public class SecondReviewTests
 
         // The next start closes it, naming the record it may have produced; a start after that closes nothing again.
         var options = new DaemonOptions { LocalNetwork = new IPEndPoint(IPAddress.Loopback, 0), IdentityStore = new FileKeyStore(VericairnHome.Path()) };
-        await using (DaemonHost restarted = await DaemonHost.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        await using (DaemonHost restarted = await DaemonTestHome.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
         {
             LocalNetworkWrite closed = Assert.Single(LocalNetworkLedger.Read(live));
             Assert.Equal((intended, "interrupted", laptop.Device), (closed.Id, closed.State, closed.Device));
@@ -583,7 +581,7 @@ public class SecondReviewTests
             await restarted.StopAsync();
         }
 
-        await using (DaemonHost again = await DaemonHost.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
+        await using (DaemonHost again = await DaemonTestHome.StartAsync(harness.Estate.Root, options: options, cancellationToken: TestContext.Current.CancellationToken))
         {
             Assert.Equal(2, File.ReadAllLines(Path.Combine(live, LocalNetworkLedger.FileName)).Length);
             await again.StopAsync();
@@ -605,14 +603,15 @@ public class SecondReviewTests
         Say($"handshake held; the runtime offered secure renegotiation: {probe.SecureRenegotiation}");
 
         // Inside the encrypted channel a renegotiating ClientHello: the runtime starts no new handshake, and closes the connection.
-        IReadOnlyList<byte> answered = await probe.RenegotiateAsync(TimeSpan.FromSeconds(5));
+        IReadOnlyList<byte> answered = await probe.RenegotiateAsync(TestTiming.HangTimeout);
         Say($"records answered to the renegotiating hello: [{string.Join(", ", answered)}]");
         Assert.DoesNotContain((byte)22, answered);
 
         // A certificate sent sealed as if the renegotiation went on is never read as one: nothing it names is fetched.
         bool sent = await probe.TrySendSealedAsync(22, Tls12Probe.CertificateMessage(named.RawData));
         Say($"the sealed certificate could be sent: {sent}");
-        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
+        await harness.Host.StopAsync();
+        await addresses.DrainAsync();
         Assert.True(addresses.Requests.IsEmpty, $"This machine fetched what a certificate sent in a renegotiation named: {string.Join(", ", addresses.Requests)}");
     }
 }

@@ -21,8 +21,8 @@ public class RefusedBodyTests
         var context = new DefaultHttpContext();
         context.Features.Set<IHttpResponseBodyFeature>(response);
         await DaemonHost.WriteProblemAsync(context, StatusCodes.Status401Unauthorized, new Problem("denied", "Sign it afresh.", []), close: true);
-        Task refused = DaemonHost.CompleteRefusalAsync(context, body.Reader);
-        await response.Completed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Task refused = DaemonHost.CompleteRefusalAsync(context, body.Reader, new ClientClock());
+        await response.Completed.Task.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
         Assert.Equal("close", context.Response.Headers.Connection);
         byte[] answer = response.Bytes.ToArray();
@@ -32,7 +32,7 @@ public class RefusedBodyTests
 
         await body.Writer.WriteAsync("the remaining body"u8.ToArray(), TestContext.Current.CancellationToken);
         await body.Writer.CompleteAsync();
-        await refused.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        await refused.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         ReadResult remainder = await body.Reader.ReadAsync(TestContext.Current.CancellationToken);
         Assert.True(remainder.IsCompleted);
         Assert.True(remainder.Buffer.IsEmpty);
@@ -45,7 +45,7 @@ public class RefusedBodyTests
     {
         var body = new Pipe();
         await body.Writer.WriteAsync(Encoding.ASCII.GetBytes(new string('x', 32)), TestContext.Current.CancellationToken);
-        Assert.Equal(8, await DaemonHost.DrainRefusedBodyAsync(body.Reader, 8, TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        Assert.Equal(8, await DaemonHost.DrainRefusedBodyAsync(body.Reader, 8, TestTiming.HangTimeout, new ClientClock(), TestContext.Current.CancellationToken));
         ReadResult remainder = await body.Reader.ReadAsync(TestContext.Current.CancellationToken);
         Assert.Equal(24, remainder.Buffer.Length);
         body.Reader.AdvanceTo(remainder.Buffer.End);
@@ -60,13 +60,16 @@ public class RefusedBodyTests
     {
         var body = new Pipe();
         using var aborted = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        Task<long> drain = DaemonHost.DrainRefusedBodyAsync(body.Reader, 64 * 1024, disconnect ? TimeSpan.FromSeconds(30) : TimeSpan.FromMilliseconds(50), aborted.Token);
+        var clock = new ClientClock();
+        Task<long> drain = DaemonHost.DrainRefusedBodyAsync(body.Reader, 64 * 1024, TimeSpan.FromSeconds(30), clock, aborted.Token);
+        Assert.False(drain.IsCompleted);
         if (disconnect)
         {
             aborted.Cancel();
         }
+        else clock.Elapse(TimeSpan.FromSeconds(30));
 
-        Assert.Equal(0, await drain.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken));
+        Assert.Equal(0, await drain.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
         // Only a pending pipe read was cancelled: neither end was completed or its stream cancelled. Data still travels afterwards.
         await body.Writer.WriteAsync("still live"u8.ToArray(), TestContext.Current.CancellationToken);
         ReadResult after = await body.Reader.ReadAsync(TestContext.Current.CancellationToken);

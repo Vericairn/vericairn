@@ -99,9 +99,10 @@ public sealed class UpdateNoticeJourneyTests : IDisposable
         ReleaseCheckState prior = store.ReadState();
         try
         {
-            using (store.Acquire()) store.WriteState(new(DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "v9.2.0"));
+            var clock = new ClientClock(new DateTimeOffset(2026, 10, 20, 12, 0, 0, TimeSpan.Zero));
+            using (store.Acquire()) store.WriteState(new(clock.GetUtcNow(), clock.GetUtcNow(), "v9.2.0"));
             var source = new ReleaseUpdatesTests.Source { Answer = _ => throw new InvalidOperationException("Check must never call a source.") };
-            var updates = new ReleaseUpdates(store, source, TimeProvider.System);
+            var updates = new ReleaseUpdates(store, source, clock);
             CliHarness.Outcome check = CliHarness.RunWithUpdates(updates, "--estate", estate, "estate", "check");
             Assert.Equal(0, check.Code);
             Assert.Contains("manifest.release-behind", check.Out, StringComparison.Ordinal);

@@ -20,7 +20,7 @@ public class ContainedProcessTests
             // Inject the native accounting result so its decision logic runs on every test platform.
             process.WindowsJobInventory = () => 1u;
             Assert.False(process.BoundaryExited()); // The leader's exit has not been observed yet.
-            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
             Assert.False(process.BoundaryExited()); // The job can still contain a helper or descendant.
             process.WindowsJobInventory = () => throw new System.ComponentModel.Win32Exception(5);
             Assert.Throws<System.ComponentModel.Win32Exception>(() => process.BoundaryExited());
@@ -44,7 +44,7 @@ public class ContainedProcessTests
         bool signaled = false;
         try
         {
-            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
             Assert.Equal(process.Id, waitpid(process.Id, out _, 0)); // Deliberately emulate a foreign reaper.
             process.UnixSignal = (_, _) => { signaled = true; return 0; }; // Never actually signal a potentially recycled group in a regression.
             System.ComponentModel.Win32Exception failure = Assert.Throws<System.ComponentModel.Win32Exception>(() => process.Signal(force: true));
@@ -67,7 +67,7 @@ public class ContainedProcessTests
         ContainedProcess process = Start(run, "generic");
         try
         {
-            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
             process.ProcfsDirectories = () => [];
             Assert.False(process.BoundaryExited());
             process.ProcfsDirectories = null;
@@ -80,7 +80,7 @@ public class ContainedProcessTests
     }
 
     [Fact]
-    public void FailedMacInventoryNeverCertifiesAnEmptyBoundaryAndCanBeRetried()
+    public async Task FailedMacInventoryNeverCertifiesAnEmptyBoundaryAndCanBeRetried()
     {
         if (!OperatingSystem.IsMacOS())
         {
@@ -90,11 +90,13 @@ public class ContainedProcessTests
         using var run = new RunEstate();
         string stop = Path.Combine(run.Scratch, "stop-native-root");
         ContainedProcess process = Start(run, "child-survives-root", stop);
+        Process? child = null;
         try
         {
-            Assert.True(SpinWait.SpinUntil(() => File.Exists(run.Report("child-survives-root")) && File.Exists(run.Report("child-survives-root") + ".child"), TimeSpan.FromSeconds(20)));
+            run.WaitUntil(() => File.Exists(run.Report("child-survives-root")) && File.Exists(run.Report("child-survives-root") + ".child"), "both members of the native process group");
+            child = Process.GetProcessById(Assert.Single(FakeHarness.Reports(run.Report("child-survives-root") + ".child"))["process"]!.GetValue<int>());
             File.WriteAllText(stop, "stop the root; its child ignores this request");
-            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
             Assert.False(process.BoundaryExited()); // The same-group child is still alive after its leader exits.
             process.ProcessInventory = _ => (0, 1); // EPERM: libproc returns zero on failure.
             Assert.False(process.BoundaryExited());
@@ -110,9 +112,12 @@ public class ContainedProcessTests
                 process.Signal(force: true);
             }
 
-            Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
-            Assert.True(SpinWait.SpinUntil(process.BoundaryExited, TimeSpan.FromSeconds(20)));
+            Assert.True(process.WaitForExit(TestTiming.HangTimeout));
+            if (child is not null)
+                await child.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
+            Assert.True(process.BoundaryExited());
             process.Close();
+            child?.Dispose();
         }
     }
 
@@ -126,7 +131,7 @@ public class ContainedProcessTests
 
         using var run = new RunEstate();
         ContainedProcess process = Start(run, "generic");
-        Assert.True(process.WaitForExit(TimeSpan.FromSeconds(20)));
+        Assert.True(process.WaitForExit(TestTiming.HangTimeout));
         try
         {
             Assert.Equal(0, kill(process.Id, 0)); // Still a waitable child: its numeric identity cannot be recycled.
@@ -143,18 +148,24 @@ public class ContainedProcessTests
     }
 
     [Fact]
-    public void AbandoningSupervisionRetainsANativeOwnerThroughEventualExit()
+    public async Task AbandoningSupervisionRetainsANativeOwnerThroughEventualExit()
     {
         using var run = new RunEstate();
         var directory = new RunDirectory(run.Service.Session.Manifest.Estate, Vericairn.Records.Identity.Ulid.NewUlid().Value);
         directory.Create();
-        RunSupervisor supervisor = RunSupervisor.Start("detached", FakeHarness.Command("close-output-short", run.Report("detached")), run.Scratch,
+        string report = run.Report("detached");
+        using var ready = new FileSignal(run.Scratch);
+        RunSupervisor supervisor = RunSupervisor.Start("detached", FakeHarness.Command("close-output", report), run.Scratch,
             WorkerEnvironment.Current(), new Vericairn.Packs.Software.GenericLauncher(), directory,
             new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(20) }, 60, null);
+        await ready.UntilAsync(() => File.Exists(report + ".closed"), "the child to close its output while staying alive", TestContext.Current.CancellationToken);
         Assert.Null(supervisor.Supervise(new CancellationToken(canceled: true)));
+        Assert.False(supervisor.NativeResourcesClosed);
+        File.WriteAllText(report + ".finish", "exit");
+        await supervisor.WhenNativeResourcesClosed.WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
         if (!OperatingSystem.IsWindows())
         {
-            bool reaped = SpinWait.SpinUntil(() => kill(supervisor.ProcessId, 0) != 0, TimeSpan.FromSeconds(20));
+            bool reaped = kill(supervisor.ProcessId, 0) != 0;
             if (!reaped)
             {
                 _ = waitpid(supervisor.ProcessId, out _, 1); // Clean up even when testing the old ownership bug.
@@ -167,10 +178,10 @@ public class ContainedProcessTests
         else
         {
             // Windows keeps the job alive until its processes exit; its process/job fields own SafeHandles.
-            Assert.True(SpinWait.SpinUntil(() => !Alive(supervisor.ProcessId), TimeSpan.FromSeconds(20)));
+            Assert.False(Alive(supervisor.ProcessId));
         }
 
-        Assert.True(SpinWait.SpinUntil(() => supervisor.NativeResourcesClosed, TimeSpan.FromSeconds(20)));
+        Assert.True(supervisor.NativeResourcesClosed);
         Assert.Null(directory.Read()!.ExitedAt);
         Assert.Null(directory.Read()!.Settled);
     }

@@ -32,7 +32,10 @@ public static class RuntimeCertificate
     public static X509KeyStorageFlags KeyStorage => LocalNetworkCredential.KeyStorage;
 
     /// <summary>Loads the certificate kept in a directory, creating or renewing it when absent, unreadable or close to expiry.</summary>
-    public static X509Certificate2 Load(string directory, string subject = "vericairn runtime")
+    public static X509Certificate2 Load(string directory, string subject = "vericairn runtime") =>
+        Load(directory, TimeProvider.System, subject);
+
+    internal static X509Certificate2 Load(string directory, TimeProvider clock, string subject = "vericairn runtime")
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         OwnerOnly(directory);
@@ -42,7 +45,7 @@ public static class RuntimeCertificate
             try
             {
                 X509Certificate2 existing = X509CertificateLoader.LoadPkcs12FromFile(path, null, KeyStorage);
-                if (existing.HasPrivateKey && !IsDue(existing, DateTimeOffset.UtcNow))
+                if (existing.HasPrivateKey && !IsDue(existing, clock.GetUtcNow()))
                 {
                     return Prepare(existing);
                 }
@@ -55,7 +58,7 @@ public static class RuntimeCertificate
             }
         }
 
-        return Create(path, subject);
+        return Create(path, subject, clock.GetUtcNow());
     }
 
     /// <summary>Replaces the certificate kept in a directory with a new one now; the file is swapped whole, so a reader sees one or the other.</summary>
@@ -63,7 +66,7 @@ public static class RuntimeCertificate
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         OwnerOnly(directory);
-        return Create(Path.Combine(directory, FileName), subject);
+        return Create(Path.Combine(directory, FileName), subject, DateTimeOffset.UtcNow);
     }
 
     /// <summary>Creates a directory, or keeps the one there, readable and writable by its owner only on Linux and macOS.</summary>
@@ -91,7 +94,7 @@ public static class RuntimeCertificate
         return "sha256:" + Convert.ToHexStringLower(certificate.GetCertHash(HashAlgorithmName.SHA256));
     }
 
-    private static X509Certificate2 Create(string path, string subject)
+    private static X509Certificate2 Create(string path, string subject, DateTimeOffset now)
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest($"CN={subject}", key, HashAlgorithmName.SHA256);
@@ -103,7 +106,6 @@ public static class RuntimeCertificate
         request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
         request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyAgreement, true));
         request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.1")], false));
-        DateTimeOffset now = DateTimeOffset.UtcNow;
         using X509Certificate2 created = request.CreateSelfSigned(now.AddMinutes(-5), now.Add(Validity));
         byte[] pkcs12 = created.Export(X509ContentType.Pkcs12);
         try

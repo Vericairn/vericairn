@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using Vericairn.Daemon;
 using Vericairn.Protocol;
 using Vericairn.Records.Signing;
+using Vericairn.Sdk;
 
 namespace Vericairn.Workbench.Tests;
 
@@ -24,6 +26,10 @@ public class LiveEstateTests(HeadlessFixture fixture)
         string? reviewText = Environment.GetEnvironmentVariable("VERICAIRN_LIVE_REVIEW");
         string? statement = Environment.GetEnvironmentVariable("VERICAIRN_LIVE_STATEMENT");
         Assert.SkipWhen(string.IsNullOrWhiteSpace(root) || string.IsNullOrWhiteSpace(actAs) || string.IsNullOrWhiteSpace(result) || string.IsNullOrWhiteSpace(reviewText) || string.IsNullOrWhiteSpace(statement), "VERICAIRN_LIVE_ESTATE, VERICAIRN_LIVE_ACT_AS, VERICAIRN_LIVE_RESULT, VERICAIRN_LIVE_REVIEW and VERICAIRN_LIVE_STATEMENT name a live estate, an acting principal, a result and the texts; unset, nothing is written.");
+        Assert.True(Directory.Exists(root), "Missing prerequisite: VERICAIRN_LIVE_ESTATE must name an available live estate.");
+        DaemonEndpoint? endpoint = DaemonHost.Discover(root!);
+        Assert.True(endpoint is not null && VericairnClient.IsAlive(endpoint),
+            "Missing prerequisite: the live estate must already have a responding daemon before the review and acceptance journey runs.");
 
         var shell = new ShellViewModel(r => new DaemonConnection(r), new CliRuntimeManager(), new Preferences(Seed.Temp("wb-prefs-live"))) { ActingOverride = actAs };
         MainWindow window = await fixture.Ui(() => { var w = new MainWindow(shell); w.Show(); return w; });

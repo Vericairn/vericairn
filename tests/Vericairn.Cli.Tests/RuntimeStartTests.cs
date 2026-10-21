@@ -22,9 +22,10 @@ public class RuntimeStartTests
         string root = CliHarness.TempDirectory("runtime-start");
         try
         {
+            CliHarness.RequireDaemonTransport();
             CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Runtime start.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit);
-            string executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn");
-            Assert.True(File.Exists(executable), executable);
+            string executable = CliHarness.BuiltExecutable;
+            Assert.True(File.Exists(executable), "Missing prerequisite: the built vericairn CLI executable.");
 
             var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (string argument in new[] { "--estate", root, "runtime", "start" })
@@ -36,11 +37,11 @@ public class RuntimeStartTests
             Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
             Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
             Task both = Task.WhenAll(output, error);
-            Task finished = await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(90), TestContext.Current.CancellationToken));
+            bool finished = await TestTiming.CompletesAsync(both, TestContext.Current.CancellationToken);
             try
             {
-                Assert.True(finished == both, "The output of 'runtime start' did not end within 90 seconds: the daemon holds the caller's output open.");
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                Assert.True(finished, "The output of 'runtime start' did not end before the hang guard: the daemon holds the caller's output open.");
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 Assert.True(process.ExitCode == 0, await output + await error);
                 Assert.Contains("serves", await output, StringComparison.Ordinal);
                 Assert.Contains("daemon", CliHarness.Ok("--estate", root, "runtime", "status").Out, StringComparison.Ordinal);
@@ -74,7 +75,7 @@ public class RuntimeStartTests
 
             // A directory where the live store's file belongs: the daemon cannot open its store and stops before it serves.
             Directory.CreateDirectory(live);
-            string executable = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn");
+            string executable = CliHarness.BuiltExecutable;
             var info = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (string argument in new[] { "--estate", root, "runtime", "start" })
             {
@@ -85,11 +86,11 @@ public class RuntimeStartTests
             Task<string> output = process.StandardOutput.ReadToEndAsync(TestContext.Current.CancellationToken);
             Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
             Task both = Task.WhenAll(output, error);
-            Task finished = await Task.WhenAny(both, Task.Delay(TimeSpan.FromSeconds(90), TestContext.Current.CancellationToken));
+            bool finished = await TestTiming.CompletesAsync(both, TestContext.Current.CancellationToken);
             try
             {
-                Assert.True(finished == both, "The output of a failed 'runtime start' did not end within 90 seconds.");
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken);
+                Assert.True(finished, "The output of a failed 'runtime start' did not end before the hang guard.");
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 string log = Path.Combine(Path.GetDirectoryName(live)!, "daemon.log");
                 string said = await error;
                 Assert.True(process.ExitCode != 0, await output + said);

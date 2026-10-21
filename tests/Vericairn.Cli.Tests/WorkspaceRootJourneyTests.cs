@@ -21,7 +21,11 @@ public class WorkspaceRootJourneyTests
     {
         await using var journey = new Journey(daemon, launcher);
         await journey.Configure();
-        if (daemon) Success(await journey.Binary("runtime", "start"));
+        if (daemon)
+        {
+            CliHarness.RequireDaemonTransport();
+            Success(await journey.Binary("runtime", "start"));
+        }
 
         CliHarness.Outcome refused = await journey.Run();
         Assert.Equal(2, refused.Code);
@@ -66,19 +70,21 @@ public class WorkspaceRootJourneyTests
         await using var journey = new Journey(daemon, "codex");
         await journey.Configure();
         Success(await journey.Binary("worker", "configure", "--workspaces", journey.Workspaces));
-        if (daemon) Success(await journey.Binary("runtime", "start"));
+        if (daemon)
+        {
+            CliHarness.RequireDaemonTransport();
+            Success(await journey.Binary("runtime", "start"));
+        }
         File.WriteAllText(journey.Report + ".behavior", "{\"pauseVersion\":true}");
         Task<CliHarness.Outcome> running = journey.Run();
         for (int probe = 1; probe <= 2; probe++)
         {
             string gate = journey.Report + ".version-" + probe.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            DateTimeOffset until = DateTimeOffset.UtcNow.AddSeconds(30);
-            while (!File.Exists(gate))
-            {
-                Assert.False(running.IsCompleted, running.IsCompleted ? (await running).Err : "");
-                Assert.True(DateTimeOffset.UtcNow < until, "The native stand-in did not reach the probe barrier.");
-                await Task.Delay(20, TestContext.Current.CancellationToken);
-            }
+            using var changed = new FileSignal(journey.Scratch);
+            await changed.UntilAsync(() => File.Exists(gate) || running.IsCompleted,
+                "the native stand-in's probe barrier", TestContext.Current.CancellationToken);
+            Assert.False(running.IsCompleted, running.IsCompleted ? (await running).Err : "");
+            Assert.True(File.Exists(gate), "The native stand-in did not reach the probe barrier.");
             if (probe == 2)
             {
                 string intent = Assert.Single(Directory.EnumerateFiles(Path.Combine(journey.Root, "records", "operation"), "*.json", SearchOption.AllDirectories));
@@ -165,7 +171,7 @@ public class WorkspaceRootJourneyTests
 
         public async Task<CliHarness.Outcome> Binary(params string[] arguments)
         {
-            var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "vericairn.exe" : "vericairn"))
+            var info = new ProcessStartInfo(CliHarness.BuiltExecutable)
             {
                 UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true,
             };
@@ -180,7 +186,7 @@ public class WorkspaceRootJourneyTests
             Task<string> error = process.StandardError.ReadToEndAsync(TestContext.Current.CancellationToken);
             try
             {
-                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TimeSpan.FromSeconds(90), TestContext.Current.CancellationToken);
+                await process.WaitForExitAsync(TestContext.Current.CancellationToken).WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken);
                 return new(process.ExitCode, await output, await error);
             }
             finally
@@ -204,7 +210,7 @@ public class WorkspaceRootJourneyTests
         using Process process = Process.Start(info)!;
         string output = process.StandardOutput.ReadToEnd();
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, error);
         return output.Trim();
     }

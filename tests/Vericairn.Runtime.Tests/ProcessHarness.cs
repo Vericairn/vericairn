@@ -2,7 +2,6 @@
 // Copyright (c) 2026 Jason Furr
 
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 
 namespace Vericairn.Runtime.Tests;
 
@@ -10,7 +9,7 @@ internal static class ProcessHarness
 {
     private const string Marker = "--vericairn-process-test";
 
-    internal static ProcessStartInfo Command(string scenario)
+    internal static ProcessStartInfo Command(string scenario, string? ready = null)
     {
         var info = new ProcessStartInfo(Environment.ProcessPath!)
         {
@@ -26,13 +25,35 @@ internal static class ProcessHarness
 
         info.ArgumentList.Add(Marker);
         info.ArgumentList.Add(scenario);
+        if (ready is not null) info.ArgumentList.Add(ready);
         return info;
     }
 
-    [ModuleInitializer]
-#pragma warning disable CA2255 // The test application hosts a synthetic child before the test platform starts.
+    internal sealed class Scenario(string scenario) : IDisposable
+    {
+        private readonly string directory = CreateDirectory();
+        private string Ready => Path.Combine(directory, "ready");
+        internal ProcessStartInfo Command => ProcessHarness.Command(scenario, Ready);
+
+        internal void WhenReady(Action action)
+        {
+            using var changed = new FileSignal(directory);
+            changed.Until(() => File.Exists(Ready), "the child process to enter its scenario");
+            Assert.True(File.Exists(Ready));
+            action();
+        }
+
+        public void Dispose() => Directory.Delete(directory, recursive: true);
+
+        private static string CreateDirectory()
+        {
+            string path = Path.Combine(Path.GetTempPath(), "vericairn-process-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(path);
+            return path;
+        }
+    }
+
     internal static void Intercept()
-#pragma warning restore CA2255
     {
         string[] arguments = Environment.GetCommandLineArgs();
         int at = Array.IndexOf(arguments, Marker);
@@ -42,7 +63,8 @@ internal static class ProcessHarness
         }
 
         // Even the broken sequential reader has a finite test lifetime.
-        new Thread(() => { Thread.Sleep(10_000); Environment.Exit(98); }) { IsBackground = true }.Start();
+        using var guard = new Timer(_ => Environment.Exit(98), null, TestTiming.HangTimeout, Timeout.InfiniteTimeSpan);
+        if (arguments.Length > at + 2) File.WriteAllText(arguments[at + 2], "ready");
         int code = Run(arguments[at + 1]);
         Console.Out.Flush();
         Console.Error.Flush();
@@ -54,7 +76,7 @@ internal static class ProcessHarness
         switch (scenario)
         {
             case "silent":
-                Thread.Sleep(5000);
+                using (var held = new ManualResetEventSlim()) held.Wait();
                 return 0;
             case "stderr":
                 Console.Error.Write(new string('e', 256 * 1024));

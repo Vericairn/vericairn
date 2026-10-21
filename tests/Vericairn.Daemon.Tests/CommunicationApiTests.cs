@@ -18,7 +18,7 @@ public class CommunicationApiTests
     {
         using var estate = new TestEstate(2);
         estate.Add("work-order", estate.OperatorId, """{"key":"COMM-1","kind":"ordinary","title":"A brief","intent":"Complete intent.","scope":["work"],"exitQuestion":"Done?","inputs":[],"deliverables":["result"]}""");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         using var client = new VericairnClient(host.Endpoint);
         WriteOutcome saved = client.CommunicationSet(new(estate.OperatorId, "person", new(Status: "comprehensive"), estate.OperatorId));
         Assert.True(saved.Ok, saved.Problem?.Message);

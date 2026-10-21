@@ -32,7 +32,7 @@ public sealed class RunFileFailureTests
             RetryWait = retryClock.Advance,
         }, "silent-ignore");
         run.Files.RequestStop(new StopRequest("2026-10-15T12:00:00Z", "test", "Keep this request."));
-        RunOutcome outcome = Assert.IsType<RunOutcome>(await run.Observe().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        RunOutcome outcome = Assert.IsType<RunOutcome>(await run.Observe().WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
 
         Assert.Equal("worker", outcome.Stop!.RequestedBy);
         Assert.Contains("could not read the stop request", outcome.Stop.Reason, StringComparison.Ordinal);
@@ -77,7 +77,7 @@ public sealed class RunFileFailureTests
             if (++attentionAttempts == 1) throw new IOException("Synthetic attention failure.");
             return "01M4TRNE1GYEK4P8MXQAB3C8Q4";
         });
-        RunOutcome outcome = Assert.IsType<RunOutcome>(await run.Observe().WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken));
+        RunOutcome outcome = Assert.IsType<RunOutcome>(await run.Observe().WaitAsync(TestTiming.HangTimeout, TestContext.Current.CancellationToken));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Null(outcome.Stop);
@@ -232,7 +232,7 @@ public sealed class RunFileFailureTests
         Assert.True(started.Ok, started.Message);
         run.Settled(started.Run);
         var files = new RunDirectory(run.Service.Session.Manifest.Estate, started.Run);
-        Assert.True(SpinWait.SpinUntil(() => files.Read()?.Settled is not null, TimeSpan.FromSeconds(10)), "The original run did not finish settlement.");
+        run.WaitUntil(() => files.Read()?.Settled is not null, "the original run to finish settlement");
         AgentRuns.Run original = AgentRuns.Find(run.Estate.Load(), started.Run)!;
         JsonObject body = JsonNode.Parse(original.Intent.Body.GetRawText())!.AsObject();
         body["identity"] = "agent-run:" + Ulid.NewUlid().Value;
@@ -259,7 +259,8 @@ public sealed class RunFileFailureTests
                 new GenericLauncher(), directory(estate, id, report),
                 new WorkerOptions { Heartbeat = TimeSpan.FromMilliseconds(10), Grace = TimeSpan.Zero, Clock = new WorkerClock() },
                 60, null, signalAttention: attention);
-            Assert.True(SpinWait.SpinUntil(() => File.Exists(report), TimeSpan.FromSeconds(10)), "The harness did not reach its readiness barrier.");
+            using var changed = new FileSignal(scratch);
+            changed.Until(() => File.Exists(report), "the harness readiness barrier", TestContext.Current.CancellationToken);
         }
 
         internal RunDirectory Files { get; }

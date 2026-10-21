@@ -100,7 +100,7 @@ public sealed class GitCommandAdapterTests : SourceAdapterConformance, IDisposab
         info.ArgumentList.Add("-q");
         using (Process process = Process.Start(info)!)
         {
-            process.WaitForExit();
+            Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         }
 
         Assert.False(Adapter.IsRepository(empty));
@@ -145,7 +145,7 @@ public sealed class GitCommandAdapterTests : SourceAdapterConformance, IDisposab
 
         using Process process = Process.Start(info)!;
         string error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        Assert.True(process.WaitForExit(TestTiming.HangTimeoutMilliseconds), "The fixture process did not exit.");
         Assert.True(process.ExitCode == 0, $"git {string.Join(' ', arguments)}: {error}");
     }
 }
@@ -250,6 +250,8 @@ public class ReleaseProviderConformanceTests
     public void TheGitHubCliProviderObservesAPublishedReleaseWhenALiveRunIsAskedFor()
     {
         Assert.SkipUnless(Environment.GetEnvironmentVariable("VERICAIRN_LIVE_GITHUB") == "1", "Set VERICAIRN_LIVE_GITHUB=1 with a logged-in GitHub CLI to observe Vericairn/vericairn v0.1.0 for real.");
+        TestPrerequisites.RequireExecutable("gh", "--version");
+        TestPrerequisites.RequireExecutable("gh", "auth", "status", "--hostname", "github.com");
         var provider = new GitHubReleaseProvider();
         Assert.Equal(IReleaseProvider.Contract, provider.Descriptor.Contract);
         ReleaseObservation release = provider.ObserveRelease("Vericairn/vericairn", "v0.1.0", Settings)!;

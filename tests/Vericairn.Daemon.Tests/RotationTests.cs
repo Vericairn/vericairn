@@ -76,14 +76,15 @@ public class RotationTests
         await using LocalNetworkHarness harness = await LocalNetworkHarness.StartAsync();
         RuntimeConnection connection = harness.Pair(harness.Estate.BuilderId);
         string before = harness.Host.Endpoint.Loopback!.Certificate;
-        Assert.False(harness.Host.RotateIfDue(DateTimeOffset.UtcNow));
+        DateTimeOffset now = harness.Time.GetUtcNow();
+        Assert.False(harness.Host.RotateIfDue(now));
         Assert.Equal(before, harness.Host.Endpoint.Loopback!.Certificate);
 
         // Within the renewal window before its expiry, the schedule replaces it.
-        DateTimeOffset due = DateTimeOffset.UtcNow + RuntimeCertificate.Validity - RuntimeCertificate.RenewBefore + TimeSpan.FromDays(1);
+        DateTimeOffset due = now + RuntimeCertificate.Validity - RuntimeCertificate.RenewBefore + TimeSpan.FromDays(1);
         Assert.True(harness.Host.RotateIfDue(due));
         Assert.NotEqual(before, harness.Host.Endpoint.Loopback!.Certificate);
-        Assert.False(harness.Host.RotateIfDue(DateTimeOffset.UtcNow));
+        Assert.False(harness.Host.RotateIfDue(now));
         Assert.Equal(ConnectionStates.Current, harness.Connections.Probe(connection).State);
     }
 
@@ -116,7 +117,7 @@ public class RotationTests
         using VericairnClient genuine = harness.Connections.Connect(connection);
         using X509Certificate2 old = X509CertificateLoader.LoadPkcs12(stolen, null);
         await using var impostor = new Impostor(old, nonce => JsonSerializer.Serialize(genuine.RuntimeIdentity(nonce), ProtocolJson.Options));
-        ConnectionStatus misled = harness.Connections.Probe(connection with { Id = Ulid.NewUlid().Value, Address = impostor.Address, LastCurrent = null }, TimeSpan.FromSeconds(5));
+        ConnectionStatus misled = harness.Connections.Probe(connection with { Id = Ulid.NewUlid().Value, Address = impostor.Address, LastCurrent = null }, TestTiming.HangTimeout);
         Assert.Equal(ConnectionStates.Unavailable, misled.State);
         Assert.Contains("did not prove the runtime identity", misled.Message, StringComparison.Ordinal);
 

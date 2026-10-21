@@ -19,7 +19,7 @@ public sealed class ChangesApiTests
 
     public ChangesApiTests() => DaemonTestHome.Ensure();
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = TestTiming.HangTimeoutMilliseconds)]
     public async Task AllFourSdkOperationsRoundTripTheirRecordedOutcomesThroughTheLocalApi()
     {
         using var estate = new TestEstate(3);
@@ -32,7 +32,7 @@ public sealed class ChangesApiTests
         var provider = new MemoryPullRequestProvider { Checks = [new("tests", Head, "completed", "success")] };
         var push = new LocalStandIn();
         TestContext.Current.TestOutputHelper!.WriteLine("Starting the local daemon.");
-        await using DaemonHost host = await DaemonHost.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
+        await using DaemonHost host = await DaemonTestHome.StartAsync(estate.Root, loopback: false, cancellationToken: TestContext.Current.CancellationToken);
         TestContext.Current.TestOutputHelper!.WriteLine("The local daemon started.");
         host.Service.Providers = new() { PushAdapter = push, SecretScanner = push };
         host.Service.Providers.Register(provider);

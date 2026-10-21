@@ -121,6 +121,7 @@ public sealed class RunSupervisor
     public int ProcessId => process.Id;
 
     internal bool NativeResourcesClosed => process.IsClosed;
+    internal Task WhenNativeResourcesClosed => process.WhenClosed;
 
     /// <summary>
     /// Starts a harness: the command line in the workspace with the environment given and nothing else, its standard input closed so
@@ -172,7 +173,7 @@ public sealed class RunSupervisor
             throw new ProviderRefusedException($"{command[0]} could not be started here: {exception.Message}", exception);
         }
 
-        DateTimeOffset launchedAt = DateTimeOffset.UtcNow;
+        DateTimeOffset launchedAt = options.Clock.GetUtcNow();
         var state = new RunObservedState
         {
             Run = run,
@@ -233,7 +234,7 @@ public sealed class RunSupervisor
                 return null;
             }
 
-            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = options.Clock.GetUtcNow();
             lock (gate)
             {
                 state.Heartbeat = RecordParser.FormatTimestamp(now);
@@ -318,7 +319,7 @@ public sealed class RunSupervisor
             {
                 PublishSignals();
             }
-            DateTimeOffset exited = DateTimeOffset.UtcNow;
+            DateTimeOffset exited = options.Clock.GetUtcNow();
             state.ExitCode = process.ExitCode;
             state.ExitedAt = RecordParser.FormatTimestamp(exited);
             state.Tokens = tokensIncomplete || usageInFlight ? null : tokens;
@@ -385,7 +386,7 @@ public sealed class RunSupervisor
         }
 
         transmittedTick = options.Clock.GetTimestamp();
-        transmitted = DateTimeOffset.UtcNow;
+        transmitted = options.Clock.GetUtcNow();
         state.Stop = state.Stop with { TransmittedAt = RecordParser.FormatTimestamp(transmitted.Value), Transmission = transmission.ToString() };
     }
 
@@ -427,7 +428,7 @@ public sealed class RunSupervisor
         {
             if (state.Stop is { TransmittedAt: not null, AcknowledgedAt: null })
             {
-                state.Stop = state.Stop with { AcknowledgedAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), Acknowledgment = how };
+                state.Stop = state.Stop with { AcknowledgedAt = RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), Acknowledgment = how };
                 Save();
             }
         }
@@ -448,7 +449,7 @@ public sealed class RunSupervisor
                 lock (gate)
                 {
                     lastEventTick = options.Clock.GetTimestamp();
-                    state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow) };
+                    state.Liveness = state.Liveness! with { LastEventAt = RecordParser.FormatTimestamp(options.Clock.GetUtcNow()) };
                     options.AfterEvent?.Invoke();
                 }
 
@@ -507,13 +508,13 @@ public sealed class RunSupervisor
                     lock (gate)
                     {
                         tokensIncomplete = true;
-                        AddSignal(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), "The worker could not fully inspect a harness event; usage and command audit may be incomplete."));
+                        AddSignal(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), "The worker could not fully inspect a harness event; usage and command audit may be incomplete."));
                     }
                 }
 
                 lock (gate)
                 {
-                    state.Output = RecordParser.FormatTimestamp(DateTimeOffset.UtcNow);
+                    state.Output = RecordParser.FormatTimestamp(options.Clock.GetUtcNow());
                     tokensIncomplete |= signal?.UsageIncomplete == true;
                     if (signal?.UsageStarted == true)
                     {
@@ -619,7 +620,9 @@ public sealed class RunSupervisor
             state.Signals.Add(signal);
             if (signal.Severity == "critical" && state.Stop is null)
             {
-                Begin(new StopRequest(signal.At, "worker", $"Critical {signal.Code} signal: {signal.Summary}"));
+                // The worker requests this stop on its own clock, which also stamps its transmission and containment, so the
+                // recorded order holds whichever clock stamped the signal.
+                Begin(new StopRequest(RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), "worker", $"Critical {signal.Code} signal: {signal.Summary}"));
             }
 
             Save();
@@ -679,7 +682,7 @@ public sealed class RunSupervisor
             if (existing < 0)
             {
                 // Do not call AddSignal here: it calls Save. The next observation publishes attention.
-                state.Signals.Add(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(DateTimeOffset.UtcNow), summary));
+                state.Signals.Add(new RunSignal("audit-unverified", "warning", RecordParser.FormatTimestamp(options.Clock.GetUtcNow()), summary));
             }
             else if (!state.Signals[existing].Summary.Contains(summary, StringComparison.Ordinal))
             {

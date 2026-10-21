@@ -6,6 +6,7 @@
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -18,12 +19,22 @@ TOOL = ROOT / "artifacts/bin/Vericairn.DocsTool/release/vericairn-docs.dll"
 
 class CompanionBuildTests(unittest.TestCase):
     def setUp(self):
+        self.assertIsNotNone(shutil.which("git"), "Missing prerequisite: git for the companion source inventory.")
+        self.assertIsNotNone(shutil.which("dotnet"), "Missing prerequisite: dotnet must be installed for the companion build tests.")
+        self.assertIsNotNone(shutil.which("ruby"), "Missing prerequisite: Ruby for the retained workflow source adapter.")
+        self.assertTrue(TOOL.is_file(), "Missing prerequisite: the Release build of Vericairn.DocsTool.")
         self.temporary = tempfile.TemporaryDirectory(prefix="companion-build-", dir=ROOT / "artifacts")
         self.root = Path(self.temporary.name)
         self.home = self.root / "home"
         self.home.mkdir()
         # Establish an empty test home without inspecting or copying the caller's setting.
         os.environ["VERICAIRN_HOME"] = str(self.home)
+        commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        version = subprocess.run(["dotnet", str(TOOL), "--version"], cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(0, commit.returncode, "Missing prerequisite: the local source checkout's HEAD commit.")
+        self.assertEqual(0, version.returncode, "Missing prerequisite: a runnable Release build of Vericairn.DocsTool.")
+        self.assertIn(commit.stdout.strip(), version.stdout,
+                      "Missing prerequisite: Vericairn.DocsTool rebuilt in Release at the checkout's HEAD commit.")
         self.output = self.root / "set"
         self.declaration = self.root / "documents.json"
         self.declaration.write_text('["cli-reference.md", "api-reference.md", "record-reference.md"]\n', encoding="utf-8")
@@ -32,7 +43,8 @@ class CompanionBuildTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def tool(self, *args, expected=0, cwd=ROOT):
-        result = subprocess.run(["dotnet", str(TOOL), *map(str, args)], cwd=cwd, capture_output=True, text=True, timeout=45)
+        # Process completion is the signal; this ceiling only detects a hung tool.
+        result = subprocess.run(["dotnet", str(TOOL), *map(str, args)], cwd=cwd, capture_output=True, text=True, timeout=120)
         self.assertEqual(expected, result.returncode, result.stdout + result.stderr)
         return result.stdout + result.stderr
 
