@@ -234,7 +234,10 @@ use the explicitly prepared release commit at submission and the actual build co
 For another registered repository, the gate uses its HEAD, or the latest clearing review's commit
 when Git proves that HEAD is its ancestor. Covered paths and cleared bytes use the same selection.
 Changed bytes, covered paths, absent reviews and unreadable registered clones refuse the applicable
-gate. An unregistered clone is explicitly not compared by that document gate; a refuse-level policy
+gate. A refuse-level document whose repository has no clone registered here also refuses, naming the repository and
+`vericairn sources clone <path> --resource <id>`; only the operator's signed, expiring grant of scope
+`release-document-uncompared:<declaration>@<version>` to the submitting principal excepts it, and the release evidence
+names that grant. A warn-level document without a registered clone is reported as not compared. A refuse-level policy
 with unavailable required source bytes still holds the release. No gate fetches or checks out sources.
 Normal `docs living` uses clone HEAD, and estate files use the estate's working tree. Current estate
 records supply triggers and reviews; they are not a historical estate snapshot at the release commit.
@@ -702,6 +705,21 @@ other untracked changes still count. Committed history remains separately audite
 committed audit can retain the branch for review when the file inventory is incomplete. Timed-out
 checks retry once; a credential check that still cannot finish requests containment.
 
+In 0.8.1, FIX-34 removes quoting as a POSIX shell does before the workspace test, so a partly quoted
+path such as `''"$HOME"/x` or `..''/x` resolves to the path the shell would use. `dash`, `ksh`, `mksh`,
+`ash`, `yash`, `posh` and `eval` have their inner commands inspected. A program the captured environment
+cannot resolve (`$RUNNER`) or a shell with another syntax (`fish`, `csh`, `tcsh`, `nu` and others)
+warns with `audit-unverified`, and its `-c` body is still read. A recursive copy, archive or sync of the
+home's `estates` directory, of one estate's directory or of one clone's directory is critical, like the home
+itself; copies inside a workspace under an estate's `workspaces` directory are not. Commands a
+script file runs, earlier shell functions and aliases, programs reached through a changed `PATH`, and
+unclassified programs whose operands look like workspace paths still give no signal.
+
+FIX-35 makes settlement exclude only what the run's starting ignore rules exclude: the base commit's
+committed `.gitignore` files and the `info/exclude` captured before launch. An ignore file the run
+changed or added, or a changed `info/exclude`, is never applied and counts as a change outside the brief.
+A nested repository anywhere in the workspace, even under an excluded directory, marks the audit incomplete.
+
 FIX-25 removes a newly prepared, unused workspace after pre-dispatch refusal only when its complete
 inventory still matches preparation. Reused, changed, concurrently used or incompletely inspected
 workspaces are preserved with a warning. Windows opens use extended paths for the longer staging
@@ -1031,9 +1049,11 @@ The queue and one-step command are not MCP tools.
 body and identity, presence, authority and the separate uncommitted receipts.
 
 `changes push`, `open`, `merge` and `observe` require repository-write authority.
-The push scans the exact complete commit range using installed Gitleaks; missing
-history, scanner or a complete report refuses it. Merges require every declared
-check and every reported check to pass at the pinned head; missing, skipped,
+The push scans the exact complete commit range using installed Gitleaks 8.25.0 or
+later and Vericairn's own rules, which keep none of gitleaks' built-in allowlists;
+missing history, scanner or a complete report refuses it. Merges require a recorded
+scanned push of the pinned head, and every declared check and every reported check
+to pass at that head; missing, skipped,
 pending or stale checks refuse. The provider performs a synchronous merge with
 an atomic head condition, then observes target checks at that merge commit.
 Pending or failed target checks remain incomplete even after a confirmed merge.

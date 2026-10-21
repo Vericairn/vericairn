@@ -7,6 +7,8 @@ using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
+using Vericairn.Records.Identity;
+using Vericairn.Records.Signing;
 using Vericairn.Records.Tests;
 using Vericairn.Runtime.Providers;
 using Vericairn.Runtime.Service;
@@ -212,19 +214,76 @@ public sealed class ReleaseDocumentGateTests
     }
 
     [Fact]
-    public void AnUnregisteredOtherRepositoryIsReportedAsNotComparedAtItsOwnCommit()
+    public void AnUnregisteredRepositoryHoldsItsRefuseLevelDocumentBeforeIntent()
+    {
+        using var fixture = new Fixture(otherRepository: true);
+        fixture.Review(fixture.Commit("Reviewed documentation."));
+        // The de-registration step 0.7.3's and 0.8.0's submissions used: the machine's clone registration removed.
+        File.Delete(EstateLocations.ClonesPath(fixture.Estate.Estate.Id));
+
+        ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.False(response.Ok);
+        Assert.Contains("README.md: no clone of Widget source", response.Message, StringComparison.Ordinal);
+        Assert.Contains("vericairn sources clone <path> --resource " + fixture.Resource.Id, response.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Provider.Dispatches);
+        Assert.Empty(fixture.Service.Records("operation"));
+    }
+
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("expired", false)]
+    [InlineData("other-version", false)]
+    [InlineData("no-expiry", false)]
+    [InlineData("unsigned", false)]
+    [InlineData("not-operator", false)]
+    public void OnlyTheOperatorsSignedExpiringGrantForThisVersionExceptsAnUncomparedDocument(string grant, bool excepted)
     {
         using var fixture = new Fixture(otherRepository: true);
         fixture.Review(fixture.Commit("Reviewed documentation."));
         File.Delete(EstateLocations.ClonesPath(fixture.Estate.Estate.Id));
+        string scope = ReleaseCoordinationService.UncomparedScope(fixture.Service.Session.Load(), fixture.Declaration, grant == "other-version" ? "1.0.1" : "1.0.0");
+        string? expires = grant switch { "expired" => "2026-10-14T00:00:00Z", "no-expiry" => null, _ => "2030-01-01T00:00:00Z" };
+        RecordEnvelope recorded = Grant(fixture, scope, expires, sign: grant != "unsigned", byOperator: grant != "not-operator");
 
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
-        Assert.True(response.Ok, response.Message);
-        RecordEnvelope intent = fixture.Service.Session.Load().OfType("operation").Single(r => EstateModel.BodyString(r, "status") == "not-started");
-        string evidence = intent.Body.GetProperty("evidence").GetRawText();
-        Assert.Contains("README.md not compared, since no clone of its repository is registered here", evidence, StringComparison.Ordinal);
-        Assert.DoesNotContain(fixture.Provider.HeadSha, evidence, StringComparison.Ordinal);
-        Assert.Single(fixture.Provider.Dispatches);
+        Assert.True(excepted == response.Ok, response.Message);
+        if (excepted)
+        {
+            string evidence = fixture.Service.Session.Load().OfType("operation").Single(r => EstateModel.BodyString(r, "status") == "not-started").Body.GetProperty("evidence").GetRawText();
+            Assert.Contains("README.md not compared", evidence, StringComparison.Ordinal);
+            Assert.Contains("under signed grant " + recorded.Id, evidence, StringComparison.Ordinal);
+            Assert.Single(fixture.Provider.Dispatches);
+        }
+        else
+        {
+            Assert.Contains("README.md: no clone of Widget source", response.Message, StringComparison.Ordinal);
+            Assert.Empty(fixture.Provider.Dispatches);
+            Assert.Empty(fixture.Service.Records("operation"));
+        }
+    }
+
+    // A grant of one scope to the operator, by the operator or by the builder, signed with a fixture device or not.
+    private static RecordEnvelope Grant(Fixture fixture, string scope, string? expires, bool sign, bool byOperator)
+    {
+        var store = new FileKeyStore(Path.Combine(fixture.Scratch.Root, "grant-keys"));
+        string op = fixture.Estate.OperatorId;
+        StoreSigner operatorSigner = Device(fixture, store, op, null);
+        StoreSigner signer = byOperator ? operatorSigner : Device(fixture, store, fixture.Estate.BuilderId, operatorSigner);
+        RecordEnvelope decision = fixture.Estate.Add("decision", op, $$"""{"title":"Release without comparing one document","statement":"Except README.md's comparison for this release only.","summary":"A bounded test exception.","synthesis":"Test evidence.","effects":["One uncompared document."],"affects":[],"decidedBy":"{{op}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":["publication"]}""", signer: operatorSigner);
+        string expiry = expires is null ? "" : $$""","expires":"{{expires}}" """.TrimEnd();
+        return fixture.Estate.Add("authority", byOperator ? op : fixture.Estate.BuilderId, $$"""{"grantee":"{{op}}","scope":["{{scope}}"],"reserved":["publication"],"conditions":["Only while this machine cannot register the repository's clone."],"basis":"{{decision.Id}}"{{expiry}}}""",
+            signer: sign ? signer : null);
+    }
+
+    // A principal's signing device, admitted by the operator's device, or by itself as the operator's first device.
+    private static StoreSigner Device(Fixture fixture, FileKeyStore store, string principal, StoreSigner? admitter)
+    {
+        string id = Ulid.NewUlid().Value;
+        string key = RecordSigning.EncodePublicKey(store.Create(id));
+        var signer = new StoreSigner(store, id);
+        RecordEnvelope device = fixture.Estate.Add("device", principal, $$"""{"principal":"{{principal}}","name":"Test signing device","platform":"linux","custody":"file-owner-only","algorithm":"ecdsa-p256-sha256","publicKey":"{{key}}","profiles":["embedded"],"presence":"none","purpose":"signing"}""", id: id, signer: signer);
+        fixture.Estate.Add("admission", fixture.Estate.OperatorId, $$"""{"principal":"{{principal}}","status":"admitted","note":"Test signing device."}""", subject: device.Reference, signer: admitter ?? signer);
+        return signer;
     }
 
     [Fact]

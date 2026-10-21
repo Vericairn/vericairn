@@ -91,7 +91,10 @@ before retrying. Observation persists that uncertainty even when it subsequently
 draft; the response can include the recorded operation. Observation checks the release repository's documents at the
 actual build commit again before recording success or a candidate. Missing commits refuse with fetch guidance,
 without substituting clone HEAD. Documents in other repositories use their own registered HEAD commits in both checks,
-or the reviewed commit when HEAD is its ancestor; unregistered clones are reported as not compared.
+or the reviewed commit when HEAD is its ancestor. A refuse-level document whose repository has no clone registered on the
+submitting machine refuses, unless the operator's signed, expiring grant of scope
+`release-document-uncompared:<declaration>@<version>` to the submitting principal excepts it; the release evidence names that grant.
+A warn-level document without a registered clone is reported as not compared.
 Provider I/O runs outside the service gate; this is not distributed
 exactly-once execution across independently running services.
 

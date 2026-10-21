@@ -16,7 +16,7 @@ public class FontLicenseTests
         string root = RepositoryRoot();
         string fonts = Path.Combine(root, "src", "Vericairn.Workbench", "Assets", "Fonts");
         string notices = File.ReadAllText(Path.Combine(root, "THIRD-PARTY-NOTICES.md"));
-        string workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "release.yml"));
+        string workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "package.yml"));
         string[] families = Directory.EnumerateFiles(fonts, "*.ttf").Select(f => Path.GetFileNameWithoutExtension(f).Split('-')[0]).Distinct().Order(StringComparer.Ordinal).ToArray();
         Assert.Equal(["Inter", "JetBrainsMono"], families);
         foreach (string family in families)

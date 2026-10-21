@@ -13,7 +13,10 @@ namespace Vericairn.Cli.Tests;
 /// </summary>
 public partial class LicenseTests
 {
-    private static readonly string[] NotDistributed = ["Avalonia.BuildServices"];
+    // Build-time only: Avalonia's build services, and the single-file and trimming analyzers the distributables' publish loads.
+    private static readonly string[] NotDistributed = ["Avalonia.BuildServices", "Microsoft.NET.ILLink.Tasks"];
+    private static readonly string[] ShippedProjects = ["Vericairn.Cli", "Vericairn.Workbench"];
+    private static readonly string[] LockFiles = ["packages.lock.json", "packages.distributable.lock.json"];
 
     [Fact]
     public void EveryShippedPackageIsInTheNoticesWithALicenseTextTheArchivesCarry()
@@ -21,9 +24,10 @@ public partial class LicenseTests
         string root = RepositoryRoot();
         string notices = File.ReadAllText(Path.Combine(root, "THIRD-PARTY-NOTICES.md"));
         var shipped = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (string project in new[] { "Vericairn.Cli", "Vericairn.Workbench" })
+        // The packages and the self-contained distributables, whose platform graphs have their own lock files.
+        foreach (string lockPath in ShippedProjects.SelectMany(project => LockFiles.Select(name => Path.Combine(root, "src", project, name))))
         {
-            using JsonDocument lockFile = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "src", project, "packages.lock.json")));
+            using JsonDocument lockFile = JsonDocument.Parse(File.ReadAllText(lockPath));
             foreach (JsonProperty framework in lockFile.RootElement.GetProperty("dependencies").EnumerateObject())
             {
                 foreach (JsonProperty package in framework.Value.EnumerateObject())
@@ -67,7 +71,7 @@ public partial class LicenseTests
             Assert.True(new FileInfo(file).Length > 0, file);
         }
 
-        string workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "release.yml"));
+        string workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "package.yml"));
         Assert.Contains("cp licenses/*.txt \"out/$rid/licenses/\"", workflow, StringComparison.Ordinal);
         Assert.Contains("cp licenses/*.txt licenses/workbench/*.txt \"out-workbench/$rid/licenses/\"", workflow, StringComparison.Ordinal);
     }

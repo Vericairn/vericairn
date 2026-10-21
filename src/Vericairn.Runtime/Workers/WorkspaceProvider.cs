@@ -26,6 +26,12 @@ public sealed record WorkspaceSnapshot(IReadOnlyDictionary<string, string> Files
 
     /// <summary>Worker exports omitted from settlement changes, retained locally for unused-workspace cleanup.</summary>
     public IReadOnlyDictionary<string, string>? RunFiles { get; init; }
+
+    /// <summary>Before a run, the hash of the repository's info/exclude, so settlement applies it only when the run left it unchanged.</summary>
+    public string? ExcludeHash { get; init; }
+
+    /// <summary>At settlement, the ignore files that differ from the run's starting rules; settlement never applies them.</summary>
+    public IReadOnlyList<string>? IgnoreChanges { get; init; }
 }
 
 /// <summary>

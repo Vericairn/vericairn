@@ -158,7 +158,8 @@ public sealed partial class GitWorktreeWorkspaces : IWorkspaceProvider
     /// <inheritdoc />
     public RunScope CheckScope(PreparedWorkspace workspace, WorkspaceSnapshot baseline, IReadOnlyList<string> permitted)
     {
-        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory);
+        WorkspaceSnapshot after = WorkspaceScopeProbe.Capture(workspace.Path, WorkspaceScopeAudit.Deadline, auditCommand, workspace.Branch, workspace.Commit, baseline.GitDirectory,
+            startExclude: baseline.ExcludeHash);
         RunScope scope = WorkspaceScopeAudit.Compare(baseline, after, permitted);
         if (reviews.TryGetValue(workspace, out Review? review))
             review.Head = baseline.Identity is not null && baseline.Identity == after.Identity

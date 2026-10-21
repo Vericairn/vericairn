@@ -195,8 +195,16 @@ public static class EstateLoader
         // the recorded upgrade. Records written before an upgrade keep the format, and the rules, they were written in.
         if (model.Manifest is not null)
         {
+            // An upgrade stopped between its migration record and the manifest is reported, not refused: rerunning it finishes the move.
+            RecordEnvelope? pending = UpgradeProgress.Pending(model.Manifest, records);
+            if (pending is not null)
+            {
+                findings.Warning("upgrade.incomplete", pending.ExpectedPath, $"Migration {pending.Id} moves the estate from {model.Manifest.Describe()} to {EstateModel.BodyString(pending, "toPin")}, and the manifest has not moved yet; `vericairn estate upgrade` to that release finishes it.");
+            }
+
             foreach (RecordEnvelope record in records.Where(r => r.Format > model.Manifest.RecordFormat))
             {
+                if (ReferenceEquals(record, pending) && UpgradeProgress.MovesToItsOwnFormat(model.Manifest, record)) continue;
                 findings.Error("record.format-ahead", record.ExpectedPath, $"This record states record format {record.Format}, and the estate is at format {model.Manifest.RecordFormat}; `vericairn estate upgrade` to a release that writes format {record.Format} moves the estate first.");
             }
         }

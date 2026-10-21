@@ -400,8 +400,11 @@ The release as intent, then observed effect:
    follows resource revisions and the provider's location keys at the effective release destination,
    including a request override. A missing clearing review,
    unknown required commit, missing contribution or absent local Git object refuses the applicable
-   gate. A document with no registered clone is reported as not compared; the independent review
-   reads it at a commit of its own repository. The runtime neither fetches nor checks out anything,
+   gate. A refuse-level document with no registered clone refuses too, naming `vericairn sources clone`,
+   unless the operator's signed, expiring grant of scope `release-document-uncompared:<declaration>@<version>`
+   to the submitting principal excepts it; the intent names that grant, and the independent review reads
+   the document at a commit of its own repository. A warn-level document with no registered clone is
+   reported as not compared. The runtime neither fetches nor checks out anything,
    and the intent records the comparisons. Estate-file checks still read the estate's working tree.
    [Estate policies](policies.md) add their applicable refuse holds to this same conjunction, including
    unavailable sources and overdue duties. Format 3 requires the exact commit, expected product hash and
@@ -554,9 +557,31 @@ the exact accepted draft. Changing both assets and their checksum file would not
 
 From 0.7.2, CI checks every workflow's external action and reusable-workflow reference against
 `.github/workflows/actions.allow`, requiring a full commit SHA. Tags, short hashes, expressions, local
-and container references are refused. This checks the repository's declared list, not the organization's
-live Actions settings. The NuGet pull-request job builds packages and symbols, writes checksums and runs
-the same verifier used by publication, without a NuGet login, identity-token permission or upload.
+actions and container references are refused; from 0.8.1 a reusable workflow beside the others in
+`.github/workflows` is allowed, since the same check covers it. This checks the repository's declared list,
+not the organization's live Actions settings.
+
+From 0.8.1 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
+`release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no
+release-only step can first fail during a release. It checks the version, restores locked, compares the
+documentation set with the build over the full history, packs, publishes the self-contained command line and
+Workbench for six platforms, writes the bill of materials, the documentation archive, the readable build
+reports, the checksums and the notes, and runs the same package verifier publication uses. Until release
+preparation writes a version's own set, and while `VersionPrefix` still names a released, frozen set, a
+change compares a provisional set generated from its own build instead; a release requires its own set.
+The path creates no tag, release or upload and holds only a read token. `release.yml`'s draft job alone
+creates the draft: it holds the write token, in that one step, and checks nothing out. Every checkout drops
+its credentials, and every workflow input reaches a script through an environment variable, never
+interpolated into it. `nuget.yml` has no pull-request trigger, so no pull request reports its skipped job.
+
+The self-contained publishes restore locked from committed runtime-specific lock files:
+`packages.distributable.lock.json` beside each `packages.lock.json` of the projects the command line and
+Workbench ship, for the six platforms. Ordinary builds and the NuGet packages keep the portable graph. After a
+dependency change, regenerate them by restoring `src/Vericairn.Cli` and `src/Vericairn.Workbench` with
+`-p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true`; the locked restore refuses
+stale ones. The bill of materials is generated from those restores without restoring again, so it describes
+the packages and every platform graph of the distributables, and a check confirms it names every package
+their lock files hold. Every tool the path installs is pinned to an exact version.
 
 The publication job has `contents: read` and `id-token: write`. The pinned `NuGet/login` action exchanges its
 GitHub identity through nuget.org Trusted Publishing, using `NUGET_USER`, a repository variable, and
@@ -942,7 +967,14 @@ workspace after the whole process boundary exits. It enumerates the workspace it
 must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
 are compared, including deletions, renames and untracked files. FIX-26 excludes untracked ignored output before
 opening it, using repository ignore rules and a copied index through isolated Git configuration. Tracked files
-still count even when they match an ignore rule. The worker's untracked `.vericairn/brief.md` and
+still count even when they match an ignore rule. From 0.8.1 (FIX-35) settlement applies only the run's starting
+rules, which the run could not change: the prepared base commit's committed `.gitignore` files and the
+repository's `info/exclude` as captured before launch, never the user's global ignore file. The ignore files,
+`info/exclude` and index the agent left are never applied, and files the base commit tracks stay tracked even when
+the agent untracks them. Every ignore file that differs from the starting rules, including a new one anywhere and a
+changed `info/exclude` (reported as `.git/info/exclude`), counts as a change outside the brief whatever the brief
+permits. A nested repository or submodule anywhere in the workspace, including under an excluded directory, marks the
+audit incomplete. The worker's untracked `.vericairn/brief.md` and
 `.vericairn/.gitignore` are excluded from comparison; their fingerprints remain available for refusal cleanup.
 Other non-ignored files there still count. Refusal cleanup separately inventories
 everything, including ignored files, before deciding whether an unused workspace can be removed.
@@ -1030,7 +1062,10 @@ Recognizable network commands, structured network URLs and web tools produce war
 network attempt. Credential access remains critical for reads, copies and listings as well as writes. FIX-20 recognizes
 the Vericairn home's `keys/` (file keys and the other stores' local handles), `connections/` (paired runtime and device
 state), and `estates/<estate>/<clone>/runtime-certificate.p12` and `runtime-identity.json`, including the identity's
-pending `.tmp` file. Listing the per-clone runtime directory itself also counts, including a listing or search with
+pending `.tmp` file. A recursive copy, archive or sync of the home, an ancestor of it, its `estates` directory, one estate's
+directory or one clone's directory, which hold each clone's `live.db` with its runtime certificate and identity,
+is critical too; a workspace beside them in an estate's `workspaces` directory holds none.
+Listing the per-clone runtime directory itself also counts, including a listing or search with
 no path operand after a known directory change. These are the stores used by `VericairnHome`, `DeviceKeyStores`, `RuntimeConnections`,
 `EstateLocations`, `RuntimeCertificate` and `RuntimeIdentity`; pending pairing codes themselves exist only in daemon
 memory. Recognizable `.p8` and `.p12` operands, the existing credential paths and secret environment variables,
@@ -1041,6 +1076,8 @@ warning; `git credential reject` does not produce a credential-output signal.
 
 The audit resolves absolute paths, traversal, `~`, simple `$NAME`, `${NAME}`, `$env:NAME` and `%NAME%` substitutions
 from the captured launch environment, and simple assignments and exports visible within the reported command.
+Quoting is removed as a POSIX shell removes it, so a partly quoted word such as `''"$HOME"/x` or `..''/x` resolves to
+the path the shell would use; a backslash escapes only where it is not the path separator.
 It derives the default Vericairn home from those captured platform home/configuration variables when no override is
 supplied. It reads no credential content and does not consult an ambient environment to resolve a reported path.
 An unresolved expansion cannot establish its target and raises `audit-unverified`; independently recognizable
@@ -1078,7 +1115,10 @@ a system temporary directory or take a boundary from tool-event input; system `/
 run's supplied temporary variable names it.
 
 Common options of `env`, `sudo`, `nohup`, `time`, `nice`, `timeout`, `command`, `exec` and `busybox`, including
-nested wrappers, do not hide the inner command. Known `cd`/`chdir`/`Set-Location` targets and wrapper directory options
+nested wrappers, do not hide the inner command. The `-c` body of `bash`, `sh`, `zsh`, `dash`, `ksh`, `mksh`, `ash`,
+`yash` and `posh`, and `eval`'s operands, are inspected as commands. A program in command position that the captured
+environment cannot resolve, such as `$RUNNER`, and a shell with another syntax (`fish`, `csh`, `tcsh`, `nu`, `xonsh`,
+`elvish`, `rc`, `es`, `ion` or `ysh`) raise `audit-unverified`; their `-c` body is still read as a POSIX shell's. Known `cd`/`chdir`/`Set-Location` targets and wrapper directory options
 supply the base for subsequent relative operands. Child shells and pipelines do not change the parent's base;
 a failure branch does not assume a preceding directory change succeeded. Quoted operators and message text remain
 text. Git message values (`-m`, `--message`, `--message=…`) for commit, tag, merge, revert, notes and stash are not paths.
@@ -1088,14 +1128,18 @@ objects. A directory supplied to a classified Git read is a read target, and cop
 Mutating or helper-executing options such as `find -delete`, `rg --pre` and `git diff --output` are not reads.
 
 The remaining warning-only cases are ordinary outside reads (`scope-read`), including listing the Vericairn home
-itself (`ls` or `ls -R`) and reading a per-clone `live.db`, recognizable network attempts (`network`),
+itself or its `estates` directory (`ls` or `ls -R`) and reading or copying a single file there, such as a per-clone
+`live.db`, recognizable network attempts (`network`),
 and uncertainty (`audit-unverified`): unresolved variables or command substitutions; unclassified outside-looking
 operands, including helper-executing forms; unknown working directories; paths whose physical containment cannot be
 verified; remote `rsync` operands; opaque interpreter input (including `osascript`); and `xargs`, whose input-supplied
 operands or replacements are not visible in the invocation. An independently recognized literal outside write or
 credential target in any of these still produces its critical signal. Archive contents, patch bodies, arbitrary
 scripts, computed filenames, aliases, every command option and shell expansion are not interpreted. A missing or
-unrecognized effect cannot be inferred absent from an emitted command.
+unrecognized effect cannot be inferred absent from an emitted command. These give no signal at all: commands that a
+script file runs (`sh script.sh`, `source`, `make` recipes or package scripts), since the audit does not read files;
+shell functions and aliases defined earlier; a workspace program reached through a changed `PATH` under a reader's
+name; and the effects of an unclassified program whose operands do not look like outside paths.
 Fixed summaries and hashes are recorded with the run; raw inputs remain in its local output log.
 
 This audit recognizes common commands and structured path inputs. It does not interpret arbitrary programs, shell expansions, aliases or every harness extension, and it cannot prove that no network or credential access occurred. Malformed events and opaque inline scripts raise an incomplete-audit signal. Isolation, credential separation and the settlement scope audit remain necessary.

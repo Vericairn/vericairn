@@ -12,4 +12,9 @@
     <ProjectReference Include="../Vericairn.Records/Vericairn.Records.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The secret scan's configuration: gitleaks' default rules without their built-in allowlists, and Vericairn's own allowances. -->
+    <EmbeddedResource Include="gitleaks.toml" LogicalName="Vericairn.Adapters.Git.gitleaks.toml" />
+  </ItemGroup>
+
 </Project>

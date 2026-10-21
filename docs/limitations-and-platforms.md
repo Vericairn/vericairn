@@ -365,7 +365,10 @@ use the explicitly prepared release commit at submission and the actual build co
 For another registered repository, the gate uses its HEAD, or the latest clearing review's commit
 when Git proves that HEAD is its ancestor. Covered paths and cleared bytes use the same selection.
 Changed bytes, covered paths, absent reviews and unreadable registered clones refuse the applicable
-gate. An unregistered clone is explicitly not compared by that document gate; a refuse-level policy
+gate. A refuse-level document whose repository has no clone registered here also refuses, naming the repository and
+`vericairn sources clone <path> --resource <id>`; only the operator's signed, expiring grant of scope
+`release-document-uncompared:<declaration>@<version>` to the submitting principal excepts it, and the release evidence
+names that grant. A warn-level document without a registered clone is reported as not compared. A refuse-level policy
 with unavailable required source bytes still holds the release. No gate fetches or checks out sources.
 Normal `docs living` uses clone HEAD, and estate files use the estate's working tree. Current estate
 records supply triggers and reviews; they are not a historical estate snapshot at the release commit.
@@ -564,9 +567,12 @@ API v1 wire contracts.
 
 ## Checked changes and operator actions
 
-Checked pushes need an installed Gitleaks scanner and complete local history of the
-exact range. Aggregate scan success is no claim about every possible secret or an
-unobserved future commit. Merges require exact declared check names and every reported
+Checked pushes need an installed Gitleaks scanner, 8.25.0 or later, and complete local
+history of the exact range. Aggregate scan success is no claim about every possible secret or an
+unobserved future commit. From 0.8.1 the scan applies gitleaks' rules without their built-in
+allowlists, so it can report a finding that gitleaks' defaults pass. A finding refuses the push,
+and with it the merge; there is no per-estate allowance, so a change refused for a value that is
+not a secret is pushed and merged outside the checked flow. Merges require exact declared check names and every reported
 check successful at the expected head; forks and required merge queues are unsupported.
 A confirmed merge with pending or failed target checks remains incomplete. Git and gh
 use the runtime user's existing configuration and login. No permission, credential
@@ -617,7 +623,7 @@ The workflow is configured to produce:
 |---|---|
 | `vericairn-0.8.0-<platform>.tar.gz` (`.zip` on Windows), six platforms | Self-contained CLI, LICENSE, NOTICE, notices and `licenses/`; macOS includes `bin/vericairn-enclave` |
 | `vericairn-workbench-0.8.0-<platform>.tar.gz` (`.zip` on Windows), six platforms | Workbench with the CLI, macOS helper where applicable, and license material |
-| `vericairn-0.8.0-sbom.cdx.json` | CycloneDX bill of materials |
+| `vericairn-0.8.0-sbom.cdx.json` | CycloneDX bill of materials; from 0.8.1 it also covers every platform graph of the self-contained distributables |
 | `vericairn-0.8.0-THIRD-PARTY-NOTICES.md` | Third-party notices |
 | `vericairn-0.8.0-docs.zip` | This documentation set, including the estate-derived release notes and their recorded window |
 | `dotnet-vc.0.8.0.nupkg` | Portable .NET tool, invoked as `dotnet vc`; no Workbench or macOS helper |

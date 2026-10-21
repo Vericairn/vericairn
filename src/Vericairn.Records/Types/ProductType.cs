@@ -143,10 +143,22 @@ public sealed class ProductType : IRecordType
             packages.NoOtherKeys();
         }
 
+        // The declaration decides where a checked merge lands and which checks it waits for, so it is operator-bound.
+        if (body.Since(3, "changes") && Changed(context, "changes") && !context.HasRole(context.Record.By, Roles.Operator) && !context.HasScope(context.Record.By, Scopes.Administer))
+            context.Error("product.changes-author", "A product's checked-changes declaration is declared, changed or removed only by the operator or a principal with the 'administer' scope.");
+
         body.NoOtherKeys();
         if (context.Principal(context.Record.By) is null)
         {
             context.Error("product.author", $"Authoring principal {context.Record.By} has no principal record.");
         }
+    }
+
+    /// <summary>Whether a field's canonical value differs from the revision this record supersedes, or is new.</summary>
+    internal static bool Changed(ValidationContext context, string field)
+    {
+        static string? Value(Model.RecordEnvelope? record, string name) =>
+            record is not null && record.Body.TryGetProperty(name, out System.Text.Json.JsonElement value) ? Canonical.CanonicalJson.Serialize(value) : null;
+        return Value(context.Record, field) != Value(context.Find(context.Record.Supersedes), field);
     }
 }

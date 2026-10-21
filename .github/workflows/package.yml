@@ -1,0 +1,267 @@
+name: package
+
+# The release's packaging path, shared by release.yml and by every change's ci.yml so that no release-only step can first fail
+# during a release. It builds every asset a release attaches, verifies the packages and checksums, and uploads them as this run's
+# artifact. It creates no tag, release or upload and holds only the read token: release.yml's draft job alone writes.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: The release version, which must equal VersionPrefix in Directory.Build.props; empty for a change, which packages VersionPrefix.
+        type: string
+        required: false
+        default: ''
+      release:
+        description: True for a release, which requires the version's own documentation set and the runner's Secure Enclave.
+        type: boolean
+        required: true
+    outputs:
+      version:
+        description: The version packaged.
+        value: ${{ jobs.package.outputs.version }}
+
+permissions:
+  contents: read
+
+jobs:
+  enclave-helper:
+    # The Secure Enclave helper is Swift and builds on macOS only; the package job places it beside the macOS command line.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Build vericairn-enclave for both Mac architectures
+        run: |
+          set -eu
+          mkdir -p enclave/osx-arm64 enclave/osx-x64
+          swiftc -O -target arm64-apple-macos13.0 -o enclave/osx-arm64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
+          swiftc -O -target x86_64-apple-macos13.0 -o enclave/osx-x64/vericairn-enclave src/Vericairn.Enclave/vericairn-enclave.swift
+          file enclave/osx-arm64/vericairn-enclave enclave/osx-x64/vericairn-enclave
+      - name: Run the arm64 helper that ships
+        # The release's test run tests a helper it compiles for itself; this runs the binary the package job ships for Apple silicon:
+        # a key made in the runner's Secure Enclave without presence, its public key read back, a digest signed, then the key
+        # discarded. A release requires the enclave; a change's run reports its absence (status 3) and skips the rest.
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          set -eu
+          helper=enclave/osx-arm64/vericairn-enclave
+          status=0
+          "$helper" available || status=$?
+          if [ "$status" -ne 0 ]; then
+            if [ "$RELEASE" != true ] && [ "$status" -eq 3 ]; then echo "this runner has no Secure Enclave; the helper was built"; exit 0; fi
+            exit "$status"
+          fi
+          dir=$(mktemp -d)
+          "$helper" create "$dir/key.blob" > "$dir/public.txt"
+          test -s "$dir/public.txt"
+          test "$(cat "$dir/public.txt")" = "$("$helper" public "$dir/key.blob")"
+          digest=$(printf 'vericairn release smoke' | shasum -a 256 | cut -d' ' -f1)
+          "$helper" sign "$dir/key.blob" "$digest" > "$dir/signature.txt"
+          test -s "$dir/signature.txt"
+          rm -rf "$dir"
+          echo "the shipped helper made a Secure Enclave key, read its public key back and signed a digest with it"
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: enclave-helper
+          path: enclave
+          retention-days: 1
+
+  package:
+    needs: [enclave-helper]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # The documentation comparison proves the commit's build sources match the commit the set's references were generated
+          # from, which a shallow clone lacks. No step needs the checkout's token, so the clone keeps none.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          global-json-file: global.json
+      - name: Check the version
+        id: version
+        shell: bash
+        # A workflow input reaches a script only through the environment, never interpolated into it.
+        env:
+          REQUESTED: ${{ inputs.version }}
+        run: |
+          set -eu
+          prefix=$(grep -o '<VersionPrefix>[^<]*' Directory.Build.props | sed 's/<VersionPrefix>//')
+          version=${REQUESTED:-$prefix}
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "The version must be a plain semantic version, not '$version'" >&2
+            exit 1
+          fi
+          if [ "$prefix" != "$version" ]; then
+            echo "Directory.Build.props says $prefix, the release input says $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Restore (locked)
+        run: dotnet restore --locked-mode
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: enclave-helper
+          path: enclave
+      - name: Check the documentation set
+        shell: bash
+        env:
+          RELEASE: ${{ inputs.release }}
+        # A release's documentation set must exist, hold every document the product declares, and match this build's commands, API
+        # operations and record types before any draft is created; every gap is listed at once. The shipped command line checks the
+        # set; the build tooling (not shipped) compares it with the build it documents. Before release preparation writes a change's
+        # set, and while VersionPrefix still names a released, frozen set, a change compares a provisional set generated from its
+        # own build instead, with the same full history.
+        run: |
+          set -eu
+          docs="docs/releases/$VERSION"
+          if [ -d "$docs" ] && ! jq -e --arg v "$VERSION" '.sets | has($v)' docs/releases/frozen-sha256.json > /dev/null; then
+            dotnet run --configuration Release --project src/Vericairn.Cli -- docs check "$docs" --documents docs/releases/documents.json
+          elif [ "$RELEASE" = true ]; then
+            echo "A release needs its own documentation set, docs/releases/$VERSION, not yet frozen." >&2
+            exit 1
+          else
+            docs="artifacts/provisional-docs/$VERSION"
+            dotnet run --configuration Release --project tools/Vericairn.DocsTool -- generate --out "$docs" --documents docs/releases/documents.json
+          fi
+          dotnet run --configuration Release --project tools/Vericairn.DocsTool -- compare "$docs"
+          echo "DOCS=$docs" >> "$GITHUB_ENV"
+      - name: Pack Community NuGet packages
+        shell: bash
+        # Pack before the RID-specific publishes: the tool is portable and the packages all carry the checked release version. These
+        # exact files stay in the draft until the operator publishes it.
+        run: |
+          set -eu
+          mkdir -p dist
+          dotnet pack --no-restore --configuration Release --output dist \
+            -p:Version="$VERSION" -p:VersionSuffix= -p:ContinuousIntegrationBuild=true
+      - name: Restore the distributables (locked)
+        shell: bash
+        # Each self-contained distributable restores locked from its committed runtime-specific lock files
+        # (packages.distributable.lock.json), so the graph that ships is the reviewed one; nothing is resolved live and discarded.
+        # A dependency change regenerates them with the same command without --locked-mode.
+        run: |
+          set -eu
+          for project in src/Vericairn.Cli/Vericairn.Cli.csproj src/Vericairn.Workbench/Vericairn.Workbench.csproj; do
+            dotnet restore "$project" --locked-mode -p:VericairnDistributable=true -p:SelfContained=true -p:PublishSingleFile=true
+          done
+      - name: Publish self-contained distributables
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p dist
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            dotnet publish src/Vericairn.Cli/Vericairn.Cli.csproj --no-restore --configuration Release --runtime "$rid" --self-contained \
+              -p:VericairnDistributable=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true \
+              --output "out/$rid/bin" --nologo --verbosity quiet
+            rm -f "out/$rid/bin/"*.pdb "out/$rid/bin/"*.xml
+            # On macOS the Secure Enclave helper ships beside the command line, which calls it for enclave custody.
+            case "$rid" in
+              osx-*) install -m 0755 "enclave/$rid/vericairn-enclave" "out/$rid/bin/vericairn-enclave" ;;
+            esac
+            cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out/$rid/"
+            # The license and notice texts of every component the command line bundles (THIRD-PARTY-NOTICES.md lists them).
+            mkdir -p "out/$rid/licenses"
+            cp licenses/*.txt "out/$rid/licenses/"
+            test -s "out/$rid/licenses/dotnet-LICENSE.txt" && test -s "out/$rid/licenses/Apache-2.0.txt"
+            case "$rid" in
+              win-*) (cd "out/$rid" && zip -q -X -r "../../dist/vericairn-$VERSION-$rid.zip" .) ;;
+              *) tar -C "out/$rid" -czf "dist/vericairn-$VERSION-$rid.tar.gz" . ;;
+            esac
+          done
+      - name: Publish Workbench distributables
+        shell: bash
+        # The desktop ships per platform as an unsigned developer build beside the command line it drives (Workbench finds vericairn
+        # next to its own executable); no bundle, installer or signature yet, as the platform obligations record.
+        run: |
+          set -eu
+          for rid in linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64; do
+            dotnet publish src/Vericairn.Workbench/Vericairn.Workbench.csproj --no-restore --configuration Release --runtime "$rid" --self-contained \
+              -p:VericairnDistributable=true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:VersionSuffix= -p:ContinuousIntegrationBuild=true \
+              --output "out-workbench/$rid/bin" --nologo --verbosity quiet
+            rm -f "out-workbench/$rid/bin/"*.pdb "out-workbench/$rid/bin/"*.xml
+            cp "out/$rid/bin/"vericairn* "out-workbench/$rid/bin/"
+            cp LICENSE NOTICE THIRD-PARTY-NOTICES.md "out-workbench/$rid/"
+            # The fonts are embedded in the executable; the SIL Open Font License requires their copyright notices and license to
+            # travel with every copy where the user can read them, so each archive carries the license texts under licenses/.
+            mkdir -p "out-workbench/$rid/licenses"
+            cp src/Vericairn.Workbench/Assets/Fonts/OFL-*.txt "out-workbench/$rid/licenses/"
+            test -s "out-workbench/$rid/licenses/OFL-Inter.txt" && test -s "out-workbench/$rid/licenses/OFL-JetBrainsMono.txt"
+            # Workbench holds a copy of the command line, so its archive carries the command line's license texts and its own.
+            cp licenses/*.txt licenses/workbench/*.txt "out-workbench/$rid/licenses/"
+            test -s "out-workbench/$rid/licenses/MIT-AvaloniaUI.txt" && test -s "out-workbench/$rid/licenses/Skia-HarfBuzz-THIRD-PARTY-NOTICES.txt"
+            case "$rid" in
+              win-*) (cd "out-workbench/$rid" && zip -q -X -r "../../dist/vericairn-workbench-$VERSION-$rid.zip" .) ;;
+              *) tar -C "out-workbench/$rid" -czf "dist/vericairn-workbench-$VERSION-$rid.tar.gz" . ;;
+            esac
+          done
+          # Locked restores leave every committed lock file as it is.
+          git diff --exit-code -- '*.lock.json'
+      - name: Software bill of materials
+        shell: bash
+        # The tool is pinned, and asked for a CycloneDX specification the components report reads (1.2 to 1.6): CycloneDX 6.3 writes
+        # 1.7 by default, which stopped 0.8.0's third release run before any asset or draft. It reads the restores above without
+        # restoring again, so the bill describes the packages and every platform graph of the distributables, and a check confirms
+        # that each package the distributables' lock files hold is in it.
+        run: |
+          set -eu
+          dotnet tool install --global CycloneDX --version 6.3.1
+          dotnet CycloneDX Vericairn.slnx --output sbom --json --exclude-test-projects --spec-version 1.6 --disable-package-restore
+          python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json
+          cp sbom/bom.json "dist/vericairn-$VERSION-sbom.cdx.json"
+          cp THIRD-PARTY-NOTICES.md "dist/vericairn-$VERSION-THIRD-PARTY-NOTICES.md"
+          # The build tooling below restores the portable graph again.
+          dotnet restore --locked-mode
+      - name: Documentation set
+        shell: bash
+        run: |
+          set -eu
+          (cd "$(dirname "$DOCS")" && zip -q -X -r "$GITHUB_WORKSPACE/dist/vericairn-$VERSION-docs.zip" "$VERSION")
+      - name: Retain and verify readable build reports
+        shell: bash
+        run: |
+          set -eu
+          dotnet run --no-restore --configuration Release --project tools/Vericairn.DocsTool -- generate --out artifacts/release-companions --documents docs/releases/documents.json --artifacts dist
+          dotnet run --no-build --configuration Release --project tools/Vericairn.DocsTool -- compare artifacts/release-companions --artifacts dist
+      - name: Checksums and notes
+        shell: bash
+        env:
+          COMMIT: ${{ github.sha }}
+          RUN: ${{ github.run_id }}
+        run: |
+          set -eu
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
+          # The record formats this build reads and writes, as the documentation set's manifest states them from the build (the
+          # comparison above refused a manifest that states others); the release observer reads the same manifest from the draft.
+          formats=$(jq -r '"reads " + (.recordFormat.reads | map(tostring) | join(", ")) + ", writes " + (.recordFormat.writes | tostring)' "$DOCS/manifest.json")
+          {
+            echo "Vericairn $VERSION (unsigned developer build)"
+            echo
+            echo "Commit: $COMMIT"
+            echo "Evidence: workflow run $RUN built and tested on ubuntu-latest, macos-latest and windows-latest, with every test class in exactly one of three shares per platform."
+            echo "Record format: $formats."
+            echo "Signing: none yet; this is an unsigned developer build. Verify the SHA256SUMS against the estate's manifest, never against the tag alone."
+            echo
+            echo "Distributables are self-contained per platform: unpack and run bin/vericairn (bin/vericairn.exe on Windows)."
+            echo "NuGet packages and portable symbol packages are attached under SHA256SUMS. Publishing this draft triggers nuget.yml to verify and push these exact files through Trusted Publishing; it never rebuilds them."
+            echo "After package publication, install the CLI with dotnet tool install --global dotnet-vc and invoke dotnet vc; install the SDK with dotnet add package Vericairn."
+            echo "Workbench, the desktop, is vericairn-workbench-$VERSION-<platform>: unpack and run bin/vericairn-workbench beside the bin/vericairn it drives; an unsigned developer build with no bundle or installer, qualified only where the platform obligations say."
+            echo
+            echo "Documentation: vericairn-$VERSION-docs.zip is this release's documentation set (docs/releases/$VERSION in the repository): overview, installation and cold start, the operator's journeys, the command-line, API and record references, release notes and known limitations."
+          } > dist/NOTES.md
+      - name: Verify every package against SHA256SUMS
+        # The same check nuget.yml runs before it pushes the published files.
+        run: python3 .github/scripts/verify-packages.py dist
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: vericairn-${{ steps.version.outputs.version }}
+          path: dist
+          retention-days: ${{ inputs.release && 90 || 1 }}

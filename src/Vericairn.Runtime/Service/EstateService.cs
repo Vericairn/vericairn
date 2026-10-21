@@ -1402,8 +1402,23 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (response, null);
             }
 
-            if (plan.Migrations.Count == 0 && File.ReadAllBytes(Path.Combine(session.Root, EstateLayout.ManifestPath)).AsSpan().SequenceEqual(EstateUpgrade.ManifestAfter(session.Manifest, plan)))
+            string manifestPath = Path.Combine(session.Root, EstateLayout.ManifestPath);
+            // A migration recorded before its manifest moved names the move this upgrade continues; another release waits for it.
+            RecordEnvelope? pending = UpgradeProgress.Pending(model.Manifest!, model.Records);
+            if (pending is not null && (EstateModel.BodyString(pending, "toPin") != plan.ToPin || EstateModel.BodyString(pending, "release") != plan.Release.Id))
             {
+                return (null, new Problem("refused", $"Migration {pending.Id} to {EstateModel.BodyString(pending, "toPin")} is recorded and the manifest has not moved; finish that upgrade before upgrading to {plan.ToPin}. Nothing changed.", []));
+            }
+
+            if (plan.Migrations.Count == 0 && File.ReadAllBytes(manifestPath).AsSpan().SequenceEqual(EstateUpgrade.ManifestAfter(session.Manifest, plan)))
+            {
+                // Only an upgrade moves a manifest to a release, so a release pin that no migration record names was moved by a run
+                // that stopped before recording the move.
+                if (model.Manifest!.Mode == "release" && !model.OfType("migration").Any(m => EstateModel.BodyString(m, "toPin") == plan.ToPin))
+                {
+                    return (null, new Problem("refused", $"The manifest is pinned to {plan.ToPin}, and no migration record names that pin: an earlier upgrade stopped after it moved the manifest and before it recorded the move. Inspect the repository's last change to {EstateLayout.ManifestPath}, then record that migration with `vericairn records new migration`, naming its fromPin, toPin {plan.ToPin}, fromFormat, toFormat {plan.ToFormat}, the steps it ran and release {plan.Release.Id}. Nothing changed.", []));
+                }
+
                 return (response, null);
             }
 
@@ -1435,6 +1450,21 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, denied);
             }
 
+            if (pending is not null)
+            {
+                // The steps' files and the migration record were written before the run stopped; only the manifest remains.
+                try
+                {
+                    ReplaceManifest(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    return (null, new Problem("refused", $"Migration {pending.Id} is recorded, and the manifest still could not be replaced: {exception.Message} Rerun the upgrade to finish it.", []));
+                }
+
+                return (response with { Applied = true, Migration = new RecordWritten(pending.ExpectedPath, pending.Id, pending.ComputedHash) }, null);
+            }
+
             // Migrations stage their files first; nothing is written until every step succeeded.
             var context = new MigrationContext(session.Root, model);
             foreach (IRecordFormatMigration step in EstateUpgrade.Steps(plan))
@@ -1453,8 +1483,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             changes.AddRange(EstateUpgrade.Steps(plan).Select(step => $"{step.Name}: {step.Summary}"));
             var previousContents = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
             var createdDirectories = new HashSet<string>(StringComparer.Ordinal);
-            string manifestPath = Path.Combine(session.Root, EstateLayout.ManifestPath);
-            previousContents[EstateLayout.ManifestPath] = File.ReadAllBytes(manifestPath);
             try
             {
                 foreach ((string relative, byte[] bytes) in context.Staged.OrderBy(s => s.Key, StringComparer.Ordinal))
@@ -1471,8 +1499,6 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                     File.WriteAllBytes(full, bytes);
                     changes.Add($"{relative} written by the migrations");
                 }
-
-                File.WriteAllBytes(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -1480,15 +1506,28 @@ public sealed partial class EstateService : IEstateApi, IDisposable
                 return (null, new Problem("refused", $"The upgrade could not write its files and was undone: {exception.Message}", []));
             }
 
+            UpgradeStage?.Invoke("staged");
+            // The migration record comes before the manifest: a run that stops between them leaves a record that says what to finish,
+            // never a moved manifest with nothing recording the move.
             using JsonDocument body = JsonDocument.Parse(EstateUpgrade.MigrationBody(plan, changes).ToJsonString());
             WriteOutcome outcome = WriteLocked(new RecordDraft("migration", request.By, body.RootElement, Format: Math.Min(plan.ToFormat, RecordFormats.Current)), model);
-            if (!outcome.Ok)
+            if (outcome.Written is null)
             {
                 RestoreFiles(session.Root, previousContents, createdDirectories);
                 return (null, outcome.Problem);
             }
 
-            return (response with { Applied = true, Migration = outcome.Written }, null);
+            UpgradeStage?.Invoke("recorded");
+            try
+            {
+                ReplaceManifest(manifestPath, EstateUpgrade.ManifestAfter(session.Manifest, plan));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return (null, new Problem("refused", $"Migration {outcome.Written.Id} is recorded, and the manifest could not be replaced: {exception.Message} Rerun the upgrade to finish it; the estate check reports upgrade.incomplete until then.", []));
+            }
+
+            return (response with { Applied = true, Migration = outcome.Written }, outcome.Problem);
         }
     }
 
@@ -1859,6 +1898,24 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
             return ToFindings(findings, $"{verified} objects verified");
         }
+    }
+
+    /// <summary>Test seam: called after each upgrade stage a stopped run can leave behind (staged, recorded, manifest-temporary).</summary>
+    internal static Action<string>? UpgradeStage { get; set; }
+
+    // Writes beside the manifest and renames over it, so a stopped run leaves the old manifest or the new one, never part of one.
+    private static void ReplaceManifest(string path, byte[] bytes)
+    {
+        string temporary = path + ".upgrading";
+        File.Delete(temporary);
+        using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            stream.Write(bytes);
+            stream.Flush(flushToDisk: true);
+        }
+
+        UpgradeStage?.Invoke("manifest-temporary");
+        File.Move(temporary, path, overwrite: true);
     }
 
     private static void RestoreFiles(string root, IReadOnlyDictionary<string, byte[]?> previousContents, IReadOnlySet<string> createdDirectories)

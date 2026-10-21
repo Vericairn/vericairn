@@ -21,7 +21,8 @@ internal static class WorkspaceScopeAudit
 
     public static WorkspaceSnapshot Capture(string workspace) => WorkspaceScopeProbe.Capture(workspace, Deadline);
 
-    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false)
+    internal static WorkspaceSnapshot CaptureLocal(string workspace, TimeSpan deadline, string? branch = null, string? baseline = null, string? gitDirectory = null, bool includeGit = false,
+        string? startExclude = null)
     {
         var files = new Dictionary<string, string>(StringComparer.Ordinal);
         var runFiles = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -53,13 +54,27 @@ internal static class WorkspaceScopeAudit
             // excludes ignored output before opening it, and uses only isolated Git configuration.
             if (!includeGit)
             {
-                try { exclusions = new WorkspaceScopeFiles(workspace, gitDirectory!, deadline - watch.Elapsed); }
+                try
+                {
+                    exclusions = branch is null ? new WorkspaceScopeFiles(workspace, gitDirectory!, deadline - watch.Elapsed)
+                        : new WorkspaceScopeFiles(workspace, gitDirectory!, baseline ?? string.Empty, startExclude, deadline - watch.Elapsed);
+                }
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException or ArgumentException)
                 {
                     problem ??= "The workspace ignore inventory is unavailable; assignment scope is unverified.";
                 }
             }
             Visit(workspace, "");
+            // Excluded output is not inventoried, but a repository there still needs its own audit.
+            long searched = 0;
+            foreach (string excluded in exclusions?.IgnoredDirectories ?? [])
+            {
+                if (NestedRepository(Path.Combine(workspace, excluded), ref searched))
+                {
+                    problem = "A submodule or nested repository needs a separate scope audit; assignment scope is incomplete.";
+                    break;
+                }
+            }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ProviderRefusedException)
         {
@@ -81,7 +96,24 @@ internal static class WorkspaceScopeAudit
             problem ??= "The workspace identity is unavailable after its inventory.";
         }
 
-        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray()) { Head = head, RunFiles = runFiles };
+        return new WorkspaceSnapshot(files, problem, identity, gitDirectory, committed.Order(StringComparer.Ordinal).ToArray())
+        {
+            Head = head, RunFiles = runFiles, ExcludeHash = branch is null ? exclusions?.ExcludeHash : null,
+            IgnoreChanges = branch is null ? null : exclusions?.Changed,
+        };
+
+        // A names-only search of excluded output, bounded like the inventory; links are not followed.
+        bool NestedRepository(string directory, ref long count)
+        {
+            foreach (string path in Directory.EnumerateFileSystemEntries(directory))
+            {
+                if (++count > 1_000_000 || watch.Elapsed >= deadline) throw new IOException("The nested repository search reached its work or time limit.");
+                if (Path.GetFileName(path) == ".git") return true;
+                FileAttributes attributes = File.GetAttributes(path);
+                if ((attributes & FileAttributes.Directory) != 0 && (attributes & FileAttributes.ReparsePoint) == 0 && NestedRepository(path, ref count)) return true;
+            }
+            return false;
+        }
 
         void CheckDeadline()
         {
@@ -265,7 +297,9 @@ internal static class WorkspaceScopeAudit
             .Where(path => before.Files.GetValueOrDefault(path) != after.Files.GetValueOrDefault(path))
             .Union(after.CommittedPaths ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string[] patterns = permitted.Select(PermittedPaths.Pattern).OfType<string>().ToArray();
-        var outside = new List<string>();
+        // A change to the rules that decide what settlement skips is never authorized by the brief's patterns.
+        var outside = new List<string>(after.IgnoreChanges ?? []);
+        changes = changes.Union(after.IgnoreChanges ?? [], StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
         string? problem = before.Problem ?? after.Problem;
         if (before.Identity != after.Identity)
         {
@@ -278,7 +312,7 @@ internal static class WorkspaceScopeAudit
 
         try
         {
-            foreach (string path in changes)
+            foreach (string path in changes.Except(after.IgnoreChanges ?? [], StringComparer.Ordinal))
             {
                 CheckDeadline();
                 bool allowed = false;

@@ -89,11 +89,8 @@ public sealed partial class EstateService
                 throw new ProviderRefusedException("An opening needs a title of at most 200 characters and a body of at most 20000.");
             lock (gate)
             {
-                bool pushed = session.Load().Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-push"
-                    && EstateModel.BodyString(o, "status") == "observed-success" && o.Body.TryGetProperty("target", out JsonElement t)
-                    && ChangeText(t, "repository") == claim.Configuration.Repository.Id && ChangeText(t, "branch") == request.Branch
-                    && ChangeText(t, "head") == request.Head && ChangeText(t, "destination") == claim.Configuration.Destination);
-                if (!pushed) throw new ProviderRefusedException("No successful scanned push is recorded for this repository, branch and exact head.");
+                if (!ScannedPush(claim, request.Branch, request.Head))
+                    throw new ProviderRefusedException("No successful scanned push is recorded for this repository, branch and exact head.");
             }
             claim.Body["target"]!["contentHash"] = ContentHash.Sha256(JsonSerializer.SerializeToUtf8Bytes(new { request.Title, request.Body }));
             DispatchChange(claim);
@@ -125,6 +122,12 @@ public sealed partial class EstateService
                 throw new ProviderRefusedException("The pull request is absent, closed, targets another branch or its head moved.");
             IReadOnlyList<string> refused = ChangeGate.Refusals(request.Head, claim.Configuration.Required, pull.Checks, pull.Complete);
             if (refused.Count > 0) throw new ProviderRefusedException(string.Join(" ", refused));
+            // Every merged head rests on a scan of exactly its commits, even when its pull request was opened elsewhere.
+            lock (gate)
+            {
+                if (!ScannedPush(claim, pull.Branch, request.Head))
+                    throw new ProviderRefusedException("No successful scanned push of this exact head to the pull request's branch is recorded; push it with vericairn changes push, which scans exactly its commits, before merging.");
+            }
             claim.Body["target"]!["pullRequest"] = pull.Number;
             claim.Body["target"]!["branch"] = pull.Branch;
             claim.Body["evidence"]!.AsArray().Add(new JsonObject { ["summary"] = "Checks observed before merge.", ["hash"] = observed.Hash, ["location"] = observed.Path });
@@ -138,6 +141,13 @@ public sealed partial class EstateService
             return ObserveChangeTarget(claim, receipt.MergeCommit);
         });
     }
+
+    // A recorded push, observed at the remote after its scan of exactly the pushed commits passed. Caller holds the gate.
+    private bool ScannedPush(ChangeClaim claim, string? branch, string head) =>
+        session.Load().Current("operation").Any(o => EstateModel.BodyString(o, "action") == "change-push"
+            && EstateModel.BodyString(o, "status") == "observed-success" && o.Body.TryGetProperty("target", out JsonElement t)
+            && ChangeText(t, "repository") == claim.Configuration.Repository.Id && ChangeText(t, "branch") == branch
+            && ChangeText(t, "head") == head && ChangeText(t, "destination") == claim.Configuration.Destination);
 
     /// <summary>Observes an original change under its recorded pins. Absence, stale heads and incomplete reads remain uncertain.</summary>
     public ChangeResponse ChangesObserve(ChangesObserveRequest request)

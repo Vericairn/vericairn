@@ -10,6 +10,9 @@ when the estate requires signatures, and record format 3 for the product's
 Add a `changes` declaration to the product record, retaining the product's other
 fields. The repository is an estate resource of kind `repository`; its `location.github`
 names the GitHub destination. Register its local clone through `sources clone`.
+The declaration and the repository's location decide where merges land, so only
+the operator or a principal with the `administer` scope declares, changes or removes
+the declaration or moves the location.
 
 ```json
 {
@@ -57,8 +60,29 @@ base with the remote target branch. Missing local objects refuse the operation;
 update the clone separately before retrying. Shallow clones are refused because
 they cannot establish the complete commit range.
 
-Gitleaks must be installed by the user. It scans exactly `base..head` with
-redaction, default rules, an empty ignore file, and inline allow comments disabled.
+Gitleaks 8.25.0 or later must be installed by the user; an older one leaves the
+scanner unavailable. It scans exactly `base..head` with redaction, Vericairn's own
+configuration, an empty ignore file, and inline allow comments disabled.
+
+The configuration holds gitleaks 8.30.1's default rules, each unchanged, with every
+built-in allowlist removed. None of its path exemptions apply, so a secret in a lock
+file, a vendored or generated tree, an image or a document is found, and no sample
+credential is admitted, such as an AWS key id ending in `EXAMPLE`. Its only
+allowances are its own, each for a value that is not the credential its rule finds:
+
+- for every rule, a placeholder, template reference, boolean, run of one repeated
+  character, format specifier or file path;
+- for generic keys, a value without a digit, gitleaks' list of key, token and secret
+  phrases that name no credential (such as `public_key` or `key_id`) with its list of
+  common words, and build secret mounts and module imports;
+- for basic authorization in curl, placeholders and variable references;
+- for Kubernetes secrets, template or empty values, and kind and data in separate
+  documents;
+- for NuGet configuration passwords, environment variable references;
+- for Vault service tokens, a value without a digit.
+
+The recorded scan's version names gitleaks' version and the configuration's SHA-256,
+for example `8.30.1; rules sha256:…`, so each scan identifies the rules it applied.
 Merge diffs are included; external diff commands and text conversion are disabled.
 Text diffs are requested even for paths marked as binary by repository attributes.
 The range's readability is checked independently before
@@ -90,6 +114,9 @@ Every required check must be present and every reported check must have complete
 successfully at the expected head. Missing, pending, failed, skipped, unknown or
 stale-head checks refuse the merge, as do incomplete pagination, a changed head,
 a different target, a closed pull request and an absent requirement declaration.
+The merge also needs a successful scanned push of that exact head to the pull
+request's branch, so a pull request opened elsewhere is pushed with `changes push`
+first.
 Fork pull requests are not supported by this provider.
 
 The successful check inventory is recorded before the merge request. GitHub's

@@ -474,7 +474,10 @@ internal sealed class ContainedProcess
                 descriptors.AddRange(pair);
                 foreach (int descriptor in pair)
                 {
-                    if (fcntl(descriptor, 2, 1) != 0) // F_SETFD, FD_CLOEXEC; dup2's targets remain inherited.
+                    // fcntl is variadic: its third argument is passed on the stack on Darwin Arm64.
+                    // The runtime's fixed-signature wrapper applies that platform ABI. Only dup2's
+                    // explicit standard-output targets may survive exec, never these observation pipes.
+                    if (SetDescriptorFlags(descriptor, 1) != 0) // FD_CLOEXEC
                     {
                         throw new Win32Exception(Marshal.GetLastPInvokeError());
                     }
@@ -682,7 +685,7 @@ internal sealed class ContainedProcess
     [DllImport("libc", SetLastError = true)] private static extern int waitid(int kind, uint pid, [Out] byte[] info, int options);
     [DllImport("libc", SetLastError = true)] private static extern int waitpid(int pid, out int status, int options);
     [DllImport("libc", SetLastError = true)] private static extern int pipe([Out] int[] pair);
-    [DllImport("libc", SetLastError = true)] private static extern int fcntl(int descriptor, int command, int value);
+    [DllImport("System.Native", EntryPoint = "SystemNative_FcntlSetFD", SetLastError = true)] private static extern int SetDescriptorFlags(int descriptor, int flags);
     [DllImport("libc")] private static extern int close(int descriptor);
     [DllImport("libc")] private static extern int posix_spawnattr_init(nint attributes);
     [DllImport("libc")] private static extern int posix_spawnattr_destroy(nint attributes);

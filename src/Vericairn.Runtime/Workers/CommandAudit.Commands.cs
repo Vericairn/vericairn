@@ -18,9 +18,10 @@ public static partial class CommandAudit
         ? word[0] == '\'' ? word[1..^1].Replace("'\"'\"'", "'", StringComparison.Ordinal) : word[1..^1] : word;
     private static string SuffixWord(string word, int prefix) => word.Length != Value(word).Length
         ? word[0] + Value(word)[prefix..] + word[^1] : word[prefix..];
-    private static string Executable(string word)
+    private static string Executable(string word) => ProgramName(ShellWord(word, null));
+    private static string ProgramName(string program)
     {
-        string name = Value(word).Replace('\\', '/').Split('/')[^1];
+        string name = program.Replace('\\', '/').Split('/')[^1];
         return name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
     }
 
@@ -134,9 +135,20 @@ public static partial class CommandAudit
         }
         start = Unwrap(arguments, start, paths, codes, local);
         if (start >= arguments.Count) return false;
-        string executable = Executable(arguments[start]);
+        string program = ShellWord(arguments[start], local.ExpansionEnvironment ?? local.Environment);
+        string executable = ProgramName(program);
         string[] args = arguments.Skip(start + 1).ToArray();
         string[] values = args.Select(Value).ToArray();
+        // A program the captured environment cannot name runs an unknown command, so its operands, including any inner
+        // command, cannot be inspected; an inner command is still read as a POSIX shell's would be.
+        if (Unresolved(program))
+        {
+            codes.Add("audit-unverified");
+            int inner = Array.FindIndex(values, a => a is "-c" or "-lc");
+            if (inner >= 0 && inner + 1 < args.Length)
+                InspectCommand(ShellCode(args[inner + 1], local), paths, codes, isReadOnly, new CommandContext(local.Working, local.Environment), depth + 1);
+            return false;
+        }
         if (executable is "export" or "readonly")
         {
             foreach (string argument in args)
@@ -174,6 +186,20 @@ public static partial class CommandAudit
             }
             if (child < args.Length)
                 InspectCommand(string.Join(' ', args[child..]), paths, codes, isReadOnly, new CommandContext(local.Working, local.Environment), depth + 1);
+            return false;
+        }
+
+        if (executable == "eval")
+            return InspectCommand(string.Join(' ', args.Select(a => ShellCode(a, local))), paths, codes, isReadOnly, new CommandContext(local.Working, local.Environment), depth + 1) && !redirects;
+
+        if (OtherShell(executable))
+        {
+            // These shells' syntax differs from the shells the audit reads; their inner command is read as a POSIX shell's,
+            // which may miss what it does.
+            codes.Add("audit-unverified");
+            int inner = Array.FindIndex(values, a => a is "-c" or "-lc" or "--command");
+            if (inner >= 0 && inner + 1 < args.Length)
+                InspectCommand(ShellCode(args[inner + 1], local), paths, codes, isReadOnly, new CommandContext(local.Working, local.Environment), depth + 1);
             return false;
         }
 
@@ -232,7 +258,9 @@ public static partial class CommandAudit
     }
 
     private static bool PathLike(string value) => value.IndexOfAny(['/', '\\', '.', '~', '$', '`', '%']) >= 0;
-    private static bool Shell(string executable) => executable is "bash" or "sh" or "zsh" or "pwsh" or "powershell" or "cmd";
+    private static bool Shell(string executable) => executable is "bash" or "sh" or "zsh" or "dash" or "ksh" or "ksh93" or "mksh" or "lksh" or "oksh"
+        or "ash" or "yash" or "posh" or "pwsh" or "powershell" or "cmd";
+    private static bool OtherShell(string executable) => executable is "fish" or "csh" or "tcsh" or "nu" or "xonsh" or "elvish" or "rc" or "es" or "ion" or "ysh";
     private static bool Interpreter(string executable) => Shell(executable) || executable is "python" or "python3" or "node" or "ruby" or "perl" or "osascript";
 
     private static bool GitHubTokenOutput(string[] values)
@@ -273,8 +301,7 @@ public static partial class CommandAudit
     private static void AddShellPath(List<InvocationPath> paths, string word, PathAccess access, CommandContext context, bool copiesTree = false) =>
         paths.Add(new InvocationPath(ShellPath(word, context), access, context.Working, copiesTree));
 
-    private static string ShellPath(string word, CommandContext context) => word.StartsWith('\'') && word.EndsWith('\'')
-        ? Value(word) : ExpandPath(word.Replace("\"", "", StringComparison.Ordinal), context.ExpansionEnvironment ?? context.Environment);
+    private static string ShellPath(string word, CommandContext context) => ShellWord(word, context.ExpansionEnvironment ?? context.Environment);
 
     private static string ShellCode(string word, CommandContext context)
     {

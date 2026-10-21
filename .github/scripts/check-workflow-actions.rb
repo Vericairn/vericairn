@@ -8,6 +8,8 @@ require 'set'
 # must receive the same check. Script bodies and comments are scalars, never workflow instructions.
 module WorkflowActions
   PIN = /\A[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-fA-F]{40}\z/
+  # A reusable workflow in this repository is checked like every other workflow here, so it needs no pin of its own.
+  LOCAL_WORKFLOW = /\A\.\/\.github\/workflows\/([A-Za-z0-9_-]+\.ya?ml)\z/
 
   def self.check(directory)
     errors = []
@@ -26,7 +28,7 @@ module WorkflowActions
     errors << 'No workflows found.' if files.empty?
     files.each do |path|
       begin
-        visit(Psych.parse_stream(File.read(path)), File.basename(path), allowed, errors)
+        visit(Psych.parse_stream(File.read(path)), File.basename(path), allowed, errors, directory)
       rescue Psych::Exception => e
         errors << "#{File.basename(path)}: invalid YAML: #{e.message}"
       end
@@ -34,19 +36,22 @@ module WorkflowActions
     errors
   end
 
-  def self.visit(node, file, allowed, errors)
+  def self.visit(node, file, allowed, errors, directory)
     if node.is_a?(Psych::Nodes::Mapping)
       node.children.each_slice(2) do |key, value|
         next unless key.is_a?(Psych::Nodes::Scalar) && key.value == 'uses'
         action = value.is_a?(Psych::Nodes::Scalar) ? value.value : nil
-        if action.nil? || !PIN.match?(action)
+        local = action && LOCAL_WORKFLOW.match(action)
+        if local
+          errors << "#{file}:#{key.start_line + 1}: no workflow #{local[1]} beside this one." unless File.file?(File.join(directory, local[1]))
+        elsif action.nil? || !PIN.match?(action)
           errors << "#{file}:#{key.start_line + 1}: uses must name an action pinned to a full commit SHA."
         elsif !allowed.include?(action)
           errors << "#{file}:#{key.start_line + 1}: action is not in actions.allow: #{action}"
         end
       end
     end
-    (node.children || []).each { |child| visit(child, file, allowed, errors) }
+    (node.children || []).each { |child| visit(child, file, allowed, errors, directory) }
   end
 end
 
