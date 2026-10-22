@@ -40,9 +40,28 @@ dotnet vc status
 ```
 
 `estate init` writes two records, you as the operator and the estate's charter, and a manifest that pins the
-Vericairn source it names, here 0.8.2's commit. `status` shows the new, empty estate. The
+Vericairn source it names, here 0.8.2's commit. From 0.8.3, `--commit` is optional: `estate init` pins the
+running build's exact source commit, as `dotnet vc --version` reports it, and a development build without a
+recorded commit still requires the option. `status` shows the new, empty estate. The
 [operator's guide](docs/operator-guide.md) continues from there: your device and its key, a builder agent,
 decisions, a work order, an agent's run, its review and acceptance, and a release.
+
+With the **0.8.3 development build**, continue this first-estate sequence by creating and admitting
+your signing device, then recording a work order from flags. Use the operator id printed by `estate init`
+and the device id printed by `devices create`:
+
+```sh
+dotnet vc devices create --principal <operator id> --name "My device"
+dotnet vc devices admit <device id> --by <operator id> --note "My first signing device."
+dotnet vc work new --by <operator id> --key W-1 --title "Build the widget" \
+  --intent "Make a useful widget." --scope "widget sources and tests" \
+  --deliverable "widget.txt" --exit-question "Does the widget build and pass its tests?"
+```
+
+`work new` defaults to `--kind ordinary` and prints the signed record's id and hash; `--json` returns
+its receipt. Repeat `--scope`, `--deliverable`, `--after <work-order id>` and `--input <type:id>` as
+needed. It uses the same validation and refusal messages as `records new work-order`. Published 0.8.2
+uses the JSON-body command shown in the [operator's guide](docs/operator-guide.md#5-the-work-loop-order-brief-assignment-attempt-result).
 
 ## What works today
 

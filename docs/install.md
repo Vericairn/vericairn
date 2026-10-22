@@ -118,7 +118,13 @@ Nothing runs in the background until you ask: commands run the embedded runtime 
 
 ## 6. Upgrading an estate to 0.8.2
 
-Install the 0.8.2 binary by Route B, then run these commands in the estate after it holds the published release record:
+Install the 0.8.2 binary by Route B. If a daemon serves the estate, restart it with the newly installed
+binary before running the upgrade.
+From the estate directory on the daemon's machine, run `vericairn runtime stop`, then
+`vericairn runtime start`. Replacing the installed binary does not replace a running daemon.
+Restart running workers with the new release too, after their active work has settled.
+
+Run these commands in the estate after it holds the published release record:
 
 ```sh
 vericairn estate upgrade --to 0.8.2 --check
@@ -129,8 +135,22 @@ Only the estate that built and observed a release holds its release record
 ([issue 177](https://github.com/Vericairn/vericairn/issues/177)). An estate other than Vericairn's own therefore
 cannot yet pin or upgrade to a published Vericairn release: `estate upgrade --to` refuses there, and its source
 pin does not move. Until a later release adds a supported record of a published Vericairn release that an
-estate depends on, initialize such an estate with `estate init --commit` set to the published release's tag
-commit, run the checksum-verified published binary with `--estate`, and never write a release record by hand.
+estate depends on, initialize such an estate with a source pin and run the checksum-verified published
+binary with `--estate`. From 0.8.3, the running build supplies its exact source commit, the same commit
+reported by `vericairn --version`:
+
+```sh
+mkdir my-estate && cd my-estate && git init
+vericairn estate init --name "My Venture" --slug my-venture \
+  --purpose "What this estate exists to do." \
+  --operator-name "Your Name" --organization "Your Organization"
+vericairn status
+```
+
+Published 0.8.2 still needs `--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` on `estate init`.
+An explicit `--commit <40-hex-commit>` overrides the default. A development build without a recorded
+commit requires it and refuses before writing anything when it is omitted. Never write a release
+record by hand to supply the missing published-release dependency.
 
 An estate running 0.8.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops
@@ -464,8 +484,14 @@ dotnet tool update --global dotnet-vc --version <published-version>
 ```
 
 For an archive installation or Workbench, download the appropriate archive from the linked release and
-verify its hashes as that release's guide describes. To move an estate's pin, first ensure its target
-published release is recorded in that estate, then use the target release's CLI:
+verify its hashes as that release's guide describes.
+
+Restart any serving daemon with the installed release first: from the estate directory on its machine,
+run `vericairn runtime stop`, then `vericairn runtime start`. Restart running workers after their active
+work has settled. An estate upgrade changes the estate's pin; it does not restart those processes.
+
+To move an estate's pin, first ensure its target published release is recorded in that estate,
+then use the target release's CLI:
 
 ```sh
 vericairn estate upgrade --to <published-version> --check

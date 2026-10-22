@@ -8,8 +8,9 @@ namespace Vericairn.Cli;
 internal sealed class WorkCommand : Command
 {
     public WorkCommand(CommandContext context)
-        : base("work", "Briefs, assignments, attempts, results and amendments of work orders.")
+        : base("work", "Create work orders; read briefs and record assignments, attempts, results and amendments.")
     {
+        Subcommands.Add(new WorkNewCommand(context));
         Subcommands.Add(new WorkMovePlanCommand(context));
         Subcommands.Add(new WorkPlaceCommand(context));
         Subcommands.Add(new WorkBriefCommand(context));

@@ -133,6 +133,9 @@ public partial interface IEstateApi
     /// <summary>What an observer sees of a work order, or null.</summary>
     ObserveResponse? Observe(string workOrder);
 
+    /// <summary>Create a work order from fields, with the same validation and signing as a new work-order record.</summary>
+    WriteOutcome WorkNew(WorkNewRequest request);
+
     /// <summary>Delegate a work order.</summary>
     WriteOutcome Assign(AssignRequest request);
 

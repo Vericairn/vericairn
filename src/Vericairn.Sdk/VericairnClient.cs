@@ -20,7 +20,7 @@ namespace Vericairn.Sdk;
 /// the local network a paired device presents a certificate its key issued, has the runtime identity it pinned prove each
 /// connection, and signs every request. It presents, requests and observes; it never evaluates authority.
 /// </summary>
-public sealed partial class VericairnClient : IEstateApi, IDisposable
+public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDisposable
 {
     private readonly HttpClient http;
     private readonly HttpClient asyncHttp;
@@ -168,7 +168,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
-    public HealthResponse Health() => Get<HealthResponse>("/v1/health")!;
+    public HealthResponse Health() => ObserveHealth(Get<HealthResponse>("/v1/health"))!;
 
     /// <inheritdoc />
     public CommunicationProfile Communication(string? recipient = null, string? assignment = null, CommunicationValues? view = null)
@@ -179,7 +179,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         }
         catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This runtime does not support communication settings.");
+            return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: exception is ClientRefusedException ? exception.Message : "This runtime does not support communication settings.");
         }
     }
 
@@ -256,6 +256,9 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
 
     /// <inheritdoc />
     public ObserveResponse? Observe(string workOrder) => Get<ObserveResponse>("/v1/work/" + Uri.EscapeDataString(workOrder), allowNotFound: true);
+
+    /// <inheritdoc />
+    public WriteOutcome WorkNew(WorkNewRequest request) => Post<WorkNewRequest, WriteOutcome>("/v1/work/new", request)!;
 
     /// <inheritdoc />
     public WriteOutcome Assign(AssignRequest request) => Post<AssignRequest, WriteOutcome>("/v1/work/assign", request)!;
@@ -410,7 +413,8 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     public string RecoverInspect()
     {
         using HttpResponseMessage response = http.GetAsync(new Uri("/v1/recover/inspect", UriKind.Relative)).GetAwaiter().GetResult();
-        return response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        EnsureSuccess(response);
+        return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
@@ -422,6 +426,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         using var content = new ByteArrayContent(bytes);
         content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
         using HttpResponseMessage response = http.PostAsync(new Uri("/v1/objects", UriKind.Relative), content).GetAwaiter().GetResult();
+        if (response.StatusCode == HttpStatusCode.NotFound) EnsureSuccess(response);
         return response.IsSuccessStatusCode
             ? (response.Content.ReadFromJsonAsync<ObjectStored>(ProtocolJson.Options).GetAwaiter().GetResult(), null)
             : (null, ReadProblem(response));
@@ -430,7 +435,9 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     /// <inheritdoc />
     public byte[]? ObjectGet(string hash)
     {
-        using HttpResponseMessage response = http.GetAsync(new Uri("/v1/objects/" + Uri.EscapeDataString(hash), UriKind.Relative)).GetAwaiter().GetResult();
+        string path = "/v1/objects/" + Uri.EscapeDataString(hash);
+        using HttpResponseMessage response = http.GetAsync(new Uri(path, UriKind.Relative)).GetAwaiter().GetResult();
+        if (response.StatusCode == HttpStatusCode.NotFound) CheckLookupRouteAsync(path, response, CancellationToken.None).GetAwaiter().GetResult();
         return response.StatusCode == HttpStatusCode.NotFound ? null : response.EnsureSuccessStatusCode().Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
     }
 
@@ -441,7 +448,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     public void Shutdown()
     {
         using HttpResponseMessage response = http.PostAsync(new Uri("/v1/shutdown", UriKind.Relative), null).GetAwaiter().GetResult();
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response);
     }
 
     /// <summary>
@@ -464,7 +471,8 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
     public string OpenApi()
     {
         using HttpResponseMessage response = http.GetAsync(new Uri(OpenApiDocument.Path, UriKind.Relative)).GetAwaiter().GetResult();
-        return response.EnsureSuccessStatusCode().Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        EnsureSuccess(response);
+        return response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
@@ -509,10 +517,11 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         using HttpResponseMessage response = http.GetAsync(new Uri(path, UriKind.Relative)).GetAwaiter().GetResult();
         if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
         {
+            CheckLookupRouteAsync(path, response, CancellationToken.None).GetAwaiter().GetResult();
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response);
         return response.Content.ReadFromJsonAsync<T>(ProtocolJson.Options).GetAwaiter().GetResult();
     }
 
@@ -522,7 +531,17 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
         using HttpResponseMessage response = http.PostAsJsonAsync(new Uri(path, UriKind.Relative), request, ProtocolJson.Options).GetAwaiter().GetResult();
         if (response.StatusCode is HttpStatusCode.UnprocessableEntity or HttpStatusCode.NotFound or HttpStatusCode.OK or HttpStatusCode.Conflict)
         {
-            return response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
+            try
+            {
+                TResponse? result = response.Content.ReadFromJsonAsync<TResponse>(ProtocolJson.Options).GetAwaiter().GetResult();
+                if (response.StatusCode == HttpStatusCode.NotFound && result is null or WriteOutcome { Written: null, Problem: null } or DocumentPinResponse { Written: null, Problem: null })
+                    throw MissingOperationAsync(response, CancellationToken.None).GetAwaiter().GetResult();
+                return result;
+            }
+            catch (JsonException) when (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                throw MissingOperationAsync(response, CancellationToken.None).GetAwaiter().GetResult();
+            }
         }
 
         response.EnsureSuccessStatusCode();
@@ -543,7 +562,7 @@ public sealed partial class VericairnClient : IEstateApi, IDisposable
             return (null, ReadProblem(response));
         }
 
-        response.EnsureSuccessStatusCode();
+        EnsureSuccess(response);
         return (null, null);
     }
 

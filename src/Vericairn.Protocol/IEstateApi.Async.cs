@@ -161,6 +161,10 @@ public partial interface IEstateApi
     Task<ObserveResponse?> ObserveAsync(string workOrder, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Observe), () => Observe(workOrder), false, this as IClientOperationLifetime, cancellationToken);
 
+    /// <summary>The cancellable counterpart of <see cref="WorkNew"/>; a stopped observation does not undo an effect.</summary>
+    Task<WriteOutcome> WorkNewAsync(WorkNewRequest request, CancellationToken cancellationToken = default) =>
+        ClientOperation.RunSynchronousAsync(nameof(WorkNew), () => WorkNew(request), true, this as IClientOperationLifetime, cancellationToken);
+
     /// <summary>The cancellable counterpart of <see cref="Assign"/>; a stopped observation does not undo an effect.</summary>
     Task<WriteOutcome> AssignAsync(AssignRequest request, CancellationToken cancellationToken = default) =>
         ClientOperation.RunSynchronousAsync(nameof(Assign), () => Assign(request), true, this as IClientOperationLifetime, cancellationToken);

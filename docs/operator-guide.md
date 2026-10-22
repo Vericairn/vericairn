@@ -34,13 +34,22 @@ Three clients share one runtime. The command line is what this guide shows first
 
 ## 2. Create an estate
 
+From 0.8.3, `estate init` uses the running build's exact source commit, as reported by
+`vericairn --version`, when `--commit` is omitted. For published 0.8.2, add
+`--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` to the command below.
+
 ```sh
 mkdir my-estate && cd my-estate && git init
 vericairn estate init --name "My Venture" --slug my-venture --purpose "What this estate exists to do." \
-  --operator-name "Your Name" --organization "Your Organization" --commit <40-hex commit of the Vericairn source to pin>
+  --operator-name "Your Name" --organization "Your Organization"
 vericairn status
 git add -A && git commit -m "Estate online"
 ```
+
+Use `--commit <40-hex-commit>` to pin a different Vericairn source commit. A development build
+without a recorded commit requires this option; omitting it refuses before any manifest or records
+are written. The default comes from the build's version metadata, so the estate's Git history does
+not choose the pin.
 
 `estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the manifest later pins a published release once the estate holds that release's record (section 9). `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.2 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
@@ -126,7 +135,31 @@ Standing permission is an authority record based on a decision: a grantee, scope
 
 ## 5. The work loop: order, brief, assignment, attempt, result
 
-A work order states intent, scope, deliverables and the one question whose honest yes closes it:
+A work order states intent, scope, deliverables and the one question whose honest yes closes it.
+
+The **0.8.3 development build** accepts these fields directly, without a JSON file. The admitted device
+of the principal named by `--by` signs it, just as it signs `records new`:
+
+```sh
+vericairn work new --by <operator or builder id> --key W-1 --title "Build the widget" \
+  --intent "Why this work exists." --scope "widget sources" --scope "widget tests" \
+  --deliverable "widget.txt" --exit-question "Does the widget build and pass its tests?"
+```
+
+`--key`, `--title`, `--intent`, `--exit-question`, at least one `--scope` and at least one
+`--deliverable` supply the required work-order fields. `--kind` defaults to `ordinary`; use
+`--kind milestone` for a milestone. Repeat `--scope` and `--deliverable` to retain each item in order.
+Optional `--after <work-order id>` names a predecessor's record id, and `--input <type:id>` names an
+input record, for example `--input decision:<decision id>`; repeat either for multiple records.
+With neither option, the order has no predecessors and an empty input list. `--after` needs record
+format 2 or later, as it does in the JSON body.
+
+The command builds a work-order body and passes it through the same writer as `records new work-order`.
+Missing fields, overlong text, malformed references, unknown predecessors, duplicate keys and signing
+refusals have the same messages. Success prints the record path, id and hash; `--json` prints the
+receipt as `{"path":"...","id":"...","hash":"sha256:..."}`.
+
+For published 0.8.2, or to supply the full record body, use the existing command:
 
 ```sh
 vericairn records new work-order --by <operator or builder id> --body order.json
@@ -346,6 +379,12 @@ carrier form keeps both carrier definitions. Results include every stored revisi
 and any refusal findings. Reconcile an interrupted storage batch before retrying.
 
 ## 9. Upgrading an estate
+
+Install the target release, then restart any daemon serving the estate before checking or applying
+the upgrade. From the estate directory on the daemon's machine, using that installed release, run
+`vericairn runtime stop`, then `vericairn runtime start`. Installing a binary leaves an existing daemon
+running its previous release. Restart running workers with the new release after their active work
+has settled. The upgrade command does not stop the daemon or workers itself.
 
 ```sh
 vericairn estate upgrade --to 0.8.2 --check
@@ -967,6 +1006,9 @@ by the person asked and accepts no work.
 
 
 ## 24. Release notices and upgrades
+
+After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
+commands and coordination steps in section 9 before using the upgraded CLI against that estate.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
 enabled by default. It asks GitHub's `Vericairn/vericairn` latest-release endpoint for the newest
