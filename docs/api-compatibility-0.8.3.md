@@ -29,8 +29,7 @@ are checked by the existing work-order validator, with the same refusal messages
 `VericairnClient` and `CancellationBoundApi` expose both members. The SDK calls
 `POST /v1/work/new`, which returns the existing `WriteOutcome` and signs as the
 author named by `By`, like `POST /v1/records`. [API v1](api-v1.md#work-order-creation-083-development)
-describes the request and the command it matches. Earlier interface changes remain
-documented in [API compatibility for 0.8.2](api-compatibility-0.8.2.md).
+describes the request and the command it matches.
 
 ## Daemon release diagnostics (FIX-62)
 
