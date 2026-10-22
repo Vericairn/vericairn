@@ -27,20 +27,23 @@ published on October 22, 2026. The [public roadmap](ROADMAP.md) lists what comes
 
 ## Try it
 
-With the .NET 10 SDK on Linux, macOS or Windows:
+With the .NET 10 SDK on Linux, macOS or Windows, the sequence from 0.8.3 is below.
+Until 0.8.3 is published, the installed 0.8.2 tool still needs
+`--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` on `estate init`.
 
 ```sh
 dotnet tool install --global dotnet-vc
 mkdir my-venture && cd my-venture && git init
 dotnet vc estate init --name "My Venture" --slug my-venture \
   --purpose "Build and ship one product with coding agents." \
-  --operator-name "Your Name" --organization "Your Organization" \
-  --commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f
+  --operator-name "Your Name" --organization "Your Organization"
 dotnet vc status
 ```
 
 `estate init` writes two records, you as the operator and the estate's charter, and a manifest that pins the
-Vericairn source it names, here 0.8.2's commit. `status` shows the new, empty estate. The
+running build's exact Vericairn source commit, as reported by `dotnet vc --version`. An explicit
+`--commit <40-hex-commit>` overrides that pin. A development build without a recorded commit requires
+that option and refuses without writing anything when it is omitted. `status` shows the new, empty estate. The
 [operator's guide](docs/operator-guide.md) continues from there: your device and its key, a builder agent,
 decisions, a work order, an agent's run, its review and acceptance, and a release.
 

@@ -129,8 +129,22 @@ Only the estate that built and observed a release holds its release record
 ([issue 177](https://github.com/Vericairn/vericairn/issues/177)). An estate other than Vericairn's own therefore
 cannot yet pin or upgrade to a published Vericairn release: `estate upgrade --to` refuses there, and its source
 pin does not move. Until a later release adds a supported record of a published Vericairn release that an
-estate depends on, initialize such an estate with `estate init --commit` set to the published release's tag
-commit, run the checksum-verified published binary with `--estate`, and never write a release record by hand.
+estate depends on, initialize such an estate with a source pin and run the checksum-verified published
+binary with `--estate`. From 0.8.3, the running build supplies its exact source commit, the same commit
+reported by `vericairn --version`:
+
+```sh
+mkdir my-estate && cd my-estate && git init
+vericairn estate init --name "My Venture" --slug my-venture \
+  --purpose "What this estate exists to do." \
+  --operator-name "Your Name" --organization "Your Organization"
+vericairn status
+```
+
+Published 0.8.2 still needs `--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` on `estate init`.
+An explicit `--commit <40-hex-commit>` overrides the default. A development build without a recorded
+commit requires it and refuses before writing anything when it is omitted. Never write a release
+record by hand to supply the missing published-release dependency.
 
 An estate running 0.8.0 at format 3 applies no format step. From 0.8.2 (FIX-38) the upgrade appends its
 migration record before it replaces the manifest, and replaces it atomically: an upgrade that stops

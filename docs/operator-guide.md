@@ -34,13 +34,22 @@ Three clients share one runtime. The command line is what this guide shows first
 
 ## 2. Create an estate
 
+From 0.8.3, `estate init` uses the running build's exact source commit, as reported by
+`vericairn --version`, when `--commit` is omitted. For published 0.8.2, add
+`--commit e000a12ea980a4ac0c7e7a127a714f6423e27d7f` to the command below.
+
 ```sh
 mkdir my-estate && cd my-estate && git init
 vericairn estate init --name "My Venture" --slug my-venture --purpose "What this estate exists to do." \
-  --operator-name "Your Name" --organization "Your Organization" --commit <40-hex commit of the Vericairn source to pin>
+  --operator-name "Your Name" --organization "Your Organization"
 vericairn status
 git add -A && git commit -m "Estate online"
 ```
+
+Use `--commit <40-hex-commit>` to pin a different Vericairn source commit. A development build
+without a recorded commit requires this option; omitting it refuses before any manifest or records
+are written. The default comes from the build's version metadata, so the estate's Git history does
+not choose the pin.
 
 `estate init` writes two records and the manifest, which validate together: the operator principal (you), the charter (name, purpose, operator, policies: `signatures: optional` at first) and the estate manifest, which is a file of the repository rather than a record. It prints your principal id. Keep that id; every record you author names it with `--by`. The manifest pins the Vericairn source commit for the estate's bootstrap; the ordinary way to run the tool against the estate is the binary you installed with `--estate`, and the manifest later pins a published release once the estate holds that release's record (section 9). `--profile local-only` keeps the records in this machine's live store instead of files; the default, `repository-synced`, is the profile the first-party estate uses. A new estate starts at record format 3, the newest format 0.8.2 writes, which the manifest's `recordFormat` states; an estate begun under an earlier release moves to it by the upgrade of section 9.
 
