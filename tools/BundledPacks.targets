@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <_VericairnPackEvidenceRoot>$(MSBuildThisFileDirectory)../artifacts/runtime-packs</_VericairnPackEvidenceRoot>
+  </PropertyGroup>
+  <!-- Record resolved publish inputs, not the SDK version or portable NuGet lock graph. -->
+  <Target Name="RecordBundledPacks" AfterTargets="Publish" Condition="'$(VericairnDistributable)' == 'true'">
+    <Error Condition="'$(SelfContained)' != 'true' Or '$(PublishSingleFile)' != 'true'" Text="Bundled pack evidence requires a self-contained single-file publish." />
+    <Error Condition="'@(ResolvedRuntimePack)' == '' Or '@(ResolvedSingleFileHostPack)' == ''" Text="The publish did not resolve its runtime and single-file apphost packs." />
+    <ItemGroup>
+      <_VericairnBundledPack Include="@(ResolvedRuntimePack)">
+        <Kind>runtime</Kind>
+      </_VericairnBundledPack>
+      <_VericairnBundledPack Include="@(ResolvedSingleFileHostPack)">
+        <Kind>apphost</Kind>
+        <!-- SDK-installed host packs have a package directory but omit NuGet identity metadata. The directory's last
+             two segments are the installed pack id and version; retain only those, never a machine path. -->
+        <NuGetPackageId Condition="'%(ResolvedSingleFileHostPack.NuGetPackageId)' == ''">$([System.IO.Path]::GetFileName($([System.IO.Path]::GetDirectoryName('%(ResolvedSingleFileHostPack.PackageDirectory)'))))</NuGetPackageId>
+        <NuGetPackageVersion Condition="'%(ResolvedSingleFileHostPack.NuGetPackageVersion)' == ''">$([System.IO.Path]::GetFileName('%(ResolvedSingleFileHostPack.PackageDirectory)'))</NuGetPackageVersion>
+      </_VericairnBundledPack>
+    </ItemGroup>
+    <Error Condition="'%(_VericairnBundledPack.NuGetPackageId)' == '' Or '%(_VericairnBundledPack.NuGetPackageVersion)' == ''" Text="A bundled pack has no resolved identity or version." />
+    <MakeDir Directories="$(_VericairnPackEvidenceRoot)/$(MSBuildProjectName)" />
+    <WriteLinesToFile File="$(_VericairnPackEvidenceRoot)/$(MSBuildProjectName)/$(RuntimeIdentifier).txt"
+                      Lines="@(_VericairnBundledPack->'%(Kind)|%(NuGetPackageId)|%(NuGetPackageVersion)')"
+                      Overwrite="true" Encoding="UTF-8" />
+  </Target>
+</Project>

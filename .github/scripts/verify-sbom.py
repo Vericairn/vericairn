@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 Jason Furr
 
+import argparse
 import json
 from pathlib import Path
-import sys
+import runpy
 
 
 def packages(lock):
@@ -16,7 +17,7 @@ def packages(lock):
     return found
 
 
-def verify(bom, locks):
+def verify(bom, locks, runtime_packs=None):
     """A bill of materials describes what ships only when it names each package the distributables' lock files hold."""
     document = json.loads(Path(bom).read_text(encoding="utf-8"))
     named = {(component["name"].lower(), component["version"]) for component in document.get("components", [])}
@@ -27,10 +28,15 @@ def verify(bom, locks):
     if missing:
         raise SystemExit("The bill of materials omits packages the distributables ship: "
                          + ", ".join(f"{name} {version}" for name, version in missing))
+    if runtime_packs is not None:
+        runpy.run_path(str(Path(__file__).with_name("runtime-packs.py")))["verify"](document, runtime_packs)
     print(f"The bill of materials names all {len(expected)} packages the distributables ship.")
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        raise SystemExit("Usage: verify-sbom.py <bom.json> <packages.distributable.lock.json>...")
-    verify(sys.argv[1], sys.argv[2:])
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("bom")
+    parser.add_argument("locks", nargs="+")
+    parser.add_argument("--runtime-packs", required=True)
+    args = parser.parse_args()
+    verify(args.bom, args.locks, args.runtime_packs)
