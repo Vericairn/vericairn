@@ -40,7 +40,9 @@ dotnet vc status
 ```
 
 `estate init` writes two records, you as the operator and the estate's charter, and a manifest that pins the
-Vericairn source it names, here 0.8.2's commit. `status` shows the new, empty estate. The
+Vericairn source it names, here 0.8.2's commit. From 0.8.3, `--commit` is optional: `estate init` pins the
+running build's exact source commit, as `dotnet vc --version` reports it, and a development build without a
+recorded commit still requires the option. `status` shows the new, empty estate. The
 [operator's guide](docs/operator-guide.md) continues from there: your device and its key, a builder agent,
 decisions, a work order, an agent's run, its review and acceptance, and a release.
 
