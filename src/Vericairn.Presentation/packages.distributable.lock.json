@@ -17,16 +17,10 @@
       "vericairn.sdk": {
         "type": "Project",
         "dependencies": {
-          "Vericairn.Protocol": "[0.8.0-dev, )",
-          "Vericairn.Records": "[0.8.0-dev, )"
+          "Vericairn.Protocol": "[0.8.2-dev, )",
+          "Vericairn.Records": "[0.8.2-dev, )"
         }
       }
-    },
-    "net10.0/linux-arm64": {},
-    "net10.0/linux-x64": {},
-    "net10.0/osx-arm64": {},
-    "net10.0/osx-x64": {},
-    "net10.0/win-arm64": {},
-    "net10.0/win-x64": {}
+    }
   }
 }

@@ -216,6 +216,14 @@ jobs:
           done
           # Locked restores leave every committed lock file as it is.
           git diff --exit-code -- '*.lock.json'
+      - name: Compare every platform's library assemblies
+        shell: bash
+        # Read the assemblies embedded in the finished single-file applications, including Workbench's CLI copy.
+        # Equal bytes also hold the assembly name and module identity used by policy implementation digests equal.
+        run: |
+          set -eu
+          python3 -m unittest discover -s tools -p 'test_distributable_libraries.py'
+          python3 tools/verify-distributable-libraries.py out out-workbench
       - name: Software bill of materials
         shell: bash
         # The tool is pinned, and asked for a CycloneDX specification the components report reads (1.2 to 1.6): CycloneDX 6.3 writes
