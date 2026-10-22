@@ -134,7 +134,9 @@ public sealed class DocumentReviewType : IRecordType
         foreach (BodyReader answer in answers ?? [])
         {
             string? trigger = answer.Text("on", true, 200);
-            if (trigger is not null && !on.Contains(trigger))
+            // Own-file changes are always covered, including declarations with only record triggers. Their content pin
+            // supplies that clearance; the separate covered pin remains required only for explicitly declared paths.
+            if (trigger is not null && trigger != "covers" && !on.Contains(trigger))
             {
                 answer.Error("document.answers", "on", $"The declaration has no '{trigger}' trigger.");
             }

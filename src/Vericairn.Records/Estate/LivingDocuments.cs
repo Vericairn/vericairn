@@ -5,6 +5,7 @@ using System.Collections.Immutable;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Types;
 
@@ -54,6 +55,9 @@ public static class LivingDocuments
     /// <param name="Record">The record that fired it; null for covered paths.</param>
     public sealed record Reason(string On, string Level, string Summary, string? Record);
 
+    // Retain the comparison used to derive due state so release admission never applies a second byte test.
+    internal sealed record ContentComparison(bool Available, Reason? Reason, string Summary, bool Unregistered = false);
+
     /// <summary>A declared document and its derived state.</summary>
     /// <param name="Declaration">The current declaration.</param>
     /// <param name="Level">The highest level among the reasons; null when the document is current.</param>
@@ -69,8 +73,10 @@ public static class LivingDocuments
         /// <summary>The resource record of the repository that holds it; null for the estate's own repository.</summary>
         public string? Repository => EstateModel.BodyString(Declaration, "repository");
 
-        /// <summary>The repository commit selected for this release comparison; null when no commit is available or needed.</summary>
+        /// <summary>The repository commit selected for this comparison; null when no commit is available or needed.</summary>
         public string? ComparisonCommit { get; init; }
+
+        internal ContentComparison? Content { get; init; }
 
         /// <summary>The fresh strict generation comparison, when the declaration has adopted that contract.</summary>
         public GeneratedDocumentPlan? Generation { get; init; }
@@ -132,21 +138,9 @@ public static class LivingDocuments
             .Select(d =>
             {
                 string? repository = EstateModel.BodyString(d, "repository");
-                IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(d, "source"));
                 bool releaseRepository = releaseRepositories is null || (repository is not null && releaseRepositories.Contains(repository));
-                string? at = repository is null ? null
-                    : releaseRepository ? commit : GeneratedDocumentContract.RequiresFreshCheck(model, d) ? null : source?.Head(model, d);
-                State state = Evaluate(model, d, at);
-                if (!releaseRepository && at is not null && state.Clearance is { Type: "document-review" } review &&
-                    review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&
-                    content.TryGetProperty("commit", out JsonElement reviewed) && reviewed.ValueKind == JsonValueKind.String &&
-                    reviewed.GetString() is string reviewedCommit && reviewedCommit != at && source!.IsAncestor(model, d, at, reviewedCommit))
-                {
-                    at = reviewedCommit;
-                    state = Evaluate(model, d, at);
-                }
-
-                return state with { ComparisonCommit = at };
+                return Evaluate(model, d, repository is not null && releaseRepository ? commit : null,
+                    repository is not null && (releaseRepository || GeneratedDocumentContract.RequiresFreshCheck(model, d)));
             }).ToList();
     }
 
@@ -214,12 +208,19 @@ public static class LivingDocuments
         return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Concat(lines.Select(l => l + "\n"))))).ToLowerInvariant();
     }
 
-    /// <summary>Every path a declaration's covers triggers name, in order and once each.</summary>
+    /// <summary>The document's own file and every path its covers triggers name, in order and once each.</summary>
     public static IReadOnlyList<string> CoveredPaths(RecordEnvelope declaration)
     {
         ArgumentNullException.ThrowIfNull(declaration);
-        return Triggers(declaration).Where(t => t.On == "covers").SelectMany(t => t.Values).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
+        IEnumerable<string> paths = CoveredTriggerPaths(declaration);
+        if (EstateModel.BodyString(declaration, "path") is { } path) paths = paths.Append(path);
+        return paths.Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
     }
+
+    // The content pin already covers the document itself. Keep the separate covered pin's existing meaning so reviews
+    // written before implicit own-file coverage remain comparable, including sources with their own identity algorithm.
+    internal static IReadOnlyList<string> CoveredTriggerPaths(RecordEnvelope declaration) =>
+        Triggers(declaration).Where(t => t.On == "covers").SelectMany(t => t.Values).Distinct(StringComparer.Ordinal).OrderBy(p => p, StringComparer.Ordinal).ToList();
 
     /// <summary>A declaration's triggers with their parameters.</summary>
     public static IReadOnlyList<(string On, string Level, string? Product, IReadOnlyList<string> Values)> Triggers(RecordEnvelope declaration)
@@ -241,14 +242,14 @@ public static class LivingDocuments
         }).ToList();
     }
 
-    private static State Evaluate(EstateModel model, RecordEnvelope declaration, string? releaseCommit = null)
+    private static State Evaluate(EstateModel model, RecordEnvelope declaration, string? releaseCommit = null, bool exactCommit = false)
     {
         if (GeneratedDocumentContract.IsStrict(model, declaration))
         {
             GeneratedDocumentPlan plan = GeneratedDocumentVerification.Plan(model, declaration, releaseCommit);
             return new State(declaration, plan.Current ? null : "refuse",
                 plan.Problems.Select(p => new Reason("generation", "refuse", p, null)).ToArray(), null,
-                plan.Status == DocumentGenerationStatus.Unavailable ? plan.Problems : [], []) { Generation = plan };
+                plan.Status == DocumentGenerationStatus.Unavailable ? plan.Problems : [], []) { Generation = plan, ComparisonCommit = releaseCommit };
         }
 
         IReadOnlyList<string> chain = model.Chain(declaration);
@@ -270,21 +271,28 @@ public static class LivingDocuments
         var reasons = new List<Reason>();
         var notes = new List<string>();
 
+        IDocumentSource? source = elsewhere ? DocumentSources.Find(EstateModel.BodyString(declaration, "source")) : null;
+        string? at = elsewhere ? exactCommit ? releaseCommit : source?.Head(model, declaration) : null;
+        if (!exactCommit && at is not null && clearance is { Type: "document-review" } review &&
+            review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&
+            content.TryGetProperty("commit", out JsonElement reviewed) && reviewed.ValueKind == JsonValueKind.String && reviewed.GetString() is { } reviewedCommit &&
+            reviewedCommit != at && source!.IsAncestor(model, declaration, at, reviewedCommit))
+            at = reviewedCommit;
+
+        ContentComparison? comparison = CompareContent(model, declaration, clearance, source, at);
+
         // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
         // estate's own files are read from its working tree; another repository's at its selected commit when given, otherwise HEAD.
-        IReadOnlyList<string> coveredPaths = CoveredPaths(declaration);
+        IReadOnlyList<string> coveredPaths = CoveredTriggerPaths(declaration);
         RecordEnvelope? coveredReview = reviews.LastOrDefault(r => EstateModel.BodyString(r, "covered") is not null);
-        string? at = null;
         string? identity = null;
         if (coveredPaths.Count > 0 && !elsewhere)
         {
             identity = CoveredIdentity(model.Root, coveredPaths);
         }
-        else if (coveredPaths.Count > 0 && DocumentSources.Find(EstateModel.BodyString(declaration, "source")) is IDocumentSource source &&
-                 (releaseCommit is null ? source.Head(model, declaration) : source.Resolve(model, declaration, releaseCommit)) is string head)
+        else if (coveredPaths.Count > 0 && comparison?.Available == true && at is not null)
         {
-            at = head;
-            identity = source.Covered(model, declaration, coveredPaths, head);
+            identity = source!.Covered(model, declaration, coveredPaths, at);
         }
 
         bool coveredChanged = identity is not null && (coveredReview is null || EstateModel.BodyString(coveredReview, "covered") != identity);
@@ -321,9 +329,50 @@ public static class LivingDocuments
             }
         }
 
+        // Keep declared triggers in their established order, including the answers recorded by a review.
+        if (comparison?.Reason is { } reason) reasons.Add(reason);
         string? due = reasons.Count == 0 ? null : reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).Last();
-        return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes);
+        return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes) { ComparisonCommit = at, Content = comparison };
     }
+
+    private static ContentComparison? CompareContent(EstateModel model, RecordEnvelope declaration, RecordEnvelope? clearance, IDocumentSource? source, string? commit)
+    {
+        string path = EstateModel.BodyString(declaration, "path") ?? string.Empty;
+        string? repository = EstateModel.BodyString(declaration, "repository");
+        // Estate revisions also clear the own-file pin. A declaration alone is not a content clearance.
+        if (repository is null && clearance is null) return null;
+        string level = Triggers(declaration).Select(t => t.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() ?? "remind";
+        JsonElement pin = clearance is { Type: "document-review" } && clearance.Body.TryGetProperty("content", out JsonElement content)
+            ? content : clearance?.Body ?? default;
+        string? clearedHash = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String ? hash.GetString() : null;
+        string clearedAt = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("commit", out JsonElement at) && at.ValueKind == JsonValueKind.String ? at.GetString() ?? "?" : "?";
+        bool available = repository is null || (commit is not null && source?.Resolve(model, declaration, commit) == commit);
+        ContentComparison Due(string summary) => new(available, new Reason("covers", level, summary, null), summary);
+        if (clearedHash is null) return Due($"{path}: no review has cleared its content");
+        if (!available)
+        {
+            RecordEnvelope? resource = model.ById.GetValueOrDefault(repository!);
+            string name = resource is null ? repository! : EstateModel.BodyString(resource, "name") ?? repository!;
+            bool registered = resource is not null && model.Manifest is not null &&
+                model.Chain(model.Latest(resource)).Any(id => RepositoryClones.Find(model.Manifest.Estate, id) is not null);
+            bool unregistered = !registered && source?.Head(model, declaration) is null;
+            return Due(!unregistered
+                ? $"{path}: the registered clone of {name} ({repository}) {(commit is null ? "has no readable HEAD commit" : $"does not contain repository commit {commit}")}; fetch that repository's clone, then retry"
+                : $"{path}: no clone of {name} ({repository}) is registered on this machine, so its content comparison cannot run; register one with `vericairn sources clone <path> --resource {repository}`") with { Unregistered = unregistered };
+        }
+
+        string file = System.IO.Path.Combine(model.Root, path.Replace('/', System.IO.Path.DirectorySeparatorChar));
+        byte[]? bytes = repository is null ? File.Exists(file) ? File.ReadAllBytes(file) : null : source!.Read(model, declaration, commit!);
+        string? currentHash = bytes is null ? null : ContentHash.Sha256(bytes);
+        string where = commit is null ? "in the estate's working tree" : $"at {Short(commit)}";
+        if (currentHash == clearedHash)
+            return new(true, null, $"{path} {where} is the content its {(clearance!.Type == "document-review" ? "review" : "revision")} {clearance.Id} cleared");
+        if (currentHash is null) return Due($"{path} is not {(repository is null ? "in the estate's working tree" : $"in its repository {where}")}");
+        string cleared = clearance!.Type == "document-review" ? $"review{(commit is null ? " " + clearance.Id : " at " + Short(clearedAt))}" : $"revision {clearance.Id}";
+        return Due($"{path} changed after its {cleared}: {where} it is {currentHash}, and the {(clearance.Type == "document-review" ? "review" : "revision")} cleared {clearedHash}");
+    }
+
+    private static string Short(string commit) => commit[..Math.Min(12, commit.Length)];
 
     private static string Fired(string on, RecordEnvelope record) => on switch
     {

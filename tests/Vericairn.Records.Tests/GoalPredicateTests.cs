@@ -3,6 +3,7 @@
 
 using System.Text.Json;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 
 namespace Vericairn.Records.Tests;
@@ -201,6 +202,7 @@ public class GoalPredicateTests
                 if (scenario == "documents-unavailable-and-due")
                 {
                     Publish(estate, named, named["P"].Id);
+                    estate.WriteFile("docs/page.md", "# Guide\n");
                     named["PAGECLEARED"] = estate.Add("document-review", op, DocumentReview(), named["PAGE"].Reference);
                 }
 
@@ -227,8 +229,11 @@ public class GoalPredicateTests
         named["PUBLISHED"] = estate.Add("release", estate.OperatorId, Release("0.1.0", "published"), new RecordReference("product", product, null), supersedes: candidate.Id);
     }
 
-    private static RecordEnvelope Declare(TestEstate estate, string path, string level, string product) =>
-        estate.Add("living-document", estate.OperatorId, $$"""{"path":"{{path}}","title":"Document","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"{{level}}","product":"{{product}}"}],"summary":"Follows the releases."}""");
+    private static RecordEnvelope Declare(TestEstate estate, string path, string level, string product)
+    {
+        estate.WriteFile(path, "# Guide\n");
+        return estate.Add("living-document", estate.OperatorId, $$"""{"path":"{{path}}","title":"Document","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"{{level}}","product":"{{product}}"}],"summary":"Follows the releases."}""");
+    }
 
     private static string Release(string version, string status)
     {
@@ -243,7 +248,7 @@ public class GoalPredicateTests
         $$"""{"to":"{{to}}","question":"{{question}}","recommendation":"Yes.","consequence":"The work waits.","state":"{{state}}"}""";
 
     private static string DocumentReview() =>
-        $$"""{"outcome":"current","content":{"hash":"{{Hash}}","bytes":10},"answers":[],"independence":"operator","summary":"Read it.","findings":[],"checks":[]}""";
+        $$"""{"outcome":"current","content":{"hash":"{{ContentHash.Sha256("# Guide\n"u8)}}","bytes":8},"answers":[],"independence":"operator","summary":"Read it.","findings":[],"checks":[]}""";
 
     private static string Goal(TestEstate estate, string completion) =>
         $$"""{"title":"Release the widget","objective":"Ship the widget.","completion":{{completion}},"constraints":[],"kind":"finite","sponsor":"{{estate.OperatorId}}","budget":{"wallMinutes":600,"attemptsPerStep":3},"plan":{"policy":"proposed-by-planner","approval":"sponsor-approves"},"inputs":[]}""";
