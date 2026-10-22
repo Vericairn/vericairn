@@ -7,6 +7,7 @@ using Vericairn.Protocol;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Hashing;
 using Vericairn.Records.Tests;
+using Vericairn.Runtime.Policies;
 using Vericairn.Runtime.Service;
 
 namespace Vericairn.Runtime.Tests;
@@ -32,7 +33,8 @@ public sealed class ReleaseBasisFixture : IDisposable
         {
             format = "vericairn.release-basis/2",
             basis = policies.Basis,
-            records = Api.Session.Load().Records.Select(r => new { r.Type, r.Id, hash = r.ComputedHash }).ToArray(),
+            // A basis's record digest covers order as well as signatures. Use the snapshot's retained order.
+            records = PolicyBasis.Recorded(Api.Session.Load()).Records.Select(r => new { r.Type, r.Id, hash = r.ComputedHash }).ToArray(),
             repositories = new[] { new
             {
                 identity = "fixture-repository", revision = "fixture-revision", contract = "vericairn.policy-repository/1", complete = true,
