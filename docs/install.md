@@ -118,7 +118,13 @@ Nothing runs in the background until you ask: commands run the embedded runtime 
 
 ## 6. Upgrading an estate to 0.8.2
 
-Install the 0.8.2 binary by Route B, then run these commands in the estate after it holds the published release record:
+Install the 0.8.2 binary by Route B. If a daemon serves the estate, restart it with the newly installed
+binary before running the upgrade.
+From the estate directory on the daemon's machine, run `vericairn runtime stop`, then
+`vericairn runtime start`. Replacing the installed binary does not replace a running daemon.
+Restart running workers with the new release too, after their active work has settled.
+
+Run these commands in the estate after it holds the published release record:
 
 ```sh
 vericairn estate upgrade --to 0.8.2 --check
@@ -478,8 +484,14 @@ dotnet tool update --global dotnet-vc --version <published-version>
 ```
 
 For an archive installation or Workbench, download the appropriate archive from the linked release and
-verify its hashes as that release's guide describes. To move an estate's pin, first ensure its target
-published release is recorded in that estate, then use the target release's CLI:
+verify its hashes as that release's guide describes.
+
+Restart any serving daemon with the installed release first: from the estate directory on its machine,
+run `vericairn runtime stop`, then `vericairn runtime start`. Restart running workers after their active
+work has settled. An estate upgrade changes the estate's pin; it does not restart those processes.
+
+To move an estate's pin, first ensure its target published release is recorded in that estate,
+then use the target release's CLI:
 
 ```sh
 vericairn estate upgrade --to <published-version> --check

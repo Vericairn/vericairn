@@ -7,8 +7,11 @@ namespace Vericairn.Protocol;
 /// A compatibility bridge for synchronous consumers. Each call uses the asynchronous operation with the bound cancellation
 /// token. Use it on a worker thread for legacy read projections, never to block a UI thread. It owns no API lifetime.
 /// </summary>
-public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationToken cancellationToken) : IEstateApi
+public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationToken cancellationToken) : IEstateApi, IDaemonVersion
 {
+    /// <inheritdoc />
+    public string? DaemonVersionWarning => (inner as IDaemonVersion)?.DaemonVersionWarning;
+
     /// <inheritdoc />
     public IReadOnlyList<string> PolicyAccess(string principal) => inner.PolicyAccessAsync(principal, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 

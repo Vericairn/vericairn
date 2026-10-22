@@ -22,6 +22,7 @@ namespace Vericairn.Cli;
 internal sealed class CommandContext(TextWriter? output = null, TextWriter? error = null, CancellationToken cancellationToken = default)
 {
     private ClientBoundary? boundary;
+    private readonly HashSet<string> daemonWarnings = new(StringComparer.Ordinal);
     internal IEstateApi? BorrowedApi { get; init; }
 
     public bool UsingDaemon { get; private set; }
@@ -30,6 +31,7 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
 
     public int Invoke(Func<int> action)
     {
+        daemonWarnings.Clear();
         using var invocation = new ClientBoundary(Error, cancellationToken);
         boundary = invocation;
         try { return invocation.Invoke(action); }
@@ -41,10 +43,18 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
 
     public bool IsAlive(DaemonEndpoint endpoint)
     {
+        using var client = new VericairnClient(endpoint);
+        return IsAlive(client);
+    }
+
+    private bool IsAlive(VericairnClient client)
+    {
         try
         {
-            using var client = new VericairnClient(endpoint);
-            return client.HealthAsync(CancellationToken).GetAwaiter().GetResult().Api == ApiVersion.Current;
+            HealthResponse health = client.HealthAsync(CancellationToken).GetAwaiter().GetResult();
+            if (client.DaemonVersionWarning is { } warning && daemonWarnings.Add(warning))
+                Error.WriteLine("warning: " + warning);
+            return health.Api == ApiVersion.Current;
         }
         // An unreachable or unanswering daemon is not alive, as before the client boundary wrapped transport failures: the command
         // falls back to the embedded runtime. A person's cancellation still propagates.
@@ -97,14 +107,21 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
 
             // In-process journeys supply an isolated service with explicit time and fixture providers.
             // Its owner retains its lifetime; ordinary invocations still discover their runtime below.
-            if (BorrowedApi is not null) return operation(new CancellationBoundApi(BorrowedApi, CancellationToken));
+            if (BorrowedApi is not null)
+            {
+                if (BorrowedApi is VericairnClient borrowedClient) _ = IsAlive(borrowedClient);
+                return operation(new CancellationBoundApi(BorrowedApi, CancellationToken));
+            }
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is not null && IsAlive(endpoint))
+            if (endpoint is not null)
             {
                 using var client = new VericairnClient(endpoint);
-                UsingDaemon = true;
-                return operation(new CancellationBoundApi(client, CancellationToken));
+                if (IsAlive(client))
+                {
+                    UsingDaemon = true;
+                    return operation(new CancellationBoundApi(client, CancellationToken));
+                }
             }
 
             using EstateService service = EstateService.Open(root);
@@ -128,12 +145,12 @@ internal sealed class CommandContext(TextWriter? output = null, TextWriter? erro
             }
 
             DaemonEndpoint? endpoint = DaemonHost.Discover(root);
-            if (endpoint is null || !IsAlive(endpoint))
+            using var client = endpoint is null ? null : new VericairnClient(endpoint);
+            if (client is null || !IsAlive(client))
             {
                 return Fail($"No daemon is serving this estate, and {purpose} needs one: configure the local-network profile with 'vericairn runtime configure --local-network <address:port>' and start the runtime with 'vericairn runtime start'.");
             }
 
-            using var client = new VericairnClient(endpoint);
             return operation(client);
         }
         catch (Exception exception) when ((exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException) && exception is not IClientOperationFailure)

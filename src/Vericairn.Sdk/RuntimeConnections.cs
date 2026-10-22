@@ -175,6 +175,7 @@ public sealed class RuntimeConnections
                 {
                     message = $"The runtime proved its identity and accepted device {connection.Device}, but did not answer every read: {exception.Message}";
                 }
+                if (client.DaemonVersionWarning is { } warning) message += " " + warning;
             }
             catch (Exception exception) when (preserveInterruption && ClientFailure.FromException(exception) is { Code: "refused" } refusal)
             {

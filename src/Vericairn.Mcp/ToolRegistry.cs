@@ -9,7 +9,11 @@ using Vericairn.Protocol;
 namespace Vericairn.Mcp;
 
 /// <summary>The outcome of a tool call: text for the agent, whether it is an error, or that no such tool exists.</summary>
-public sealed record ToolCallResult(string Text, bool IsError, bool Unknown = false);
+public sealed record ToolCallResult(string Text, bool IsError, bool Unknown = false)
+{
+    /// <summary>A serving daemon release warning, separate from the tool's unchanged result text.</summary>
+    public string? Warning { get; init; }
+}
 
 /// <summary>One tool: a name, a description that describes and never directs, an input schema, and the call it makes through the API.</summary>
 public sealed record ToolDefinition(string Name, string Description, JsonObject InputSchema, bool Writes, Func<IEstateApi, JsonObject?, ToolCallResult> Invoke)
@@ -105,11 +109,13 @@ public sealed partial class ToolRegistry
                 return new ToolCallResult(string.Empty, true, Unknown: true);
             }
 
-            return await tool.InvokeAsync(api, arguments, cancellationToken).ConfigureAwait(false);
+            ToolCallResult result = await tool.InvokeAsync(api, arguments, cancellationToken).ConfigureAwait(false);
+            return result with { Warning = (api as IDaemonVersion)?.DaemonVersionWarning };
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ArgumentException or HttpRequestException or JsonException or UnauthorizedAccessException or OperationCanceledException or TimeoutException)
         {
-            return new ToolCallResult(ClientFailure.FromException(exception)?.Message ?? exception.Message, true);
+            return new ToolCallResult(ClientFailure.FromException(exception)?.Message ?? exception.Message, true)
+                { Warning = (api as IDaemonVersion)?.DaemonVersionWarning };
         }
     }
 
