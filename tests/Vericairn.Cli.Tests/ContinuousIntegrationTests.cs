@@ -230,6 +230,32 @@ public class ContinuousIntegrationTests
     }
 
     [Fact]
+    public void ThePackageJobRequiresEqualLibraryAssembliesAcrossEveryPublishedPlatform()
+    {
+        string package = Block(Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml")), "package:", 2);
+        const string name = "- name: Compare every platform's library assemblies";
+        int compare = package.IndexOf(name, StringComparison.Ordinal);
+        int cli = package.IndexOf("- name: Publish self-contained distributables", StringComparison.Ordinal);
+        int workbench = package.IndexOf("- name: Publish Workbench distributables", StringComparison.Ordinal);
+        int checksums = package.IndexOf("- name: Checksums and notes", StringComparison.Ordinal);
+        Assert.True(cli > 0 && workbench > cli && compare > workbench && checksums > compare,
+            "Every CLI and Workbench bundle is compared before the package job accepts its artifacts.");
+        string step = Block(package, name, 6);
+        Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
+        Assert.Contains("python3 -m unittest discover -s tools -p 'test_distributable_libraries.py'\n", step, StringComparison.Ordinal);
+        Assert.Contains("python3 tools/verify-distributable-libraries.py out out-workbench\n", step, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", package, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", step, StringComparison.Ordinal);
+        Assert.DoesNotContain("||", step, StringComparison.Ordinal);
+        // The checker must cover exactly the RIDs each publishing loop ships, not a subset that could hide a differing build.
+        string checker = Read(Path.Combine(RepositoryRoot(), "tools", "verify-distributable-libraries.py"));
+        const string platforms = "linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64";
+        foreach (string publish in new[] { "- name: Publish self-contained distributables", "- name: Publish Workbench distributables" })
+            Assert.Contains("for rid in " + platforms + "; do", Block(package, publish, 6), StringComparison.Ordinal);
+        Assert.Contains("RIDS = (" + string.Join(", ", platforms.Split(' ').Select(rid => "\"" + rid + "\"")) + ")", checker, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EveryCheckoutKeepsNoCredentialsAndOnlyTheDraftStepCanWrite()
     {
         string workflows = Path.Combine(RepositoryRoot(), ".github", "workflows");
