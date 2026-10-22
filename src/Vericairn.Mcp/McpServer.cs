@@ -250,9 +250,11 @@ public sealed class McpServer
                     return Error(id, -32602, $"Unknown tool '{toolName}'.");
                 }
 
+                var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = call.Text });
+                if (call.Warning is { } warning) content.Add(new JsonObject { ["type"] = "text", ["text"] = "warning: " + warning });
                 return Result(id, new JsonObject
                 {
-                    ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = call.Text }),
+                    ["content"] = content,
                     ["isError"] = call.IsError,
                 });
             default:

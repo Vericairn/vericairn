@@ -37,11 +37,19 @@ public interface IEstateConnection : IDisposable
 public sealed class DaemonConnection : IEstateConnection
 {
     private VericairnClient? client;
+    private readonly Func<string, DaemonEndpoint?> discover;
+    private readonly Func<DaemonEndpoint, VericairnClient> connect;
 
     /// <summary>A connection for an estate root.</summary>
-    public DaemonConnection(string root)
+    public DaemonConnection(string root) : this(root, DaemonDiscovery.Discover, endpoint => new VericairnClient(endpoint))
+    {
+    }
+
+    internal DaemonConnection(string root, Func<string, DaemonEndpoint?> discover, Func<DaemonEndpoint, VericairnClient> connect)
     {
         Root = root;
+        this.discover = discover;
+        this.connect = connect;
     }
 
     /// <inheritdoc />
@@ -66,14 +74,25 @@ public sealed class DaemonConnection : IEstateConnection
         client = null;
         try
         {
-            DaemonEndpoint? endpoint = DaemonDiscovery.Discover(Root);
+            DaemonEndpoint? endpoint = discover(Root);
             if (endpoint is not null)
             {
-                using var probe = new VericairnClient(endpoint);
-                if ((await probe.HealthAsync(cancellationToken).ConfigureAwait(false)).Api != ApiVersion.Current) return;
-                client = new VericairnClient(endpoint);
-                Where = $"{endpoint.Kind} endpoint, process {endpoint.ProcessId}, since {endpoint.StartedAt}";
-                return;
+                VericairnClient? probe = connect(endpoint);
+                try
+                {
+                    HealthResponse health = await probe.HealthAsync(cancellationToken).ConfigureAwait(false);
+                    Where = $"{endpoint.Kind} endpoint, process {endpoint.ProcessId}, since {endpoint.StartedAt}";
+                    if (probe.DaemonVersionWarning is { } warning) Where += ". " + warning;
+                    if (health.Api != ApiVersion.Current)
+                    {
+                        Where += $" The daemon serves API {health.Api}; this client requires API {ApiVersion.Current}.";
+                        return;
+                    }
+                    client = probe;
+                    probe = null;
+                    return;
+                }
+                finally { probe?.Dispose(); }
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or HttpRequestException)
