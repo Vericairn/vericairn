@@ -7,20 +7,22 @@ at 05:00:34 UTC with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
 (estate release record `01M56P744RYYS9XBHM4NTD0JDZ`). 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
-The [0.8.1 set](0.8.1/README.md) documents FIX-34 through FIX-38 and CI-03, the corrections from
+The [0.8.2 set](0.8.2/README.md) documents the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
+FIX-53, which lets the macOS and Linux single-file command lines start processes again, and FIX-54, which rechecks a
+retained basis's record digest when it is read. That work is FIX-34 through FIX-38 and CI-03, the corrections from
 0.8.0's security review; FIX-39 through FIX-46 and FIX-48, found while adopting estate policies;
 FIX-29, FIX-32, FIX-49 and CI-01 for test timing and CI; FIX-51, the release gate's retained basis by reference; DIST-02, DIST-03 and DIST-04 for package registry
 observations, the package icon and MCP Registry discovery; DOCS-07's exact-byte document pins; and
-BRAND-02's README openings, after published 0.8.0. An estate at format 3 upgrades to it without a
-format step. The source version is `0.8.1-dev`.
-The set records no 0.8.1 publication, tag, package availability or platform qualification.
-Its references retain build commit `3b6e437dab6e9597419be06a4f0166b6d370e7a6`,
+BRAND-02's README openings. An estate at format 3 upgrades to it without a
+format step. The source version is `0.8.2-dev`.
+The set records no 0.8.2 publication, tag, package availability or platform qualification.
+Its references retain build commit `479634f023cd377aba29861312a52ba855795eda`,
 with 147 commands, 104 API operations, 42 record types and 32 required documents.
-Its notes render the estate's records with `--from 0.8.0 --to 0.8.1` and open with the operator's
-approved Security section. The set was first frozen at `baa1e9c`; after FIX-51 changed a build
-source it was prepared again at that fix's merge commit, replacing only its own checksum entries, which no
-release asset had contained, and frozen again for its release build, with every file's checksum in
+Its notes render the estate's records with `--from 0.8.0 --to 0.8.2` and open with the operator's
+approved Security section. The set is frozen for its release build, with every file's checksum in
 `frozen-sha256.json`.
+
+The [0.8.1 set](0.8.1/README.md) stays frozen and indexed in `frozen-sha256.json`. Its candidate, built from `d9adbc9faff0a59131a78d9909a9484fb1366f5a` by release run 39640015331, was withdrawn before publication under decision `01M5GAS5XYGCRMMJ99ZXCQDSWF`, recorded by withdrawal `01M5GASTQG0DY20QJN9274CNZ5`, following review `01M5FVAK36D8J2FV1QH5JP1RVC`: its self-contained single-file command lines for macOS and Linux could start no process. It is not a published release or an upgrade target, and the operator deletes its unpublished draft. Neither the set nor its checksums are rewritten to correct its historical wording. Release 0.8.2 carries the same work with FIX-53, FIX-54 and corrected documentation, as 0.7.1 replaced withdrawn 0.7.0.
 
 The [0.8.0 set](0.8.0/README.md) documents POLICY-01 through POLICY-04, DOCS-05,
 CODE-02 through CODE-06, READ-01 through READ-04, FIX-23 through FIX-28, FIX-30, FIX-31, OPS-01 and
