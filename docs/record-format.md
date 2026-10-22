@@ -1,6 +1,6 @@
-# Record formats, Vericairn 0.8.1
+# Record formats, Vericairn 0.8.2
 
-Vericairn 0.8.1 reads record formats 1, 2 and 3. It writes an estate's own format,
+Vericairn 0.8.2 reads record formats 1, 2 and 3. It writes an estate's own format,
 at most 3; new estates start at 3. API version 1 remains the transport contract.
 Context, hand-over, reference inventories and readable renditions have their own
 artifact contracts and are not additional record formats.

@@ -104,15 +104,15 @@ The protection boundaries are explicit:
 | Agent wording, frequency and refresh | Instructions in the captured brief; compliance by an external agent is not enforced or certified |
 | Remote | Not built; no implementation or qualification claimed |
 
-This document describes 0.8.1: 0.8.0's estate policies and duties, readable companions,
-checked changes, operator actions and cancellable client operations, with 0.8.1's corrections and
+This document describes 0.8.2: 0.8.0's estate policies and duties, readable companions,
+checked changes, operator actions and cancellable client operations, with 0.8.2's corrections and
 additions described with their owning flows below. FIX-23 through FIX-28 are described there too. It retains FIX-19's independent workspace
 repositories, UPDATE-01's newer-release notice, FIX-20's command-audit corrections,
 FIX-21's concurrent TLS handshake correction and FIX-22's current required attention.
 The [API guide](api-v1.md#transports) describes certificate preparation and handshake diagnostics.
 Earlier guides retain the behavior of their own releases.
-The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12; earlier sets remain frozen.
-0.8.1 retains the existing hand-over, watching, communication, measured context and explicit qualified
+The withdrawn 0.7.0 candidate's additions shipped in 0.7.1 with FIX-12, and the withdrawn 0.8.1 candidate's ship in 0.8.2 with FIX-53 and FIX-54; earlier sets remain frozen.
+0.8.2 retains the existing hand-over, watching, communication, measured context and explicit qualified
 execution contracts, and 0.7.2's corrections to identifier ordering, release gates and dispatch, notes and
 attention, export restore, record publication and recovery, workflow checks, Workbench loading and the Codex worker.
 All eight 0.7.2 NuGet packages are available after the release event's successful Trusted Publishing run.
@@ -464,8 +464,8 @@ The "Milestone and release acceptances" section includes every operator acceptan
 window, including one labeled `self` because the operator recorded the candidate. Other self acceptances,
 including a builder's acceptance of its own ordinary work, stay out of that section.
 
-To render the 0.8.1 notes from the estate's records, use
-`vericairn docs notes --from 0.8.0 --to 0.8.1 --out docs/releases/0.8.1`.
+To render the 0.8.2 notes from the estate's records, use
+`vericairn docs notes --from 0.8.0 --to 0.8.2 --out docs/releases/0.8.2`.
 The exclusive start follows 0.8.0's recorded end; the command writes its exact window to the manifest.
 The earlier set keeps its approved Security section on F-01 and its original notes window.
 
@@ -557,11 +557,11 @@ the exact accepted draft. Changing both assets and their checksum file would not
 
 From 0.7.2, CI checks every workflow's external action and reusable-workflow reference against
 `.github/workflows/actions.allow`, requiring a full commit SHA. Tags, short hashes, expressions, local
-actions and container references are refused; from 0.8.1 a reusable workflow beside the others in
+actions and container references are refused; from 0.8.2 a reusable workflow beside the others in
 `.github/workflows` is allowed, since the same check covers it. This checks the repository's declared list,
 not the organization's live Actions settings.
 
-From 0.8.1 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
+From 0.8.2 (CI-03) the release's packaging path is one definition, `.github/workflows/package.yml`, which
 `release.yml` calls after its test matrix and `ci.yml` runs on every change beside the tests, so no
 release-only step can first fail during a release. It checks the version, restores locked, compares the
 documentation set with the build over the full history, packs, publishes the self-contained command line and
@@ -803,7 +803,7 @@ configuration limitations below apply. No MCP tool launches or stops a run.
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.8.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
@@ -967,7 +967,7 @@ workspace after the whole process boundary exits. It enumerates the workspace it
 must still match the baseline. Content, symlink targets (without reading through the link), and Unix modes
 are compared, including deletions, renames and untracked files. FIX-26 excludes untracked ignored output before
 opening it, using repository ignore rules and a copied index through isolated Git configuration. Tracked files
-still count even when they match an ignore rule. From 0.8.1 (FIX-35) settlement applies only the run's starting
+still count even when they match an ignore rule. From 0.8.2 (FIX-35) settlement applies only the run's starting
 rules, which the run could not change: the prepared base commit's committed `.gitignore` files and the
 repository's `info/exclude` as captured before launch, never the user's global ignore file. The ignore files,
 `info/exclude` and index the agent left are never applied, and files the base commit tracks stay tracked even when
@@ -1637,7 +1637,7 @@ still requires the builder's three-platform CI run. API v1 stays additive; harne
 record format 2 and retained at format 3. RUN-02 and RUN-03 add no MCP tools.
 
 The efficiency Adapter remains disabled and has no implementation here. Any request to enable it is
-refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.2. Remote is not
+refused as unsupported, even if a later scope selects `disabled`. EFF-01 belongs to 0.8.3. Remote is not
 built: RUN-01 adds no remote launch, environment admission, observation, signing or qualification.
 
 ## Newer-release notices (0.7.3)

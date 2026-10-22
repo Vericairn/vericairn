@@ -59,7 +59,7 @@ operator command is offered through MCP.
 
 ## Package publication, unlisting and deprecation
 
-Vericairn 0.8.1 adds `packages observe`, `packages unlist` and `packages deprecate`.
+Vericairn 0.8.2 adds `packages observe`, `packages unlist` and `packages deprecate`.
 The NuGet provider reads nuget.org's public V3 API without an account or API key. Unlisting and
 deprecation remain the package account holder's acts in the nuget.org website. Vericairn records
 their intent first and their observed outcome afterwards; it never takes a NuGet key or performs
@@ -234,7 +234,7 @@ the estate. The existing `ask`, `progress`, `status` and record-writing commands
 
 ## MCP Registry publication
 
-Starting with 0.8.1, publish `io.github.vericairn/vericairn` to the
+Starting with 0.8.2, publish `io.github.vericairn/vericairn` to the
 [official MCP Registry](https://registry.modelcontextprotocol.io/) only after the accepted
 release's `dotnet-vc` package is published on nuget.org. This is a separate operator action;
 the release and NuGet workflows do not publish a registry entry.
@@ -243,14 +243,14 @@ the release and NuGet workflows do not publish a registry entry.
    [nuget.org](https://www.nuget.org/packages/dotnet-vc). Download that release's `.nupkg` and
    `SHA256SUMS` and verify the package against its checksum. Use the accepted release's package,
    without rebuilding it or substituting a manifest from a checkout.
-2. In a fresh working directory containing that package, extract its manifest. For 0.8.1:
+2. In a fresh working directory containing that package, extract its manifest. For 0.8.2:
 
    ```sh
-   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.1.nupkg").read(".mcp/server.json"))'
+   python3 -c 'import pathlib, zipfile; pathlib.Path("server.json").write_bytes(zipfile.ZipFile("dotnet-vc.0.8.2.nupkg").read(".mcp/server.json"))'
    ```
 
    Inspect `server.json`: the server name must be `io.github.vericairn/vericairn`, both versions
-   must be `0.8.1`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
+   must be `0.8.2`, and the NuGet identifier must be `dotnet-vc`. Keep the required estate and
    principal inputs as placeholders. For a later release, use that release's version throughout.
 3. Install the registry's `mcp-publisher` from its
    [official release](https://github.com/modelcontextprotocol/registry/releases), following

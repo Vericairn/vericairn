@@ -7,7 +7,7 @@ carries the records goals need, the additions milestone M3 adopted, and the livi
 0.5.1 wrote it and were withdrawn before publication; 0.5.2 was the first published release to write it. The 0.6.0
 candidate implemented goal evaluation and execution, routing and asks, and pairing, but was also withdrawn before
 publication. The 0.7.0 candidate was also withdrawn before publication; 0.7.1 carries its work with FIX-12.
-This document describes the format-2 rules retained by 0.8.1. Published 0.7.3 reads formats 1 and 2,
+This document describes the format-2 rules retained by 0.8.2. Published 0.7.3 reads formats 1 and 2,
 writing at most format 2. The additions first present in 0.7.0 are work-progress, communication-setting, communication-delegation and harness-qualification types,
 estate observations, watching settings and execution admission fields. These additions require a 0.7.0-capable
 reader before authoring them, but no format-3 migration; older records retain their original bytes and rules.
@@ -509,7 +509,7 @@ anything is written; `vericairn goal show <goal>` says whether the goal is ready
 
 A goal's pause or stop changes its recorded lifecycle and prevents new runs; it does not signal runs already in
 flight. Use `vericairn worker stop <run> --by <principal>` for each run that must stop, then inspect `worker runs` for
-observed containment. In 0.8.1 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
+observed containment. In 0.8.2 `limits.deadline` (including `goal propose --deadline`) and `limits.consecutiveFailures`
 are stored and validated but not enforced by routing or the worker. The worker enforces its run thresholds and
 `stallSeconds`; operators must act on deadlines and consecutive failures themselves.
 
