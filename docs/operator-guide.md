@@ -135,7 +135,31 @@ Standing permission is an authority record based on a decision: a grantee, scope
 
 ## 5. The work loop: order, brief, assignment, attempt, result
 
-A work order states intent, scope, deliverables and the one question whose honest yes closes it:
+A work order states intent, scope, deliverables and the one question whose honest yes closes it.
+
+The **0.8.3 development build** accepts these fields directly, without a JSON file. The admitted device
+of the principal named by `--by` signs it, just as it signs `records new`:
+
+```sh
+vericairn work new --by <operator or builder id> --key W-1 --title "Build the widget" \
+  --intent "Why this work exists." --scope "widget sources" --scope "widget tests" \
+  --deliverable "widget.txt" --exit-question "Does the widget build and pass its tests?"
+```
+
+`--key`, `--title`, `--intent`, `--exit-question`, at least one `--scope` and at least one
+`--deliverable` supply the required work-order fields. `--kind` defaults to `ordinary`; use
+`--kind milestone` for a milestone. Repeat `--scope` and `--deliverable` to retain each item in order.
+Optional `--after <work-order id>` names a predecessor's record id, and `--input <type:id>` names an
+input record, for example `--input decision:<decision id>`; repeat either for multiple records.
+With neither option, the order has no predecessors and an empty input list. `--after` needs record
+format 2 or later, as it does in the JSON body.
+
+The command builds a work-order body and passes it through the same writer as `records new work-order`.
+Missing fields, overlong text, malformed references, unknown predecessors, duplicate keys and signing
+refusals have the same messages. Success prints the record path, id and hash; `--json` prints the
+receipt as `{"path":"...","id":"...","hash":"sha256:..."}`.
+
+For published 0.8.2, or to supply the full record body, use the existing command:
 
 ```sh
 vericairn records new work-order --by <operator or builder id> --body order.json
@@ -291,6 +315,12 @@ symbols with the publication verifier, without a login, token permission or uplo
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
 ## 9. Upgrading an estate
+
+Install the target release, then restart any daemon serving the estate before checking or applying
+the upgrade. From the estate directory on the daemon's machine, using that installed release, run
+`vericairn runtime stop`, then `vericairn runtime start`. Installing a binary leaves an existing daemon
+running its previous release. Restart running workers with the new release after their active work
+has settled. The upgrade command does not stop the daemon or workers itself.
 
 ```sh
 vericairn estate upgrade --to 0.8.2 --check
@@ -912,6 +942,9 @@ by the person asked and accepts no work.
 
 
 ## 24. Release notices and upgrades
+
+After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
+commands and coordination steps in section 9 before using the upgraded CLI against that estate.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
 enabled by default. It asks GitHub's `Vericairn/vericairn` latest-release endpoint for the newest
