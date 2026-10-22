@@ -100,25 +100,34 @@ internal sealed class ReleaseCoordinationService(
                 location.TryGetProperty("github", out JsonElement github) && string.Equals(github.GetString(), request.Repository, StringComparison.OrdinalIgnoreCase)).SelectMany(model.Chain).ToHashSet(StringComparer.Ordinal);
             ReleasePolicyAssessment assessment = assessPolicies(model, request.Product, request.Version, request.Commit, repositories);
             IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, request.Product, request.Commit, repositories);
-            var compared = CompareLivingDocuments(model, documents, repositories, request.Version, request.By, now());
+            var compared = CompareLivingDocuments(model, documents, request.Version, request.By, now());
             List<FindingDto> objections = [new("error", "release.setup", "release", message), .. assessment.Objections,
-                .. compared.Changed.Concat(documents.Where(d => d.Closes).Select(d => d.Describe())).Select(m => new FindingDto("warning", "document.release-hold", "release-documents", m))];
+                .. compared.Changed.Select(m => new FindingDto("warning", "document.release-hold", "release-documents", m))];
             return GateRefusal("release " + request.Version, "not-started", assessment, objections);
         }
     }
 
     /// <summary>
-    /// Reads each refuse-level repository document at its selected commit: those whose bytes differ from their latest review,
-    /// and what was compared. A refuse-level document whose repository has no clone registered here holds the release unless a
-    /// signed, expiring grant excepts that document for this version. Covered paths use the same selected commit.
+    /// Uses the shared due states and their retained content comparisons. Only a signed, expiring grant for this document
+    /// and version can except an unregistered repository's unavailable comparison; every other reason still holds.
     /// </summary>
-    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents, IReadOnlySet<string> releaseRepositories,
+    private static (List<string> Changed, List<string> Compared) CompareLivingDocuments(EstateModel model, IReadOnlyList<LivingDocuments.State> documents,
         string version, string? by, DateTimeOffset evaluatedAt)
     {
         var changed = new List<string>();
         var compared = new List<string>();
-        foreach (LivingDocuments.State document in documents.Where(d => d.Repository is not null && (d.DeclaresRefuse || GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration))))
+        foreach (LivingDocuments.State document in documents)
         {
+            LivingDocuments.State admission = document;
+            if (document.Content is { Unregistered: true } content && document.DeclaresRefuse &&
+                UncomparedException(model, document.Declaration, version, by, evaluatedAt) is { } grant)
+            {
+                LivingDocuments.Reason[] reasons = document.Reasons.Where(r => r != content.Reason).ToArray();
+                admission = document with { Reasons = reasons, Level = reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() };
+                compared.Add($"{document.Path} not compared, since no clone of its repository ({document.Repository}) is registered here, under signed grant {grant.Id} {grant.ComputedHash}, which expires {EstateModel.BodyString(grant, "expires")}; the independent review reads it at a commit of its own repository");
+            }
+            if (admission.Closes) changed.Add(admission.Describe());
+            if (document.Repository is null || (!document.DeclaresRefuse && !GeneratedDocumentContract.RequiresFreshCheck(model, document.Declaration))) continue;
             if (document.Generation is { } generation)
             {
                 if (generation.Current) compared.Add($"{document.Path} at {generation.Commit}: every generated member equals its verified sources");
@@ -135,59 +144,7 @@ internal sealed class ReleaseCoordinationService(
                 if (!LivingDocuments.Triggers(document.Declaration).Any(t => t.Level == "refuse")) continue;
             }
 
-            RecordEnvelope? review = document.Clearance is { Type: "document-review" } cleared ? cleared : null;
-            JsonElement content = review is not null && review.Body.TryGetProperty("content", out JsonElement c) ? c : default;
-            string? clearedHash = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
-            string clearedAt = content.ValueKind == JsonValueKind.Object && content.TryGetProperty("commit", out JsonElement at) ? at.GetString() ?? "?" : "?";
-            if (clearedHash is null)
-            {
-                changed.Add($"{document.Path}: no review has cleared its content");
-                continue;
-            }
-
-            IDocumentSource? source = DocumentSources.Find(EstateModel.BodyString(document.Declaration, "source"));
-            string? commit = document.ComparisonCommit;
-            string? resolved = commit is null ? null : source?.Resolve(model, document.Declaration, commit);
-            if (commit is null || resolved != commit)
-            {
-                RecordEnvelope? repository = model.ById.GetValueOrDefault(document.Repository!);
-                bool registered = repository is not null && model.Manifest is not null &&
-                    model.Chain(model.Latest(repository)).Any(id => RepositoryClones.Find(model.Manifest.Estate, id) is not null);
-                if (registered || source?.Head(model, document.Declaration) is not null)
-                {
-                    string missing = commit is null ? "has no readable HEAD commit"
-                        : $"does not contain {(releaseRepositories.Contains(document.Repository!) ? "release" : "repository")} commit {commit}";
-                    changed.Add($"{document.Path}: the registered clone of {EstateModel.BodyString(repository!, "name")} ({document.Repository}) {missing}; fetch that repository's clone, then retry");
-                }
-                else
-                {
-                    string where = releaseRepositories.Contains(document.Repository!) ? $"release commit {commit}"
-                        : $"a commit of its own repository (latest review: {clearedAt})";
-                    string name = repository is null ? document.Repository! : EstateModel.BodyString(repository, "name") ?? document.Repository!;
-                    // Whether a refuse-level comparison runs never depends on unsigned machine-local configuration alone.
-                    if (!document.DeclaresRefuse)
-                        compared.Add($"{document.Path} not compared, since no clone of its repository is registered here; the independent review reads it at {where}");
-                    else if (UncomparedException(model, document.Declaration, version, by, evaluatedAt) is { } grant)
-                        compared.Add($"{document.Path} not compared, since no clone of {name} ({document.Repository}) is registered here, under signed grant {grant.Id} {grant.ComputedHash}, which expires {EstateModel.BodyString(grant, "expires")}; the independent review reads it at {where}");
-                    else
-                        changed.Add($"{document.Path}: no clone of {name} ({document.Repository}) is registered on this machine, so its refuse-level comparison cannot run; register one with `vericairn sources clone <path> --resource {document.Repository}`, or record the operator's signed, expiring grant of scope {UncomparedScope(model, document.Declaration, version)} to {by ?? "the submitting principal"}");
-                }
-
-                continue;
-            }
-
-            byte[]? bytes = source!.Read(model, document.Declaration, commit);
-            string? now = bytes is null ? null : ContentHash.Sha256(bytes);
-            if (now == clearedHash)
-            {
-                compared.Add($"{document.Path} at {commit[..12]} is the content its review {review!.Id} cleared");
-            }
-            else
-            {
-                changed.Add(now is null
-                    ? $"{document.Path} is not in its repository at {commit[..12]}"
-                    : $"{document.Path} changed after its review at {clearedAt[..Math.Min(12, clearedAt.Length)]}: at {commit[..12]} it is {now}, and the review cleared {clearedHash}");
-            }
+            if (document.Content is { Available: true, Reason: null } comparison) compared.Add(comparison.Summary);
         }
 
         return (changed, compared);
@@ -221,12 +178,12 @@ internal sealed class ReleaseCoordinationService(
         { return ["The exact generated-region comparison could not complete safely."]; }
     }
 
-    private static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string version, string? by, DateTimeOffset at, string? commit, ProviderDescriptor provider, string destination)
+    internal static (List<string> Changed, List<string> Compared) ReleaseDocumentChecks(EstateModel model, string product, string version, string? by, DateTimeOffset at, string? commit, ProviderDescriptor provider, string destination)
     {
         IReadOnlySet<string> repositories = ReleaseRepositories(model, provider, destination);
         // Recheck inside the admission boundary: a declaration may have arrived while the provider was being resolved.
         IReadOnlyList<LivingDocuments.State> documents = LivingDocuments.AtReleaseCommit(model, product, commit, repositories);
-        (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, repositories, version, by, at);
+        (List<string> changed, List<string> compared) = CompareLivingDocuments(model, documents, version, by, at);
         if (commit is null && NeedsReleaseCommit(model, product, repositories))
             changed.Add("The exact release commit is unavailable for the product's living documents; prepare its exact commit and submit it explicitly");
         foreach (LivingDocuments.State document in documents.Where(d => d.Repository is null && d.Generation is null && GeneratedDocumentContract.RequiresFreshCheck(model, d.Declaration)))
@@ -240,7 +197,6 @@ internal sealed class ReleaseCoordinationService(
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
             { changed.Add(document.Path + ": required generated regions are unavailable"); }
         }
-        changed.AddRange(documents.Where(d => d.Closes).Select(d => d.Describe()));
         return (changed, compared);
     }
 
