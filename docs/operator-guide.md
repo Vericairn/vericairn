@@ -275,9 +275,10 @@ Changed bytes, covered paths, absent reviews and unreadable registered clones re
 gate. A refuse-level document whose repository has no clone registered here also refuses, naming the repository and
 `vericairn sources clone <path> --resource <id>`; only the operator's signed, expiring grant of scope
 `release-document-uncompared:<declaration>@<version>` to the submitting principal excepts it, and the release evidence
-names that grant. A warn-level document without a registered clone is reported as not compared. A refuse-level policy
+names that grant. A warn-level document without a registered clone is shown as due because its comparison is unavailable. A refuse-level policy
 with unavailable required source bytes still holds the release. No gate fetches or checks out sources.
-Normal `docs living` uses clone HEAD, and estate files use the estate's working tree. Current estate
+Normal `docs living` uses repository HEAD, or the reviewed commit when HEAD is its ancestor;
+estate files use the estate's working tree. Current estate
 records supply triggers and reviews; they are not a historical estate snapshot at the release commit.
 
 POLICY-03 combines built-in objections, living-document gates and applicable policies before a build
@@ -525,6 +526,15 @@ vericairn docs declare --by <principal id> --body living.json
 {"path": "docs/guide.md", "title": "The guide", "kind": "authored", "source": "estate-file", "triggers": [{"on": "covers", "level": "warn", "paths": ["src/widget"]}, {"on": "release", "level": "refuse", "product": "<product id>"}, {"on": "decision", "level": "remind"}], "checks": ["names-version", "links-resolve"], "clearedBy": "any", "summary": "Describes the widget and names its current release."}
 ```
 
+In 0.8.3, FIX-50 always includes the document's own file among its covered paths. A change to its
+bytes after its latest clearance makes it due even if its declaration names only release and decision
+triggers. Its `covers` reason names the document and the changed hashes, at the highest level the
+declaration uses. `docs living`, status, progress, the estate check and the release gate use the same
+derivation; a release's applicable document due at `refuse` holds submission before intent or dispatch.
+A review at the new bytes clears that reason everywhere, subject to the declared checks and `clearedBy`.
+Existing reviews keep their meaning: `content` pins the document itself and `covered` pins the explicitly
+declared paths. The [living-documents guide](living-documents.md) describes the comparison and clearance rules.
+
 The triggers are `covers` (the listed paths changed since the last clearing review, uncommitted changes included), `release` (a newer published release of the product), `upgrade` (a newer migration), `decision` (a newer current decision names the document in its `documents`) and `accepted` (a newer acceptance of a work order with one of the listed `keys`). Each has a level: `remind` shows in `status`; `warn` is also a `document.due` warning of `estate check`; `refuse` also refuses the product's next `release submit` before any intent is recorded, naming every such document at once. `clearedBy` says who may clear it: any admitted principal (`any`, the default), one other than whoever revised its content (`independent`), or the operator. One current declaration per document: `docs declare --supersedes <declaration>` revises it.
 
 ```sh
@@ -536,7 +546,7 @@ vericairn docs review docs/guide.md --by <principal id> --outcome current --summ
 
 A generated region is the content between `<!-- vericairn:generated <id> -->` and `<!-- vericairn:end <id> -->`, each on its own line, declared in `regions` with its generator. `estate check` regenerates every region of the estate's own files whose generator is installed and refuses a hand edit or lost markers (`document.generated-edited`); `vericairn docs regenerate <path>` rewrites them and nothing outside the markers. The foundation's generator `vericairn.records/releases` tabulates the published releases of the products its inputs name, newest first. `vericairn.records/progress` embeds the progress report without repository checks, so regenerating a document does not recursively read itself.
 
-A document in another repository, such as a product's README, is declared with that repository's resource in `repository` and the software pack's source `vericairn.software/git-file`. Register this machine's clone of the repository with `vericairn sources clone <path> --resource <resource id>`; the path stays machine configuration and never enters a record. `covers` is then compared at that clone's head; without a registered clone, at the commit reviewed or released. A review of such a document names the `--commit` it read. Because external commits do not identify the content author in estate records, declare `--independence self`, `independent-agent` or `operator` truthfully; a builder defaults to `self`. An estate file's independence is derived from its recorded revisions. For a document declared at `refuse` on a product's releases, `release submit` reads it through the registered clone at the commit the release builds and refuses when its bytes differ from what its latest review cleared; the intent records what was compared. A declaration that names a source, trigger, check or generator no installed pack provides shows as unavailable (`document.unavailable`), and one with a `refuse` trigger closes its product's release gate until the pack is installed or the declaration is revised.
+A document in another repository, such as a product's README, is declared with that repository's resource in `repository` and the software pack's source `vericairn.software/git-file`. Register this machine's clone of the repository with `vericairn sources clone <path> --resource <resource id>`; the path stays machine configuration and never enters a record. `covers` and the document's own bytes are compared at that clone's HEAD, or at the latest clearing review's commit when HEAD is its ancestor. An unavailable comparison is shown as due with its cause. A review of such a document names the `--commit` it read. Because external commits do not identify the content author in estate records, declare `--independence self`, `independent-agent` or `operator` truthfully; a builder defaults to `self`. An estate file's independence is derived from its recorded revisions. For a document declared at `refuse` on a product's releases, the same due state holds `release submit`; the release repository uses the exact commit being built, and other repositories keep their own commit selection. The intent records what was compared. A declaration that names a source, trigger, check or generator no installed pack provides shows as unavailable (`document.unavailable`), and one with a `refuse` trigger closes its product's release gate until the pack is installed or the declaration is revised.
 
 The software pack supplies exact retained reference and companion checks and reference-coverage policy evaluation. It has no semantic third-party-notice or README check and no automatic declaration proposals. Generated ownership can be retired through the existing checked retirement path. Workbench's readable views show renditions and exact sources; the authored Documents page still does not put its content beside its triggers.
 
@@ -545,8 +555,8 @@ resolves for the requested release ref. Clone HEAD may differ. An unresolved com
 Git object or an unavailable required contribution refuses the applicable gate; fetch the exact commit
 into the registered clone and review there. Observation checks the actual build commit again before
 recording success or a candidate, because a ref can move after submission. This release-document gate fetches and
-checks out nothing automatically. Normal `docs living` still uses clone HEAD; estate-file checks still
-read the estate's working tree. Current estate records supply triggers and reviews, not a historical
+checks out nothing automatically. Normal `docs living` uses clone HEAD or the clearing review's commit
+when HEAD is its ancestor; estate-file checks read the estate's working tree. Current estate records supply triggers and reviews, not a historical
 snapshot of all estate state at the release commit.
 
 ## 17. Goals, predicates and evaluation
