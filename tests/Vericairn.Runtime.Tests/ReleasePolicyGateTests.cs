@@ -543,6 +543,29 @@ public sealed class ReleasePolicyGateTests
     }
 
     [Fact]
+    public void AReferencedBasisReadsAsUnavailableWhenARecordsSignaturesDifferFromThoseItJudged()
+    {
+        using var f = new Fixture();
+        f.Duty();
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request);
+        Assert.True(response.Ok, response.Message);
+        string hash = Assert.Single(response.BasisEvidence!);
+        Assert.NotNull(f.Api.ReleaseBasis(hash));
+        using JsonDocument stored = JsonDocument.Parse(f.Api.Session.Objects.Read(hash)!);
+        HashSet<string> named = stored.RootElement.GetProperty("records").EnumerateArray().Select(r => r.GetProperty("id").GetString()!).ToHashSet(StringComparer.Ordinal);
+        RecordEnvelope judged = f.Api.Session.Load().Records.First(r => named.Contains(r.Id) && r.Signatures.Count > 0);
+        string path = Directory.GetFiles(Path.Combine(f.Records.Estate.Root, "records"), judged.Id + ".json", SearchOption.AllDirectories).Single();
+
+        // The record keeps its content hash, which leaves out signatures; only the stored record digest covers them.
+        byte[] signature = System.Buffers.Text.Base64Url.DecodeFromChars(judged.Signatures[0].Signature);
+        signature[0] ^= 0xff;
+        File.WriteAllText(path, File.ReadAllText(path).Replace(judged.Signatures[0].Signature, System.Buffers.Text.Base64Url.EncodeToString(signature), StringComparison.Ordinal));
+
+        Assert.Contains(f.Api.Session.Load().Records, r => r.Id == judged.Id && r.ComputedHash == judged.ComputedHash);
+        Assert.Null(f.Api.ReleaseBasis(hash));
+    }
+
+    [Fact]
     public async Task APassingSubmissionRetainsExactInputsAndRechecksWithoutHashingItsOwnIntent()
     {
         using var f = new Fixture();

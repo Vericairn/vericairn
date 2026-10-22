@@ -64,7 +64,7 @@ internal sealed class PolicyBasis
         Origin = origin;
         Submission = submission is null ? null : submission with { Repositories = submission.Repositories?.ToImmutableArray(), WorkOrders = submission.WorkOrders?.ToImmutableArray() };
         Complete = complete;
-        RecordDigest = Hash(Records.Select(r => new { r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body, r.DeclaredHash, r.ComputedHash, r.Signatures, r.Format }));
+        RecordDigest = DigestOf(Records);
         Digest = Hash(new
         {
             contract = Contract, scanner = WritingScanner.Contract, RecordDigest, Findings, complete, asOf, origin, submission,
@@ -118,4 +118,8 @@ internal sealed class PolicyBasis
 
     internal static string Canonical<T>(T value) => CanonicalJson.Serialize(JsonSerializer.SerializeToElement(value));
     internal static string Hash<T>(T value) => ContentHash.Sha256(Encoding.UTF8.GetBytes(Canonical(value)));
+
+    /// <summary>The digest of exactly these records in this order, signatures included, which a record's own hash leaves out.</summary>
+    internal static string DigestOf(IEnumerable<RecordEnvelope> records) =>
+        Hash(records.Select(r => new { r.Type, r.Id, r.At, r.By, r.Subject, r.Supersedes, r.Body, r.DeclaredHash, r.ComputedHash, r.Signatures, r.Format }));
 }
