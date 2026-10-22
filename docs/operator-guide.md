@@ -283,6 +283,12 @@ the organization's live Actions settings or bind the published draft to estate a
 
 ## 9. Upgrading an estate
 
+Install the target release, then restart any daemon serving the estate before checking or applying
+the upgrade. From the estate directory on the daemon's machine, using that installed release, run
+`vericairn runtime stop`, then `vericairn runtime start`. Installing a binary leaves an existing daemon
+running its previous release. Restart running workers with the new release after their active work
+has settled. The upgrade command does not stop the daemon or workers itself.
+
 ```sh
 vericairn estate upgrade --to 0.8.2 --check
 vericairn estate upgrade --to 0.8.2 --by <principal id>
@@ -903,6 +909,9 @@ by the person asked and accepts no work.
 
 
 ## 24. Release notices and upgrades
+
+After installing an upgrade, restart a serving daemon as well as running workers. Follow the stop/start
+commands and coordination steps in section 9 before using the upgraded CLI against that estate.
 
 `vericairn version`, `vericairn doctor`, `vericairn status` and Workbench disclose a release check
 enabled by default. It asks GitHub's `Vericairn/vericairn` latest-release endpoint for the newest
