@@ -78,6 +78,33 @@ public class SoftwareCompanionTests
         Assert.Contains("`7`", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Caller cancellation", text, StringComparison.Ordinal);
         Assert.DoesNotContain("exit code `2`", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Stored records awaiting companion recovery", text, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("cli-client-outcomes")]
+    [InlineData("cli-reference")]
+    public void StoredRecordRecoveryProseComesFromTheRetainedBuildSnapshot(string name)
+    {
+        string commands = JsonSerializer.Serialize(new
+        {
+            format = "vericairn.build-references/1", kind = "cli-reference", commit = Commit,
+            rootOptions = System.Array.Empty<object>(), commands = System.Array.Empty<object>(),
+            clientOutcomes = new
+            {
+                storedRecords = new { storage = "Recorded storage.", clients = "Recorded client receipts.", recovery = "Recorded recovery <action>." },
+                introduction = "Recorded introduction.", refusal = "Recorded refusal.", cancellation = "Recorded cancellation.",
+                uncertain = "Recorded uncertain effect.", rows = System.Array.Empty<object>(),
+            },
+        });
+        string text = Read(Render(name, "commands.json", File("commands.json", commands)));
+        Assert.Contains("## Stored records awaiting companion recovery", text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded storage."), text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded client receipts."), text, StringComparison.Ordinal);
+        Assert.Contains(DocumentMarkdown.Text("Recorded recovery <action>."), text, StringComparison.Ordinal);
+        Assert.Contains("[API outcomes](api-v1.md#outcomes-and-problems)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<action>", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("never resubmit the stored record", text, StringComparison.Ordinal);
     }
 
     [Fact]

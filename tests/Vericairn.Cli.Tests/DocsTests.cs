@@ -46,6 +46,10 @@ public class DocsTests
             Assert.Contains("HTTP `200` with both `written`", maintained, StringComparison.Ordinal);
             Assert.Contains("never resubmit the stored record", maintained, StringComparison.Ordinal);
             Assert.Contains("exit code `2`", maintained, StringComparison.Ordinal);
+            string recovery = maintained[maintained.IndexOf("## Stored records awaiting companion recovery", StringComparison.Ordinal)..maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)].TrimEnd();
+            string generatedRecovery = excerpt[excerpt.IndexOf("## Stored records awaiting companion recovery", StringComparison.Ordinal)..excerpt.IndexOf("## Interrupted client requests", StringComparison.Ordinal)].TrimEnd();
+            Assert.Equal(recovery, System.Net.WebUtility.HtmlDecode(generatedRecovery));
+            Assert.Contains(generatedRecovery + "\n\n## Interrupted client requests", reference, StringComparison.Ordinal);
             maintained = maintained[maintained.IndexOf("## Interrupted client requests", StringComparison.Ordinal)..].TrimEnd()
                 .Replace("| --- | --- | --- |", "|---|---|---|", StringComparison.Ordinal);
             Assert.Equal(maintained, System.Net.WebUtility.HtmlDecode(section));
@@ -54,7 +58,7 @@ public class DocsTests
         finally { Directory.Delete(output, recursive: true); }
     }
 
-    private static readonly string[] Declared = ["README.md", "install.md", "operator-guide.md", "cli-reference.md", "api-reference.md", "record-reference.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
+    private static readonly string[] Declared = ["README.md", "install.md", "operator-guide.md", "cli-reference.md", "cli-client-outcomes.md", "api-reference.md", "record-reference.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
 
     private static readonly string[] Authored = ["README.md", "install.md", "operator-guide.md", "record-format.md", "api.md", "software.md", "workbench.md", "mcp.md", "release-notes.md", "limitations-and-platforms.md"];
 
@@ -348,6 +352,38 @@ public class DocsTests
         {
             Directory.Delete(output, recursive: true);
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CheckRefusesMissingStoredRecordRecoveryGuidance(bool missingFile)
+    {
+        string output = CliHarness.TempDirectory("docs-recovery");
+        try
+        {
+            string declaration = Declaration(output);
+            Assert.Equal(0, Tool(() => ReferenceSet.Generate(output, declaration, json: false)).Code);
+            foreach (string name in Authored) File.WriteAllText(Path.Combine(output, name), "# " + ReferenceSet.ReleaseVersion + "\n");
+            Assert.Equal(0, CliHarness.Run("docs", "check", output, "--documents", declaration).Code);
+            Assert.Equal(0, Tool(() => ReferenceSet.CompareWithBuild(output, json: false)).Code);
+
+            string path = Path.Combine(output, "cli-client-outcomes.md");
+            string original = File.ReadAllText(path);
+            int start = original.IndexOf("## Stored records awaiting companion recovery", StringComparison.Ordinal);
+            int end = original.IndexOf("## Interrupted client requests", StringComparison.Ordinal);
+            Assert.True(start >= 0 && end > start);
+            if (missingFile) File.Delete(path);
+            else File.WriteAllText(path, original.Remove(start, end - start));
+
+            CliHarness.Outcome check = CliHarness.Run("docs", "check", output, "--documents", declaration, "--json");
+            Assert.Equal(1, check.Code);
+            Assert.Contains(check.Json.GetProperty("findings").EnumerateArray(), finding =>
+                finding.GetProperty("Code").GetString() == (missingFile ? "docs.document" : "docs.client-outcomes") &&
+                finding.GetProperty("Location").GetString() == "cli-client-outcomes.md");
+            Assert.Equal(1, Tool(() => ReferenceSet.CompareWithBuild(output, json: false)).Code);
+        }
+        finally { Directory.Delete(output, recursive: true); }
     }
 
     [Fact]
