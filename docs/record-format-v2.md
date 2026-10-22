@@ -337,13 +337,17 @@ the newest current decision that names the document by path or by declaration, a
 of a work order with one of its keys. `covers` compares the covered paths' identity in the working tree, uncommitted
 changes included, with the one the latest clearing review recorded; only a review clears it. For a document of another
 repository, `covers` is compared at the head of that repository's clone registered here (`vericairn sources clone`),
-through its source; without one, it is compared at the commit reviewed or released. A document is due at the highest
+or the clearing review's commit when HEAD is its ancestor. An unavailable comparison is shown with its cause. A document is due at the highest
 level among its reasons: `remind` shows in status; `warn` is also a `document.due` warning of `vericairn estate check`;
 `refuse` also refuses the next `vericairn release submit` of the product, before any intent is recorded, naming every
-such document at once. `vericairn release submit` also refuses, before any intent is recorded, when a repository document
-that declares `refuse` and whose `release` trigger names the product differs from the content its latest review cleared,
-or has no clearing review. Both document bytes and repository `covers` checks use a commit of the document's own
-repository. In the release repository this is the exact commit the build provider resolves at the
+such document at once. In 0.8.3, FIX-50 always includes the document's own file among its covered paths, even when
+its declaration has only release and decision triggers. Changed bytes or missing content after clearance make it due
+with a `covers` reason naming the change, at the highest declared level. The existing `content` pin compares those
+bytes separately from the declared paths' `covered` pin, so earlier reviews keep their meaning. A repository document
+without a clearing review is due too. `docs living`, status, progress, the estate check and the release gate use this
+same derivation; the gate has no separate byte-change rule. A clearing review at the new bytes clears the own-file
+reason everywhere. The [living-documents guide](living-documents.md) describes this rule and its clearance requirements.
+Both document bytes and repository `covers` checks use a commit of the document's own repository. In the release repository this is the exact commit the build provider resolves at the
 effective destination; an unresolved commit refuses submission, and the clone's HEAD is never substituted. In another
 repository it is that repository's registered HEAD, or the reviewed commit when HEAD is its ancestor. A newer or
 divergent HEAD with changed content still refuses. Resource revisions retain the repository's identity. The comparison
