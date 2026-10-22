@@ -196,6 +196,8 @@ public class DocsTests
             Assert.DoesNotContain("docs generate", commands);
             Assert.Contains("release providers", commands);
             Assert.Contains("records new", commands);
+            Assert.Contains("work new", commands);
+            Assert.Contains("POST /v1/work/new", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("estate upgrade", commands);
             Assert.Contains("updates configure", commands);
             foreach (string action in new[] { "push", "open", "merge", "observe" })
@@ -222,6 +224,11 @@ public class DocsTests
             string cli = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "cli-reference.md")));
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn work new`", cli, StringComparison.Ordinal);
+            string workNew = cli[cli.IndexOf("### `vericairn work new`", StringComparison.Ordinal)..];
+            workNew = workNew[..workNew.IndexOf("\n### ", 5, StringComparison.Ordinal)];
+            foreach (string option in new[] { "--by", "--key", "--title", "--intent", "--scope", "--deliverable", "--exit-question", "--kind", "--after", "--input" })
+                Assert.Contains(option, workNew, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn operator list`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn updates configure`", cli, StringComparison.Ordinal);
