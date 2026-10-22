@@ -25,6 +25,12 @@ public sealed record RecentCommit(string Commit, string At, string Summary);
 /// <param name="AsOf">When the observation was made.</param>
 public sealed record RepositoryObservation(string Commit, string? Branch, string? Remote, string RootCommit, bool Clean, int Modified, int Untracked, IReadOnlyList<string> Tags, IReadOnlyList<RecentCommit> Recent, string AsOf);
 
+/// <summary>A local observation used by release admission, never proof of a remote's current state.</summary>
+/// <param name="Clean">Whether staged, tracked and untracked changes are absent.</param>
+/// <param name="DefaultBranch">Default branch named by the clone's origin HEAD, or null when unknown.</param>
+/// <param name="DefaultHead">Commit of the local remote-tracking default branch, or null when unavailable.</param>
+public sealed record ReleaseSourceObservation(bool Clean, string? DefaultBranch, string? DefaultHead);
+
 /// <summary>
 /// The git adapter contract, version 1: read-only observation and optional isolated worker workspaces. It preserves uncommitted
 /// work and never publishes; integration and remote publication are provider operations, not adapter ones.
@@ -45,6 +51,9 @@ public interface ISourceAdapter
 
     /// <summary>Observes a repository without changing it; throws <see cref="ProviderRefusedException"/> when the path is not a repository with a commit.</summary>
     RepositoryObservation Inspect(string path);
+
+    /// <summary>Reads cleanliness and the locally known default branch head without fetching or modifying the clone. Null when unsupported or unavailable.</summary>
+    ReleaseSourceObservation? InspectRelease(string path) => null;
 
     /// <summary>
     /// Reads a regular file at its exact SHA-256 hash from this repository's local history, without fetching or changing it.

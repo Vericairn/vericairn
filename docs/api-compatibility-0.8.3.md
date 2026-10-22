@@ -63,3 +63,37 @@ keep their existing meaning. For a nullable lookup after a differing release was
 consults that daemon's OpenAPI routes: an absent route gets the missing-operation diagnostic, while
 an advertised lookup still returns null for an absent resource. If the route description is unavailable,
 the client preserves the nullable result rather than guessing; the release warning remains available.
+
+## Release submission check (FIX-55)
+
+| Added member | Purpose |
+| --- | --- |
+| `IEstateApi.ReleaseCheck(ReleaseSubmitRequest)` | Return every admission objection without effects. |
+| `IEstateApi.ReleaseCheckAsync(ReleaseSubmitRequest, CancellationToken = default)` | Default asynchronous bridge, classified as a read. |
+| `VericairnClient.ReleaseCheck` / `ReleaseCheckAsync` | Call the dedicated `POST /v1/releases/check` route. |
+| `CancellationBoundApi.ReleaseCheck` / `ReleaseCheckAsync` | Preserve read cancellation and lifetime behavior. |
+| `EstateService.ReleaseCheck` | Execute the shared submission admission gate. |
+| `ReleaseSubmitRequest.ClientBuild { get; init; }` | Carry the client's full informational version, including its source commit. |
+| `ReleaseResponse.Check { get; init; }` | Optional `ReleaseCheckDetails` for a check response. |
+| `ReleaseCheckDetails(Commit, Expected, ClientBuild, RuntimeBuild, BasisBytes, Objections)` | Exact checked inputs, serialized basis size and objections. |
+| `ReleaseObjection(Code, Location, Message, NextAction)` | Portable finding with its next action. |
+| `ISourceAdapter.InspectRelease(string path)` | Read local clone cleanliness and default-branch identity without effects; the default implementation returns unavailable. |
+| `ReleaseSourceObservation(bool Clean, string? DefaultBranch, string? DefaultHead)` | Source adapter's local observation. |
+| `GitCommandAdapter.InspectRelease(string path)` | Inspect Git without fetching, checking out or refreshing its index. |
+| `ReleaseWorkspace.CheckAsync(IEstateApi, string?, CancellationToken = default)` | Check the current Workbench release form. |
+| `ShellViewModel.CheckReleaseAsync(ReleaseWorkspace?, CancellationToken = default)` | Run that check without a submission lifecycle or status refresh. |
+
+External `IEstateApi` implementations must implement `ReleaseCheck` and rebuild; the asynchronous
+member has a default implementation. Existing `ISourceAdapter` implementations still compile and
+return unavailable until they implement inspection. An unavailable required source is an objection.
+The positional constructors and deconstruction members of `ReleaseSubmitRequest` and `ReleaseResponse`
+are unchanged. `ClientBuild` is additive on the wire, but format-3 check and submit now require it to
+match the runtime's complete informational version and source commit. Format-1/2 callers that omit
+it retain their prior compatibility behavior; supplied identities are checked in every format.
+
+The route returns HTTP 200 with the existing `ReleaseResponse`: status `checked` or `check-refused`,
+the ordinary `ok` and `problem`, and `check`. It is a read for presence, cancellation and write-ledger
+purposes, including on authenticated local-network connections. Connection authentication and
+principal binding still apply. There is no fallback to `/v1/releases/submit` on an older server.
+The new MCP read tool is `release_submit_check`; the CLI option is `release submit --check`;
+Workbench offers **Check submission (nothing recorded)**. See [API v1](api-v1.md#release-submission-check-083-development).

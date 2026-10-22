@@ -129,6 +129,30 @@ A warn-level document without a registered clone is reported as not compared.
 Provider I/O runs outside the service gate; this is not distributed
 exactly-once execution across independently running services.
 
+## Release submission check (0.8.3 development)
+
+`POST /v1/releases/check` accepts `ReleaseSubmitRequest` and returns `ReleaseResponse` with `check`.
+It runs the same admission as submit at `commit` and `expected`, including the document gate's own
+comparisons, policy holds, device availability and authority, provider settings, identity reconciliation,
+registered-clone cleanliness, default-branch head and retained-object limits. It signs, records, retains
+and dispatches nothing. The route is a read even though its inputs use POST: it needs no presence and
+creates no write intent ledger. Normal connection authentication and principal binding still apply.
+It is available over an authenticated local-network connection without invoking a release provider.
+
+`ReleaseSubmitRequest.clientBuild` is the caller's full informational version, including source commit.
+Format 3 requires it for check and submit and compares it exactly with the runtime build. The CLI and
+Workbench supply their own identity. SDK and API callers supply theirs explicitly. A check returns HTTP
+200 with `ok: true`, `status: checked`, or `ok: false`, `status: check-refused`; objections also appear in
+`problem.findings`. `check` contains `commit`, `expected`, `clientBuild`, `runtimeBuild`, `basisBytes`, and
+`objections`, each with `code`, `location`, `message` and `nextAction`. Neither `operation` nor
+`basisEvidence` is created by a check. Sources and default-branch refs must already be available locally;
+the operation never fetches or repairs them. It does not recover or close journals.
+
+The SDK exposes `ReleaseCheck` and `ReleaseCheckAsync`; cancellation and transport failures are read
+failures with no uncertain submitted effect. The dedicated route has no fallback to submit on older
+runtimes. A passing response reserves nothing and grants no authority: actual submission repeats the
+gate against its current inputs. See the [release guide](software.md#release-providers-and-the-products-release-profile).
+
 ## Context artifacts (0.7.0 addition)
 
 `GET /v1/context/work/{key}` (`Context`) computes and returns a
@@ -682,6 +706,7 @@ pairing does not qualify a Remote client.
 | `POST /v1/runs` | Start a coding agent's run on an assignment (`RunStartRequest`: assignment, launcher, agent, by, repository, and optionally goal, branch, base, wallMinutes and the launcher's settings), the worker contract `vericairn.worker/1` ([software.md](software.md#coding-agents-the-worker-and-its-launchers)). Refused over the local network, and, before anything is recorded, when the agent is not the assignment's contributor or has no admitted device whose key the runtime's machine holds, when the recording principal is neither the operator, nor holds `local-engineering`, nor is the sponsor of the goal the run is charged to when the sponsor is a person (from 0.6.0), when the work belongs to no active goal or the goal's budget does not allow the run, when a device of an operator or of the goal's sponsor can sign there without its owner's presence (the refusal names each device and why) and the goal's sponsor recorded no custody exception in force for the goal (from 0.6.0; judged before the workspace is prepared and again when the intent is recorded, so an exception revised or expired meanwhile lifts nothing; a run launched under one names the exception in force when its intent was recorded, and the response says what it lifted; judged a last time immediately before the launch, when an exception that lapsed or a key that arrived after the intent launches nothing and the run's next revision is `canceled`, neither in flight nor charged, the response's status `canceled`), when the launcher cannot run (Codex's goals feature is verified first), or when the workspace cannot be prepared. Otherwise the workspace is prepared, the intent recorded with the run's cap, and the harness launched; the response returns once it started, and the runtime observes and settles the run. Returns a `RunResponse` (run, status, message, ok, the operation revision, the cap, the workspace, problem). From 0.6.0 |
 | `GET /v1/runs` | The agent runs (`RunsResponse`): each run (`RunRow`: run, identity, launcher, agent, assignment, goal, workspace, status, cap, usage once settled, what it is charged, a stop's facts, its last heartbeat here, whether a worker here observes it now, whether its launcher is generic, optional event-stream `liveness` and settled workspace `scope`), and the ledger of every goal with a run or active now (`LedgerRow`: each charged unit's budget, spend and remainder, the runs in flight, the concurrency, the attempts per step, and why a new run would be fenced). From 0.6.0 |
 | `POST /v1/runs/{id}/stop` | Ask a run to stop (`RunStopRequest`: by, reason, graceSeconds) and report what was observed (`RunStopResponse`: run, state, message, ok, stop): the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts in `stop`, and `state` is the furthest one observed. A stop that is not observed is reported as `requested`. On every profile, refused unless `by` is an operator, decides for the run's goal (its sponsor, or an operator for a goal an agent sponsors) or started the run. The main observation wait is capped at 30 seconds, whatever grace the request names, with a bounded settlement wait after exit; the response reports what is observed so far, and clients poll for later facts. From 0.6.0 |
+| `POST /v1/releases/check` | Read-only submission admission at the exact commit and product hash, from 0.8.3 development. Returns `ReleaseResponse.check` with all objections and next actions; no presence, intent, signing, retention or dispatch. |
 | `POST /v1/releases/submit` | Submit a release as intent before effect, on the runtime's machine (refused over the local network, as observing is, since both use the provider's credentials there): the provider is the request's `provider`, else the one the product record declares (neither is refused; a provider with no implementation on the runtime's machine is refused, never replaced); the settings are the provider's defaults, then the product's declared settings, then the request's `settings` (and `repository`, `ref`, `workflow`, kept from 0.3.1 as settings of those names). The operation record is written, then the build is dispatched; nothing is published. Before any intent, the product's living documents can refuse it ([software.md](software.md#release-providers-and-the-products-release-profile), step 1). Returns a `ReleaseResponse`. |
 | `POST /v1/releases/observe` | Observe a release's run, draft and publication through the provider its operation records and record what settled: the operation revision, the candidate release with every artifact classified by the product's profile (or the generic rule), and later the observed publication; or cancel an intent that had no effect. The operation is found by `provider` and `repository` (the destination), by `product` and `version`, or by a destination one current operation alone matches. Returns a `ReleaseResponse`. |
 | `POST /v1/estate/export` | Write a verified export to a path on the runtime's machine; no keys or authority travel with it. From 0.6.0 a device-signed export names its device's principal as `by`, which must be an operator or hold the `administer` scope; over the local network it is refused |
@@ -849,7 +874,7 @@ and `findings` when a record was rejected:
 | `reconcile-required` | With `written`, the record was stored but companion publication stopped; the batch journal retains pending outputs. Reopen the estate or run `docs regenerate` to recover those outputs without repeating the record write. Without `written`, an unreadable local batch journal or unresolved generated outputs hold further record writes until reconciliation; reads remain available | 200 with `written`; 422 without `written` on `WriteOutcome` routes; inside the response on composite routes |
 | `conflict` | From COMMS-01, the communication scope changed since the expected hash, or has divergent current revisions; refresh and reconcile before submitting | 409 |
 
-The release routes (`POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
+The release routes (`POST /v1/releases/check`, `POST /v1/releases/submit` and `POST /v1/releases/observe`) answer every request
 they handle with 200 and a `ReleaseResponse`: `ok` says whether the request advanced as asked or there
 is nothing to record yet, and a refusal is its `problem`, not an HTTP status. The run routes (`POST
 /v1/runs` and `POST /v1/runs/{id}/stop`, from 0.6.0) answer the same way, with a `RunResponse` or a

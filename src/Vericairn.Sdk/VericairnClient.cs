@@ -376,6 +376,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public RunStopResponse RunStop(string run, RunStopRequest request) => Post<RunStopRequest, RunStopResponse>("/v1/runs/" + Uri.EscapeDataString(run) + "/stop", request)!;
 
     /// <inheritdoc />
+    public ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/check", request)!;
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => Post<ReleaseSubmitRequest, ReleaseResponse>("/v1/releases/submit", request)!;
 
     /// <inheritdoc />

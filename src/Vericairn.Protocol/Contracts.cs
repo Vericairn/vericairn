@@ -431,7 +431,27 @@ public sealed record ReleaseRow(string? Version, string? Status, string? Commit,
 /// <param name="Settings">The provider's settings by name; they override the product's declared settings and the provider's defaults.</param>
 /// <param name="Commit">Prepared exact commit, required in format 3 and for release-repository document comparisons; never resolved by a provider during admission.</param>
 /// <param name="Expected">Expected current product hash, required in format 3.</param>
-public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null, string? Commit = null, string? Expected = null);
+public sealed record ReleaseSubmitRequest(string Product, string Version, string? Repository, string By, string? Ref = null, string? Workflow = null, string? Reconciliation = null, string? Provider = null, IReadOnlyDictionary<string, string>? Settings = null, string? Commit = null, string? Expected = null)
+{
+    /// <summary>The submitting client's full informational version, including its source commit; required in format 3.</summary>
+    public string? ClientBuild { get; init; }
+}
+
+/// <summary>One submission objection and the action needed before trying again.</summary>
+/// <param name="Code">Stable diagnostic code.</param>
+/// <param name="Location">Portable subject of the objection.</param>
+/// <param name="Message">What failed or is unavailable.</param>
+/// <param name="NextAction">How to address it.</param>
+public sealed record ReleaseObjection(string Code, string Location, string Message, string NextAction);
+
+/// <summary>The exact inputs and measured retained-basis size of a read-only submission check.</summary>
+/// <param name="Commit">Requested release commit.</param>
+/// <param name="Expected">Expected product revision hash.</param>
+/// <param name="ClientBuild">Client build identity supplied by the caller.</param>
+/// <param name="RuntimeBuild">Runtime build identity used for comparison.</param>
+/// <param name="BasisBytes">Serialized basis size, without retaining it.</param>
+/// <param name="Objections">Every objection found, each with its next action.</param>
+public sealed record ReleaseCheckDetails(string? Commit, string? Expected, string? ClientBuild, string RuntimeBuild, long BasisBytes, IReadOnlyList<ReleaseObjection> Objections);
 
 /// <summary>
 /// Observe a release's run, draft and publication and record what settled; or cancel an intent that had no effect. The operation
@@ -491,7 +511,11 @@ public sealed record ProviderRow(string Provider, string Kind, string Implementa
 /// <param name="Problem">Why nothing could proceed.</param>
 /// <param name="Policies">Fresh server evaluation at the last admission boundary, including any refused holds.</param>
 /// <param name="BasisEvidence">Retained basis object hashes in evaluation order, also pinned by the operation's ordinary evidence.</param>
-public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null, PolicyResponse? Policies = null, IReadOnlyList<string>? BasisEvidence = null);
+public sealed record ReleaseResponse(string Identity, string Status, string Message, bool Ok, RecordWritten? Operation = null, RecordWritten? Candidate = null, RecordWritten? Release = null, string? ReleaseId = null, string? Run = null, string? Pending = null, string? Publish = null, string? PublishedAt = null, string? Url = null, Problem? Problem = null, PolicyResponse? Policies = null, IReadOnlyList<string>? BasisEvidence = null)
+{
+    /// <summary>Present only for a read-only submission check; a passing check grants no dispatch authority.</summary>
+    public ReleaseCheckDetails? Check { get; init; }
+}
 
 /// <summary>
 /// Start a coding agent's run on an assignment through a launcher (the worker contract, vericairn.worker/1): the runtime prepares a

@@ -97,6 +97,7 @@ public static class OpenApiDocument
         ("GET", "/v1/runs"),
         ("POST", "/v1/runs"),
         ("POST", "/v1/runs/{id}/stop"),
+        ("POST", "/v1/releases/check"),
         ("POST", "/v1/releases/submit"),
         ("POST", "/v1/releases/observe"),
         ("POST", "/v1/changes/push"),
@@ -342,7 +343,10 @@ public static class OpenApiDocument
         }
         else if (method == "POST" && path.StartsWith("/v1/releases/", StringComparison.Ordinal))
         {
-            responses["200"] = new JsonObject { ["description"] = "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed." };
+            responses["200"] = new JsonObject { ["description"] = path == "/v1/releases/check"
+                ? "ReleaseResponse with check details and every objection; no signature, record, retained basis or dispatch."
+                : "ReleaseResponse: what was recorded and what the provider showed; a problem inside when nothing could proceed.",
+                ["content"] = new JsonObject { ["application/json"] = new JsonObject { ["schema"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseResponse" } } } };
         }
         else if (method == "POST" && path == "/v1/work/progress")
         {
@@ -454,6 +458,11 @@ public static class OpenApiDocument
         workNewRequest["properties"]!["inputs"]!["description"] = "Input references as type:id; omitted means an empty list.";
         workNewRequest["properties"]!["after"]!["description"] = "Work-order record ids this work starts after; omitted means no dependencies.";
 
+        JsonObject releaseResponse = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object"), ("policies", "object"), ("basisEvidence", "array"), ("check", "object"));
+        releaseResponse["properties"]!["check"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseCheckDetails" };
+        JsonObject releaseCheck = Object(("commit", "string"), ("expected", "string"), ("clientBuild", "string"), ("runtimeBuild", "string"), ("basisBytes", "integer"), ("objections", "array"));
+        releaseCheck["properties"]!["objections"]!["items"] = new JsonObject { ["$ref"] = "#/components/schemas/ReleaseObjection" };
+
         return new JsonObject
         {
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -533,7 +542,7 @@ public static class OpenApiDocument
             ["PackagesDeprecateRequest"] = Object(("product", "string"), ("version", "string"), ("package", "string"), ("by", "string"), ("reasons", "array"), ("message", "string"), ("alternatePackage", "string"), ("alternateRange", "string")),
             ["PackagesResponse"] = Object(("ok", "boolean"), ("status", "string"), ("message", "string"), ("packages", "array"), ("intent", "object"), ("operation", "object"), ("instruction", "string"), ("problem", "object")),
             ["ChangeResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("observation", "object"), ("ask", "object"), ("pullRequest", "string"), ("head", "string"), ("mergeCommit", "string"), ("checkStatus", "string"), ("problem", "object")),
-            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string")),
+            ["ReleaseSubmitRequest"] = Object(("product", "string"), ("version", "string"), ("repository", "string"), ("by", "string"), ("ref", "string"), ("workflow", "string"), ("reconciliation", "string"), ("provider", "string"), ("settings", "object"), ("commit", "string"), ("expected", "string"), ("clientBuild", "string")),
             ["ReleaseObserveRequest"] = Object(("version", "string"), ("repository", "string"), ("by", "string"), ("qualified", "array"), ("limitations", "array"), ("signing", "string"), ("cancel", "string"), ("product", "string"), ("provider", "string")),
             ["ProviderRow"] = Object(("provider", "string"), ("kind", "string"), ("implementation", "string"), ("contract", "string"), ("status", "string"), ("operations", "array"), ("limitations", "array"), ("settings", "array"), ("destination", "string"), ("locations", "array"), ("execution", "object")),
             ["RunStartRequest"] = Object(("assignment", "string"), ("launcher", "string"), ("agent", "string"), ("by", "string"), ("repository", "string"), ("goal", "string"), ("branch", "string"), ("base", "string"), ("wallMinutes", "integer"), ("settings", "object"), ("configuration", "string"), ("execution", "object"), ("allocation", "object"), ("contextPackage", "string")),
@@ -543,7 +552,9 @@ public static class OpenApiDocument
             ["RunStopResponse"] = Object(("run", "string"), ("state", "string"), ("message", "string"), ("ok", "boolean"), ("stop", "object"), ("problem", "object")),
             ["RunRow"] = Object(("run", "string"), ("identity", "string"), ("launcher", "string"), ("agent", "string"), ("assignment", "string"), ("goal", "string"), ("workspace", "string"), ("status", "string"), ("cap", "object"), ("usage", "object"), ("charged", "object"), ("stop", "object"), ("heartbeat", "string"), ("observed", "boolean"), ("generic", "boolean"), ("liveness", "object"), ("scope", "object"), ("signals", "array"), ("execution", "object"), ("executionObserved", "object")),
             ["RunsResponse"] = Object(("runs", "array"), ("goals", "array")),
-            ["ReleaseResponse"] = Object(("identity", "string"), ("status", "string"), ("message", "string"), ("ok", "boolean"), ("operation", "object"), ("candidate", "object"), ("release", "object"), ("releaseId", "string"), ("run", "string"), ("pending", "string"), ("publish", "string"), ("publishedAt", "string"), ("url", "string"), ("problem", "object"), ("policies", "object"), ("basisEvidence", "array")),
+            ["ReleaseResponse"] = releaseResponse,
+            ["ReleaseCheckDetails"] = releaseCheck,
+            ["ReleaseObjection"] = Object(("code", "string"), ("location", "string"), ("message", "string"), ("nextAction", "string")),
             ["UpgradeRequest"] = Object(("version", "string"), ("by", "string"), ("check", "boolean")),
             ["ExportRequest"] = Object(("output", "string"), ("by", "string")),
             ["PairingIssueRequest"] = Object(("principal", "string"), ("by", "string"), ("profiles", "array")),
@@ -597,6 +608,7 @@ public static class OpenApiDocument
         "/v1/runs" => "RunStartRequest",
         "/v1/harness-qualifications" => "HarnessQualifyRequest",
         "/v1/runs/{id}/stop" => "RunStopRequest",
+        "/v1/releases/check" => "ReleaseSubmitRequest",
         "/v1/releases/submit" => "ReleaseSubmitRequest",
         "/v1/releases/observe" => "ReleaseObserveRequest",
         "/v1/changes/push" => "ChangesPushRequest",
@@ -705,6 +717,7 @@ public static class OpenApiDocument
         ("GET", "/v1/runs") => "The agent runs, each with its cap recorded before it started, its observed usage once settled, what it is charged (its cap for every unit not reported, and while in flight), a stop's facts and worker-observed signals with severity and attention references; and the ledger of every goal with a run or active now.",
         ("POST", "/v1/runs") => "Start a coding agent's run on an assignment (vericairn.worker/1): refused while the goal is not active or its budget is spent, while a device of an operator or of the goal's sponsor signs without presence on the runtime's machine and the sponsor recorded no custody exception in force for the goal, and before anything is recorded when the launcher cannot run; otherwise the workspace is prepared, the intent recorded with the cap, and the harness launched, then observed and settled. The principal recording the run (by) is the operator, the goal's sponsor when the sponsor is a person, or a principal with the local-engineering scope. Nothing is accepted.",
         ("POST", "/v1/runs/{id}/stop") => "Ask a run to stop: the request, its transmission to the harness, the harness's acknowledgment, an escalation after the grace period and the observed containment are separate facts; a stop that is not observed is reported as requested.",
+        ("POST", "/v1/releases/check") => "Evaluate every submission objection and its next action at the exact commit and product hash. Signs, records, retains and dispatches nothing, and requires no presence. A check grants no submission authority.",
         ("POST", "/v1/releases/submit") => "Submit a release as intent before effect: the operation record is written, then the build is dispatched through the provider the request names or the product declares; nothing is published, and a provider with no implementation here is refused.",
         ("POST", "/v1/changes/push") => "Record intent, scan exactly the commits, then push the pinned head with a remote lease and record its observed outcome. Requires repository-write authority.",
         ("POST", "/v1/operator/record") => "Sign the operator's own record on their admitted device, commit that record alone on a new estate branch, and scan, push, open, wait and merge through recorded changes operations. Requires a clean repository-synced estate at record format 3 and declared checks. Identical input resumes the original action; uncertain effects are observed before retry. waitSeconds bounds each check phase from 0 to 240 (default 120). Synchronous only; not exposed through MCP.",

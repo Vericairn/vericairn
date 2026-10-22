@@ -264,6 +264,9 @@ public partial interface IEstateApi
     /// <summary>Ask a run to stop, and report what was observed: requested, transmitted, acknowledged, escalated and contained, each only once observed.</summary>
     RunStopResponse RunStop(string run, RunStopRequest request);
 
+    /// <summary>Checks release submission without signing, recording, retaining, presence or dispatch; re-evaluated on actual submission.</summary>
+    ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request);
+
     /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
     ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
 

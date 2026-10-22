@@ -50,13 +50,13 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         recordAccess = new EstateRecordAccess(gate, session,
             (draft, model) => WriteLocked(draft, model),
             (draft, model) => AuthorLocked(draft, model),
-            StoreTogetherLocked, LoadWith, RequestDeviceRefusal);
+            StoreTogetherLocked, LoadWith, RequestDeviceRefusal, CheckReleaseRecord);
         runAdmission = new RunAdmissionService(recordAccess, () => Providers, () => WorkerOptions,
             (model, files, order, maxBytes, recipient, assignment) =>
                 BriefLocked(model, files, order, checkBatches: false, maxBytes: maxBytes, profile: Communication(recipient, assignment)));
         runDispatch = new RunDispatchService(recordAccess, runAdmission, () => Providers, () => WorkerOptions);
         releaseCoordination = new ReleaseCoordinationService(recordAccess, () => Providers, Record, NewRecord,
-            AssessReleasePolicies, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
+            AssessReleasePolicies, SerializeReleaseBasis, RetainReleaseBasis, () => PolicyClock.GetUtcNow(), boundary => ReleaseBoundary?.Invoke(boundary));
     }
 
     /// <summary>
@@ -84,6 +84,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         service.JudgeInterruptedBatches();
         return service;
     }
+
+    /// <summary>Opens canonical records for a check without cache updates, batch recovery or creating durable state.</summary>
+    internal static EstateService OpenReadOnly(string root) => new(EstateSession.Open(root, readOnly: true));
 
     /// <summary>The product version of this runtime.</summary>
     public static string Version =>
@@ -1366,6 +1369,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
     }
 
     /// <inheritdoc />
+    public ReleaseResponse ReleaseCheck(ReleaseSubmitRequest request) => releaseCoordination.ReleaseCheck(request);
+
+    /// <inheritdoc />
     public ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request) => releaseCoordination.ReleaseSubmit(request);
 
     /// <inheritdoc />
@@ -2053,6 +2059,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
 
         try
         {
+            if (signers.Count > 0) BeforeSigningRecord?.Invoke();
             return (RecordAuthor.Create(draft, signers), null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException or CanonicalJsonException)
@@ -2060,6 +2067,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             return (null, exception.Message);
         }
     }
+
+    /// <summary>A test hook at the actual signing boundary; availability checks never enter it.</summary>
+    internal Action? BeforeSigningRecord { get; set; }
 
     /// <summary>A test's hook, called before each record a batch stores: a test throws from it to stop a batch between its records.</summary>
     internal Action<AuthoredRecord>? BeforeStoringTogether { get; set; }

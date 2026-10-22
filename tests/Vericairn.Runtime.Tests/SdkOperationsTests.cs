@@ -99,6 +99,23 @@ public sealed class SdkOperationsTests
             new CancellationBoundApi(client, TestContext.Current.CancellationToken).PolicyHash(body)).OutcomeUnknown);
     }
 
+    [Fact]
+    public async Task InterruptedReleaseCheckIsAReadWithNoUncertainEffect()
+    {
+        using var client = Client((request, _) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("/v1/releases/check", request.RequestUri!.AbsolutePath);
+            throw new HttpRequestException("The fixture transport is unavailable.");
+        });
+        var request = new ReleaseSubmitRequest("product", "1.0.0", null, "principal");
+        ClientUnavailableException failure = await Assert.ThrowsAsync<ClientUnavailableException>(() =>
+            client.ReleaseCheckAsync(request, TestContext.Current.CancellationToken));
+        Assert.False(failure.OutcomeUnknown);
+        Assert.False(Assert.Throws<ClientUnavailableException>(() =>
+            new CancellationBoundApi(client, TestContext.Current.CancellationToken).ReleaseCheck(request)).OutcomeUnknown);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Unauthorized)]
@@ -191,8 +208,9 @@ public sealed class SdkOperationsTests
     public void EverySynchronousApiOperationHasATypedCancellableCounterpart()
     {
         MethodInfo[] synchronous = typeof(IEstateApi).GetMethods().Where(m => !m.Name.EndsWith("Async", StringComparison.Ordinal)).ToArray();
-        Assert.Equal(100, synchronous.Length);
+        Assert.Equal(101, synchronous.Length);
         Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.WorkNew));
+        Assert.Single(synchronous, method => method.Name == nameof(IEstateApi.ReleaseCheck));
         foreach (MethodInfo method in synchronous)
         {
             Type[] parameters = [.. method.GetParameters().Select(p => p.ParameterType), typeof(CancellationToken)];
