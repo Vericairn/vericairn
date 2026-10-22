@@ -101,6 +101,55 @@ public sealed partial class ReleasePolicyGateTests
     }
 
     [Fact]
+    public void AClockBeforeTheSelectedDevicesAdmissionRefusesWithoutSigning()
+    {
+        using var f = new Fixture();
+        EstateModel model = f.Api.Session.Read();
+        RecordEnvelope device = Assert.Single(model.Current("device"), d => EstateModel.BodyString(d, "name") == "Fixture release writer");
+        RecordEnvelope admission = Assert.Single(model.About(device.Id, "admission"));
+        f.Clock.Now = admission.AtTime.AddSeconds(-1);
+        f.Api.BeforeSigningRecord = () => Assert.Fail("The device's recorded admission time can be checked without signing.");
+        var before = BytesOf(f.Records.Estate.Root);
+
+        ReleaseResponse check = f.Api.ReleaseCheck(f.Request);
+        ReleaseResponse submit = f.Api.ReleaseSubmit(f.Request);
+
+        Assert.False(check.Ok);
+        Assert.Contains(check.Check!.Objections, o => o.Code == "signature.before-admission");
+        Assert.Equal(check.Problem!.Findings, submit.Problem!.Findings);
+        Assert.Equal(before, BytesOf(f.Records.Estate.Root));
+        Assert.Equal(0, f.Provider.Calls);
+    }
+
+    [Fact]
+    public void TheSignedIntentSizeIsCheckedBeforeSigningOrRetainingItsBasis()
+    {
+        using var f = new Fixture();
+        Assert.True(f.Api.ReleaseSubmit(f.Request).Ok);
+        RecordEnvelope intent = Assert.Single(f.Api.Session.Read().OfType("operation"), r => r.Supersedes is null);
+        int signedBytes = File.ReadAllBytes(Path.Combine(f.Records.Estate.Root, intent.ExpectedPath)).Length;
+        JsonObject unsigned = JsonNode.Parse(File.ReadAllBytes(Path.Combine(f.Records.Estate.Root, intent.ExpectedPath)))!.AsObject();
+        Assert.True(unsigned.Remove("signatures"));
+        int unsignedBytes = CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(unsigned)).Length;
+        int originalWorkflow = intent.Body.GetProperty("target").GetProperty("workflow").GetString()!.Length;
+        int padding = checked((int)(EstateLayout.MaxFileBytes - signedBytes) / 2 + originalWorkflow + 1);
+        Assert.True(unsignedBytes + 2 * (padding - originalWorkflow) <= EstateLayout.MaxFileBytes);
+        Assert.True(signedBytes + 2 * (padding - originalWorkflow) > EstateLayout.MaxFileBytes);
+        ReleaseSubmitRequest request = f.Request with { Version = "1.0.1", Workflow = new string('x', padding) };
+        f.Api.BeforeSigningRecord = () => Assert.Fail("The signed envelope's fixed overhead must be measured before signing.");
+        var before = BytesOf(f.Records.Estate.Root);
+
+        ReleaseResponse check = f.Api.ReleaseCheck(request);
+        ReleaseResponse submit = f.Api.ReleaseSubmit(request);
+
+        Assert.False(check.Ok);
+        Assert.Contains(check.Check!.Objections, o => o.Code == "layout.size" && o.Location == "release-intent");
+        Assert.Equal(check.Problem!.Findings, submit.Problem!.Findings);
+        Assert.Equal(before, BytesOf(f.Records.Estate.Root));
+        Assert.Equal(1, f.Provider.Calls);
+    }
+
+    [Fact]
     public void APassingCheckDoesNotAuthorizeSubmissionAfterTheProductChanges()
     {
         using var f = new Fixture();

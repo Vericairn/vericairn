@@ -1621,7 +1621,9 @@ public sealed partial class EstateService : IEstateApi, IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         lock (gate)
         {
-            return Standing(session.Load(), deviceId);
+            // Authentication also precedes read-only submission checks: observe canonical records without
+            // refreshing the live cache or its metadata. Revocations still take effect on the next read.
+            return Standing(session.Read(), deviceId);
         }
     }
 

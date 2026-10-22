@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Jason Furr
 
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Vericairn.Protocol;
 using Vericairn.Records.Authoring;
+using Vericairn.Records.Canonical;
 using Vericairn.Records.Estate;
 using Vericairn.Records.Model;
 using Vericairn.Records.Signing;
@@ -38,6 +41,31 @@ public sealed partial class EstateService
         try
         {
             AuthoredRecord proposal = RecordAuthor.Create(draft);
+            if (signer is not null && model.ById.TryGetValue(signer.DeviceId, out RecordEnvelope? device))
+            {
+                if (SignatureChecks.Recovers(model, signer.DeviceId))
+                    objections.Add(new("error", "signature.recovery-scope", "release-intent", "The selected device is a recovery device, which cannot sign a release intent."));
+                string? signatureCode = SignatureChecks.AdmissionStateAt(model, device, proposal.Envelope.At) switch
+                {
+                    SignatureChecks.AdmissionState.Admitted => null,
+                    SignatureChecks.AdmissionState.NotYetAdmitted => "signature.before-admission",
+                    SignatureChecks.AdmissionState.Revoked => "signature.revoked",
+                    _ => "signature.unadmitted",
+                };
+                if (signatureCode is not null)
+                    objections.Add(new("error", signatureCode, "release-intent", "The selected signing device is not admitted at the proposed intent's authoring time."));
+                // A P-256 signature's encoding has a fixed length. Measure that envelope without accessing a key;
+                // these sizing bytes are never parsed as a record, retained, or passed to the authoring boundary.
+                JsonObject sizing = JsonNode.Parse(proposal.Bytes)!.AsObject();
+                sizing["signatures"] = new JsonArray(new JsonObject
+                {
+                    ["algorithm"] = RecordSigning.Algorithm, ["device"] = signer.DeviceId,
+                    ["signature"] = new string('A', (RecordSigning.SignatureBytes * 8 + 5) / 6),
+                });
+                long signedBytes = CanonicalJson.SerializePrettyUtf8(JsonSerializer.SerializeToElement(sizing)).LongLength;
+                if (proposal.Bytes.LongLength <= EstateLayout.MaxFileBytes && signedBytes > EstateLayout.MaxFileBytes)
+                    objections.Add(new("error", "layout.size", "release-intent", $"The signed intent would be {signedBytes:N0} bytes, exceeding the {EstateLayout.MaxFileBytes:N0}-byte record limit."));
+            }
             EstateModel proposed = EstateLoader.Load(session.Root, session.ReadFiles().Append(new RecordFile(proposal.RelativePath, proposal.Bytes)).ToArray());
             // Only this unsigned in-memory proposal's missing signature is accounted for by the availability check above.
             // Signature findings on every existing record remain objections. No unsigned proposal can reach WriteLocked.

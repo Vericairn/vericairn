@@ -66,13 +66,14 @@ the client preserves the nullable result rather than guessing; the release warni
 
 ## Release submission check (FIX-55)
 
-| Added member | Purpose |
+| Member | Purpose |
 | --- | --- |
 | `IEstateApi.ReleaseCheck(ReleaseSubmitRequest)` | Return every admission objection without effects. |
 | `IEstateApi.ReleaseCheckAsync(ReleaseSubmitRequest, CancellationToken = default)` | Default asynchronous bridge, classified as a read. |
 | `VericairnClient.ReleaseCheck` / `ReleaseCheckAsync` | Call the dedicated `POST /v1/releases/check` route. |
 | `CancellationBoundApi.ReleaseCheck` / `ReleaseCheckAsync` | Preserve read cancellation and lifetime behavior. |
 | `EstateService.ReleaseCheck` | Execute the shared submission admission gate. |
+| `EstateService.Standing` | Observe canonical device standing without refreshing live storage, including during check-request authentication. |
 | `ReleaseSubmitRequest.ClientBuild { get; init; }` | Carry the client's full informational version, including its source commit. |
 | `ReleaseResponse.Check { get; init; }` | Optional `ReleaseCheckDetails` for a check response. |
 | `ReleaseCheckDetails(Commit, Expected, ClientBuild, RuntimeBuild, BasisBytes, Objections)` | Exact checked inputs, serialized basis size and objections. |
