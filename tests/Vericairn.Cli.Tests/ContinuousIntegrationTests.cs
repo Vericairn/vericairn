@@ -182,6 +182,61 @@ public class ContinuousIntegrationTests
         // Until 0.8.1 the bill described the solution's locked portable graph while the bundles were resolved live and discarded.
         Assert.True(package.IndexOf("- name: Restore the distributables (locked)", StringComparison.Ordinal) < step);
         Assert.Contains("python3 .github/scripts/verify-sbom.py sbom/bom.json src/Vericairn.Cli/packages.distributable.lock.json src/Vericairn.Workbench/packages.distributable.lock.json", sbom, StringComparison.Ordinal);
+        int packs = sbom.IndexOf("python3 .github/scripts/runtime-packs.py sbom/bom.json artifacts/runtime-packs", StringComparison.Ordinal);
+        int verify = sbom.IndexOf("python3 .github/scripts/verify-sbom.py", StringComparison.Ordinal);
+        int copy = sbom.IndexOf("cp sbom/bom.json", StringComparison.Ordinal);
+        Assert.True(packs > 0 && verify > packs && copy > verify);
+        Assert.Contains("--runtime-packs artifacts/runtime-packs\n", sbom, StringComparison.Ordinal);
+        string targets = Read(Path.Combine(RepositoryRoot(), "src", "Directory.Build.targets"));
+        Assert.Contains("../tools/BundledPacks.targets", targets, StringComparison.Ordinal);
+        Assert.Contains("'$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench'", targets, StringComparison.Ordinal);
+        string evidence = Read(Path.Combine(RepositoryRoot(), "tools", "BundledPacks.targets"));
+        Assert.Contains("AfterTargets=\"Publish\"", evidence, StringComparison.Ordinal);
+        Assert.Contains("@(ResolvedRuntimePack)", evidence, StringComparison.Ordinal);
+        Assert.Contains("@(ResolvedSingleFileHostPack)", evidence, StringComparison.Ordinal);
+        Assert.Contains("%(NuGetPackageId)|%(NuGetPackageVersion)", evidence, StringComparison.Ordinal);
+        string checker = Read(Path.Combine(RepositoryRoot(), ".github", "scripts", "runtime-packs.py"));
+        const string platforms = "linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64";
+        Assert.Contains("RIDS = (" + string.Join(", ", platforms.Split(' ').Select(rid => "\"" + rid + "\"")) + ")", checker, StringComparison.Ordinal);
+        Assert.Contains("PYTHONDONTWRITEBYTECODE: '1'", package, StringComparison.Ordinal);
+        string evidenceTest = Block(package, "- name: Test resolved publish pack evidence", 6);
+        Assert.Contains("run: python3 .github/scripts/test-publish-evidence.py\n", evidenceTest, StringComparison.Ordinal);
+        Assert.DoesNotContain("if:", evidenceTest, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", evidenceTest, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PackagingRequiresTheLatestPublishedBaselineAndExplicitExpectedApiChanges()
+    {
+        string root = RepositoryRoot();
+        string package = Block(Read(Path.Combine(root, ".github", "workflows", "package.yml")), "package:", 2);
+        string resolve = Block(package, "- name: Resolve the latest published API baselines", 6);
+        string pack = Block(package, "- name: Pack Community NuGet packages", 6);
+        Assert.Contains("run: python3 .github/scripts/api-baselines.py artifacts/api-baselines\n", resolve, StringComparison.Ordinal);
+        Assert.True(package.IndexOf(resolve, StringComparison.Ordinal) < package.IndexOf(pack, StringComparison.Ordinal));
+        Assert.Contains("-p:VericairnApiBaselineRoot=\"$GITHUB_WORKSPACE/artifacts/api-baselines\"\n", pack, StringComparison.Ordinal);
+        Assert.Contains("python3 .github/scripts/test-api-validation.py", package, StringComparison.Ordinal);
+        foreach (string step in new[] { resolve, pack, Block(package, "- name: Test the API compatibility gate with local packages", 6) })
+        {
+            Assert.DoesNotContain("if:", step, StringComparison.Ordinal);
+            Assert.DoesNotContain("continue-on-error", step, StringComparison.Ordinal);
+            Assert.DoesNotContain("||", step, StringComparison.Ordinal);
+        }
+        string targets = Read(Path.Combine(root, "src", "Directory.Build.targets"));
+        foreach (string setting in new[] { "<EnablePackageValidation>true", "<RunApiCompat>true", "<DisablePackageBaselineValidation>false",
+                     "<ApiCompatGenerateSuppressionFile>false", "<ApiCompatPermitUnnecessarySuppressions>false" })
+            Assert.Contains(setting, targets, StringComparison.Ordinal);
+        Assert.Contains("BeforeTargets=\"RunPackageValidation\"", targets, StringComparison.Ordinal);
+        Assert.Contains("<ApiCompatSuppressionFile Include=\"$(_VericairnApiExpected)\"", targets, StringComparison.Ordinal);
+        Assert.Contains("<Delete Files=\"$(_ApiCompatValidatePackageSemaphoreFile)\"", targets, StringComparison.Ordinal);
+        Assert.DoesNotContain("NoWarn", targets, StringComparison.Ordinal);
+        foreach (string project in Directory.EnumerateFiles(Path.Combine(root, "src"), "*.csproj", SearchOption.AllDirectories))
+        {
+            System.Xml.Linq.XDocument document = System.Xml.Linq.XDocument.Load(project);
+            if (document.Descendants("IsPackable").SingleOrDefault()?.Value != "true" || document.Descendants("PackAsTool").SingleOrDefault()?.Value == "true") continue;
+            string id = document.Descendants("PackageId").Single().Value;
+            Assert.True(File.Exists(Path.Combine(root, ".github", "api-compatibility", id + ".xml")), $"{id} requires explicit expected API changes.");
+        }
     }
 
     [Fact]
