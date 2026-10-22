@@ -285,3 +285,49 @@ jobs:
           name: vericairn-${{ steps.version.outputs.version }}
           path: dist
           retention-days: ${{ inputs.release && 90 || 1 }}
+
+  published-cli:
+    # These runners execute the archives built by package, so the reusable workflow cannot succeed before both have run.
+    needs: [package]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            rid: osx-arm64
+          - os: windows-latest
+            rid: win-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: vericairn-${{ needs.package.outputs.version }}
+          path: dist
+      - name: Run the published macOS command line
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          RID: ${{ matrix.rid }}
+        run: |
+          set -eu
+          mkdir smoke
+          tar -xzf "dist/vericairn-$VERSION-$RID.tar.gz" -C smoke
+          smoke/bin/vericairn --version
+          smoke/bin/vericairn sources inspect "$GITHUB_WORKSPACE"
+      - name: Run the published Windows command line
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.package.outputs.version }}
+          RID: ${{ matrix.rid }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -LiteralPath "dist/vericairn-$env:VERSION-$env:RID.zip" -DestinationPath smoke
+          & ./smoke/bin/vericairn.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./smoke/bin/vericairn.exe sources inspect "$env:GITHUB_WORKSPACE"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

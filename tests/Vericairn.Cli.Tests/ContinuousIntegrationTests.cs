@@ -136,6 +136,11 @@ public class ContinuousIntegrationTests
             Assert.Contains(option, command, StringComparison.Ordinal);
         }
 
+        // Only the exact product configuration may be supplied; another config flag still fails the bypass checks below.
+        const string productConfig = "--config \"$GITHUB_WORKSPACE/src/Vericairn.Adapters.Git/gitleaks.toml\" ";
+        Assert.Contains(productConfig, command, StringComparison.Ordinal);
+        Assert.Equal(2, command.Split(productConfig, StringSplitOptions.None).Length);
+        command = command.Remove(command.IndexOf(productConfig, StringComparison.Ordinal), productConfig.Length);
         foreach (string option in new[] { "--no-git", "--exit-code", "--baseline-path", "--config", "--enable-rule", "--max-target-megabytes", "--report" })
         {
             Assert.DoesNotContain(option, command, StringComparison.Ordinal);
@@ -227,6 +232,51 @@ public class ContinuousIntegrationTests
         string step = Block(package, "- name: Run the published single-file command line", 6);
         Assert.Contains("set -eu\n", step, StringComparison.Ordinal);
         Assert.Contains("out/linux-x64/bin/vericairn sources inspect \"$GITHUB_WORKSPACE\"\n", step, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MacAndWindowsRunThePackageJobsOwnArchivesAndPropagateProcessFailures()
+    {
+        string workflow = Read(Path.Combine(RepositoryRoot(), ".github", "workflows", "package.yml"));
+        string job = Block(workflow, "published-cli:", 2);
+        Assert.Contains("\n    needs: [package]\n", job, StringComparison.Ordinal);
+        Assert.Contains("\n      fail-fast: false\n", job, StringComparison.Ordinal);
+        Assert.Contains("\n    runs-on: ${{ matrix.os }}\n", job, StringComparison.Ordinal);
+        Assert.Equal("      matrix:\n        include:\n          - os: macos-latest\n            rid: osx-arm64\n          - os: windows-latest\n            rid: win-x64\n", Block(job, "matrix:", 6));
+        Assert.Contains("uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0", job, StringComparison.Ordinal);
+        Assert.Contains("name: vericairn-${{ needs.package.outputs.version }}\n          path: dist\n", job, StringComparison.Ordinal);
+        Assert.DoesNotContain("continue-on-error", job, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet publish", job, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n    if:", job, StringComparison.Ordinal);
+        string mac = Block(job, "- name: Run the published macOS command line", 6);
+        Assert.Contains("if: runner.os == 'macOS'\n", mac, StringComparison.Ordinal);
+        Assert.Contains("shell: bash\n", mac, StringComparison.Ordinal);
+        Assert.Contains("set -eu\n", mac, StringComparison.Ordinal);
+        Assert.Contains("tar -xzf \"dist/vericairn-$VERSION-$RID.tar.gz\" -C smoke\n", mac, StringComparison.Ordinal);
+        Assert.Contains("smoke/bin/vericairn sources inspect \"$GITHUB_WORKSPACE\"\n", mac, StringComparison.Ordinal);
+        string windows = Block(job, "- name: Run the published Windows command line", 6);
+        Assert.Contains("if: runner.os == 'Windows'\n", windows, StringComparison.Ordinal);
+        Assert.Contains("shell: pwsh\n", windows, StringComparison.Ordinal);
+        Assert.Contains("$ErrorActionPreference = 'Stop'\n", windows, StringComparison.Ordinal);
+        Assert.Contains("Expand-Archive -LiteralPath \"dist/vericairn-$env:VERSION-$env:RID.zip\" -DestinationPath smoke\n", windows, StringComparison.Ordinal);
+        Assert.Contains("& ./smoke/bin/vericairn.exe --version\n          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n", windows, StringComparison.Ordinal);
+        Assert.Contains("& ./smoke/bin/vericairn.exe sources inspect \"$env:GITHUB_WORKSPACE\"\n          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n", windows, StringComparison.Ordinal);
+        foreach (string step in new[] { mac, windows })
+        {
+            Assert.Contains("VERSION: ${{ needs.package.outputs.version }}\n", step, StringComparison.Ordinal);
+            Assert.Contains("RID: ${{ matrix.rid }}\n", step, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void DependabotGroupsMonthlyActionUpdatesAndLeavesApprovalToTheWorkflowPolicy()
+    {
+        string github = Path.Combine(RepositoryRoot(), ".github");
+        Assert.Equal("version: 2\nupdates:\n  - package-ecosystem: github-actions\n    directory: /\n    schedule:\n      interval: monthly\n    groups:\n      github-actions:\n        patterns: ['*']\n    open-pull-requests-limit: 1\n", Read(Path.Combine(github, "dependabot.yml")));
+        string policy = Read(Path.Combine(github, "scripts", "check-workflow-actions.rb"));
+        Assert.Contains("!OWNER.match?(action)", policy, StringComparison.Ordinal);
+        Assert.Contains("!allowed.include?(action)", policy, StringComparison.Ordinal);
+        Assert.Contains("{40}", policy, StringComparison.Ordinal);
     }
 
     [Fact]
