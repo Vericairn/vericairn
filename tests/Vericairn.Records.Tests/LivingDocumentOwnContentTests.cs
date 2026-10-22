@@ -62,6 +62,21 @@ public sealed class LivingDocumentOwnContentTests
     }
 
     [Fact]
+    public void OwnContentReasonsPreserveTheOrderOfDeclaredTriggers()
+    {
+        using var estate = new TestEstate(recordFormat: 2);
+        estate.WriteFile("docs/guide.md", "# Guide\n");
+        RecordEnvelope declaration = Declare(estate, Product(estate), "refuse");
+        Review(estate, declaration, "current");
+        estate.WriteFile("docs/guide.md", "# Changed guide\n");
+        estate.Add("decision", estate.OperatorId,
+            $$"""{"title":"Change the guide","statement":"Revise the guide.","summary":"Update the guide.","synthesis":"The operator changes the guide.","effects":["Update the guide."],"affects":[],"decidedBy":"{{estate.OperatorId}}","decidedAt":"2026-10-13T12:00:00Z","stake":"low","notAuthorized":[],"documents":["docs/guide.md"]}""");
+
+        Assert.Equal(["decision", "covers"], State(estate).Reasons.Select(r => r.On));
+        Assert.Equal("refuse", State(estate).Level);
+    }
+
+    [Fact]
     public void ADeletedDocumentIsDueAndOnlyTheLatestClearedBytesCanRestoreIt()
     {
         using var estate = new TestEstate(recordFormat: 2);

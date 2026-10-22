@@ -124,7 +124,12 @@ internal sealed class ReleaseCoordinationService(
             {
                 LivingDocuments.Reason[] reasons = document.Reasons.Where(r => r != content.Reason).ToArray();
                 admission = document with { Reasons = reasons, Level = reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() };
-                compared.Add($"{document.Path} not compared, since no clone of its repository ({document.Repository}) is registered here, under signed grant {grant.Id} {grant.ComputedHash}, which expires {EstateModel.BodyString(grant, "expires")}; the independent review reads it at a commit of its own repository");
+                RecordEnvelope? repository = model.ById.GetValueOrDefault(document.Repository!);
+                string name = repository is null ? document.Repository! : EstateModel.BodyString(repository, "name") ?? document.Repository!;
+                string? reviewed = document.Clearance is { } review && review.Body.TryGetProperty("content", out JsonElement pin) && pin.ValueKind == JsonValueKind.Object &&
+                    pin.TryGetProperty("commit", out JsonElement reviewedCommit) && reviewedCommit.ValueKind == JsonValueKind.String ? reviewedCommit.GetString() : null;
+                string where = document.ComparisonCommit is { } commit ? $"commit {commit}" : $"a commit of its own repository (latest review: {reviewed})";
+                compared.Add($"{document.Path} not compared, since no clone of {name} ({document.Repository}) is registered here, under signed grant {grant.Id} {grant.ComputedHash}, which expires {EstateModel.BodyString(grant, "expires")}; the independent review reads it at {where}");
             }
             if (admission.Closes) changed.Add(admission.Describe());
             if (document.Repository is null || (!document.DeclaresRefuse && !GeneratedDocumentContract.RequiresFreshCheck(model, document.Declaration))) continue;

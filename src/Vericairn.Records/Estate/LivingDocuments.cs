@@ -73,7 +73,7 @@ public static class LivingDocuments
         /// <summary>The resource record of the repository that holds it; null for the estate's own repository.</summary>
         public string? Repository => EstateModel.BodyString(Declaration, "repository");
 
-        /// <summary>The repository commit selected for this release comparison; null when no commit is available or needed.</summary>
+        /// <summary>The repository commit selected for this comparison; null when no commit is available or needed.</summary>
         public string? ComparisonCommit { get; init; }
 
         internal ContentComparison? Content { get; init; }
@@ -274,13 +274,12 @@ public static class LivingDocuments
         IDocumentSource? source = elsewhere ? DocumentSources.Find(EstateModel.BodyString(declaration, "source")) : null;
         string? at = elsewhere ? exactCommit ? releaseCommit : source?.Head(model, declaration) : null;
         if (!exactCommit && at is not null && clearance is { Type: "document-review" } review &&
-            review.Body.TryGetProperty("content", out JsonElement content) &&
-            content.TryGetProperty("commit", out JsonElement reviewed) && reviewed.GetString() is { } reviewedCommit &&
+            review.Body.TryGetProperty("content", out JsonElement content) && content.ValueKind == JsonValueKind.Object &&
+            content.TryGetProperty("commit", out JsonElement reviewed) && reviewed.ValueKind == JsonValueKind.String && reviewed.GetString() is { } reviewedCommit &&
             reviewedCommit != at && source!.IsAncestor(model, declaration, at, reviewedCommit))
             at = reviewedCommit;
 
         ContentComparison? comparison = CompareContent(model, declaration, clearance, source, at);
-        if (comparison?.Reason is { } reason) reasons.Add(reason);
 
         // A review records one identity for all the covered paths, so every covers trigger compares the identity of them all. The
         // estate's own files are read from its working tree; another repository's at its selected commit when given, otherwise HEAD.
@@ -330,6 +329,8 @@ public static class LivingDocuments
             }
         }
 
+        // Keep declared triggers in their established order, including the answers recorded by a review.
+        if (comparison?.Reason is { } reason) reasons.Add(reason);
         string? due = reasons.Count == 0 ? null : reasons.Select(r => r.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).Last();
         return new State(declaration, due, reasons, clearance, unavailable.ToList(), notes) { ComparisonCommit = at, Content = comparison };
     }
@@ -343,8 +344,8 @@ public static class LivingDocuments
         string level = Triggers(declaration).Select(t => t.Level).OrderBy(l => LivingDocumentType.Levels.IndexOf(l)).LastOrDefault() ?? "remind";
         JsonElement pin = clearance is { Type: "document-review" } && clearance.Body.TryGetProperty("content", out JsonElement content)
             ? content : clearance?.Body ?? default;
-        string? clearedHash = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("hash", out JsonElement hash) ? hash.GetString() : null;
-        string clearedAt = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("commit", out JsonElement at) ? at.GetString() ?? "?" : "?";
+        string? clearedHash = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("hash", out JsonElement hash) && hash.ValueKind == JsonValueKind.String ? hash.GetString() : null;
+        string clearedAt = pin.ValueKind == JsonValueKind.Object && pin.TryGetProperty("commit", out JsonElement at) && at.ValueKind == JsonValueKind.String ? at.GetString() ?? "?" : "?";
         bool available = repository is null || (commit is not null && source?.Resolve(model, declaration, commit) == commit);
         ContentComparison Due(string summary) => new(available, new Reason("covers", level, summary, null), summary);
         if (clearedHash is null) return Due($"{path}: no review has cleared its content");
