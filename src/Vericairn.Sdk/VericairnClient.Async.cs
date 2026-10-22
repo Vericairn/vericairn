@@ -226,6 +226,10 @@ public sealed partial class VericairnClient
     public Task<ObserveResponse?> ObserveAsync(string workOrder, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ObserveResponse?>(nameof(Observe), async token => (await GetAsync<ObserveResponse>("/v1/work/" + Uri.EscapeDataString(workOrder), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Observe)), cancellationToken);
 
+    /// <summary>The cancellable WorkNew operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> WorkNewAsync(WorkNewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(WorkNew), async token => (await PostAsync<WorkNewRequest, WriteOutcome>("/v1/work/new", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WorkNew)), cancellationToken);
+
     /// <summary>The cancellable Assign operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AssignAsync(AssignRequest request, CancellationToken cancellationToken = default) =>
         RunOperationAsync<WriteOutcome>(nameof(Assign), async token => (await PostAsync<AssignRequest, WriteOutcome>("/v1/work/assign", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(Assign)), cancellationToken);

@@ -258,6 +258,9 @@ public sealed partial class VericairnClient : IEstateApi, IDaemonVersion, IDispo
     public ObserveResponse? Observe(string workOrder) => Get<ObserveResponse>("/v1/work/" + Uri.EscapeDataString(workOrder), allowNotFound: true);
 
     /// <inheritdoc />
+    public WriteOutcome WorkNew(WorkNewRequest request) => Post<WorkNewRequest, WriteOutcome>("/v1/work/new", request)!;
+
+    /// <inheritdoc />
     public WriteOutcome Assign(AssignRequest request) => Post<AssignRequest, WriteOutcome>("/v1/work/assign", request)!;
 
     /// <inheritdoc />

@@ -62,6 +62,7 @@ public static class ApiRoutes
         app.MapGet($"{v}/decisions/{{id}}", (string id) => service.Decision(id) is DecisionResponse decision ? Results.Json(decision, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/work/{{key}}/brief", (string key, string? recipient, string? assignment, string? progress, string? status, string? decision, string? result, string? handoff) => service.BriefFor(key, recipient, assignment, new CommunicationValues(progress, status, decision, result, handoff)) is BriefResponse brief ? Results.Json(brief, ProtocolJson.Options) : Results.NotFound());
         app.MapGet($"{v}/work/{{key}}", (string key) => service.Observe(key) is ObserveResponse observe ? Results.Json(observe, ProtocolJson.Options) : Results.NotFound());
+        app.MapPost($"{v}/work/new", (WorkNewRequest request) => Outcome(service.WorkNew(request)));
         app.MapPost($"{v}/work/assign", (AssignRequest request) => Outcome(service.Assign(request)));
         app.MapPost($"{v}/work/attempt", (AttemptRequest request) => Outcome(service.Attempt(request)));
         app.MapPost($"{v}/work/progress", (WorkProgressRequest request) => Results.Json(service.WorkProgress(request), ProtocolJson.Options));
