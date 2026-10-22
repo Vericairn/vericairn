@@ -914,7 +914,7 @@ public sealed partial class EstateService : IEstateApi, IDisposable
             string? commit = null;
             string? covered = null;
             Func<string, bool>? exists = null;
-            IReadOnlyList<string> coveredPaths = LivingDocuments.CoveredPaths(declared);
+            IReadOnlyList<string> coveredPaths = LivingDocuments.CoveredTriggerPaths(declared);
             if (EstateModel.BodyString(declared, "repository") is null)
             {
                 string file = Path.Combine(session.Root, path.Replace('/', Path.DirectorySeparatorChar));

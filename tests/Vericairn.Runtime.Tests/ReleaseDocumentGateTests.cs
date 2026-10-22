@@ -6,6 +6,7 @@ using System.Text.Json.Nodes;
 using Vericairn.Adapters.Git;
 using Vericairn.Protocol;
 using Vericairn.Records.Estate;
+using Vericairn.Records.Hashing;
 using Vericairn.Records.Model;
 using Vericairn.Records.Identity;
 using Vericairn.Records.Signing;
@@ -18,7 +19,70 @@ namespace Vericairn.Runtime.Tests;
 
 public sealed class ReleaseDocumentGateTests
 {
-    private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
+    private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"];
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void OwnBytesChangedAfterReviewAreDueOnEverySurfaceAndHoldUntilReviewed(bool otherRepository)
+    {
+        using var fixture = new Fixture(covers: false, otherRepository: otherRepository);
+        string reviewed = fixture.Commit("Reviewed documentation.");
+        fixture.Review(reviewed);
+        fixture.AssertSurfaces(due: false);
+        string changed = fixture.Commit("Changed documentation.");
+        if (!otherRepository) fixture.Provider.HeadSha = changed;
+
+        DocumentReason reason = Assert.Single(fixture.AssertSurfaces(due: true).Reasons);
+        Assert.Equal("covers", reason.On);
+        Assert.Contains($"README.md changed after its review at {reviewed[..12]}: at {changed[..12]}", reason.Summary, StringComparison.Ordinal);
+        Assert.Contains(ContentHash.Sha256("Reviewed documentation."u8), reason.Summary, StringComparison.Ordinal);
+        Assert.Contains(ContentHash.Sha256("Changed documentation."u8), reason.Summary, StringComparison.Ordinal);
+        Assert.Contains(reason.Summary, Assert.Single(fixture.DocumentChecks().Changed), StringComparison.Ordinal);
+        Assert.Empty(fixture.Service.Records("operation"));
+
+        ReleaseResponse held = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.False(held.Ok);
+        Assert.Contains(reason.Summary, held.Message, StringComparison.Ordinal);
+        Assert.Empty(fixture.Service.Records("operation"));
+        Assert.Empty(fixture.Provider.Dispatches);
+
+        fixture.Review(changed);
+        fixture.AssertSurfaces(due: false);
+        Assert.Empty(fixture.DocumentChecks().Changed);
+        ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.True(submitted.Ok, submitted.Message);
+        Assert.Single(fixture.Provider.Dispatches);
+    }
+
+    [Fact]
+    public void AnUncommittedEstateDocumentEditUsesTheSameDueStateAndGate()
+    {
+        using var fixture = new Fixture(covers: false);
+        string commit = fixture.Commit("Reviewed documentation.");
+        fixture.Review(commit);
+        fixture.Provider.HeadSha = commit;
+        fixture.Estate.WriteFile("docs/guide.md", "# Guide\n");
+        RecordEnvelope declaration = fixture.Estate.Add("living-document", fixture.Estate.OperatorId,
+            $$"""{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"refuse","product":"{{fixture.Request.Product}}"},{"on":"decision","level":"warn"}],"summary":"Documents the product."}""");
+        var review = new DocumentReviewRequest(fixture.Estate.OperatorId, "current", "Read the guide.");
+        Assert.True(fixture.Service.DocumentReview(declaration.Id, review).Ok);
+        fixture.AssertSurfaces(due: false, path: "docs/guide.md");
+        fixture.Estate.WriteFile("docs/guide.md", "# Revised guide\n");
+        DocumentReason reason = Assert.Single(fixture.AssertSurfaces(due: true, path: "docs/guide.md").Reasons);
+        Assert.Contains("docs/guide.md changed after its review", reason.Summary, StringComparison.Ordinal);
+        Assert.Contains(reason.Summary, Assert.Single(fixture.DocumentChecks().Changed), StringComparison.Ordinal);
+        ReleaseResponse held = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.False(held.Ok);
+        Assert.Empty(fixture.Provider.Dispatches);
+        Assert.Empty(fixture.Service.Records("operation"));
+
+        Assert.True(fixture.Service.DocumentReview(declaration.Id, review).Ok);
+        fixture.AssertSurfaces(due: false, path: "docs/guide.md");
+        Assert.Empty(fixture.DocumentChecks().Changed);
+        ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request);
+        Assert.True(submitted.Ok, submitted.Message);
+    }
 
     [Fact]
     public void AnUnavailableStrictGeneratorRefusesReleaseWithoutAuthoredTriggersOrPins()
@@ -161,6 +225,8 @@ public sealed class ReleaseDocumentGateTests
         fixture.Review(reviewed);
         string head = newerHead ? fixture.Commit("Reviewed documentation.") : reviewed;
 
+        fixture.AssertSurfaces(due: false);
+
         ReleaseResponse submitted = fixture.Service.ReleaseSubmit(fixture.Request);
         Assert.True(submitted.Ok, submitted.Message);
         RecordEnvelope intent = fixture.Service.Session.Load().OfType("operation").Single(r => EstateModel.BodyString(r, "status") == "not-started");
@@ -190,6 +256,8 @@ public sealed class ReleaseDocumentGateTests
 
         string changed = fixture.Commit("Changed documentation.");
 
+        fixture.AssertSurfaces(due: true);
+
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
         Assert.False(response.Ok);
         Assert.Contains("README.md changed after its review", response.Message, StringComparison.Ordinal);
@@ -205,6 +273,8 @@ public sealed class ReleaseDocumentGateTests
     {
         using var fixture = new Fixture(covers, otherRepository: true);
         fixture.Commit("Unreviewed documentation.");
+
+        fixture.AssertSurfaces(due: true);
 
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
         Assert.False(response.Ok);
@@ -388,6 +458,8 @@ public sealed class ReleaseDocumentGateTests
         fixture.Review(reviewed);
         Git(fixture.Repository, "checkout", "-q", "-B", "main", behind);
 
+        fixture.AssertSurfaces(due: false);
+
         ReleaseResponse response = fixture.Service.ReleaseSubmit(fixture.Request);
         Assert.True(response.Ok, response.Message);
         RecordEnvelope intent = fixture.Service.Session.Load().OfType("operation").Single(r => EstateModel.BodyString(r, "status") == "not-started");
@@ -430,7 +502,7 @@ public sealed class ReleaseDocumentGateTests
             Resource = Estate.Add("resource", Estate.OperatorId, $$"""{"kind":"repository","name":"Widget source","role":"Product source.","location":{"github":"{{location}}"},"visibility":"public"}""");
             RepositoryClones.Register(Estate.Estate.Id, Resource.Id, Repository);
             string covered = covers ? ",{\"on\":\"covers\",\"level\":\"refuse\",\"paths\":[\"README.md\",\"guide.md\"]}" : string.Empty;
-            Declaration = Estate.Add("living-document", Estate.OperatorId, $$"""{"path":"README.md","repository":"{{Resource.Id}}","title":"Readme","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product.Id}}"}{{covered}}],"checks":["links-resolve"],"summary":"Documents the widget."}""");
+            Declaration = Estate.Add("living-document", Estate.OperatorId, $$"""{"path":"README.md","repository":"{{Resource.Id}}","title":"Readme","kind":"authored","source":"vericairn.software/git-file","triggers":[{"on":"release","level":"refuse","product":"{{product.Id}}"},{"on":"decision","level":"warn"}{{covered}}],"checks":["links-resolve"],"summary":"Documents the widget."}""");
             Service = EstateService.Open(Estate.Root);
             var registry = new ProviderRegistry();
             registry.Register(Provider);
@@ -458,6 +530,42 @@ public sealed class ReleaseDocumentGateTests
         {
             WriteOutcome review = Service.DocumentReview(Declaration.Id, new DocumentReviewRequest(Estate.OperatorId, "current", "Read the release documentation.", Commit: commit));
             Assert.True(review.Ok, System.Text.Json.JsonSerializer.Serialize(review.Problem));
+        }
+
+        public (List<string> Changed, List<string> Compared) DocumentChecks() => ReleaseCoordinationService.ReleaseDocumentChecks(
+            Service.Session.Load(), Request.Product, Request.Version, Request.By, Estate.Clock, Request.Commit, Provider.Descriptor, Request.Repository!);
+
+        public DocumentRow AssertSurfaces(bool due, string path = "README.md")
+        {
+            DocumentRow document = Assert.Single(Service.Documents(), d => d.Path == path);
+            Assert.Equal(due ? "due" : "current", document.State);
+            Assert.Equal(due ? "refuse" : null, document.Level);
+            StatusResponse status = Service.Status();
+            if (due) Assert.Contains(path + ": due at refuse", status.Text, StringComparison.Ordinal);
+            System.Text.Json.JsonElement row = Assert.Single(status.Json.GetProperty("documents").EnumerateArray(), d => d.GetProperty("path").GetString() == path);
+            Assert.Equal(document.State, row.GetProperty("state").GetString());
+            Assert.Equal(document.Reasons.Select(r => r.Summary), row.GetProperty("reasons").EnumerateArray().Select(r => r.GetProperty("summary").GetString()));
+            FindingsResponse check = Service.Check();
+            ProgressResponse progress = Service.Progress();
+            if (due)
+            {
+                foreach (DocumentReason reason in document.Reasons)
+                {
+                    Assert.Contains(reason.Summary, status.Text, StringComparison.Ordinal);
+                    Assert.Contains(check.Findings, f => f.Code == "document.due" && f.Message.Contains(reason.Summary, StringComparison.Ordinal));
+                    Assert.Contains(reason.Summary, progress.Text, StringComparison.Ordinal);
+                    Assert.Contains(progress.Json.GetProperty("standing").GetProperty("check").GetProperty("findings").EnumerateArray(),
+                        f => f.GetProperty("code").GetString() == "document.due" && f.GetProperty("message").GetString()!.Contains(reason.Summary, StringComparison.Ordinal));
+                }
+            }
+            else
+            {
+                Assert.Empty(document.Reasons);
+                Assert.DoesNotContain(check.Findings, f => f.Code == "document.due" && f.Location == path);
+                Assert.DoesNotContain(progress.Json.GetProperty("standing").GetProperty("check").GetProperty("findings").EnumerateArray(),
+                    f => f.GetProperty("code").GetString() == "document.due" && f.GetProperty("location").GetString() == path);
+            }
+            return document;
         }
 
         public void Dispose()
