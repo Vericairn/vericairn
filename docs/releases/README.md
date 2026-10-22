@@ -1,13 +1,17 @@
 # Release documentation sets
 
-The current published release is **0.8.0**, published on October 20, 2026 at 11:28:45 UTC,
-with tag `v0.8.0` at `cd508425339415944411cf71cce9ad20f46ff41f`
-(estate release record `01M5CH7JNSD0MPQZHW51BGYNN4`). It follows 0.7.3, published on October 18, 2026
-at 05:00:34 UTC with tag `v0.7.3` at `b4f4bcab2763689ff4f402b11b1b33cc3669d9c2`
-(estate release record `01M56P744RYYS9XBHM4NTD0JDZ`). 0.7.2's [Security section](0.7.2/release-notes.md#security)
+The current published release is **0.8.2**, published on October 22, 2026 at 11:24:13 UTC,
+with tag `v0.8.2` at `e000a12ea980a4ac0c7e7a127a714f6423e27d7f`
+(estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It follows 0.8.0, published on October 20, 2026
+at 11:28:45 UTC with tag `v0.8.0` at `cd508425339415944411cf71cce9ad20f46ff41f`
+(estate release record `01M5CH7JNSD0MPQZHW51BGYNN4`); the 0.8.1 candidate between them was withdrawn.
+0.8.2's [Security section](0.8.2/release-notes.md#security) discloses the corrections from 0.8.0's
+security review. One known issue of 0.8.2: each platform's archive carries a separately compiled build of
+the same libraries, so a policy basis differs by platform
+([issue 184](https://github.com/Vericairn/vericairn/issues/184)); 0.8.3 fixes it. 0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
-The [0.8.2 set](0.8.2/README.md) documents the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
+The [0.8.2 set](0.8.2/README.md) documents the current published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with
 FIX-53, which lets the macOS and Linux single-file command lines start processes again, and FIX-54, which rechecks a
 retained basis's record digest when it is read. That work is FIX-34 through FIX-38 and CI-03, the corrections from
 0.8.0's security review; FIX-39 through FIX-46 and FIX-48, found while adopting estate policies;
@@ -15,7 +19,7 @@ FIX-29, FIX-32, FIX-49 and CI-01 for test timing and CI; FIX-51, the release gat
 observations, the package icon and MCP Registry discovery; DOCS-07's exact-byte document pins; and
 BRAND-02's README openings. An estate at format 3 upgrades to it without a
 format step. The source version is `0.8.2-dev`.
-The set records no 0.8.2 publication, tag, package availability or platform qualification.
+The set was frozen before publication, so it records no publication, tag, package availability or platform qualification; the estate's release record and this index do.
 Its references retain build commit `479634f023cd377aba29861312a52ba855795eda`,
 with 147 commands, 104 API operations, 42 record types and 32 required documents.
 Its notes render the estate's records with `--from 0.8.0 --to 0.8.2` and open with the operator's
@@ -68,11 +72,12 @@ The [0.6.0 set](0.6.0/README.md) stays frozen. Its candidate was withdrawn befor
 
 ## NuGet publication setup
 
-The 0.8.0 release event's Trusted Publishing run, [run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377),
-pushed all eight packages, and each lists 0.8.0 on nuget.org:
+The 0.8.2 release event's Trusted Publishing run, [run 39770313785](https://github.com/Vericairn/vericairn/actions/runs/39770313785),
+pushed all eight packages with their symbol packages, and each lists 0.8.2 on nuget.org:
 `dotnet-vc`, `Vericairn`, `Vericairn.Daemon`, `Vericairn.Mcp`, `Vericairn.Protocol`, `Vericairn.Records`,
-`Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.0 is available. The recovery below belongs to
-0.7.1's first publication, not to the 0.7.2, 0.7.3 or 0.8.0 events.
+`Vericairn.Runtime` and `Vericairn.Sdk`. Installation of 0.8.2 is available. 0.8.0's own run,
+[run 39415232377](https://github.com/Vericairn/vericairn/actions/runs/39415232377), published 0.8.0 the same way.
+The recovery below belongs to 0.7.1's first publication, not to the 0.7.2, 0.7.3, 0.8.0 or 0.8.2 events.
 
 On October 17, 2026, [run 39028643979](https://github.com/Vericairn/vericairn/actions/runs/39028643979)
 of `nuget.yml` pushed `dotnet-vc` and the seven Vericairn packages at 0.7.1, with their produced symbol packages,

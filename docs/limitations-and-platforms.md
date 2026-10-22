@@ -17,6 +17,16 @@ and requires explicit adoption afterwards. 0.8.0's features and earlier correcti
 The earlier custody, accounting and transport limits still hold. Tests and documentation do not replace
 independent review or operator acceptance.
 
+## Known issue in published 0.8.2
+
+Each platform's 0.8.2 archive carries a separately compiled build of the same libraries: the build folder's
+platform name is embedded in each assembly. Policy evaluation identifies its implementation by the compiled
+assembly's identity, so the same estate's policy basis digest, and the implementation digests it covers,
+differ by platform. Evaluation on one machine stays consistent; status and policy bases compared across
+platforms differ only in those digests. It is not a security problem. 0.8.3 builds the libraries the same
+way for every platform and checks it in the release's packaging path
+([issue 184](https://github.com/Vericairn/vericairn/issues/184)).
+
 ## Machine-local worker configuration and qualification
 
 FIX-11 supplies the stock CLI and daemon with native worker configuration. Before a native run, use `vericairn worker configure --launcher codex --model <model> --effort <effort>` (or `claude-code`); omit choices to show it. Both model and effort are required when setting. Repeated `--allow-model` and `--allow-effort` options narrow choices and must include their defaults. Without a model allowlist only the default is admitted; without an effort allowlist the launcher's supported efforts are admitted. Each set replaces that launcher's defaults and allowlists. Missing or malformed configuration refuses before intent, and an explicit run override cannot replace it or escape its restrictions.
@@ -49,7 +59,7 @@ The archives are self-contained .NET applications and require no separate .NET r
 
 The workflow packages unsigned developer builds. There is no application-signing or notarization step, application bundle or installer. Check downloaded bytes against `SHA256SUMS` and the estate's recorded hashes; see `install.md` for quarantine and SmartScreen behavior. These checks establish the downloaded bytes, not a platform signature.
 
-The NuGet packages are framework-dependent: the `dotnet-vc` tool needs the .NET and ASP.NET Core 10 runtimes supplied by the .NET 10 SDK. It installs no Workbench and no macOS Secure Enclave helper. Use the macOS archive for the bundled helper. The worker's agent-side MCP command still resolves `vericairn`, so a NuGet-only worker installation is not qualified by package smoke tests. `Vericairn` is a dependency-only SDK front door; it does not bring an embedded runtime or daemon. The release workflow builds packages into the draft; NuGet Trusted Publishing happens only after the operator publishes that release. 0.8.2 package availability requires operator publication and a successful package workflow; 0.7.3 packages are already published. Name-reservation versions are not product releases.
+The NuGet packages are framework-dependent: the `dotnet-vc` tool needs the .NET and ASP.NET Core 10 runtimes supplied by the .NET 10 SDK. It installs no Workbench and no macOS Secure Enclave helper. Use the macOS archive for the bundled helper. The worker's agent-side MCP command still resolves `vericairn`, so a NuGet-only worker installation is not qualified by package smoke tests. `Vericairn` is a dependency-only SDK front door; it does not bring an embedded runtime or daemon. The release workflow builds packages into the draft; NuGet Trusted Publishing happens only after the operator publishes that release. 0.8.2 package availability requires operator publication and a successful package workflow; the 0.8.0 and 0.8.2 packages are published. Name-reservation versions are not product releases.
 
 Nuget.org receives exactly the package assets the operator publishes, verified against that release's own `SHA256SUMS`. The workflow checks completeness and hashes but does not compare with the estate's accepted candidate or require its acceptance record; a published prerelease also triggers it. Publishing the exact accepted draft supplies that binding. Changing both assets and their checksum file would pass this comparison. Upload never rebuilds packages. Duplicate versions are skipped, not replaced or independently verified against nuget.org's existing bytes.
 
