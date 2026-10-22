@@ -424,6 +424,13 @@ the receipt. `release observe` records it as uncertain before querying the provi
 then waits for a run or draft. Observe and reconcile the original identity before retrying. A known
 failure or cancellation needs `--reconciliation`; that retry pins its settings and records an uncertain
 claim before dispatch. An active provider call cannot be canceled or reconciled until it returns.
+
+The extra pre-dispatch revision reported for a retry of a canceled intent in 0.8.2 is fixed in 0.8.3
+(FIX-57). The comparison excludes the submission's own revisions and their exact supersession links,
+so an unchanged retry records one claim before dispatch and one receipt afterwards, like a first
+submission. Another successor, record revision, source change or changed admission finding still
+counts. Retained evidence keeps its original timestamps and digests.
+
 A gh refusal before workflow-command launch is a known refusal; interruption after launch or failure to
 identify the run is uncertain. These rules are not a distributed exactly-once guarantee between separate
 runtime instances.
