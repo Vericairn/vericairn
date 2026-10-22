@@ -13,11 +13,21 @@ namespace Vericairn.Runtime.Service;
 
 internal sealed record ReleasePolicyAssessment(PolicyBasis Basis, PolicyEvaluation Evaluation, PolicyResponse View, IReadOnlyList<FindingDto> Objections)
 {
-    internal bool HasSameInputsAndFindings(ReleasePolicyAssessment other)
+    internal bool HasSameInputsAndFindings(ReleasePolicyAssessment other, IReadOnlyList<RecordEnvelope>? ownRevisions = null)
     {
         // Reuse the full basis digest contract at one instant for comparison only. Retained evidence
         // keeps its actual timestamp and digest; neither evaluation is rerun at an earlier time.
-        var comparable = new PolicyBasis(other.Basis.Model, Basis.AsOf, other.Basis.Origin,
+        EstateModel model = other.Basis.Model;
+        if (ownRevisions is { Count: > 0 })
+        {
+            // Excluding a retry's new record also excludes its own link from the canceled intent.
+            // Match both ends: another successor of that intent, or any other revision, still counts.
+            var successors = model.SupersededBy.Where(pair => !ownRevisions.Any(revision =>
+                revision.Type == "operation" && revision.Supersedes == pair.Key && revision.Id == pair.Value))
+                .ToImmutableDictionary(StringComparer.Ordinal);
+            model = new EstateModel(model.Root, model.Records, model.ById, successors, model.Findings) { Manifest = model.Manifest };
+        }
+        var comparable = new PolicyBasis(model, Basis.AsOf, other.Basis.Origin,
             other.Basis.Repositories, other.Basis.Objects, other.Basis.Implementations, other.Basis.Submission, other.Basis.Complete);
         return Basis.Digest == comparable.Digest && AdmissionState(Evaluation).Canonical() == AdmissionState(other.Evaluation).Canonical();
     }

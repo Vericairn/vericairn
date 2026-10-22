@@ -26,6 +26,167 @@ public sealed class ReleasePolicyGateTests
     [InlineData(1, 0)]
     [InlineData(0, 1)]
     [InlineData(1, 1)]
+    public void ARetryKeepsTheSameOperationHistoryAsTimePasses(int preparationSeconds, int dispatchSeconds)
+    {
+        using var f = new Fixture();
+        f.Duty();
+        RecordEnvelope canceled = f.CanceledIntent();
+        int originalCount = f.Api.Session.Load().OfType("operation").Count();
+        string preparedAt = RecordParser.FormatTimestamp(f.Clock.Now);
+        f.Api.ReleaseBoundary = stage => f.Clock.Now = f.Clock.Now.AddSeconds(stage == "prepared" ? preparationSeconds : dispatchSeconds);
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope intent = Assert.Single(model.Current("operation"));
+            Assert.Equal("uncertain", EstateModel.BodyString(intent, "status"));
+            Assert.Equal(canceled.Id, intent.Supersedes);
+            Assert.Equal(originalCount + 1, model.OfType("operation").Count());
+            Assert.Single(intent.Body.GetProperty("evidence").EnumerateArray(), item => item.TryGetProperty("hash", out _));
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request with { Reconciliation = "The previous intent had no effect." });
+
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Provider.Calls);
+        ReleaseBasisEvidence retained = f.Api.ReleaseBasis(Assert.Single(response.BasisEvidence!))!.Evidence;
+        Assert.Equal(preparedAt, retained.Basis.AsOf);
+        Assert.Equal(RecordParser.FormatTimestamp(f.Clock.Now), response.Policies!.Basis.AsOf);
+        Assert.Equal(retained.Basis.RecordDigest, response.Policies.Basis.RecordDigest);
+        Assert.Contains(retained.Records, record => record.GetProperty("id").GetString() == canceled.Id);
+        Assert.Empty(retained.ExcludedOperationRevisions);
+        Assert.Equal(originalCount + 2, f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal("dispatched", EstateModel.BodyString(Assert.Single(f.Api.Session.Load().Current("operation")), "status"));
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData("record", "prepared")]
+    [InlineData("record", "before-dispatch")]
+    [InlineData("source", "prepared")]
+    [InlineData("source", "before-dispatch")]
+    [InlineData("verdict", "prepared")]
+    [InlineData("verdict", "before-dispatch")]
+    [InlineData("finding", "prepared")]
+    [InlineData("finding", "before-dispatch")]
+    public void UnrelatedChangesDuringARetryAreRetainedBeforeAnyProviderCall(string change, string boundary)
+    {
+        using var f = new Fixture();
+        f.Duty(level: "warn", graceDays: change == "finding" ? 1 : 0);
+        RecordEnvelope canceled = f.CanceledIntent();
+        f.Records.Estate.WriteFile("docs/evidence.md", "Original source.\n");
+        int originalCount = f.Api.Session.Load().OfType("operation").Count();
+        RecordEnvelope? changedRecord = null;
+        f.Api.ReleaseBoundary = stage =>
+        {
+            if (stage != boundary) return;
+            Assert.Equal(0, f.Provider.Calls);
+            if (change == "record")
+            {
+                JsonObject revised = PolicyFixture.Body(f.Records.Decision);
+                revised["summary"] = "An unrelated revision during a retry.";
+                changedRecord = f.Records.Add("decision", revised, supersedes: f.Records.Decision.Id);
+            }
+            else if (change == "source") f.Records.Estate.WriteFile("docs/evidence.md", "Changed source.\n");
+            else f.Clock.Now = f.Due;
+        };
+        f.Provider.OnDispatch = () =>
+        {
+            Assert.Equal(0, f.Provider.Calls);
+            EstateModel model = f.Api.Session.Load();
+            RecordEnvelope current = Assert.Single(model.Current("operation"));
+            Assert.Equal(originalCount + (boundary == "before-dispatch" ? 2 : 1), model.OfType("operation").Count());
+            Assert.Equal("uncertain", EstateModel.BodyString(current, "status"));
+            ReleaseBasisEvidence[] retained = current.Body.GetProperty("evidence").EnumerateArray()
+                .Where(item => item.TryGetProperty("hash", out _))
+                .Select(item => f.Api.ReleaseBasis(item.GetProperty("hash").GetString()!)!.Evidence).ToArray();
+            Assert.Equal(2, retained.Length);
+            ReleaseBasisEvidence first = retained[0], fresh = retained[1];
+            Assert.NotEqual(first.Basis.Digest, fresh.Basis.Digest);
+            Assert.All(retained, basis => Assert.Contains(basis.Records, record => record.GetProperty("id").GetString() == canceled.Id));
+            if (boundary == "before-dispatch")
+            {
+                RecordEnvelope intent = model.ById[current.Supersedes!];
+                Assert.Equal(canceled.Id, intent.Supersedes);
+                PolicyRecordReference excluded = Assert.Single(fresh.ExcludedOperationRevisions);
+                Assert.Equal(intent.Id, excluded.Id);
+                Assert.Equal(intent.ComputedHash, excluded.Hash);
+                Assert.DoesNotContain(fresh.Records, record => record.GetProperty("id").GetString() == intent.Id);
+            }
+            else Assert.Empty(fresh.ExcludedOperationRevisions);
+            if (change == "record")
+            {
+                Assert.NotEqual(first.Basis.RecordDigest, fresh.Basis.RecordDigest);
+                Assert.DoesNotContain(first.Records, record => record.GetProperty("id").GetString() == changedRecord!.Id);
+                Assert.Contains(fresh.Records, record => record.GetProperty("id").GetString() == changedRecord!.Id);
+            }
+            else
+            {
+                Assert.Equal(first.Basis.RecordDigest, fresh.Basis.RecordDigest);
+                if (change == "source")
+                {
+                    Assert.Equal("Original source.\n", SourceText(first));
+                    Assert.Equal("Changed source.\n", SourceText(fresh));
+                }
+                else
+                {
+                    Assert.Equal("scheduled", Assert.Single(first.Policies.Findings).Disposition);
+                    PolicyFindingDto updated = Assert.Single(fresh.Policies.Findings, finding => finding.Duty!.DueAt == RecordParser.FormatTimestamp(f.Due));
+                    Assert.Equal(change == "verdict" ? "unmet" : "satisfied", updated.Verdict);
+                    Assert.Equal(change == "verdict" ? "none" : "due-within-grace", updated.Disposition);
+                    Assert.False(updated.ReleaseHold);
+                }
+            }
+        };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request with { Reconciliation = "The previous intent had no effect." });
+
+        Assert.True(response.Ok, response.Message);
+        Assert.Equal(1, f.Provider.Calls);
+        Assert.Equal(2, response.BasisEvidence!.Count);
+        Assert.Equal(originalCount + (boundary == "before-dispatch" ? 3 : 2), f.Api.Session.Load().OfType("operation").Count());
+        Assert.Equal(0, f.Api.Validate().Errors);
+
+        static string SourceText(ReleaseBasisEvidence basis) => System.Text.Encoding.UTF8.GetString(
+            Assert.Single(basis.Repositories.SelectMany(repository => repository.Files), file => file.Path == "docs/evidence.md").Bytes.ToArray());
+    }
+
+    [Theory]
+    [InlineData("prepared")]
+    [InlineData("before-dispatch")]
+    public void ADeadlineCrossedDuringARetryStillPreventsDispatch(string boundary)
+    {
+        using var f = new Fixture();
+        f.Duty();
+        RecordEnvelope canceled = f.CanceledIntent();
+        f.Api.ReleaseBoundary = stage => { if (stage == boundary) f.Clock.Now = f.Due; };
+
+        ReleaseResponse response = f.Api.ReleaseSubmit(f.Request with { Reconciliation = "The previous intent had no effect." });
+
+        Assert.False(response.Ok);
+        Assert.Equal(0, f.Provider.Calls);
+        Assert.Contains(response.Policies!.Findings, finding => finding.ReleaseHold && finding.Verdict == "unmet");
+        EstateModel model = f.Api.Session.Load();
+        RecordEnvelope current = Assert.Single(model.Current("operation"));
+        Assert.Equal("canceled", EstateModel.BodyString(current, "status"));
+        Assert.Equal(boundary == "before-dispatch" ? 4 : 2, model.OfType("operation").Count());
+        if (boundary == "before-dispatch")
+        {
+            Assert.Equal("canceled", response.Status);
+            Assert.Equal(2, response.BasisEvidence!.Count);
+            ReleaseBasisEvidence fresh = f.Api.ReleaseBasis(response.BasisEvidence[1])!.Evidence;
+            Assert.Equal(current.Supersedes, Assert.Single(fresh.ExcludedOperationRevisions).Id);
+            Assert.Contains(fresh.Records, record => record.GetProperty("id").GetString() == canceled.Id);
+        }
+        else Assert.Equal(canceled.Id, current.Id);
+        Assert.Equal(0, f.Api.Validate().Errors);
+    }
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 0)]
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
     public void ElapsedTimeAloneKeepsTheSameOperationHistory(int preparationSeconds, int dispatchSeconds)
     {
         using var f = new Fixture();
@@ -756,6 +917,17 @@ public sealed class ReleasePolicyGateTests
             policy["rules"]![0]!["parameters"]!["schedule"]!["firstDueAt"] = RecordParser.FormatTimestamp(Due);
             policy["rules"]![0]!["parameters"]!["graceDays"] = graceDays;
             return Records.Policy(policy);
+        }
+
+        internal RecordEnvelope CanceledIntent()
+        {
+            JsonObject intent = ReleaseFlow.IntentBody(Provider.Provider, "Example/widget",
+                new Dictionary<string, string> { ["repository"] = "Example/widget" }, "1.0.0", Product.Id);
+            RecordEnvelope original = Records.Add("operation", intent, subject: Product.Reference);
+            RecordEnvelope canceled = Records.Add("operation", ReleaseFlow.Canceled(original.Body, "No provider was called."),
+                subject: Product.Reference, supersedes: original.Id);
+            Records.AssertValid();
+            return canceled;
         }
 
         internal RecordEnvelope Staleness(string level)
