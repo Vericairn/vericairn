@@ -42,6 +42,30 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## Work-order creation (0.8.3 development)
+
+`POST /v1/work/new` takes `WorkNewRequest`, the API counterpart of `vericairn work new`:
+
+```json
+{"by":"<principal id>","key":"W-1","title":"Build the widget","intent":"Make a useful widget.","scope":["widget sources","widget tests"],"exitQuestion":"Does it work?","deliverables":["widget.txt"],"kind":"ordinary","after":[],"inputs":[]}
+```
+
+`kind` defaults to `ordinary`; `milestone` is the other valid value. `after` is an optional
+list of work-order record ids, available from record format 2, and `inputs` is a list of
+`type:id` strings, empty when omitted. `scope` and `deliverables` retain their item order.
+The runtime converts these fields into a work-order body and calls the same writer as
+`POST /v1/records`. It uses the same validation, refusal messages and author signing.
+Missing required fields reach that validator; invalid fields are not silently repaired.
+
+Success returns HTTP 200 with `WriteOutcome.Written` containing `path`, `id` and `hash`.
+A validation refusal returns HTTP 422 with the existing problem and findings, and stores
+no record. Device-authenticated requests must name their own principal in `by`.
+
+The SDK exposes `WorkNew(request)` and `WorkNewAsync(request, cancellationToken)`;
+`CancellationBoundApi` exposes both. [API compatibility for 0.8.3](api-compatibility-0.8.3.md)
+lists the added interface members. This operation is a development addition and is not
+in published 0.8.2.
+
 ## Checked repository changes (0.8.0)
 
 | Route | Request | SDK method |

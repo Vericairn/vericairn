@@ -246,6 +246,12 @@ public sealed partial class CancellationBoundApi(IEstateApi inner, CancellationT
     public Task<ObserveResponse?> ObserveAsync(string workOrder, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.ObserveAsync(workOrder, cancellationToken: token), cancellationToken);
 
     /// <inheritdoc />
+    public WriteOutcome WorkNew(WorkNewRequest request) => inner.WorkNewAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
+
+    /// <inheritdoc />
+    public Task<WriteOutcome> WorkNewAsync(WorkNewRequest request, CancellationToken cancellationToken = default) => ForwardAsync(token => inner.WorkNewAsync(request, cancellationToken: token), cancellationToken);
+
+    /// <inheritdoc />
     public WriteOutcome Assign(AssignRequest request) => inner.AssignAsync(request, cancellationToken: cancellationToken).GetAwaiter().GetResult();
 
     /// <inheritdoc />
