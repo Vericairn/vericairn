@@ -607,7 +607,7 @@ public sealed partial class VericairnClient
             throw UnreadableRefusal(response, exception);
         }
     }
-    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    /// <summary>Read retained release-admission evidence or its resolution problem; null means an unknown or unsupported hash. Grants no submission authority.</summary>
     public Task<ReleaseBasisResponse?> ReleaseBasisAsync(string hash, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ReleaseBasisResponse?>(nameof(ReleaseBasis), token => GetAsync<ReleaseBasisResponse>("/v1/release-bases/" + Uri.EscapeDataString(hash), allowNotFound: true, cancellationToken: token), false, OperationTimeout?.Invoke(nameof(ReleaseBasis)), cancellationToken);
 }

@@ -47,7 +47,9 @@ public sealed class DutyTransportCommandsTests
             Assert.Equal(policy.ComputedHash, api.Session.Load().ById[reviewed.Id].Body.GetProperty("read")[0].GetProperty("hash").GetString());
             Assert.True(Assert.Single(api.Policy("maintenance")!.Findings, f => f.Duty?.Occurrence.GetProperty("number").GetInt64() == 0).Duty!.Completed);
             CliHarness.Ok("release", "basis", "--help");
-            Assert.Equal(2, CliHarness.Run("--estate", root, "release", "basis", "missing").Code);
+            CliHarness.Outcome missing = CliHarness.Run("--estate", root, "release", "basis", "missing");
+            Assert.Equal(2, missing.Code);
+            Assert.Contains("No supported retained release basis has this hash: missing.", missing.Err, StringComparison.Ordinal);
         }
         finally { Directory.Delete(scratch, true); }
     }

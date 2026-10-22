@@ -19,13 +19,19 @@ internal sealed class ReleaseBasisCommand : Command
     private static int Execute(CommandContext context, string root, string hash, bool json) => context.WithApi(root, api =>
     {
         ReleaseBasisResponse? retained = api.ReleaseBasis(hash);
-        if (retained is null) return context.Fail("No supported retained release basis has this hash.");
+        if (retained is null) return context.Fail($"No supported retained release basis has this hash: {hash}.");
         if (json) context.Output.WriteLine(JsonSerializer.Serialize(retained, ProtocolJson.Options));
-        else
+        if (retained.Evidence is not { } evidence)
+        {
+            Problem problem = retained.Problem ?? new("release-basis-unavailable", $"Retained release basis {hash} cannot resolve.", []);
+            foreach (FindingDto finding in problem.Findings) context.Error.WriteLine($"{finding.Code} {finding.Location}: {finding.Message}");
+            return context.Fail(problem.Message);
+        }
+        if (!json)
         {
             context.Output.WriteLine("Retained release evidence " + retained.Hash);
-            context.Output.Write(PolicyPresentation.Render(retained.Evidence.Policies));
-            foreach (string comparison in retained.Evidence.Documents) context.Output.WriteLine("  " + comparison);
+            context.Output.Write(PolicyPresentation.Render(evidence.Policies));
+            foreach (string comparison in evidence.Documents) context.Output.WriteLine("  " + comparison);
         }
         return CommandContext.Clean;
     });

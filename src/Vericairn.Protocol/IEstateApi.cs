@@ -312,6 +312,6 @@ public partial interface IEstateApi
 
     /// <summary>Verify every object.</summary>
     FindingsResponse ObjectsVerify();
-    /// <summary>Read retained release-admission evidence without creating a record or authorizing a later submission.</summary>
+    /// <summary>Read retained release-admission evidence, or its resolution problem. Null means an unknown or unsupported hash. Creates no record and grants no submission authority.</summary>
     ReleaseBasisResponse? ReleaseBasis(string hash);
 }
