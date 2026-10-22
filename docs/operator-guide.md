@@ -281,6 +281,70 @@ against the repository's full-SHA allow-list. The NuGet pull-request job builds 
 symbols with the publication verifier, without a login, token permission or upload. This does not verify
 the organization's live Actions settings or bind the published draft to estate acceptance.
 
+### Withdrawal and moving planned work (0.8.3 additions)
+
+Withdraw a candidate at the exact revision you inspected:
+
+```sh
+vericairn release withdraw <candidate-id> --expected <candidate-hash> --provider <draft-provider> --reason "Replace this candidate." --by <principal-id>
+```
+
+This validates and records two signed records together: a release revision with
+`status: withdrawn`, retaining its artifacts and other evidence, and an operation
+with action `delete-release-draft` and status `not-started`. The reason and original
+candidate hash accompany both. The provider is explicit; `--setting name=value`
+records any additional settings it needs. The candidate's repository, product and
+version are retained. No provider call or deletion occurs. An obsolete hash or
+invalid record writes neither record; a storage interruption reports the receipts
+already stored and leaves a batch journal to reconcile before retrying.
+
+The operator deletes the draft at that destination. Under the returned deletion
+intent, record the actual dispatch as a superseding `operation` with the same
+subject, provider, action, identity, target and evidence, changing `status` to
+`dispatched` and adding the actual UTC `dispatchedAt`. Use `records new operation`
+with `--supersedes <intent-id> --expected <intent-hash> --subject
+release:<withdrawn-id>:<withdrawn-hash> --by <principal-id> --body dispatch.json`.
+An uncertain deletion is recorded as `uncertain` under the same identity. Then:
+
+```sh
+vericairn release observe --version <version> --withdrawal <intent-id> --by <principal-id>
+```
+
+Observation uses only that intent's provider and destination. A draft still present
+stays pending; provider failures settle nothing. Observed absence records
+`observed-success`. Ordinary release observation keeps a withdrawn candidate
+withdrawn even if a publication later appears at the provider.
+
+To move a release plan, inspect the current carrier and all its planned work orders
+with `status --json`, `work observe <key> --json` and `records show <id>`. Prepare a JSON object
+whose keys are the **current revision ids** of every planned member and whose values
+are their hashes. A member is planned when it has no work status or its latest
+status is `planned`, and it has no effective acceptance. Include every such member
+whose typed release placement names this carrier's original identity. For example,
+`planned-work.json` has the form `{ "<work-revision-id>": "<work-hash>" }`; use `{}`
+only when there are no planned members. Move them to an existing carrier:
+
+```sh
+vericairn work move-plan <source-carrier> --expected <source-hash> --expected-work planned-work.json --to <destination-carrier> --expected-target <destination-hash> --by <principal-id>
+```
+
+Or change the source carrier's version and its planned members together:
+
+```sh
+vericairn work move-plan <source-carrier> --expected <source-hash> --expected-work planned-work.json --version <new-version> --by <principal-id>
+```
+
+The runtime compares complete membership and every supplied hash before preparing
+successors. The prepared set is an optimistic snapshot: reread and prepare it again
+after a conflict. A member moved, revised, accepted or started since preparation, an added
+member, or either changed carrier causes a conflict and writes nothing. Every
+placement passes the same signing, record and policy checks as `work place` and
+generic work-order authoring. A retired destination or a published or withdrawn
+target version refuses the complete move. Other work statuses retain their
+placements. The version form also revises the source's typed `releasePlan`; the
+carrier form keeps both carrier definitions. Results include every stored revision
+and any refusal findings. Reconcile an interrupted storage batch before retrying.
+
 ## 9. Upgrading an estate
 
 ```sh

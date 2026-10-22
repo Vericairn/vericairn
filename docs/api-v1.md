@@ -42,6 +42,26 @@ it once (`EstateService`); the daemon (`Vericairn.Daemon`) serves that implement
 otherwise. Authority is evaluated behind the API, never in front of it: a client presents and requests,
 the runtime decides, and every response is what the runtime observed.
 
+## Release planning (0.8.3 additions)
+
+| POST route | Request | Response |
+| --- | --- | --- |
+| `/v1/releases/withdraw` | `ReleaseWithdrawRequest`: release, by, expected, provider, reason, optional settings | `ReleaseResponse` |
+| `/v1/work/{key}/move-plan` | `WorkMovePlanRequest`: by, expected, expectedWork, either to with expectedTarget or version | `WorkMovePlanResponse` |
+
+Withdrawal records the candidate's withdrawn revision and its draft-deletion intent
+without calling the provider. `expectedWork` maps the exact current revision id of
+every planned member to its hash. The server compares complete membership and all
+hashes, then validates the full batch before any write. Both routes return HTTP 200
+with their typed result, including `problem` and its record-validation findings on a
+refusal. Conflict and validation refusal carry no stored receipts. A storage
+interruption can carry partial receipts and requires batch recovery before retrying.
+
+`ReleaseObserveRequest.Withdrawal` optionally selects a deletion intent by id on the
+existing `/v1/releases/observe` route. The operator must first record dispatch or
+uncertainty under that original intent. Observation uses its retained provider and
+destination; only observed absence settles it. The record format is unchanged.
+
 ## Checked repository changes (0.8.0)
 
 | Route | Request | SDK method |
