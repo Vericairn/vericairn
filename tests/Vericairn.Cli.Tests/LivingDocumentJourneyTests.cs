@@ -16,8 +16,58 @@ namespace Vericairn.Cli.Tests;
 public class LivingDocumentJourneyTests
 {
     private const string Commit = "0123456789abcdef0123456789abcdef01234567";
-    private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"];
+    private static readonly string[] GitIdentity = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false"];
     private const string Product = """{"name":"Widget","slug":"widget","summary":"A widget.","editions":[{"name":"Community","slug":"community","summary":"Free."}],"surfaces":[{"name":"CLI","slug":"cli","summary":"Command line."}]}""";
+
+    [Fact]
+    public void OwnTextChangesAreDueEverywhereWithOnlyReleaseAndDecisionTriggers()
+    {
+        string root = CliHarness.TempDirectory("living-own-text");
+        string scratch = CliHarness.TempDirectory("living-own-text-scratch");
+        IReleaseProvider? previous = Commands.ReleaseProvider;
+        var provider = new FakeReleaseProvider();
+        Commands.ReleaseProvider = provider;
+        try
+        {
+            string op = CliHarness.Ok("--estate", root, "--json", "estate", "init", "--name", "Example", "--slug", "example", "--purpose", "Living documents.", "--operator-name", "Operator", "--organization", "Example", "--commit", Commit).Json.GetProperty("operator").GetString()!;
+            string product = CliHarness.Ok("--estate", root, "--json", "records", "new", "product", "--by", op, "--body", CliHarness.WriteJson(scratch, "product.json", Product)).Id;
+            string guide = Path.Combine(root, "docs", "guide.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(guide)!);
+            File.WriteAllText(guide, "# Guide\n");
+            CliHarness.Ok("--estate", root, "docs", "declare", "--by", op, "--body", CliHarness.WriteJson(scratch, "declaration.json", $$"""{"path":"docs/guide.md","title":"Guide","kind":"authored","source":"estate-file","triggers":[{"on":"release","level":"refuse","product":"{{product}}"},{"on":"decision","level":"warn"}],"summary":"Describes the widget."}"""));
+            CliHarness.Ok("--estate", root, "docs", "review", "docs/guide.md", "--by", op, "--outcome", "current", "--summary", "Read the guide.");
+            Assert.Contains("docs/guide.md  current", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+
+            File.AppendAllText(guide, "A new claim.\n");
+            string due = CliHarness.Ok("--estate", root, "docs", "living").Out;
+            Assert.Contains("docs/guide.md  due at refuse", due, StringComparison.Ordinal);
+            JsonElement document = Assert.Single(CliHarness.Ok("--estate", root, "--json", "docs", "living").Json.EnumerateArray());
+            JsonElement reason = Assert.Single(document.GetProperty("reasons").EnumerateArray());
+            Assert.Equal("covers", reason.GetProperty("on").GetString());
+            string summary = reason.GetProperty("summary").GetString()!;
+            Assert.Contains("docs/guide.md changed after its review", summary, StringComparison.Ordinal);
+            Assert.Contains(summary, due, StringComparison.Ordinal);
+            Assert.Contains(summary, CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+            Assert.Contains(summary, CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
+            Assert.Contains(summary, CliHarness.Ok("--estate", root, "estate", "check").Out, StringComparison.Ordinal);
+            CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", op);
+            Assert.Equal(2, held.Code);
+            Assert.Contains(summary, held.Json.GetProperty("message").GetString(), StringComparison.Ordinal);
+            Assert.Empty(provider.Dispatches);
+
+            CliHarness.Ok("--estate", root, "docs", "review", "docs/guide.md", "--by", op, "--outcome", "current", "--summary", "The new claim holds.");
+            Assert.Contains("docs/guide.md  current", CliHarness.Ok("--estate", root, "docs", "living").Out, StringComparison.Ordinal);
+            Assert.Contains("Living documents: 0 due of 1 declared", CliHarness.Ok("--estate", root, "status").Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("document.due", CliHarness.Ok("--estate", root, "progress").Out, StringComparison.Ordinal);
+            Assert.DoesNotContain("document.due", CliHarness.Ok("--estate", root, "estate", "check").Out, StringComparison.Ordinal);
+            Assert.Equal("dispatched", ReleaseJourney.Ok(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.2.0", "--repository", "Example/widget", "--by", op).Json.GetProperty("status").GetString());
+        }
+        finally
+        {
+            Commands.ReleaseProvider = previous;
+            CliHarness.Delete(root, scratch);
+        }
+    }
 
     [Fact]
     public void ADocumentDueAtRefuseHoldsTheNextReleaseUntilItIsReviewed()
@@ -232,6 +282,9 @@ public class LivingDocumentJourneyTests
             Git(repo, "commit", "-q", "-am", "Edit the README");
             string third = GitOutput(repo, "rev-parse", "HEAD");
             provider.HeadSha = third;
+            string living = CliHarness.Ok("--estate", root, "docs", "living").Out;
+            Assert.Contains("README.md  due at refuse", living, StringComparison.Ordinal);
+            Assert.Contains($"README.md changed after its review at {second[..12]}: at {third[..12]}", living, StringComparison.Ordinal);
             CliHarness.Outcome held = ReleaseJourney.Run(provider.HeadSha, "--estate", root, "--json", "release", "submit", "--provider", "github-releases", "--product", product, "--version", "0.3.0", "--repository", "Example/widget", "--by", builder);
             Assert.Equal(2, held.Code);
             Assert.Contains($"README.md changed after its review at {second[..12]}: at {third[..12]}", held.Out + held.Err, StringComparison.Ordinal);
