@@ -116,7 +116,7 @@ public sealed partial class VericairnClient
 
     /// <summary>The cancellable Health operation, with a deadline covering the complete response.</summary>
     public Task<HealthResponse> HealthAsync(CancellationToken cancellationToken = default) =>
-        RunOperationAsync<HealthResponse>(nameof(Health), async token => (await GetAsync<HealthResponse>("/v1/health", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Health)), cancellationToken);
+        RunOperationAsync<HealthResponse>(nameof(Health), async token => ObserveHealth(await GetAsync<HealthResponse>("/v1/health", cancellationToken: token).ConfigureAwait(false))!, false, OperationTimeout?.Invoke(nameof(Health)), cancellationToken);
 
     /// <summary>The cancellable Communication operation, with a deadline covering the complete response.</summary>
     public Task<CommunicationProfile> CommunicationAsync(string? recipient = null, string? assignment = null, CommunicationValues? view = null, CancellationToken cancellationToken = default) =>
@@ -128,7 +128,7 @@ public sealed partial class VericairnClient
             }
             catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: "This runtime does not support communication settings.");
+                return new CommunicationProfile(recipient, assignment, new Dictionary<string, CommunicationValue>(), [], [], Unavailable: exception is ClientRefusedException ? exception.Message : "This runtime does not support communication settings.");
             }
         }, false, OperationTimeout?.Invoke(nameof(Communication)), cancellationToken);
 
@@ -225,6 +225,10 @@ public sealed partial class VericairnClient
     /// <summary>The cancellable Observe operation, with a deadline covering the complete response.</summary>
     public Task<ObserveResponse?> ObserveAsync(string workOrder, CancellationToken cancellationToken = default) =>
         RunOperationAsync<ObserveResponse?>(nameof(Observe), async token => (await GetAsync<ObserveResponse>("/v1/work/" + Uri.EscapeDataString(workOrder), allowNotFound: true, cancellationToken: token).ConfigureAwait(false)), false, OperationTimeout?.Invoke(nameof(Observe)), cancellationToken);
+
+    /// <summary>The cancellable WorkNew operation, with a deadline covering the complete response.</summary>
+    public Task<WriteOutcome> WorkNewAsync(WorkNewRequest request, CancellationToken cancellationToken = default) =>
+        RunOperationAsync<WriteOutcome>(nameof(WorkNew), async token => (await PostAsync<WorkNewRequest, WriteOutcome>("/v1/work/new", request, cancellationToken: token).ConfigureAwait(false))!, true, OperationTimeout?.Invoke(nameof(WorkNew)), cancellationToken);
 
     /// <summary>The cancellable Assign operation, with a deadline covering the complete response.</summary>
     public Task<WriteOutcome> AssignAsync(AssignRequest request, CancellationToken cancellationToken = default) =>
@@ -434,6 +438,7 @@ public sealed partial class VericairnClient
             using var content = new ByteArrayContent(bytes);
             content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
             using HttpResponseMessage response = await asyncHttp.PostAsync(new Uri("/v1/objects", UriKind.Relative), content, token).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound) throw await MissingOperationAsync(response, token).ConfigureAwait(false);
             if (response.StatusCode >= HttpStatusCode.InternalServerError) await EnsureSuccessAsync(response, token).ConfigureAwait(false);
             return response.IsSuccessStatusCode
                 ? (await response.Content.ReadFromJsonAsync<ObjectStored>(ProtocolJson.Options, token).ConfigureAwait(false), null)
@@ -444,8 +449,13 @@ public sealed partial class VericairnClient
     public Task<byte[]?> ObjectGetAsync(string hash, CancellationToken cancellationToken = default) =>
         RunOperationAsync<byte[]?>(nameof(ObjectGet), async token =>
         {
-            using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri("/v1/objects/" + Uri.EscapeDataString(hash), UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
-            if (response.StatusCode == HttpStatusCode.NotFound) return null;
+            string path = "/v1/objects/" + Uri.EscapeDataString(hash);
+            using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri(path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                await CheckLookupRouteAsync(path, response, token).ConfigureAwait(false);
+                return null;
+            }
             await EnsureSuccessAsync(response, token).ConfigureAwait(false);
             return await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
         }, false, OperationTimeout?.Invoke(nameof(ObjectGet)), cancellationToken);
@@ -494,6 +504,7 @@ public sealed partial class VericairnClient
         using HttpResponseMessage response = await asyncHttp.GetAsync(new Uri(path, UriKind.Relative), HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         if (allowNotFound && response.StatusCode == HttpStatusCode.NotFound)
         {
+            await CheckLookupRouteAsync(path, response, cancellationToken).ConfigureAwait(false);
             return null;
         }
 
@@ -528,6 +539,7 @@ public sealed partial class VericairnClient
         }
         catch (Exception exception) when (IsRejection(response) && exception is (IOException or JsonException or OperationCanceledException))
         {
+            if (response.StatusCode == HttpStatusCode.NotFound) throw await MissingOperationAsync(response, cancellationToken).ConfigureAwait(false);
             throw UnreadableRefusal(response, exception);
         }
     }
@@ -551,9 +563,10 @@ public sealed partial class VericairnClient
         return (null, null);
     }
 
-    private static async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    private async Task EnsureSuccessAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode) return;
+        if (response.StatusCode == HttpStatusCode.NotFound) throw await MissingOperationAsync(response, cancellationToken).ConfigureAwait(false);
         // A server error alone says nothing about an effect, but an explicit refusal does. Preserve that answer
         // even when (for example) the runtime uses 503 because it cannot safely keep the write's device ledger.
         try

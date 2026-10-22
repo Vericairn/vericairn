@@ -57,6 +57,7 @@ public static class OpenApiDocument
         ("GET", "/v1/decisions/{id}"),
         ("GET", "/v1/work/{key}/brief"),
         ("GET", "/v1/work/{key}"),
+        ("POST", "/v1/work/new"),
         ("POST", "/v1/work/assign"),
         ("POST", "/v1/work/attempt"),
         ("POST", "/v1/work/progress"),
@@ -444,6 +445,15 @@ public static class OpenApiDocument
         operatorRecordRequest["required"] = new JsonArray("type", "by", "body");
         operatorRecordRequest["properties"]!["waitSeconds"] = new JsonObject { ["type"] = "integer", ["minimum"] = 0, ["maximum"] = 240, ["default"] = 120 };
 
+        JsonObject workNewRequest = Object(("by", "string"), ("key", "string"), ("title", "string"), ("intent", "string"),
+            ("scope", "array"), ("exitQuestion", "string"), ("deliverables", "array"), ("kind", "string"), ("after", "array"), ("inputs", "array"));
+        workNewRequest["required"] = new JsonArray("by", "key", "title", "intent", "scope", "exitQuestion", "deliverables");
+        workNewRequest["properties"]!["kind"]!["default"] = "ordinary";
+        foreach (string field in new[] { "scope", "deliverables", "after", "inputs" })
+            workNewRequest["properties"]![field]!["items"] = new JsonObject { ["type"] = "string" };
+        workNewRequest["properties"]!["inputs"]!["description"] = "Input references as type:id; omitted means an empty list.";
+        workNewRequest["properties"]!["after"]!["description"] = "Work-order record ids this work starts after; omitted means no dependencies.";
+
         return new JsonObject
         {
             ["CompanionRequest"] = Object(("generator", "string"), ("selection", "string"), ("revision", "string"), ("snapshot", "string"), ("page", "integer"), ("field", "string"), ("index", "string"), ("audience", "string"), ("contract", "integer"), ("declaration", "string"), ("commit", "string")),
@@ -463,6 +473,7 @@ public static class OpenApiDocument
             ["EstateObserveRequest"] = Object(("by", "string")),
             ["HandoffPackage"] = Object(("hash", "string"), ("bytes", "integer"), ("payload", "object")),
             ["NewRecordRequest"] = Object(("type", "string"), ("by", "string"), ("body", "object"), ("subject", "string"), ("supersedes", "string"), ("at", "string"), ("id", "string"), ("expected", "string")),
+            ["WorkNewRequest"] = workNewRequest,
             ["AssignRequest"] = Object(("workOrder", "string"), ("contributor", "string"), ("by", "string"), ("brief", "object"), ("note", "string")),
             ["AttemptRequest"] = Object(("assignment", "string"), ("by", "string"), ("workspace", "string"), ("note", "string"), ("at", "string")),
             ["WorkProgressRequest"] = Object(("attempt", "string"), ("by", "string"), ("phase", "string"), ("note", "string"), ("completed", "boolean")),
@@ -562,6 +573,7 @@ public static class OpenApiDocument
         "/v1/status/observations" => "EstateObserveRequest",
         "/v1/resume" => "HandoffPackage",
         "/v1/records" => "NewRecordRequest",
+        "/v1/work/new" => "WorkNewRequest",
         "/v1/work/assign" => "AssignRequest",
         "/v1/work/attempt" => "AttemptRequest",
         "/v1/work/progress" => "WorkProgressRequest",
@@ -655,6 +667,7 @@ public static class OpenApiDocument
         ("GET", "/v1/decisions/{id}") => "One decision by the id of any of its revisions.",
         ("GET", "/v1/work/{key}/brief") => "The brief of a work order: everything a contributor needs, from the records alone.",
         ("GET", "/v1/work/{key}") => "What an observer sees of a work order.",
+        ("POST", "/v1/work/new") => "Create a work order from fields, with the same validation, refusals and author signing as POST /v1/records for work-order.",
         ("POST", "/v1/work/assign") => "Delegate a work order to a contributor under a brief.",
         ("POST", "/v1/work/attempt") => "Record the start of an attempt.",
         ("POST", "/v1/work/progress") => "Publish the contributor's latest progress claim on its own attempt. Active notes replace local state; a completed phase is recorded once, and an identical completion retry returns its record. Claims never establish worker liveness, scope or acceptance.",

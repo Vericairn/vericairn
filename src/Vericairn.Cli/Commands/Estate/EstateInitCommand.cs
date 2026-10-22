@@ -8,6 +8,11 @@ namespace Vericairn.Cli;
 internal sealed class EstateInitCommand : Command
 {
     public EstateInitCommand(CommandContext context)
+        : this(context, CommandContext.VersionText())
+    {
+    }
+
+    internal EstateInitCommand(CommandContext context, string versionText)
         : base("init", "Create a new estate: operator principal, charter and manifest, validated together.")
     {
         var operations = new EstateOperations(context);
@@ -18,7 +23,7 @@ internal sealed class EstateInitCommand : Command
         var organizationOption = new Option<string>("--organization") { Description = "Organization display name.", Required = true };
         var githubOption = new Option<string?>("--github") { Description = "GitHub organization login, if any." };
         var repositoryOption = new Option<string>("--repository") { Description = "GitHub owner/name of the Vericairn source to pin.", DefaultValueFactory = _ => "Vericairn/vericairn" };
-        var commitOption = new Option<string>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits).", Required = true };
+        var commitOption = new Option<string?>("--commit") { Description = "Commit of the Vericairn source to pin (40 hex digits). Defaults to the running build's recorded commit; required when the build records none.", Arity = ArgumentArity.ExactlyOne };
         var profileOption = new Option<string>("--profile") { Description = "Storage profile: repository-synced (records as files in a git repository) or local-only (records in this machine's live store).", DefaultValueFactory = _ => "repository-synced" };
         Options.Add(profileOption);
         Options.Add(nameOption);
@@ -38,8 +43,16 @@ internal sealed class EstateInitCommand : Command
             parseResult.GetValue(organizationOption)!,
             parseResult.GetValue(githubOption),
             parseResult.GetValue(repositoryOption)!,
-            parseResult.GetValue(commitOption)!,
+            parseResult.GetValue(commitOption) ?? RecordedCommit(versionText),
             parseResult.GetValue(profileOption)!,
             parseResult.GetValue(context.JsonOption)));
+    }
+
+    private static string? RecordedCommit(string versionText)
+    {
+        int separator = versionText.IndexOf('+');
+        if (separator < 0) return null;
+        string commit = versionText[(separator + 1)..];
+        return commit.Length == 40 && commit.All(char.IsAsciiHexDigit) ? commit.ToLowerInvariant() : null;
     }
 }

@@ -15,8 +15,13 @@ namespace Vericairn.Cli;
 
 internal sealed class EstateOperations(CommandContext context)
 {
-    public int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string commit, string profile, bool json)
+    public int Init(string root, string name, string slug, string purpose, string operatorName, string organization, string? github, string repository, string? commit, string profile, bool json)
     {
+        if (commit is null)
+        {
+            return context.Fail("This build has no recorded 40-digit source commit. Pass --commit <40-hex-commit> to choose the Vericairn source to pin.");
+        }
+
         try
         {
             var initialization = new EstateInitialization(name, slug, purpose, operatorName, organization, github, repository, commit, Profile: profile);
