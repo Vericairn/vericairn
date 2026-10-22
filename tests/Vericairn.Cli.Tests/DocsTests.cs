@@ -195,6 +195,10 @@ public class DocsTests
                 Assert.Contains("GET " + route, manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.DoesNotContain("docs generate", commands);
             Assert.Contains("release providers", commands);
+            Assert.Contains("release withdraw", commands);
+            Assert.Contains("work move-plan", commands);
+            Assert.Contains("POST /v1/releases/withdraw", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
+            Assert.Contains("POST /v1/work/{key}/move-plan", manifest.RootElement.GetProperty("operations").EnumerateArray().Select(o => o.GetString()));
             Assert.Contains("records new", commands);
             Assert.Contains("estate upgrade", commands);
             Assert.Contains("updates configure", commands);
@@ -222,6 +226,10 @@ public class DocsTests
             string cli = System.Net.WebUtility.HtmlDecode(File.ReadAllText(Path.Combine(output, "cli-reference.md")));
             Assert.Contains("## `vericairn records`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn records new`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn release withdraw`", cli, StringComparison.Ordinal);
+            Assert.Contains("### `vericairn work move-plan`", cli, StringComparison.Ordinal);
+            Assert.Contains("`--expected-work <expected-work>`", cli, StringComparison.Ordinal);
+            Assert.Contains("`--withdrawal <withdrawal>`", cli, StringComparison.Ordinal);
             Assert.Contains("`--by <by>`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn operator list`", cli, StringComparison.Ordinal);
             Assert.Contains("### `vericairn updates configure`", cli, StringComparison.Ordinal);

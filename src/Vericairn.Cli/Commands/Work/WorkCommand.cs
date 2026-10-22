@@ -10,6 +10,7 @@ internal sealed class WorkCommand : Command
     public WorkCommand(CommandContext context)
         : base("work", "Briefs, assignments, attempts, results and amendments of work orders.")
     {
+        Subcommands.Add(new WorkMovePlanCommand(context));
         Subcommands.Add(new WorkPlaceCommand(context));
         Subcommands.Add(new WorkBriefCommand(context));
         Subcommands.Add(new WorkAssignCommand(context));

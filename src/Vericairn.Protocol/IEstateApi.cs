@@ -261,6 +261,12 @@ public partial interface IEstateApi
     /// <summary>Ask a run to stop, and report what was observed: requested, transmitted, acknowledged, escalated and contained, each only once observed.</summary>
     RunStopResponse RunStop(string run, RunStopRequest request);
 
+    /// <summary>Move the complete expected set of planned work, validating every revision before any is stored.</summary>
+    WorkMovePlanResponse WorkMovePlan(string key, WorkMovePlanRequest request) => new([], new("unsupported", "This API implementation does not support planned-work moves.", []));
+
+    /// <summary>Withdraw an exact candidate and record its draft-deletion intent without deleting it.</summary>
+    ReleaseResponse ReleaseWithdraw(ReleaseWithdrawRequest request) => new(request.Release, "not-started", "This API implementation does not support release withdrawal.", false, Problem: new("unsupported", "Release withdrawal is unavailable.", []));
+
     /// <summary>Submit a release as intent before effect: the operation record is written, then the workflow is dispatched; nothing is published.</summary>
     ReleaseResponse ReleaseSubmit(ReleaseSubmitRequest request);
 
