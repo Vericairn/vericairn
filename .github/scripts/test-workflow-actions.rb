@@ -36,6 +36,12 @@ Dir.mktmpdir('workflow-actions') do |directory|
     puts "PASS #{name}"
   end
   File.write(path, "jobs: {test: {uses: '#{pin}'}}")
+  ['other/action', 'actions-lookalike/checkout', 'NuGet/other', 'NuGet/login/other'].each do |action|
+    File.write(File.join(directory, 'actions.allow'), "#{pin}\n#{action}@#{'a' * 40}\n")
+    raise "Unpermitted owner passed: #{action}" if WorkflowActions.check(directory).empty?
+  end
+  File.write(File.join(directory, 'actions.allow'), "#{pin}\ngithub/codeql-action/init@#{'a' * 40}\nNuGet/login@#{'b' * 40}\n")
+  raise 'Permitted owners failed' unless WorkflowActions.check(directory).empty?
   File.write(File.join(directory, 'actions.allow'), "actions/checkout@v5\n")
   raise 'Unpinned allow-list entry passed' if WorkflowActions.check(directory).empty?
   File.delete(File.join(directory, 'actions.allow'))
