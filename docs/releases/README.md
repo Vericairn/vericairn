@@ -8,7 +8,12 @@ at 11:28:45 UTC with tag `v0.8.0` at `cd508425339415944411cf71cce9ad20f46ff41f`
 0.8.2's [Security section](0.8.2/release-notes.md#security) discloses the corrections from 0.8.0's
 security review. One known issue of 0.8.2: each platform's archive carries a separately compiled build of
 the same libraries, so a policy basis differs by platform
-([issue 184](https://github.com/Vericairn/vericairn/issues/184)); 0.8.3 fixes it. 0.7.2's [Security section](0.7.2/release-notes.md#security)
+([issue 184](https://github.com/Vericairn/vericairn/issues/184)). The fix for 0.8.3 (FIX-61) builds
+platform-independent libraries while retaining the applications' locked per-platform restores.
+The shared packaging job compares the embedded Vericairn library assemblies in all six platforms'
+CLI and Workbench distributables and fails on any difference, holding policy implementation identities
+equal across platforms. This changes no frozen set and does not establish 0.8.3 publication.
+0.7.2's [Security section](0.7.2/release-notes.md#security)
 discloses the export-restore integrity defect in releases 0.1.0 through 0.7.1 and its correction in 0.7.2.
 
 The [0.8.2 set](0.8.2/README.md) documents the current published release, published on October 22, 2026 at tag `v0.8.2`, commit `e000a12ea980a4ac0c7e7a127a714f6423e27d7f` (estate release record `01M5HNSF7RT7FZDBKM9RCY655V`). It carries the work of the withdrawn 0.8.1 candidate, after published 0.8.0, with

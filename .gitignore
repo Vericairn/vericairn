@@ -13,3 +13,6 @@ TestResults/
 *.user
 *.suo
 .DS_Store
+
+# Python byte caches, such as those the packaging checker's tests write under tools/, are never sources.
+__pycache__/

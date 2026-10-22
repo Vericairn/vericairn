@@ -23,9 +23,14 @@ Each platform's 0.8.2 archive carries a separately compiled build of the same li
 platform name is embedded in each assembly. Policy evaluation identifies its implementation by the compiled
 assembly's identity, so the same estate's policy basis digest, and the implementation digests it covers,
 differ by platform. Evaluation on one machine stays consistent; status and policy bases compared across
-platforms differ only in those digests. It is not a security problem. 0.8.3 builds the libraries the same
-way for every platform and checks it in the release's packaging path
-([issue 184](https://github.com/Vericairn/vericairn/issues/184)).
+platforms differ only in those digests. It is not a security problem. The fix for 0.8.3 (FIX-61) builds
+the libraries without platform-specific intermediate paths while keeping the applications' locked
+per-platform restores. The shared packaging job reads the Vericairn library assemblies embedded in
+all six platforms' CLI and Workbench bundles, including Workbench's copy of the CLI, and fails if
+their library sets or assembly bytes differ. Libraries shared by the two applications must also match.
+This holds the assembly names and module identities used by policy implementation digests equal
+across platforms ([issue 184](https://github.com/Vericairn/vericairn/issues/184)). The fix changes no
+policy digest formula or frozen release documentation; 0.8.2 remains the current published release.
 
 ## Machine-local worker configuration and qualification
 
