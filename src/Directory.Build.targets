@@ -1,0 +1,24 @@
+<Project>
+  <Import Project="../tools/BundledPacks.targets" Condition="'$(MSBuildProjectName)' == 'Vericairn.Cli' Or '$(MSBuildProjectName)' == 'Vericairn.Workbench'" />
+  <!-- Ordinary builds remain offline-capable. The package workflow supplies baselines fetched for this run. -->
+  <PropertyGroup Condition="'$(VericairnApiBaselineRoot)' != '' And '$(IsPackable)' == 'true' And '$(PackAsTool)' != 'true'">
+    <EnablePackageValidation>true</EnablePackageValidation>
+    <RunApiCompat>true</RunApiCompat>
+    <DisablePackageBaselineValidation>false</DisablePackageBaselineValidation>
+    <ApiCompatGenerateSuppressionFile>false</ApiCompatGenerateSuppressionFile>
+    <ApiCompatPermitUnnecessarySuppressions>false</ApiCompatPermitUnnecessarySuppressions>
+    <_VericairnApiBaseline>$(VericairnApiBaselineRoot)/$(PackageId).props</_VericairnApiBaseline>
+    <_VericairnApiExpected>$(MSBuildThisFileDirectory)../.github/api-compatibility/$(PackageId).xml</_VericairnApiExpected>
+  </PropertyGroup>
+  <Import Project="$(_VericairnApiBaseline)" Condition="'$(_VericairnApiBaseline)' != '' And Exists('$(_VericairnApiBaseline)')" />
+  <ItemGroup Condition="'$(_VericairnApiBaseline)' != ''">
+    <ApiCompatSuppressionFile Include="$(_VericairnApiExpected)" />
+  </ItemGroup>
+  <Target Name="RequirePublishedApiBaseline" BeforeTargets="RunPackageValidation" Condition="'$(_VericairnApiBaseline)' != ''">
+    <Error Condition="!Exists('$(_VericairnApiBaseline)') Or '$(PackageValidationBaselinePath)' == '' Or !Exists('$(PackageValidationBaselinePath)')"
+           Text="Every library requires its latest published API baseline before packaging." />
+    <Error Condition="!Exists('$(_VericairnApiExpected)')" Text="Every library requires a repository file of expected API changes." />
+    <!-- The SDK's incremental stamp does not include the baseline. Always check the baseline fetched for this run. -->
+    <Delete Files="$(_ApiCompatValidatePackageSemaphoreFile)" />
+  </Target>
+</Project>
