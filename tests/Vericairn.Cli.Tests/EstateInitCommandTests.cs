@@ -28,6 +28,40 @@ public sealed class EstateInitCommandTests
         finally { CliHarness.Delete(root); }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheEstatesGitCommitNeverSuppliesTheDefaultPin(bool recordedCommit)
+    {
+        string root = CliHarness.TempDirectory("init-git");
+        try
+        {
+            ContextJourneyTests.Git(root, "init", "-q", "-b", "main");
+            ContextJourneyTests.Git(root, "config", "core.autocrlf", "false");
+            ContextJourneyTests.Git(root, "commit", "-q", "--allow-empty", "-m", "Estate fixture");
+            byte[] head = File.ReadAllBytes(Path.Combine(root, ".git", "refs", "heads", "main"));
+            Assert.NotEqual(Commit, System.Text.Encoding.UTF8.GetString(head).Trim());
+
+            string version = recordedCommit ? "0.8.3+" + Commit : "0.8.3-dev";
+            CliHarness.Outcome outcome = WithVersion(version, Arguments(root));
+            if (recordedCommit)
+            {
+                AssertPin(root, outcome, Commit);
+            }
+            else
+            {
+                Assert.Equal(2, outcome.Code);
+                Assert.Empty(outcome.Out);
+                Assert.Contains("no recorded 40-digit source commit", outcome.Err, StringComparison.Ordinal);
+                Assert.Contains("--commit <40-hex-commit>", outcome.Err, StringComparison.Ordinal);
+                Assert.Equal([".git"], Directory.EnumerateFileSystemEntries(root).Select(Path.GetFileName));
+            }
+
+            Assert.Equal(head, File.ReadAllBytes(Path.Combine(root, ".git", "refs", "heads", "main")));
+        }
+        finally { CliHarness.Delete(root); }
+    }
+
     [Fact]
     public void DefaultPinMatchesTheRunningBuildsVersionReport()
     {
